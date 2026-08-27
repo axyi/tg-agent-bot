@@ -490,7 +490,18 @@ group is stored completely or not at all. `tool_calls` is serialised with
   "function": {"name": "exec", "arguments": "{\"argv\": [\"uname\", \"-a\"]}"}}]
 ```
 
-**REQ-DB-09 (MUST)** `load_context_messages` algorithm — implement exactly:
+**REQ-DB-09 (MUST)** `load_context_messages` algorithm — implement exactly.
+
+Two row counts appear below and they are **not** the same number. Use these
+terms exactly as defined; assertions in section 5 rely on the distinction:
+
+| Term | Stage | Meaning |
+|---|---|---|
+| **fetched** | step 1 | rows the SQL query returns — up to `WINDOW_TURNS` whole turns |
+| **window** | steps 3–4 | rows that survive the newest-to-oldest walk and are returned to the caller |
+
+`fetched >= window` always; they are equal only when the conversation is
+shorter than the window.
 
 1. Fetch the most recent **whole turns** of the conversation. The bound is on
    `turn_id`, never on a row count, so a group can never be cut in half:
@@ -505,11 +516,11 @@ group is stored completely or not at all. `tool_calls` is serialised with
    with `:turns = WINDOW_TURNS = 40`.
 
    Derivation of the two bounds, both of which MUST hold:
-   - *40 turns is enough.* Every group holds at least 1 row, so reaching
-     `limit = 30` rows needs at most 30 groups, plus at most 1 more for the
-     overhanging oldest group — 31 turns. 40 is that plus margin.
-   - *The fetch is bounded.* A group holds at most 9 rows (REQ-DB-05), so this
-     query returns at most `40 * 9 = 360` rows.
+   - *40 turns is enough.* Every group holds at least 1 row, so the step-3 walk
+     needs at most 30 groups to reach a `limit = 30` **window**, plus at most 1
+     more for the overhanging oldest group — 31 turns. 40 is that plus margin.
+   - *The fetch is bounded.* A group holds at most 9 rows (REQ-DB-05), so step 1
+     **fetches** at most `40 * 9 = 360` rows.
 
    Selecting by `turn_id` rather than by a row `LIMIT` is what makes REQ-DB-10
    structurally true instead of arithmetically lucky: a row-count `LIMIT` can
@@ -1768,8 +1779,8 @@ report, not for the code.
 | T-DB-09 | `bot_state` round-trips across a close/reopen |
 | T-DB-10 | `CHECK` rejects `role='tool'` without `tool_call_id`, `role='user'` with `tool_calls_json`, `role='x'`, and `tool_calls_json` that is not valid JSON |
 | T-DB-11 | `tool_calls_json` round-trips into the exact provider wire shape |
-| T-DB-12 | **no mid-group cut**, two cases. (a) 300 turns where every third turn is a maximum-size tool group (1 assistant + 8 tool rows, 1100 rows): the window does not start with `role='tool'`, every included assistant-with-tools row has exactly as many `tool` siblings in its group as it declares in `tool_calls_json`, and the fetch returns at most `40 * 9 = 360` rows. (b) **regression case** — insert one oversized group directly through SQL (1 assistant declaring 200 calls + 200 `tool` rows) after 10 user turns, then assert the window still starts with `role='assistant'`. Case (b) is the one with teeth: replacing the `turn_id` bound with `ORDER BY id DESC LIMIT 120` returns 120 consecutive `tool` rows and violates REQ-DB-10. |
-| T-DB-13 | window bounds hold at both extremes: 100 singleton turns → exactly 30 rows fetched from 40 turns; 200 consecutive maximum-size groups → the fetch returns exactly 360 rows and the window still starts with an `assistant` row |
+| T-DB-12 | **no mid-group cut**, two cases. (a) 300 turns where every third turn is a maximum-size tool group (1 assistant + 8 tool rows), giving 1100 rows **in the table**: the **window** does not start with `role='tool'`, every assistant-with-tools row in the window has exactly as many `tool` siblings in its group as it declares in `tool_calls_json`, and step 1 **fetches** at most `40 * 9 = 360` rows. (b) **regression case** — insert one oversized group directly through SQL (1 assistant declaring 200 calls + 200 `tool` rows) after 10 user turns, then assert the window still starts with `role='assistant'`. Case (b) is the one with teeth: replacing the `turn_id` bound with `ORDER BY id DESC LIMIT 120` returns 120 consecutive `tool` rows and violates REQ-DB-10. |
+| T-DB-13 | both bounds hold at both extremes, asserting the two stages separately. (a) 100 singleton turns (100 rows in the table) → step 1 **fetches** exactly 40 rows (turns 61–100) and the **window** is exactly 30 rows, starting with a `user` row. (b) 200 consecutive maximum-size groups (1800 rows in the table) → step 1 **fetches** exactly `40 * 9 = 360` rows and the **window** is exactly 36 rows (four 9-row groups, because the walk stops only once `total >= 30`), starting with an `assistant` row. Asserting 30 for the fetch in case (a) is wrong and fails a correct implementation. |
 
 `tests/test_exec.py` (the only tests that start real processes; every command
 is `sys.executable`)
