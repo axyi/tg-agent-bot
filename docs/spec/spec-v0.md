@@ -69,7 +69,13 @@ cell your harness does not expose. Never write a secret value into that file.
 
 **REQ-EC-12 (MUST)** Never commit `.env`, a database file, the sandbox
 directory, or any log file. Section 3.2 lists the required `.gitignore`
-entries.
+entries. There is deliberately **no separate pre-commit secret-scanning step**:
+the accepted compensating controls are the `.gitignore` entries of REQ-PATH-03
+(secrets and runtime state are untrackable), `config.redact()` applied to every
+log line and error string (REQ-CFG-04, proven by T-CFG-08 and T-TG-06), and the
+no-runtime-data-under-`docs/` rule of REQ-EC-10. Together these mean no code
+path writes a secret to a trackable file, so a scanner would have nothing to
+find.
 
 **REQ-EC-13 (MUST)** Commit in conventional-commit style
 (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), one logical unit per commit.
@@ -388,7 +394,8 @@ CREATE TABLE IF NOT EXISTS messages (
         (role = 'user'      AND tool_calls_json IS NULL AND tool_call_id IS NULL)
      OR (role = 'assistant' AND tool_call_id IS NULL)
      OR (role = 'tool'      AND tool_calls_json IS NULL AND tool_call_id IS NOT NULL)
-    )
+    ),
+    CHECK (tool_calls_json IS NULL OR json_valid(tool_calls_json))
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages (conv_id, id);
@@ -428,6 +435,11 @@ group shapes exist:
 A `tool` row therefore never starts a group. Every `tool_call_id` present in an
 assistant row's `tool_calls_json` MUST have exactly one matching `tool` row in
 the same group, in the same order.
+
+**Group size is bounded**: a tool turn holds at most
+`1 + MAX_TOOL_CALLS_ACCEPTED = 9` rows, because the agent drops tool calls
+beyond `MAX_TOOL_CALLS_ACCEPTED` before storing anything (REQ-AG-06). User and
+answer turns hold exactly 1 row. Nothing else may write to `messages`.
 
 **REQ-DB-06 (MUST)** `storage.py` public functions:
 
@@ -480,14 +492,35 @@ group is stored completely or not at all. `tool_calls` is serialised with
 
 **REQ-DB-09 (MUST)** `load_context_messages` algorithm — implement exactly:
 
-1. Fetch the most recent rows of the conversation, bounded:
+1. Fetch the most recent **whole turns** of the conversation. The bound is on
+   `turn_id`, never on a row count, so a group can never be cut in half:
    ```sql
    SELECT id, turn_id, role, content, tool_calls_json, tool_call_id
-   FROM messages WHERE conv_id = ? ORDER BY id DESC LIMIT 120
+   FROM messages
+   WHERE conv_id = :conv
+     AND turn_id > (SELECT COALESCE(MAX(turn_id), 0) - :turns
+                    FROM messages WHERE conv_id = :conv)
+   ORDER BY id ASC
    ```
-   Reverse the result into ascending `id` order. (120 is a safe superset: the
-   window keeps at most 30 messages plus the overhang of one group, and a group
-   holds at most 4 rows.)
+   with `:turns = WINDOW_TURNS = 40`.
+
+   Derivation of the two bounds, both of which MUST hold:
+   - *40 turns is enough.* Every group holds at least 1 row, so reaching
+     `limit = 30` rows needs at most 30 groups, plus at most 1 more for the
+     overhanging oldest group — 31 turns. 40 is that plus margin.
+   - *The fetch is bounded.* A group holds at most 9 rows (REQ-DB-05), so this
+     query returns at most `40 * 9 = 360` rows.
+
+   Selecting by `turn_id` rather than by a row `LIMIT` is what makes REQ-DB-10
+   structurally true instead of arithmetically lucky: a row-count `LIMIT` can
+   land in the middle of a group and leave a `tool` row at the front of the
+   result, which some provider APIs reject outright.
+
+   REQ-DB-10 is therefore defended twice, and both defences are required. The
+   `MAX_TOOL_CALLS_ACCEPTED` cap (REQ-AG-06) stops an oversized group from ever
+   being written; the `turn_id` bound stops any group that does exist — however
+   it got there — from being cut. T-DB-12 case (b) exercises the second defence
+   by writing an oversized group directly through SQL.
 2. Partition the ascending rows into groups of consecutive equal `turn_id`.
 3. Walk groups from newest to oldest with `total = 0`. For each group: if
    `total >= limit`, stop; otherwise prepend the group to the result and add
@@ -1184,7 +1217,8 @@ ROUND_LIMIT = 8               # logical rounds per user message
 TOOL_ROUND_LIMIT = 7          # rounds 1..7 may expose tools
 HTTP_ATTEMPT_LIMIT = 9        # total calls to llm.complete per user message
 TOOL_EXECUTION_LIMIT = 12     # total tool executions per user message
-MAX_TOOL_CALLS_PER_RESPONSE = 3
+MAX_TOOL_CALLS_PER_RESPONSE = 3    # how many are executed
+MAX_TOOL_CALLS_ACCEPTED = 8        # how many are kept at all (bounds the turn group)
 RETRY_SLEEP_S = 2.0
 ```
 
@@ -1250,10 +1284,18 @@ return finish(FALLBACK_NO_ANSWER)         # defensive; normally unreachable
 never before returning `FALLBACK_LLM_ERROR`. With every attempt failing
 retryably there are 9 `complete()` calls and 8 sleeps.
 
-Because each round consumes at least one attempt and there are 8 rounds and 9
-attempts, **exactly one retry is available per user message**. The first
-retryable failure consumes it; a later retryable failure ends the turn with
-`FALLBACK_LLM_ERROR`. A non-retryable failure never retries.
+**The 9 HTTP attempts are one shared pool for the whole user message, not a
+per-round allowance.** Any round may retry repeatedly while the pool has room;
+consecutive retries inside a single round are allowed and expected. Two
+consequences a cheap implementation must get right:
+
+- If round 1 keeps failing retryably, all 9 attempts are spent inside round 1
+  and the message ends with `FALLBACK_LLM_ERROR` without ever reaching round 2.
+  This is exactly what T-AG-09 asserts.
+- If every round succeeds on its first attempt, the loop spends 8 attempts and
+  one spare is left unused.
+
+A **non-retryable** failure never retries, however much of the pool is left.
 
 **REQ-AG-05 (MUST)** Response disposition table — implement every row:
 
@@ -1271,6 +1313,7 @@ retryable failure consumes it; a later retryable failure ends the turn with
 to every response before any execution, preserving the original order:
 
 ```
+calls = calls[:MAX_TOOL_CALLS_ACCEPTED]   # everything beyond this is dropped
 seen = set()
 for i, raw in enumerate(calls):
     cid = raw.id.strip()
@@ -1282,6 +1325,15 @@ for i, raw in enumerate(calls):
     name = raw.name.strip()
     yield ToolCall(id=cid, name=name, arguments=raw.arguments)
 ```
+
+Calls beyond `MAX_TOOL_CALLS_ACCEPTED` are **dropped before normalisation**:
+they are never stored, never sent back to the provider, and never receive a
+tool result. One line is logged:
+`WARNING response carried <n> tool calls; kept the first 8`. This is what bounds
+a turn group to `1 + MAX_TOOL_CALLS_ACCEPTED = 9` rows (REQ-DB-05), which
+REQ-DB-09 depends on. Dropping is safe precisely because the assistant message
+that gets stored is the **truncated** list, so the stored group stays internally
+consistent.
 
 The normalised list — including calls that will not be executed — is what gets
 stored in `tool_calls_json` and sent back to the provider, so every
@@ -1714,8 +1766,10 @@ report, not for the code.
 | T-DB-07 | a newest group of 5 rows with `limit=3` is returned whole |
 | T-DB-08 | the first message of any window is never `role='tool'` |
 | T-DB-09 | `bot_state` round-trips across a close/reopen |
-| T-DB-10 | `CHECK` rejects `role='tool'` without `tool_call_id`, `role='user'` with `tool_calls_json`, and `role='x'` |
+| T-DB-10 | `CHECK` rejects `role='tool'` without `tool_call_id`, `role='user'` with `tool_calls_json`, `role='x'`, and `tool_calls_json` that is not valid JSON |
 | T-DB-11 | `tool_calls_json` round-trips into the exact provider wire shape |
+| T-DB-12 | **no mid-group cut**, two cases. (a) 300 turns where every third turn is a maximum-size tool group (1 assistant + 8 tool rows, 1100 rows): the window does not start with `role='tool'`, every included assistant-with-tools row has exactly as many `tool` siblings in its group as it declares in `tool_calls_json`, and the fetch returns at most `40 * 9 = 360` rows. (b) **regression case** — insert one oversized group directly through SQL (1 assistant declaring 200 calls + 200 `tool` rows) after 10 user turns, then assert the window still starts with `role='assistant'`. Case (b) is the one with teeth: replacing the `turn_id` bound with `ORDER BY id DESC LIMIT 120` returns 120 consecutive `tool` rows and violates REQ-DB-10. |
+| T-DB-13 | window bounds hold at both extremes: 100 singleton turns → exactly 30 rows fetched from 40 turns; 200 consecutive maximum-size groups → the fetch returns exactly 360 rows and the window still starts with an `assistant` row |
 
 `tests/test_exec.py` (the only tests that start real processes; every command
 is `sys.executable`)
@@ -1781,6 +1835,7 @@ is `sys.executable`)
 | T-AG-12 | empty content with no tool calls while tools are exposed → `FALLBACK_EMPTY` |
 | T-AG-13 | the system prompt contains `now`, every skill name and description, and no system row is ever written to `messages` |
 | T-AG-14 | with the weather skill loaded and a scripted `curl` argv, the injected runner receives it and **no real process is started** (`subprocess.Popen` is monkeypatched to fail the test) |
+| T-AG-15 | a response carrying 12 tool calls → exactly 8 are kept: 3 executed, 5 get the excess error, the stored `tool_calls_json` has exactly 8 entries, exactly 8 `tool` rows are stored, the group is 9 rows, and calls 9–12 appear nowhere in storage or in the messages sent to the provider |
 
 `tests/test_telegram.py`
 
@@ -1930,8 +1985,9 @@ call → model again = steps). On the sixth tool call — "stop, use what you ha
 (A coding agent is allowed to think forever; yours is not.)*
 
 Reconciliation of the numbers: the normative caps are **8 logical rounds**
-(inside the required 5–10 band), **9 HTTP attempts** (8 rounds plus exactly one
-retry, which is the "max retries" clause) and **12 tool executions**. The
+(inside the required 5–10 band), **9 HTTP attempts** — a single shared pool per
+user message covering the 8 rounds and every retry, which is the "max retries"
+clause — and **12 tool executions**. The
 lecturer's "sixth tool call" is an illustration of the pattern, not a separate
 limit; the enforced tool cap is 12 and the "stop, use what you have" behaviour
 is implemented literally as `FINAL_INSTRUCTION` (REQ-AG-03) on round 8 and on
@@ -1939,7 +1995,7 @@ any round after the tool budget is spent.
 
 | Where | REQ-AG-01, REQ-AG-04, REQ-AG-07, REQ-AG-08 |
 |---|---|
-| Tests | T-AG-03, T-AG-04, T-AG-05, T-AG-06, T-AG-08, T-AG-09, T-AG-10, T-AG-11 |
+| Tests | T-AG-03, T-AG-04, T-AG-05, T-AG-06, T-AG-08, T-AG-09, T-AG-10, T-AG-11, T-AG-15 |
 
 **HW-3** — «**Универсальный инструмент `exec`** (консоль) — желательно
 безопасно, см. раздел про YOLO.»
@@ -1948,7 +2004,7 @@ any round after the tool budget is spent.
 
 | Where | REQ-TOOL-01, REQ-TOOL-04, REQ-EXEC-01 (honest threat model), REQ-EXEC-02 (proven bounded runner), REQ-NG-01, REQ-NG-02 |
 |---|---|
-| Tests | T-EX-01…T-EX-12 |
+| Tests | T-EX-01…T-EX-13 |
 
 **HW-4** — «**Пара скиллов**, например скилл погоды: есть специальный сайт с
 curl-доступным прогнозом (wttr.in (?)) — город в пути, `0` — сегодня, `1` —
@@ -1997,7 +2053,7 @@ Chosen option: SQLite, `N = 30`, sliding window over complete turn groups.
 
 | Where | REQ-DB-01…DB-11 |
 |---|---|
-| Tests | T-DB-01…T-DB-11 |
+| Tests | T-DB-01…T-DB-13 |
 
 **HW-7** — «**Безопасность**: проверять `sender.tg_id` по списку разрешённых
 (свой Telegram ID можно вывести в `console.log` из сообщения — в личке с ботом
