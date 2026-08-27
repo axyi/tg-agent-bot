@@ -3,7 +3,7 @@
 Telegram bot turned into an LLM agent: minimal harness, bounded agent loop,
 exec tool, skills (course assignment 3).
 
-Lab-wide standards apply: `../../standards/{workflow,reporting,project-structure}.md`
+Standards summary (self-contained): SDD — the spec is the contract; atomic commits (one prompt → one commit); review in a clean context; deterministic gates before done.
 (SDD, atomic commits, model sizing, clean-context review, worktrees).
 
 ## Stack
@@ -29,7 +29,7 @@ Lab-wide standards apply: `../../standards/{workflow,reporting,project-structure
 - `docs/` — spec, prompt log, reports, token accounting
 
 Context boundaries: agents work inside this repository only. Never read or edit
-anything above it (in particular the lab's `../../raw/` and `../../base/`).
+anything above the repository root.
 The exec tool runs untrusted model output — it executes only inside the
 sandbox described in the spec, never against the host working tree.
 
@@ -83,7 +83,7 @@ self-review in the writing context.
 
 Every prompt sent to an LLM is logged in `docs/prompts/` (one file per
 prompt), tokens/cost in `docs/llm-usage.md`, run results in `docs/reports/`.
-See `../../standards/reporting.md`.
+Every prompt sent to an LLM is logged in `docs/prompts/` (one file per prompt), tokens/cost in `docs/llm-usage.md`, run reports in `docs/reports/`.
 
 ## Secrets
 
