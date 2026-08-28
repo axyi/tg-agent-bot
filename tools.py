@@ -16,6 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import config
+
 EXEC_TIMEOUT_S = 30.0
 EXEC_KILL_GRACE_S = 5.0
 EXEC_DRAIN_GRACE_S = 2.0
@@ -177,7 +179,7 @@ def load_skills(skills_dir: Path) -> dict[str, Skill]:
         try:
             skill = _parse_skill(path.read_text(encoding="utf-8"), path.name)
         except (OSError, UnicodeDecodeError, ValueError) as exc:
-            log.warning("skill file %s ignored: %s", path.name, exc)
+            log.warning("skill file %s ignored: %s", path.name, config.redact(str(exc)))
             continue
         if skill.name in skills:
             log.warning("duplicate skill name '%s' in %s ignored", skill.name, path.name)

@@ -44,6 +44,12 @@ class RecordingRunner:
         self.argv_calls.append(list(argv))
         return dict(self.result)
 
+    def forbid_real_processes(self, monkeypatch):
+        """Fail the test if anything reaches `subprocess.Popen` while this runner stands in."""
+        def _forbidden(*args, **kwargs):
+            raise AssertionError(f"unexpected subprocess start: {args!r}")
+        monkeypatch.setattr(subprocess, "Popen", _forbidden)
+
 
 class FakeTelegram:
     """Records `(chat_id, text)`; can be scripted to raise on the n-th send."""
@@ -64,10 +70,3 @@ class FakeTelegram:
 def mock_llm_transport(handler):
     """An httpx transport that answers from `handler` instead of the network."""
     return httpx.MockTransport(handler)
-
-
-def forbid_popen(monkeypatch):
-    """Fail the test if any real process is started (T-AG-14)."""
-    def _forbidden(*args, **kwargs):
-        raise AssertionError(f"unexpected subprocess start: {args!r}")
-    monkeypatch.setattr(subprocess, "Popen", _forbidden)

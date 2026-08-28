@@ -1,5 +1,7 @@
 # tg-agent-bot
 
+## What it is
+
 A Telegram bot turned into a bounded LLM agent. It runs a minimal harness —
 plain Python plus `httpx` and `python-dotenv`, no bot framework and no agent
 framework — around a loop that alternates model calls and tool calls under hard

@@ -135,15 +135,15 @@ def run_agent(
                 continue                      # same round, same tool policy
             return finish(FALLBACK_LLM_ERROR.format(reason=str(exc)))
 
-        answer = response.content.strip()
+        has_content = bool(response.content.strip())
         if not response.tool_calls:
-            if answer:
-                return finish(answer)
+            if has_content:
+                return finish(response.content)
             return finish(FALLBACK_EMPTY if expose_tools else FALLBACK_NO_ANSWER)
         if not expose_tools:
             # Tool calls are discarded unexecuted and never stored.
             log.info("discarded %d tool calls offered without tools", len(response.tool_calls))
-            return finish(answer or FALLBACK_NO_ANSWER)
+            return finish(response.content if has_content else FALLBACK_NO_ANSWER)
 
         normalized = normalize_tool_calls(response.tool_calls)
         results, tools_used = _execute_tool_calls(

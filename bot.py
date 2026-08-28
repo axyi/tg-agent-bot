@@ -167,8 +167,12 @@ def process_update(
         log.info("update %d carries no message; ignored", update_id)
         return
     chat = message.get("chat")
-    if not isinstance(chat, dict) or chat.get("type") != "private":
-        log.info("update %d is not from a private chat; ignored", update_id)
+    if (
+        not isinstance(chat, dict)
+        or chat.get("type") != "private"
+        or not isinstance(chat.get("id"), int)
+    ):
+        log.info("update %d is not from a usable private chat; ignored", update_id)
         return
     sender = message.get("from")
     if not isinstance(sender, dict) or sender.get("is_bot"):
@@ -433,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     tg = TelegramClient(cfg.telegram_bot_token, client=client)
     try:
         bot_username = tg.get_me()["username"]
-    except TelegramError as exc:
+    except (TelegramError, KeyError, TypeError) as exc:
         log.error("cannot identify the bot: %s", redact(str(exc)))
         client.close()
         conn.close()
