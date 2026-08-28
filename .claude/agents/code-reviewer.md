@@ -19,7 +19,12 @@ Procedure:
 3. Review for what machines can't catch: spec violations, hallucinated
    APIs/behavior, missing edge cases from the spec, security issues (secrets,
    injection, unsafe deserialization), misleading naming/docs.
-4. Report findings ordered by severity, each with `file:line`, a one-sentence
+4. Scrutinize the tests — the highest-value target: every asserted value
+   must come from the spec or an independent literal, never be imported or
+   re-derived from the implementation under test (a test comparing a
+   constant to itself proves nothing). For critical logic ask "which test
+   fails if this line changes?" — if none would, report the gap.
+5. Report findings ordered by severity, each with `file:line`, a one-sentence
    problem statement, and a concrete failure scenario. If nothing is wrong,
    say so explicitly.
 

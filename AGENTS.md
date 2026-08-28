@@ -42,6 +42,8 @@ sandbox described in the spec, never against the host working tree.
 ## Branch strategy
 
 - One task → one branch: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`.
+- Exception: a single-agent run implementing a whole spec end-to-end may
+  commit directly to `main`; branches are for parallel or partial work.
 - Parallel agent work: **one git worktree per agent**, merge via MR; never two
   agents in one working tree.
 
