@@ -4,11 +4,10 @@ Telegram bot turned into an LLM agent: minimal harness, bounded agent loop,
 exec tool, skills (course assignment 3).
 
 Standards summary (self-contained): SDD — the spec is the contract; atomic commits (one prompt → one commit); review in a clean context; deterministic gates before done.
-(SDD, atomic commits, model sizing, clean-context review, worktrees).
 
 ## Stack
 
-- Language: Python >= 3.12, environment managed by **uv**
+- Language: Python 3.13 (pinned via .python-version; requires-python ">=3.12,<3.14"), environment managed by **uv**
 - Frameworks/libs: `httpx` (Telegram Bot API and LLM HTTP calls),
   `python-dotenv` (config from `.env`); standard library for everything else —
   no bot framework, no agent framework
@@ -83,7 +82,7 @@ self-review in the writing context.
 
 Every prompt sent to an LLM is logged in `docs/prompts/` (one file per
 prompt), tokens/cost in `docs/llm-usage.md`, run results in `docs/reports/`.
-Every prompt sent to an LLM is logged in `docs/prompts/` (one file per prompt), tokens/cost in `docs/llm-usage.md`, run reports in `docs/reports/`.
+
 
 ## Secrets
 

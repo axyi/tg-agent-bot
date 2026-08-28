@@ -9,3 +9,4 @@ sandbox/
 *.db
 *.db-wal
 *.db-shm
+.claude/agent-memory/
