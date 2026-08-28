@@ -13,8 +13,8 @@ implementation is produced by an AI agent from it.
 |---|---|
 | Repository scaffold | done |
 | `docs/spec/spec-v0.md` (implementation spec, 113 requirements) | done — reviewed, gate passed (0 high/medium findings, 3 review cycles) |
-| Implementation (`bot.py`, `agent.py`, `llm/`, `tools.py`, `storage.py`, tests) | **pending — launched by `go docs/spec/spec-v0.md`** |
-| Live run against Telegram + LM Studio / OpenRouter | pending implementation |
+| Implementation (`bot.py`, `agent.py`, `llm/`, `tools.py`, `storage.py`, tests) | done — all four gates green on the first full run, 113 tests, 1 fix cycle of 5 (closing the code review's finding) |
+| Live run against Telegram + LM Studio / OpenRouter | **pending — never executed**; the suite and `--selftest` are provably offline, so no real bot token, Telegram API or inference server has been exercised yet |
 
 ## How the implementation run works
 
