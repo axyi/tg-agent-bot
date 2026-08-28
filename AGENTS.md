@@ -83,6 +83,12 @@ self-review in the writing context.
 Every prompt sent to an LLM is logged in `docs/prompts/` (one file per
 prompt), tokens/cost in `docs/llm-usage.md`, run results in `docs/reports/`.
 
+After each run report, generate `docs/reports/tg-post-vN.md` — a
+ready-to-paste Telegram post, written in **Russian**: constraints → result →
+metrics (spec tokens, prompts, first-run, bugs, tokens in/out, cost) → a
+link to this project's GitHub repository
+(https://github.com/axyi/tg-agent-bot). Under ~1500 characters.
+
 
 ## Secrets
 
