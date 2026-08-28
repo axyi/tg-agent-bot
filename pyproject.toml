@@ -1,0 +1,29 @@
+[project]
+name = "tg-agent-bot"
+version = "0.1.0"
+description = "Telegram bot turned into a bounded LLM agent"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "httpx==0.28.1",
+    "python-dotenv==1.2.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.5",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
