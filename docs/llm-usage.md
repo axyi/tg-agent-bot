@@ -15,7 +15,7 @@
 | 11 | implementation step 9 — `bot.py` (Telegram layer, poll loop, `--selftest`) | claude-opus-5 | unknown | unknown |
 | 12 | implementation step 10 — `README.md`, prompt log, this table | claude-opus-5 | unknown | unknown |
 | 13 | implementation step 11 — the four acceptance gates + code review | claude-opus-5 | unknown | unknown |
-| **Σ** | | | unknown for rows 3–13 | unknown |
+| **Σ** (rows 3–13, one continuous session) | | claude-opus-5 | in 14.78M (160 uncached + 260k cache-write + 14.52M cache-read), out 148.5k — measured from the local session transcript | ≈$12.60 (estimate at public API prices; actual billing: flat-rate subscription) |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.
@@ -23,7 +23,11 @@ Rows 3–13 are the implementation run (`go docs/spec/spec-v0.md`, prompt
 `docs/prompts/01-go-spec-v0.md`), one row per stage of the spec's section 4
 implementation order. The run executed as one continuous agent session; the
 harness does not expose per-request input/output token counts or money cost to
-the agent, so those cells are `unknown` rather than estimated. The table keeps
+the agent, so the per-step cells stay `unknown`. The Σ row was measured
+afterwards from the local Claude Code session transcript (per-request `usage`
+fields, deduplicated by request id); cost estimated at Anthropic's public API
+price list (claude-opus-5: $5/$25 per MTok in/out, cache write ×1.25, cache
+read ×0.1) — the session actually ran on a flat-rate subscription. The table keeps
 its original five columns — the spec's REQ-EC-11 names a six-column variant
 (`Tokens in` / `Tokens out`), but the instruction to keep the existing columns
 takes precedence over the parenthetical.
