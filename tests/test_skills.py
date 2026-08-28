@@ -134,3 +134,7 @@ def test_t_sk_unknown_tool_and_bad_arguments():
     assert json.loads(
         tools.execute_tool("exec", "[1]", skills={}, runner=lambda argv: {})
     ) == {"error": "arguments must be a JSON object"}
+    # Arguments are parsed before the tool name is looked at (REQ-TOOL-03 order).
+    assert json.loads(
+        tools.execute_tool("nope", "{oops", skills={}, runner=lambda argv: {})
+    ) == {"error": "arguments are not valid JSON"}

@@ -5,7 +5,7 @@ import agent
 import storage
 import tools
 from llm.base import LLMError, LLMResponse, ToolCall
-from tests.fakes import FakeLLM, RecordingRunner, forbid_popen
+from tests.fakes import FakeLLM, RecordingRunner
 
 NOW = "2026-08-28T12:00:00Z"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -214,8 +214,10 @@ def test_t_ag_13_system_prompt(conn):
     for skill in skills.values():
         assert f"- {skill.name}: {skill.description}" in system["content"]
     assert "- host-info:" in system["content"].split("Installed skills:")[1]
-    roles = {r["role"] for r in rows(conn, conv)}
-    assert roles <= {"user", "assistant", "tool"}
+    # REQ-AG-10: the system prompt is rebuilt per request and never persisted.
+    stored = conn.execute("SELECT content FROM messages").fetchall()
+    assert all(system["content"] not in row["content"] for row in stored)
+    assert all("Installed skills:" not in row["content"] for row in stored)
 
 
 def test_t_ag_13_system_prompt_without_skills(conn):
@@ -224,7 +226,6 @@ def test_t_ag_13_system_prompt_without_skills(conn):
 
 
 def test_t_ag_14_weather_skill_argv_reaches_the_runner(conn, monkeypatch):
-    forbid_popen(monkeypatch)
     skills = tools.load_skills(REPO_ROOT / "skills")
     argv = ["curl", "--fail", "--silent", "--max-time", "10", "--",
             "https://wttr.in/Koln?format=3"]
@@ -235,6 +236,7 @@ def test_t_ag_14_weather_skill_argv_reaches_the_runner(conn, monkeypatch):
     ]
     runner = RecordingRunner({"exit_code": 0, "timed_out": False, "truncated": False,
                               "stdout": "Koln: sunny +21C\n", "stderr": ""})
+    runner.forbid_real_processes(monkeypatch)
     reply, llm, runner, _, conv = run(conn, script, skills=skills, runner=runner)
     assert reply == "Koln: sunny"
     assert runner.argv_calls == [argv]

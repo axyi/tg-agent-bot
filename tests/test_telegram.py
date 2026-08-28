@@ -87,7 +87,7 @@ def test_t_tg_01_unauthorized_sender(conn, tmp_path, caplog):
     assert any("unauthorized update from tg_id=999" in r.getMessage() for r in caplog.records)
 
 
-def test_t_tg_02_poison_updates(conn, tmp_path):
+def test_t_tg_02_poison_updates(conn, tmp_path, caplog):
     cfg = make_cfg(tmp_path)
     no_message = {"update_id": 1}
     no_from = {"update_id": 2, "message": {"chat": {"id": 1, "type": "private"}, "text": "x"}}
@@ -114,6 +114,14 @@ def test_t_tg_02_poison_updates(conn, tmp_path):
         assert storage.get_state(conn, "last_update_id") == "4"
 
     assert counts(conn) == (0, 0)
+
+    # The chat-type rule runs before the allowlist rule, so a group message from
+    # an unlisted sender is dropped as a group message, not as an intruder.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        tg, llm, runner = process(conn, cfg, update(update_id=5, user_id=999, chat_type="group"))
+    assert not any("unauthorized" in r.getMessage() for r in caplog.records)
+    assert tg.sent == []
 
 
 def test_t_tg_03_non_text_message(conn, tmp_path):
@@ -147,22 +155,37 @@ def test_t_tg_04_api_error_is_distinct_from_status_error():
 
 def test_t_tg_05_retry_after_beats_backoff(conn, tmp_path):
     cfg = make_cfg(tmp_path)
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if len(seen) == 1:
+            return httpx.Response(
+                429,
+                json={
+                    "ok": False,
+                    "error_code": 429,
+                    "description": "Too Many Requests",
+                    "parameters": {"retry_after": 7},
+                },
+            )
+        return httpx.Response(401, text="Unauthorized")
+
+    # The value comes out of the response body, not out of the caller.
+    with pytest.raises(bot.TelegramError) as raised:
+        tg_client(handler).get_updates(None)
+    assert raised.value.retry_after == 7.0
+    assert raised.value.fatal is False
+    assert str(raised.value) == "telegram getUpdates rate limited"
+
+    seen.clear()
     sleeps = []
-    calls = []
-
-    class Tg:
-        def get_updates(self, offset):
-            calls.append(offset)
-            if len(calls) == 1:
-                raise bot.TelegramError("telegram getUpdates rate limited", retry_after=7.0)
-            raise bot.TelegramError("telegram getUpdates rejected the bot token", fatal=True)
-
     code = bot.poll_loop(
-        conn=conn, tg=Tg(), cfg=cfg, llm=FakeLLM([]), skills={},
+        conn=conn, tg=tg_client(handler), cfg=cfg, llm=FakeLLM([]), skills={},
         runner=RecordingRunner(), bot_username=BOT_USERNAME, sleep=sleeps.append,
     )
     assert code == 2
-    assert sleeps == [8.0]
+    assert sleeps == [8.0]      # retry_after + 1.0, never the generic backoff
 
 
 def test_t_tg_06_token_never_reaches_logs_or_exceptions(conn, tmp_path, caplog):

@@ -80,6 +80,7 @@ def test_t_cfg_07_default_paths_under_project_root(tmp_path):
     assert cfg.exec_workdir == tmp_path / "sandbox"
     assert cfg.db_path == tmp_path / "bot.db"
     assert cfg.exec_workdir.is_dir()
+    assert cfg.exec_workdir.stat().st_mode & 0o777 == 0o700
 
 
 def test_t_cfg_08_redact():
