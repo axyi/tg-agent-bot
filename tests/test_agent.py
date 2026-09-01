@@ -5,7 +5,7 @@ import agent
 import storage
 import tools
 from llm.base import LLMError, LLMResponse, ToolCall
-from tests.fakes import FakeLLM, RecordingRunner
+from tests.fakes import FakeFetcher, FakeLLM, RecordingRunner
 
 NOW = "2026-08-28T12:00:00Z"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +24,7 @@ def answer(content="done"):
     return LLMResponse(content, [], "stop")
 
 
-def run(conn, script, *, skills=None, runner=None, user="hello"):
+def run(conn, script, *, skills=None, runner=None, user="hello", fetcher=None):
     conv = storage.get_or_create_active_conversation(conn, 7)
     storage.add_user_message(conn, conv, user)
     llm = FakeLLM(script)
@@ -38,6 +38,7 @@ def run(conn, script, *, skills=None, runner=None, user="hello"):
         runner=runner,
         now=NOW,
         sleep=sleeps.append,
+        fetcher=fetcher,
     )
     return reply, llm, runner, sleeps, conv
 
@@ -199,10 +200,27 @@ def test_t_ag_11_tool_calls_while_tools_are_none_without_content(conn):
     assert rows(conn, conv)[-1]["content"] == agent.FALLBACK_NO_ANSWER
 
 
-def test_t_ag_12_empty_content_without_tool_calls(conn):
-    reply, llm, runner, _, conv = run(conn, [LLMResponse("", [], "stop")])
+def test_t_ag_12_empty_content_triggers_one_repair_round(conn):
+    # REQ-V1-RP-03: the first empty response buys one repair round, not the fallback.
+    empty = [LLMResponse("", [], "stop"), LLMResponse("", [], "stop")]
+    reply, llm, runner, _, conv = run(conn, empty)
     assert reply == agent.FALLBACK_EMPTY
+    assert len(llm.calls) == 2
+    assert llm.calls[0][0][-1]["content"] != agent.EMPTY_REPAIR_INSTRUCTION
+    assert llm.calls[1][0][-1] == {
+        "role": "system", "content": agent.EMPTY_REPAIR_INSTRUCTION
+    }
     assert rows(conn, conv)[-1]["content"] == agent.FALLBACK_EMPTY
+    # The repair instruction is a request-time nudge, never a stored message.
+    stored = conn.execute("SELECT content FROM messages").fetchall()
+    assert all(agent.EMPTY_REPAIR_INSTRUCTION not in r["content"] for r in stored)
+
+
+def test_t_ag_12_repaired_empty_response_answers(conn):
+    script = [LLMResponse("", [], "stop"), answer("recovered")]
+    reply, llm, runner, _, conv = run(conn, script)
+    assert reply == "recovered"
+    assert len(llm.calls) == 2
 
 
 def test_t_ag_13_system_prompt(conn):
@@ -225,24 +243,30 @@ def test_t_ag_13_system_prompt_without_skills(conn):
     assert prompt.rstrip().endswith("- (none)")
 
 
-def test_t_ag_14_weather_skill_argv_reaches_the_runner(conn, monkeypatch):
+def test_t_ag_14_weather_skill_url_reaches_the_fetcher(conn, monkeypatch):
+    # REQ-V1-SK-01: the weather skill now scripts a `fetch` call, never an exec.
     skills = tools.load_skills(REPO_ROOT / "skills")
-    argv = ["curl", "--fail", "--silent", "--max-time", "10", "--",
-            "https://wttr.in/Koln?format=3"]
+    url = "https://wttr.in/K%C3%B6ln?format=3"
     script = [
         LLMResponse("", [ToolCall("call_1", "load_skill", '{"name": "weather"}')], "tool_calls"),
-        LLMResponse("", [ToolCall("call_2", "exec", json.dumps({"argv": argv}))], "tool_calls"),
+        LLMResponse("", [ToolCall("call_2", "fetch", json.dumps({"url": url}))], "tool_calls"),
         answer("Koln: sunny"),
     ]
-    runner = RecordingRunner({"exit_code": 0, "timed_out": False, "truncated": False,
-                              "stdout": "Koln: sunny +21C\n", "stderr": ""})
+    fetcher = FakeFetcher({"status_code": 200, "truncated": False,
+                           "body": "Koln: sunny +21C", "notice": tools.UNTRUSTED_NOTICE})
+    runner = RecordingRunner()
     runner.forbid_real_processes(monkeypatch)
-    reply, llm, runner, _, conv = run(conn, script, skills=skills, runner=runner)
+    reply, llm, runner, _, conv = run(
+        conn, script, skills=skills, runner=runner, fetcher=fetcher
+    )
     assert reply == "Koln: sunny"
-    assert runner.argv_calls == [argv]
+    # No process was started (forbid_real_processes) and no request left the process
+    # (the `no_network` conftest fixture); only the injected fetcher saw the URL.
+    assert fetcher.urls == [url]
+    assert runner.argv_calls == []
     tool_rows = [r for r in rows(conn, conv) if r["role"] == "tool"]
     assert json.loads(tool_rows[0]["content"])["name"] == "weather"
-    assert json.loads(tool_rows[1]["content"])["stdout"].startswith("Koln: sunny")
+    assert json.loads(tool_rows[1]["content"])["body"].startswith("Koln: sunny")
 
 
 def test_t_ag_15_calls_beyond_the_accept_cap_are_dropped(conn):

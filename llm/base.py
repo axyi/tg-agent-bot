@@ -28,9 +28,13 @@ class LLMResponse:
 
 
 class LLMError(Exception):
-    def __init__(self, message: str, *, retryable: bool) -> None:
+    """`kind` splits the failures the agent treats differently: a `malformed`
+    answer is worth re-asking for, an `http` 4xx is not (REQ-V1-RP-01)."""
+
+    def __init__(self, message: str, *, retryable: bool, kind: str = "http") -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.kind = kind
 
 
 class LLMClient(Protocol):
@@ -38,15 +42,27 @@ class LLMClient(Protocol):
         self,
         messages: list[dict],
         tools: list[dict] | None,
+        *,
+        max_tokens: int | None = None,
     ) -> LLMResponse: ...
 
 
-def build_payload(model: str, messages: list[dict], tools: list[dict] | None) -> dict:
+DEFAULT_MAX_TOKENS = 1024
+DEFAULT_CONTEXT_LENGTH = 4096
+
+
+def build_payload(
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None,
+    *,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+) -> dict:
     payload = {
         "model": model,
         "messages": messages,
         "temperature": 0,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "stream": False,
     }
     if tools is not None:
@@ -109,10 +125,12 @@ def post_completion(
         response = client.post(url, json=payload, headers=headers, timeout=timeout_s)
     except httpx.TimeoutException:
         # TimeoutException is a TransportError subclass; it must be checked first.
-        raise _error("llm request timed out", retryable=True) from None
+        raise _error("llm request timed out", retryable=True, kind="transport") from None
     except httpx.TransportError as exc:
         raise _error(
-            f"llm transport error: {exc.__class__.__name__}", retryable=True
+            f"llm transport error: {exc.__class__.__name__}",
+            retryable=True,
+            kind="transport",
         ) from None
 
     status = response.status_code
@@ -130,9 +148,11 @@ def post_completion(
     return parse_response(data)
 
 
-def _error(message: str, *, retryable: bool) -> LLMError:
-    return LLMError(config.redact(message), retryable=retryable)
+def _error(message: str, *, retryable: bool, kind: str = "http") -> LLMError:
+    return LLMError(config.redact(message), retryable=retryable, kind=kind)
 
 
 def _malformed(detail: str) -> LLMError:
-    return _error(f"malformed provider response: {detail}", retryable=False)
+    # `malformed` is reserved for structurally wrong JSON. A body that is not JSON
+    # at all stays `http`: the server answered, the payload is garbage.
+    return _error(f"malformed provider response: {detail}", retryable=False, kind="malformed")

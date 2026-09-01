@@ -4,6 +4,7 @@ import subprocess
 
 import httpx
 
+import tools
 from llm.base import LLMError
 
 _DEFAULT_ENVELOPE = {
@@ -14,6 +15,13 @@ _DEFAULT_ENVELOPE = {
     "stderr": "",
 }
 
+_DEFAULT_FETCH_ENVELOPE = {
+    "status_code": 200,
+    "truncated": False,
+    "body": "recorded",
+    "notice": tools.UNTRUSTED_NOTICE,
+}
+
 
 class FakeLLM:
     """Replays a scripted list of `LLMResponse` / `LLMError` items."""
@@ -21,10 +29,16 @@ class FakeLLM:
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        # REQ-V1-FIN-02: the extended protocol carries `max_tokens`. It is recorded in
+        # its own parallel list rather than as a third tuple element, because T-AG-03
+        # unpacks `self.calls` entries as pairs and section 9.1 does not license
+        # touching that test.
+        self.max_tokens_calls = []
 
-    def complete(self, messages, tools):
+    def complete(self, messages, tool_definitions, *, max_tokens=None):
         # The agent reuses one `messages` list, so snapshot it before it grows.
-        self.calls.append((list(messages), tools))
+        self.calls.append((list(messages), tool_definitions))
+        self.max_tokens_calls.append(max_tokens)
         if not self.script:
             raise AssertionError("FakeLLM script exhausted")
         item = self.script.pop(0)
@@ -49,6 +63,18 @@ class RecordingRunner:
         def _forbidden(*args, **kwargs):
             raise AssertionError(f"unexpected subprocess start: {args!r}")
         monkeypatch.setattr(subprocess, "Popen", _forbidden)
+
+
+class FakeFetcher:
+    """Stands in for the bound `tools.fetch_url`; records URLs, never leaves the process."""
+
+    def __init__(self, result=None):
+        self.result = dict(result) if result is not None else dict(_DEFAULT_FETCH_ENVELOPE)
+        self.urls = []
+
+    def __call__(self, url):
+        self.urls.append(url)
+        return dict(self.result)
 
 
 class FakeTelegram:

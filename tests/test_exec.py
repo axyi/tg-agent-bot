@@ -9,7 +9,7 @@ import tools
 
 
 def run(tmp_path, code, timeout_s=tools.EXEC_TIMEOUT_S):
-    return tools.run_command(
+    return tools._run_process(
         [sys.executable, "-c", code], workdir=tmp_path, timeout_s=timeout_s
     )
 
@@ -84,6 +84,8 @@ def test_t_ex_06_both_streams_truncated(tmp_path):
 
 
 def test_t_ex_07_environment_allowlist(tmp_path):
+    # REQ-V1-DK-02: with `extra_env=None` the v0 allowlist is unchanged. The container
+    # environment is a different thing and is covered by T-V1-DK-02.
     result = run(tmp_path, "import json, os, sys; sys.stdout.write(json.dumps(dict(os.environ)))")
     env = json.loads(result["stdout"])
     assert set(env) <= {"PATH", "LANG", "HOME"}
@@ -96,10 +98,10 @@ def test_t_ex_08_cwd_is_the_sandbox(tmp_path):
 
 
 def test_t_ex_09_start_failures(tmp_path):
-    assert tools.run_command(["nosuchprogram-xyz"], workdir=tmp_path) == {
+    assert tools._run_process(["nosuchprogram-xyz"], workdir=tmp_path) == {
         "error": "program not found: nosuchprogram-xyz"
     }
-    assert tools.run_command([sys.executable], workdir=tmp_path / "gone") == {
+    assert tools._run_process([sys.executable], workdir=tmp_path / "gone") == {
         "error": "sandbox directory is missing"
     }
 

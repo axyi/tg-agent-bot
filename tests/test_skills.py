@@ -5,10 +5,7 @@ from pathlib import Path
 import tools
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CURL_ARGV = (
-    '["curl", "--fail", "--silent", "--max-time", "10", "--", '
-    '"https://wttr.in/<CITY>?format=3"]'
-)
+FETCH_URL_LINE = "https://wttr.in/<CITY>?format=3"
 
 VALID = """---
 name: demo
@@ -77,9 +74,12 @@ def test_t_sk_04_shipped_skills_load():
     assert skills["host-info"].source == "host-info.md"
 
 
-def test_t_sk_05_weather_body_carries_the_exact_argv():
+def test_t_sk_05_weather_body_carries_the_exact_fetch_url():
     skills = tools.load_skills(REPO_ROOT / "skills")
-    assert CURL_ARGV in skills["weather"].body
+    body = skills["weather"].body
+    assert FETCH_URL_LINE in body
+    # REQ-V1-SK-01: the skill must not send the model back to the network-less sandbox.
+    assert "curl" not in body
 
 
 def test_t_sk_06_load_skill_dispatch():
@@ -118,10 +118,12 @@ def test_t_sk_07_missing_directory(tmp_path, caplog):
 
 def test_t_sk_08_tool_specs():
     specs = tools.tool_specs()
-    assert [s["function"]["name"] for s in specs] == ["exec", "load_skill"]
+    assert [s["function"]["name"] for s in specs] == ["exec", "load_skill", "fetch"]
     assert all(s["type"] == "function" for s in specs)
     assert specs[0]["function"]["parameters"]["required"] == ["argv"]
     assert specs[1]["function"]["parameters"]["required"] == ["name"]
+    assert specs[2]["function"]["parameters"]["required"] == ["url"]
+    assert specs[2]["function"]["parameters"]["additionalProperties"] is False
 
 
 def test_t_sk_unknown_tool_and_bad_arguments():

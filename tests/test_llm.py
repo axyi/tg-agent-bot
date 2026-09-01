@@ -80,18 +80,18 @@ def test_t_lm_03_tool_calls_parse():
 
 
 @pytest.mark.parametrize(
-    ("status", "exc", "retryable"),
+    ("status", "exc", "retryable", "kind"),
     [
-        (429, None, True),
-        (500, None, True),
-        (503, None, True),
-        (400, None, False),
-        (404, None, False),
-        (None, httpx.ReadTimeout("slow"), True),
-        (None, httpx.ConnectError("down"), True),
+        (429, None, True, "http"),
+        (500, None, True, "http"),
+        (503, None, True, "http"),
+        (400, None, False, "http"),
+        (404, None, False, "http"),
+        (None, httpx.ReadTimeout("slow"), True, "transport"),
+        (None, httpx.ConnectError("down"), True, "transport"),
     ],
 )
-def test_t_lm_04_error_mapping(status, exc, retryable):
+def test_t_lm_04_error_mapping(status, exc, retryable, kind):
     def handler(request):
         if exc is not None:
             raise exc
@@ -101,6 +101,7 @@ def test_t_lm_04_error_mapping(status, exc, retryable):
     with pytest.raises(LLMError) as raised:
         llm.complete([], None)
     assert raised.value.retryable is retryable
+    assert raised.value.kind == kind
 
 
 def test_t_lm_04_timeout_message():
@@ -114,10 +115,17 @@ def test_t_lm_04_timeout_message():
 
 
 @pytest.mark.parametrize(
-    "payload",
-    [None, {"no_choices": 1}, {"choices": []}, {"choices": [{"message": "text"}]}],
+    ("payload", "kind"),
+    [
+        # REQ-V1-RP-01: a non-JSON body is `http` (the server answered, the payload is
+        # garbage); `malformed` is reserved for structurally wrong JSON.
+        (None, "http"),
+        ({"no_choices": 1}, "malformed"),
+        ({"choices": []}, "malformed"),
+        ({"choices": [{"message": "text"}]}, "malformed"),
+    ],
 )
-def test_t_lm_05_malformed_responses(payload):
+def test_t_lm_05_malformed_responses(payload, kind):
     def handler(request):
         if payload is None:
             return httpx.Response(200, content=b"not json at all")
@@ -127,6 +135,7 @@ def test_t_lm_05_malformed_responses(payload):
     with pytest.raises(LLMError) as raised:
         llm.complete([], None)
     assert raised.value.retryable is False
+    assert raised.value.kind == kind
 
 
 def test_t_lm_06_null_content_is_not_an_error():

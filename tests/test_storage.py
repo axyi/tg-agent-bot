@@ -41,7 +41,7 @@ def test_t_db_01_init_schema_idempotent(tmp_path):
     storage.init_schema(c1)
     storage.init_schema(c1)
     version = c1.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
-    assert version == 1
+    assert version == 2
     c1.close()
     c2 = storage.connect(path)
     storage.init_schema(c2)

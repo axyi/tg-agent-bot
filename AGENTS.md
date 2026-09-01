@@ -8,6 +8,8 @@ Standards summary (self-contained): SDD — the spec is the contract; atomic com
 ## Stack
 
 - Language: Python 3.13 (pinned via .python-version; requires-python ">=3.12,<3.14"), environment managed by **uv**
+- Runtime dependency of the host: the **`docker` CLI** — `exec` runs every
+  command inside a disposable container and never falls back to the host
 - Frameworks/libs: `httpx` (Telegram Bot API and LLM HTTP calls),
   `python-dotenv` (config from `.env`); standard library for everything else —
   no bot framework, no agent framework
@@ -49,14 +51,20 @@ sandbox described in the spec, never against the host working tree.
 
 ## Gates — run before reporting success
 
-All four must exit 0, run in this order:
+All five must exit 0, run in this order:
 
 ```bash
 uv sync --locked
 uv run --locked ruff check .
 uv run --locked pytest
 uv run --locked python bot.py --selftest
+uv run --locked python bot.py --selftest-live
 ```
+
+Gates 1–4 are unconditional and offline. Gate 5 needs the live environment
+(a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
+LM Studio and an OpenRouter key); it spends no inference tokens and sends no
+Telegram message.
 
 ## go protocol
 
@@ -73,6 +81,14 @@ end-to-end, following its own Execution contract section.** Concretely:
 - report the task as done only when every gate is green.
 
 The spec is the contract. Where the spec and this file disagree, stop and ask.
+
+## Spec sync
+
+The spec under docs/spec/ is the contract. Any change that alters
+architecture, behaviour, limits, security posture, storage schema or the
+command set MUST update the relevant spec delta (or add a new one) in the
+same commit. A PR that changes behaviour without touching docs/spec/ is
+incomplete.
 
 ## Review
 

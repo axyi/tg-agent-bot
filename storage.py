@@ -5,11 +5,27 @@ in autocommit mode.
 """
 
 import json
+import os
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+import config
+
 WINDOW_TURNS = 40
+SCHEMA_VERSION = 2
+RECENT_GOAL_CHARS = 200
+
+_SUMMARIES_DDL = """
+CREATE TABLE IF NOT EXISTS summaries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    conv_id      INTEGER NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+    tg_user_id   INTEGER NOT NULL,
+    created_at   TEXT    NOT NULL,
+    summary_json TEXT    NOT NULL CHECK (json_valid(summary_json))
+);
+"""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -17,7 +33,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 
-INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 1);
+INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 2);
 
 CREATE TABLE IF NOT EXISTS conversations (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +68,16 @@ CREATE TABLE IF NOT EXISTS bot_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+""" + _SUMMARIES_DDL
+
+# The only migration this version knows (REQ-V1-MEM-01). It is additive: a
+# version-1 database keeps every row it had.
+_MIGRATION_1_TO_2 = """
+BEGIN IMMEDIATE;
+""" + _SUMMARIES_DDL + """
+UPDATE schema_version SET version = 2 WHERE id = 1;
+COMMIT;
 """
 
 _INSERT_MESSAGE = (
@@ -77,14 +103,37 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    _restrict_permissions(db_path)
     return conn
+
+
+def _restrict_permissions(db_path: Path) -> None:
+    """REQ-V1-SEC-04: the conversation store is readable by its owner only."""
+    os.chmod(db_path, 0o600)
+    for suffix in ("-wal", "-shm"):
+        try:
+            os.chmod(str(db_path) + suffix, 0o600)
+        except FileNotFoundError:
+            pass
+    # `config.PROJECT_ROOT` is read at call time so that a monkeypatched root is
+    # honoured; the project root itself is never chmod-ed.
+    parent = Path(os.path.normpath(db_path.parent))
+    if parent != Path(os.path.normpath(config.PROJECT_ROOT)):
+        os.chmod(parent, 0o700)
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
-    version = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
-    if version != 1:
+    version = schema_version(conn)
+    if version == 1:
+        conn.executescript(_MIGRATION_1_TO_2)
+        version = schema_version(conn)
+    if version != SCHEMA_VERSION:
         raise RuntimeError(f"unsupported database schema version: {version}")
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
 
 
 def utc_now_iso() -> str:
@@ -159,7 +208,14 @@ def add_tool_turn(
     return turn_id
 
 
-def load_context_messages(conn: sqlite3.Connection, conv_id: int, limit: int = 30) -> list[dict]:
+def load_context_messages(
+    conn: sqlite3.Connection,
+    conv_id: int,
+    limit: int = 30,
+    *,
+    token_budget: int | None = None,
+    estimator: Callable[[dict], int] | None = None,
+) -> list[dict]:
     groups: list[list[sqlite3.Row]] = []
     for row in _fetch_turn_rows(conn, conv_id):
         if groups and groups[-1][0]["turn_id"] == row["turn_id"]:
@@ -167,14 +223,64 @@ def load_context_messages(conn: sqlite3.Connection, conv_id: int, limit: int = 3
         else:
             groups.append([row])
 
+    # With no budget the walk is byte-for-byte the v0 one (REQ-DB-09).
+    budgeting = token_budget is not None and estimator is not None
     selected: list[sqlite3.Row] = []
     total = 0
-    for group in reversed(groups):
+    tokens = 0
+    for index, group in enumerate(reversed(groups)):
         if total >= limit:
             break
+        if budgeting:
+            cost = sum(estimator(_to_message(row)) for row in group)
+            # The newest group is always taken whole; the budget may exclude older
+            # groups but never splits one.
+            if index > 0 and tokens + cost > token_budget:
+                break
+            tokens += cost
         selected[0:0] = group
         total += len(group)
     return [_to_message(row) for row in selected]
+
+
+def add_summary(
+    conn: sqlite3.Connection, conv_id: int, tg_user_id: int, summary_json: str
+) -> None:
+    conn.execute(
+        "INSERT INTO summaries (conv_id, tg_user_id, created_at, summary_json) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(conv_id) DO UPDATE SET "
+        "  tg_user_id = excluded.tg_user_id, "
+        "  created_at = excluded.created_at, "
+        "  summary_json = excluded.summary_json",
+        (conv_id, tg_user_id, utc_now_iso(), summary_json),
+    )
+
+
+def get_summary(conn: sqlite3.Connection, conv_id: int) -> str | None:
+    row = conn.execute(
+        "SELECT summary_json FROM summaries WHERE conv_id = ?", (conv_id,)
+    ).fetchone()
+    return None if row is None else row["summary_json"]
+
+
+def recent_goals(conn: sqlite3.Connection, tg_user_id: int, limit: int = 3) -> list[str]:
+    """The `goal` of the newest `limit` summaries, newest first. Rows whose JSON
+    carries no string goal are skipped rather than rendered."""
+    rows = conn.execute(
+        "SELECT summary_json FROM summaries WHERE tg_user_id = ? ORDER BY id DESC LIMIT ?",
+        (tg_user_id, limit),
+    ).fetchall()
+    goals: list[str] = []
+    for row in rows:
+        try:
+            parsed = json.loads(row["summary_json"])
+        except ValueError:
+            continue
+        goal = parsed.get("goal") if isinstance(parsed, dict) else None
+        if isinstance(goal, str) and goal.strip():
+            goals.append(goal[:RECENT_GOAL_CHARS])
+    return goals
 
 
 def get_state(conn: sqlite3.Connection, key: str) -> str | None:
@@ -188,6 +294,10 @@ def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
     )
+
+
+def delete_state(conn: sqlite3.Connection, key: str) -> None:
+    conn.execute("DELETE FROM bot_state WHERE key = ?", (key,))
 
 
 def _fetch_turn_rows(
