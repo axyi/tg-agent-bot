@@ -123,10 +123,35 @@ is re-validated against the allowlist.
 
 **Never put an internal hostname or an IP literal in `FETCH_ALLOWED_DOMAINS`.**
 The request runs on the bot host, so an internal entry turns the model into an
-SSRF client against your own network. This is enforced at startup, not just
-advised: an IP literal (IPv4 or IPv6, bracketed or bare), `localhost` or a
-`.localhost` suffix, a bare hostname with no dot, or an entry carrying a port
-or a path is rejected with a `ConfigError` naming the offending entry.
+SSRF client against your own network. Three layers enforce this, not just
+advice:
+
+1. **at config load** — an IP literal (IPv4 or IPv6, bracketed or bare, or
+   shortened/hex/octal-shaped like `127.1` or `0x7f.1`), `localhost` or a
+   `.localhost` suffix, a bare hostname with no dot, or an entry carrying a
+   port or a path is rejected with a `ConfigError` naming the offending entry;
+2. **at startup** — every allowlisted domain is resolved once; one that
+   resolves to a loopback, private, link-local, multicast, reserved or
+   unspecified address is logged as a warning (not fatal, in case DNS is
+   transiently wrong at boot);
+3. **at request time** — the initial URL and every redirect hop are resolved
+   again immediately before the request, and refused if the resolved address
+   falls in any of those same forbidden scopes.
+
+**Layer 3 fails open, on purpose.** If resolution itself fails (a transient
+DNS error), the request-time check finds no address to judge and lets the
+request proceed rather than refusing — the allowlist is the primary control,
+and a DNS hiccup should degrade `fetch` into an ordinary connection error, not
+an unexplainable refusal; the connection itself will fail moments later
+anyway. This is the only place in this project that fails open, stated here
+precisely because everything else in this document fails closed.
+
+**Accepted residual risks:** the request-time check (layer 3) and the actual
+TCP connect are not atomic, so a small DNS-rebinding window remains between
+"resolved to a public address" and "connected to it". Separately, the
+allowlist constrains the **domain**, not the **port** — an allowlisted domain
+answering on a non-standard port is still reachable. Both are narrowed by the
+layers above but not closed by them.
 
 ## Add a skill
 
@@ -185,6 +210,14 @@ below and the low-privilege account recommendation, which stays in force.
 it needs runtime features outside `docker run`'s stock flags and is knowingly
 not mitigated in this release.
 
+**Accepted residual risk:** the empty `/etc/resolv.conf` file is created at a
+predictable path next to the database. Creation refuses a symlink and
+verifies the result is a plain, empty, single-linked file this process owns
+(`O_NOFOLLOW`/`O_TRUNC` plus an `fstat` check), and refuses outright to place
+it in a sticky-but-world-writable directory — but a directory shared with an
+untrusted local user, if one is not one of those two rejected shapes, still
+carries a residual TOCTOU race on that predictable path.
+
 **No container outlives the bot.** A `--rm` container only cleans itself up
 when it exits on its own; a bot process killed mid-run (`kill -9`, a crash)
 leaves its container running, holding its memory and CPU slice. Three layers
@@ -201,10 +234,14 @@ close this:
    missing — the wrapper is skipped and a warning is logged; orphan protection
    then rests on the startup reap alone.
 
-**This bot is a single process per Docker daemon.** The startup reap removes
-*every* container carrying the label, so running two instances of this bot
-against the same daemon would let a starting instance kill a running
-instance's sandbox. Multi-instance operation is not supported.
+**This bot is a single process per Docker daemon.** The startup reap now skips
+any container whose owner label names a still-live process (checked against
+`/proc/<pid>/stat`'s start time, so a recycled pid cannot forge ownership), so
+starting a second instance no longer kills a first instance's running exec.
+Multi-instance operation is still not a supported configuration — a second
+instance's own sandbox directory, database and audit log are independent of
+the first's, and nothing coordinates the two beyond this one no-longer-fatal
+interaction on the shared Docker daemon.
 
 **The honest price.** Membership in the `docker` group over a rootful daemon is
 **root-equivalent on the host**. The isolation of `exec` is bought at exactly
@@ -226,23 +263,41 @@ itself exits with one of those codes inside the container is indistinguishable
 from a docker-level failure and is reported as one.
 
 A second, related ambiguity: `timeout(1)` exits 124 when it kills the wrapped
-command for exceeding its own budget. While the in-container wrapper is
-active, a program that legitimately exits 124 of its own accord is
-indistinguishable from one the wrapper killed, and both are reported as
-`timed_out: true`. With the wrapper active, the container now almost always
-dies on its own before the outer wall-clock kill, so that path (the
-`docker kill` on the timeout branch) becomes nearly unreachable in production;
-it stays in the code and stays tested, as the fallback for a container that
-ignores its own budget.
+command for exceeding its own budget, and 137 when the command ignored
+`SIGTERM` and was finished off by `--kill-after`. While the in-container
+wrapper is active, a program that legitimately exits 124 or 137 of its own
+accord is indistinguishable from one the wrapper killed, and both are
+reported as `timed_out: true`. With the wrapper active, the container now
+almost always dies on its own before the outer wall-clock kill, so that path
+(the `docker kill` on the timeout branch) becomes nearly unreachable in
+production; it stays in the code and stays tested, as the fallback for a
+container that ignores its own budget (see Appendix-B scenario D6 in
+`docs/reports/report-v1.2.md`).
 
 **Sandbox quota trade-off.** The disk-quota scan (`EXEC_SANDBOX_MAX_BYTES`)
-walks the sandbox tree on every `exec`, refusing when it holds more than
-200,000 filesystem entries (directories and files, even empty ones) rather
-than finishing an unbounded walk. A model that creates that many entries
+walks the sandbox tree on every `exec`, refusing — naming which of "too many
+entries" or "could not be measured" it is — when it holds more than 200,000
+filesystem entries (directories and files, even empty ones) or when any
+subtree cannot be read, rather than finishing an unbounded or partial walk.
+A model that creates that many entries, or makes a directory unreadable,
 disables `exec` until the operator clears the sandbox — a self-inflicted
 denial of service the model can trigger cheaply. The limit is set high enough
 that ordinary work never approaches it, and failing closed is preferred to an
-unbounded scan; recovery is one `rm -rf` of the sandbox contents.
+unbounded or silently-partial scan.
+
+**The sandbox is scratch space and is emptied on every start by default:**
+`EXEC_SANDBOX_CLEAN_ON_START=true` is the default, and at every startup the
+bot empties the sandbox directory, logging how many entries it cleared —
+anything a previous run left there is deleted, so an operator does not need
+to find and run `rm -rf` by hand. Set `EXEC_SANDBOX_CLEAN_ON_START=false` to
+keep files in the sandbox across restarts instead, **accepting that a
+sandbox filled past the quota then stays broken (`exec` refused) until it is
+cleared by hand.** Separately, the cleanup itself chmods and retries an entry
+it cannot remove (the `chmod 000` case); if even that retry fails, it logs
+`could not clear <path> from the sandbox; clear it by hand` and continues —
+that log line names the manual fallback: `chmod`/`chown` the named path
+yourself, then delete it, since the bot owns those entries only because the
+container ran as its own uid.
 
 **Redaction is defence in depth, not a security boundary.** Every guard below
 matches **literal registered values**. Any transformation performed inside the
@@ -338,9 +393,11 @@ uv run --locked ruff check .
 uv run --locked pytest
 uv run --locked python bot.py --selftest
 uv run --locked python bot.py --selftest-live
+uv run --locked python devtools/mutation_check.py
 ```
 
-The first four are offline and unconditional. The suite is provably offline: any
+Gates 1–4 and 6 are offline and unconditional; only gate 5 needs the live
+environment. The suite is provably offline: any
 real outbound HTTP request fails the test, the LLM and the Telegram client are
 replaced by fakes, the command runner is injected, and even the `docker` binary
 is a stub script on `PATH`. `--selftest` drives one full update through a
@@ -354,3 +411,17 @@ OpenRouter model list. It never issues a chat/completions request, so it costs
 zero tokens, and it never sends a Telegram message. It exits non-zero if any
 check fails; unconfigured providers are skipped, not failed. The `/status`
 exec-backend line renders the version probed at **startup**, not a live one.
+
+`devtools/mutation_check.py` is a standard-library-only mutation-testing gate:
+for each of a fixed list of one-line production edits, it applies the edit,
+reruns the suite, restores the original byte-for-byte, and fails if the suite
+stayed green (the edit "survived" — meaning nothing tests that line).
+
+### Verification
+
+Gates 1–4 prove the code runs and behaves as its tests say; gate 5 proves the
+live environment (Docker, Telegram, the model providers) actually works; gate
+6 proves the tests can tell correct code from broken code. None of the six
+proves the requirements themselves are the right ones — that needs an
+adversarial pass against a running instance, which is how every finding
+closed by spec-v1.1 and spec-v1.2 was found.

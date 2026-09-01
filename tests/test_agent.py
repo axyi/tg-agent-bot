@@ -70,7 +70,10 @@ def test_t_ag_02_tool_round_then_answer(conn):
     stored = rows(conn, conv)
     assert [r["role"] for r in stored] == ["user", "assistant", "tool", "assistant"]
     assert stored[1]["turn_id"] == stored[2]["turn_id"]
-    assert stored[2]["tool_call_id"] == "call_0"
+    # REQ-V12-ID-01: the id is minted by the bot, not a literal the model
+    # supplied — only the pairing between the two rows is guaranteed.
+    wire = json.loads(stored[1]["tool_calls_json"])
+    assert stored[2]["tool_call_id"] == wire[0]["id"]
     assert stored[3]["turn_id"] not in {stored[1]["turn_id"], stored[0]["turn_id"]}
     # the tool result reached the provider on the next request
     second_request = llm.calls[1][0]
@@ -142,9 +145,12 @@ def test_t_ag_07_malformed_calls_all_get_results(conn):
     stored = rows(conn, conv)
     wire = json.loads(stored[1]["tool_calls_json"])
     ids = [c["id"] for c in wire]
+    # REQ-V12-ID-01: the model's ids (duplicate, empty, whatever it sent) are
+    # discarded unconditionally — every kept call gets the minted
+    # call_<turn_id>_<index> value regardless.
+    turn_id = stored[1]["turn_id"]
+    assert ids == [f"call_{turn_id}_{i}" for i in range(5)]
     assert len(ids) == len(set(ids)) == 5
-    assert ids[:3] == ["call_a", "call_b", "call_c"]
-    assert ids[3] == "auto_3"
     tool_rows = [r for r in stored if r["role"] == "tool"]
     assert [r["tool_call_id"] for r in tool_rows] == ids
     assert json.loads(tool_rows[0]["content"]) == {"error": "arguments are not valid JSON"}

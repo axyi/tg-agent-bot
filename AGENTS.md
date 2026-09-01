@@ -51,7 +51,7 @@ sandbox described in the spec, never against the host working tree.
 
 ## Gates — run before reporting success
 
-All five must exit 0, run in this order:
+All six must exit 0, run in this order:
 
 ```bash
 uv sync --locked
@@ -59,12 +59,14 @@ uv run --locked ruff check .
 uv run --locked pytest
 uv run --locked python bot.py --selftest
 uv run --locked python bot.py --selftest-live
+uv run --locked python devtools/mutation_check.py
 ```
 
 Gates 1–4 are unconditional and offline. Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
-Telegram message.
+Telegram message. Gate 6 is the mutation-testing gate (`devtools/mutation_check.py`):
+offline, but slow (minutes, since it reruns the test suite once per mutation).
 
 ## go protocol
 

@@ -334,6 +334,13 @@ def _next_turn_id(conn: sqlite3.Connection, conv_id: int) -> int:
     ).fetchone()[0]
 
 
+def next_turn_id(conn: sqlite3.Connection, conv_id: int) -> int:
+    """Public alias of `_next_turn_id` (REQ-V12-ID-01): a pure read, safe to call
+    before `add_tool_turn` allocates the same value, since no row is inserted
+    between the two calls in a round."""
+    return _next_turn_id(conn, conv_id)
+
+
 def _add_single_row(conn: sqlite3.Connection, conv_id: int, role: str, content: str) -> int:
     turn_id = _next_turn_id(conn, conv_id)
     conn.execute(

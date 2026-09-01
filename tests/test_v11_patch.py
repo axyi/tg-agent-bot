@@ -6,6 +6,8 @@ mount. One file per REQ-V11-TREE-01.
 import functools
 import json
 import logging
+import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -224,13 +226,25 @@ def test_t_v11_trn_02_run_process_headroom_strips_straddling_secret(tmp_path):
 
 
 def test_t_v11_trn_03_fetch_url_headroom_strips_straddling_secret():
+    # REQ-V12-TST-01: `httpx.Response(200, content=body)` delivers the whole
+    # body as a single chunk, so `config.redact` alone would catch the secret
+    # no matter what `fetch_url` does around it — the fetch leg of the
+    # truncation fix would go unverified. Streaming the body from an iterator
+    # of fixed-size chunks makes the cut genuinely land inside the secret.
     secret = SENTINEL
     config.register_secret(secret)
     filler_len = tools.FETCH_MAX_BYTES - len(secret) // 2
     body = ("A" * filler_len + secret + "B" * 100).encode("utf-8")
 
+    def chunked(data: bytes, size: int = 8):
+        # Small enough that, without the headroom this test guards, the read
+        # loop's cut lands genuinely inside the sentinel rather than safely
+        # past it.
+        for start in range(0, len(data), size):
+            yield data[start:start + size]
+
     def handler(request):
-        return httpx.Response(200, content=body)
+        return httpx.Response(200, content=chunked(body))
 
     client = httpx.Client(transport=mock_llm_transport(handler))
     result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=client)
@@ -240,6 +254,33 @@ def test_t_v11_trn_03_fetch_url_headroom_strips_straddling_secret():
         assert secret[:length] not in result["body"], length
     assert result["truncated"] is True
     assert len(result["body"].encode("utf-8")) <= tools.FETCH_MAX_BYTES
+    # Without headroom, strip_secret_fragment's own amputation of the partial
+    # secret would satisfy every assertion above with the placeholder absent —
+    # proving the secret was seen *whole* is what pins the `+ secret_headroom`
+    # term specifically (REQ-V12-TST-02 #11's rationale, applied to TRN-03).
+    assert config.REDACTION in result["body"]
+
+
+def test_t_v11_trn_03_fetch_url_strips_a_fragment_left_by_a_short_response():
+    # A response that ends on its own, well under FETCH_MAX_BYTES, in a bare
+    # prefix of a registered secret: headroom never engages (nothing is being
+    # cut), so only `strip_secret_fragment` can be what removes the fragment.
+    secret = SENTINEL
+    config.register_secret(secret)
+    body = ("hello world " + secret[:20]).encode("utf-8")
+
+    def chunked(data: bytes, size: int = 8):
+        for start in range(0, len(data), size):
+            yield data[start:start + size]
+
+    def handler(request):
+        return httpx.Response(200, content=chunked(body))
+
+    client = httpx.Client(transport=mock_llm_transport(handler))
+    result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=client)
+
+    assert secret[:20] not in result["body"]
+    assert result["body"] == "hello world "
 
 
 def test_t_v11_trn_04_no_secrets_registered_matches_v1_behaviour(tmp_path):
@@ -276,20 +317,30 @@ def test_t_v11_orp_01_wrap_timeout_prefix_and_label():
 
 
 def test_t_v11_orp_02_startup_reap_removes_labelled_orphans(docker_stub, caplog):  # noqa: F811
-    docker_stub.set(ps_ids=["deadbeef1", "deadbeef2"])
+    # REQ-V12-ORP-02: an unlabelled (v1.1-era) container is always an orphan;
+    # one owned by a still-live process is left alone.
+    live_owner = tools.owner_key()
+    docker_stub.set(ps_entries=[["deadbeef1", ""], ["alive1", live_owner]])
     with caplog.at_level(logging.INFO):
         bot._reap_orphaned_containers()
     ps_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["ps"]]
-    assert ps_calls == [["ps", "-aq", "--filter", "label=tgexec=1"]]
+    assert ps_calls == [
+        ["ps", "-a", "--filter", "label=tgexec=1", "--format",
+         '{{.ID}}\t{{.Label "tgexec-owner"}}'],
+    ]
     rm_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["rm"]]
-    assert rm_calls == [["rm", "-f", "deadbeef1", "deadbeef2"]]
+    assert rm_calls == [["rm", "-f", "deadbeef1"]]
     assert any(
-        "reaped 2 orphaned exec container" in record.getMessage() for record in caplog.records
+        "reaped 1 orphaned exec container" in record.getMessage() for record in caplog.records
+    )
+    assert any(
+        "skipped 1 container(s) owned by a live process" in record.getMessage()
+        for record in caplog.records
     )
 
 
 def test_t_v11_orp_02_empty_listing_issues_no_rm(docker_stub):  # noqa: F811
-    docker_stub.set(ps_ids=[])
+    docker_stub.set(ps_entries=[])
     bot._reap_orphaned_containers()
     rm_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["rm"]]
     assert rm_calls == []
@@ -337,13 +388,24 @@ def test_t_v11_orp_03_image_has_timeout_argv_and_hardening(docker_stub):  # noqa
     assert ("--cap-drop", "ALL") in pairs
     assert ("--security-opt", "no-new-privileges") in pairs
     assert argv[-2:] == ["timeout", "--version"]
+    # REQ-V12-ORP-04: the probe is named and labelled like every other
+    # container, so it can never become an unreapable orphan.
+    assert ("--label", tools.CONTAINER_LABEL) in pairs
+    assert any(
+        flag == "--label" and value.startswith("tgexec-owner=") for flag, value in pairs
+    )
+    name = argv[argv.index("--name") + 1]
+    assert re.fullmatch(r"tgexec-probe-[0-9a-f]{8}", name)
+    assert ("--user", f"{os.getuid()}:{os.getgid()}") in pairs
 
 
 def test_t_v11_orp_03_false_result_disables_wrap_and_warns(docker_stub, tmp_path, caplog):  # noqa: F811
     docker_stub.set(exit=1)
     cfg = make_cfg(tmp_path)
     with caplog.at_level(logging.WARNING):
-        wrap_timeout, _ = bot._startup_docker_wiring(cfg, docker_ok=True)
+        wrap_timeout, _ = bot._startup_docker_wiring(
+            cfg, docker_ok=True, resolve=lambda *a, **k: []
+        )
     assert wrap_timeout is False
     assert any("self-timeout unavailable" in record.getMessage() for record in caplog.records)
 
@@ -365,6 +427,24 @@ def test_t_v11_orp_04_exit_124_mapping_depends_on_wrap_timeout(docker_stub, sand
     assert result["timed_out"] is False
     assert result["exit_code"] == 124
 
+    # REQ-V12-ORP-03: a command that ignores SIGTERM and is finished off by
+    # `--kill-after` exits 137, which maps the same way 124 does.
+    docker_stub.set(exit=137, stdout="killed by sigkill\n")
+    result = tools.run_command_docker(
+        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
+        docker_ok=True, wrap_timeout=True,
+    )
+    assert result["timed_out"] is True
+    assert result["exit_code"] == 137
+
+    docker_stub.set(exit=137, stdout="own exit code\n")
+    result = tools.run_command_docker(
+        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
+        docker_ok=True, wrap_timeout=False,
+    )
+    assert result["timed_out"] is False
+    assert result["exit_code"] == 137
+
 
 def test_t_v11_orp_04_outer_kill_path_still_times_out(docker_stub, sandbox, monkeypatch):  # noqa: F811
     monkeypatch.setattr(tools, "DOCKER_STARTUP_GRACE_S", 0.0)
@@ -383,15 +463,17 @@ def test_t_v11_wir_01_docker_not_ok_runs_nothing_and_creates_nothing(tmp_path, m
         raise AssertionError("unexpected subprocess call")
 
     monkeypatch.setattr(bot.subprocess, "run", forbidden)
-    result = bot._startup_docker_wiring(cfg, docker_ok=False)
+    result = bot._startup_docker_wiring(cfg, docker_ok=False, resolve=lambda *a, **k: [])
     assert result == (False, None)
     assert not (cfg.db_path.parent / ".resolv-empty").exists()
 
 
 def test_t_v11_wir_01_docker_ok_reaps_probes_and_creates_the_file_once(docker_stub, tmp_path):  # noqa: F811
     cfg = make_cfg(tmp_path)
-    docker_stub.set(ps_ids=[], exit=0)
-    wrap_timeout, empty_resolv = bot._startup_docker_wiring(cfg, docker_ok=True)
+    docker_stub.set(ps_entries=[], exit=0)
+    wrap_timeout, empty_resolv = bot._startup_docker_wiring(
+        cfg, docker_ok=True, resolve=lambda *a, **k: []
+    )
     assert wrap_timeout is True
     assert empty_resolv == cfg.db_path.parent / ".resolv-empty"
     assert empty_resolv.exists()
@@ -411,14 +493,14 @@ def test_t_v11_qta_01_sums_regular_files_and_ignores_symlink_targets(tmp_path):
     outside.write_bytes(b"z" * 100000)
     try:
         (tmp_path / "link").symlink_to(outside)
-        total, cut_short = tools.sandbox_usage(tmp_path)
-        assert cut_short is False
+        total, status = tools.sandbox_usage(tmp_path)
+        assert status == tools.SCAN_OK
         assert total == 100
     finally:
         outside.unlink()
 
 
-def test_t_v11_qta_01_survives_an_unreadable_entry(tmp_path, monkeypatch):
+def test_t_v11_qta_01_reports_incomplete_on_an_unreadable_entry(tmp_path, monkeypatch):
     (tmp_path / "ok.txt").write_bytes(b"x" * 50)
     (tmp_path / "ghost.txt").write_bytes(b"y" * 999)
     real_lstat = tools.os.lstat
@@ -429,8 +511,8 @@ def test_t_v11_qta_01_survives_an_unreadable_entry(tmp_path, monkeypatch):
         return real_lstat(path, *a, **kw)
 
     monkeypatch.setattr(tools.os, "lstat", flaky)
-    total, cut_short = tools.sandbox_usage(tmp_path)
-    assert cut_short is False
+    total, status = tools.sandbox_usage(tmp_path)
+    assert status == tools.SCAN_INCOMPLETE
     assert total == 50
 
 
@@ -438,12 +520,12 @@ def test_t_v11_qta_01_reports_cut_short_past_entry_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(tools, "SANDBOX_SCAN_MAX_ENTRIES", 3)
     for i in range(5):
         (tmp_path / f"f{i}.txt").write_bytes(b"x")
-    _total, cut_short = tools.sandbox_usage(tmp_path)
-    assert cut_short is True
+    _total, status = tools.sandbox_usage(tmp_path)
+    assert status == tools.SCAN_CUT_SHORT
 
 
-def test_t_v11_qta_01_missing_directory_returns_zero_false(tmp_path):
-    assert tools.sandbox_usage(tmp_path / "gone") == (0, False)
+def test_t_v11_qta_01_missing_directory_returns_zero_ok(tmp_path):
+    assert tools.sandbox_usage(tmp_path / "gone") == (0, tools.SCAN_OK)
 
 
 def test_t_v11_qta_02_full_sandbox_refuses_without_spawning(sandbox, monkeypatch):  # noqa: F811
@@ -460,6 +542,37 @@ def test_t_v11_qta_02_full_sandbox_refuses_without_spawning(sandbox, monkeypatch
     assert result == {
         "error": "sandbox is full: 1000 bytes of 1000 allowed; "
                  "ask the operator to clear the sandbox directory"
+    }
+
+    # REQ-V12-QTA-02: the cut-short and incomplete-scan cases get their own
+    # message, distinct from "full", and neither starts a process.
+    with pytest.MonkeyPatch.context() as cut_mp:
+        cut_mp.setattr(tools, "SANDBOX_SCAN_MAX_ENTRIES", 0)
+        result = tools.run_command_docker(
+            ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+            sandbox_max_bytes=10_000_000,
+        )
+    assert result == {
+        "error": "sandbox holds too many files to measure (over 0 entries); "
+                 "ask the operator to clear the sandbox directory",
+        "sandbox_scan": tools.SCAN_CUT_SHORT,
+    }
+
+    ghost = sandbox / "ghost"
+    ghost.mkdir()
+    (ghost / "x.bin").write_bytes(b"x" * 10)
+    ghost.chmod(0)
+    try:
+        result = tools.run_command_docker(
+            ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+            sandbox_max_bytes=10_000_000,
+        )
+    finally:
+        ghost.chmod(0o700)
+    assert result == {
+        "error": "sandbox size could not be measured; ask the operator to "
+                 "inspect the sandbox directory",
+        "sandbox_scan": tools.SCAN_INCOMPLETE,
     }
 
 
@@ -524,6 +637,9 @@ def test_t_v11_qta_03_run_exec_pops_the_key_before_the_model_sees_it(docker_stub
         "exec", json.dumps({"argv": ["true"]}), skills={}, runner=runner2, audit=audit,
     )
     assert captured["sandbox_over_quota"] is True
+    # REQ-V12-QTA-02: the audit record always carries the scan status; a
+    # plain over-quota run (scan itself succeeded) reports it as SCAN_OK.
+    assert captured["sandbox_scan"] == tools.SCAN_OK
 
 
 def test_t_v11_qta_04_exec_sandbox_max_bytes_parsing():
@@ -548,6 +664,10 @@ def test_t_v11_qta_04_exec_sandbox_max_bytes_parsing():
 @pytest.mark.parametrize("entry", [
     "169.254.169.254", "127.0.0.1", "[::1]", "localhost", "sub.localhost",
     "internalhost", "example.com:8080", "example.com/path",
+    # REQ-V12-SSR-01: shortened and hexadecimal IPv4 forms (finding W-6) —
+    # none of these parse as an `ipaddress` literal, so only the strict shape
+    # check catches them.
+    "127.1", "127.0.1", "0x7f.1", "0x7f.0.0.1",
 ])
 def test_t_v11_cfv_01_rejects_ssrf_shaped_domains(entry):
     with pytest.raises(ConfigError) as raised:
@@ -593,10 +713,22 @@ def test_t_v11_inf_01_empty_resolv_file_created_and_reused(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
     assert path.read_bytes() == b""
 
-    path.write_bytes(b"should not be touched")
+    # A plain non-empty file is truncated, not rejected (REQ-V12-INF-01,
+    # scenario D5): only the file's *type* is untrusted, not its prior use.
+    path.write_bytes(b"should be truncated away")
     path2 = bot._ensure_empty_resolv(db_path)
     assert path2 == path
-    assert path.read_bytes() == b"should not be touched"
+    assert path.read_bytes() == b""
+
+    # A symlink at the path is refused outright — a planted symlink to the
+    # host's real resolv.conf must never be trusted or silently replaced
+    # (finding W-8-bis).
+    path.unlink()
+    target = tmp_path / "host-resolv.conf"
+    target.write_text("nameserver 10.0.0.1\n")
+    path.symlink_to(target)
+    with pytest.raises(ConfigError):
+        bot._ensure_empty_resolv(db_path)
 
 
 def test_t_v11_inf_01_mount_flag_ordering_and_omission():

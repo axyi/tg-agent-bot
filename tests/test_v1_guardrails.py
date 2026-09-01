@@ -1328,6 +1328,9 @@ def test_main_binds_the_container_runner_not_the_host_runner(tmp_path, monkeypat
     fetcher = captured["fetcher"]
     assert fetcher.func is tools.fetch_url
     assert fetcher.keywords["allowed_domains"] == cfg.fetch_allowed_domains
+    # REQ-V12-SSR-03: the production resolver is bound in, not left at the
+    # `None` default that keeps every offline test free of real DNS.
+    assert fetcher.keywords["resolve"] is tools.resolve_host
     assert isinstance(captured["limiter"], bot.RateLimiter)
     assert captured["docker_version"] == "27.1.2"
     assert captured["docker_ok"] is True

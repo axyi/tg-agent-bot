@@ -35,16 +35,19 @@ if verb == "version":
     sys.stdout.write(mode.get("version", "27.1.2") + "\\n")
     sys.exit(0)
 if verb == "ps":
-    for cid in mode.get("ps_ids", []):
-        sys.stdout.write(cid + "\\n")
+    entries = mode.get("ps_entries")
+    if entries is None:
+        entries = [[cid, ""] for cid in mode.get("ps_ids", [])]
+    for cid, owner in entries:
+        sys.stdout.write(f"{cid}\\t{owner}\\n")
     sys.exit(0)
 if verb == "rm":
     sys.exit(mode.get("rm_exit", 0))
-if mode.get("sleep"):
-    time.sleep(mode["sleep"])
 if mode.get("write_bytes"):
     with open("grown.bin", "wb") as fh:
         fh.write(b"0" * mode["write_bytes"])
+if mode.get("sleep"):
+    time.sleep(mode["sleep"])
 sys.stdout.write(mode.get("stdout", ""))
 sys.stderr.write(mode.get("stderr", ""))
 sys.exit(mode.get("exit", 0))

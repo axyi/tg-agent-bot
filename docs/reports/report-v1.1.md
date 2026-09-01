@@ -118,7 +118,18 @@ Spec-v1 regression (REQ-V11-ACC-01):
 
 ## Deviations from the spec
 
-None. Section 9.1's amendment list was applied exactly as written; no test
+**Corrected retroactively per REQ-V12-DOC-02 item 4** (spec-v1.2's compliance
+review named this section's original "None" as false — both facts below
+were visible in adjacent prose, but this is the section a reader checks):
+
+1. The whole run was delivered as **one commit** although it consumed two
+   prompts (`05` go, `06` review).
+2. Appendix B was executed by a **scripted driver with a scripted model**,
+   not by Telegram messages from the operator's account, as its scenarios
+   describe.
+
+Beyond those two process deviations, the technical scope was followed
+exactly: section 9.1's amendment list was applied exactly as written; no test
 outside that list was modified, and no test was deleted (`git diff --stat`
 shows only the two new/amended test files touched, plus the new
 `tests/test_v11_patch.py`).

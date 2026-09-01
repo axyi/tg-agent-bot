@@ -1,3 +1,5 @@
+import socket
+
 import httpx
 import pytest
 
@@ -12,6 +14,15 @@ def no_network(monkeypatch):
         raise AssertionError(
             f"unexpected network request: {request.method} {request.url.host}")
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", _forbidden)
+
+
+@pytest.fixture(autouse=True)
+def no_dns(monkeypatch):
+    """REQ-V12-OFF-01: DNS is barred as well as HTTP. Any test that needs
+    resolution must inject its own stub; none may reach the real resolver."""
+    def _forbidden(host, *args, **kwargs):
+        raise AssertionError(f"unexpected DNS lookup: {host}")
+    monkeypatch.setattr(socket, "getaddrinfo", _forbidden)
 
 
 @pytest.fixture(autouse=True)

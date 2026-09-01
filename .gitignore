@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 *.log
 .DS_Store
+.idea/
 
 # exec-tool sandbox and runtime state
 sandbox/

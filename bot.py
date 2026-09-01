@@ -9,8 +9,11 @@ import json
 import logging
 import os
 import random
+import shutil
 import signal
+import socket
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,6 +24,7 @@ from pathlib import Path
 import httpx
 
 import agent
+import config
 import storage
 import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
@@ -306,9 +310,18 @@ def exec_backend_status(
     return version, docker_ok
 
 
-def _startup_docker_wiring(cfg: Config, docker_ok: bool) -> tuple[bool, Path | None]:
+def _startup_docker_wiring(
+    cfg: Config, docker_ok: bool, *, resolve: Callable[..., list] | None = None
+) -> tuple[bool, Path | None]:
     """REQ-V11-WIR-01: the one named seam everything this patch adds to startup
-    lives behind. Does nothing at all — no subprocess, no file creation — when
+    lives behind.
+
+    REQ-V12-QTA-03 and REQ-V12-SSR-02 run first and **regardless** of
+    `docker_ok`: sandbox cleanup and the allowlist resolution check touch only
+    the local filesystem and the network, never `docker`, and a sandbox left
+    over quota — or an allowlist entry that has started resolving somewhere
+    forbidden — must be caught even while Docker is down. Past that point the
+    seam does nothing at all — no subprocess, no file creation — when
     `docker_ok` is false.
 
     This is a safety requirement, not a style choice: the existing tests that
@@ -316,6 +329,8 @@ def _startup_docker_wiring(cfg: Config, docker_ok: bool) -> tuple[bool, Path | N
     shell out to a real `docker` during `pytest`. Section 9.1 stubs this one
     seam in both; no other startup path may call `docker`.
     """
+    _clean_sandbox_at_start(cfg)
+    _check_allowlist_resolution(cfg, resolve)
     if not docker_ok:
         return False, None
     _reap_orphaned_containers()
@@ -330,12 +345,95 @@ def _startup_docker_wiring(cfg: Config, docker_ok: bool) -> tuple[bool, Path | N
     return wrap_timeout, empty_resolv
 
 
+def _clean_sandbox_at_start(cfg: Config) -> None:
+    """REQ-V12-QTA-03: give the operator an automatic way out of a sandbox a
+    previous run left over quota. Uses `shutil`/`os` directly, never a
+    subprocess, and runs before the `docker_ok` branch above — a prior test's
+    contract (no subprocess, no file-system side effect when `docker_ok` is
+    false) covers only the docker-dependent parts of this seam."""
+    if not cfg.exec_sandbox_clean_on_start:
+        return
+    try:
+        entries = list(cfg.exec_workdir.iterdir())
+    except OSError as exc:
+        log.warning("could not list the sandbox for startup cleanup: %s", redact(str(exc)))
+        return
+    removed = 0
+    for entry in entries:
+        try:
+            _remove_sandbox_entry(entry)
+            removed += 1
+        except OSError:
+            log.warning("could not clear %s from the sandbox; clear it by hand", entry)
+    if removed:
+        noun = "entry" if removed == 1 else "entries"
+        log.info("cleared %d %s from the sandbox at startup", removed, noun)
+
+
+def _remove_sandbox_entry(entry: Path) -> None:
+    """The W-4 attack ends with a `chmod 000` subdirectory, which a plain
+    `rmtree` cannot remove. `shutil.rmtree`'s `onexc` hands back a `func` that
+    is "platform and implementation dependent" (its own docs' words) — on
+    Python 3.12+'s fd-based implementation it can be `os.open`, whose
+    signature `func(path)` cannot satisfy — so retrying that exact call is not
+    reliable. Instead: a first pass that never raises, only records every path
+    it could not remove; chmod each of those paths to `u+rwX` (the bot owns
+    them — the container ran as the bot's own uid); then retry the whole
+    removal once, letting a second failure propagate to the caller."""
+    if entry.is_symlink() or not entry.is_dir():
+        os.unlink(entry)
+        return
+    failed_paths: list[str] = []
+    shutil.rmtree(entry, onexc=lambda _func, path, _exc: failed_paths.append(path))
+    if failed_paths:
+        for path in failed_paths:
+            os.chmod(path, stat.S_IRWXU)
+        shutil.rmtree(entry)
+
+
+def _check_allowlist_resolution(cfg: Config, resolve: Callable[..., list] | None) -> None:
+    """REQ-V12-SSR-02, layer 2: resolved once at startup, best effort.
+
+    `resolve` defaults to `None` here — never `= socket.getaddrinfo` in the
+    signature, which would bind the original function object at `def` time and
+    let a call that omits `resolve=` slip past the offline test guard
+    (REQ-V12-OFF-01) into real DNS. The lookup happens through the module
+    attribute at call time instead, so the guard is mechanical.
+    """
+    resolve = resolve or socket.getaddrinfo
+    for entry in cfg.fetch_allowed_domains:
+        try:
+            results = resolve(entry, 443, proto=socket.IPPROTO_TCP)
+        except OSError as exc:
+            log.warning(
+                "could not resolve allowlisted domain %s: %s; the request-time "
+                "guard remains in force",
+                entry, exc.__class__.__name__,
+            )
+            continue
+        for result in results:
+            address = result[4][0]
+            scope = config.address_scope(address)
+            if scope is not None:
+                raise ConfigError(
+                    f"allowlisted domain {entry} resolves to a {scope} address "
+                    f"({address}); refusing to start"
+                )
+
+
+_REAP_PS_FORMAT = '{{.ID}}\t{{.Label "tgexec-owner"}}'
+
+
 def _reap_orphaned_containers() -> None:
-    """REQ-V11-ORP-02: remove every container carrying the exec label. A failure
-    here is logged and never prevents startup."""
+    """REQ-V12-ORP-02: remove only what is genuinely orphaned — a container
+    from v1.1 (no owner label) is always an orphan by now; one labelled by a
+    still-live bot process is left alone, so starting a second instance can no
+    longer kill the first one's running exec. A failure here is logged and
+    never prevents startup."""
     try:
         listed = subprocess.run(
-            ["docker", "ps", "-aq", "--filter", f"label={tools.CONTAINER_LABEL}"],
+            ["docker", "ps", "-a", "--filter", f"label={tools.CONTAINER_LABEL}",
+             "--format", _REAP_PS_FORMAT],
             timeout=REAP_TIMEOUT_S, capture_output=True, env=tools._probe_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -344,12 +442,24 @@ def _reap_orphaned_containers() -> None:
     if listed.returncode != 0:
         log.warning("orphan container reap failed: docker ps exited %d", listed.returncode)
         return
-    ids = [line for line in listed.stdout.decode("utf-8", errors="replace").split() if line]
-    if not ids:
+    lines = [
+        line for line in listed.stdout.decode("utf-8", errors="replace").split("\n") if line
+    ]
+    to_remove = []
+    skipped = 0
+    for line in lines:
+        container_id, _sep, owner = line.partition("\t")
+        if owner and tools.owner_is_alive(owner):
+            skipped += 1
+            continue
+        to_remove.append(container_id)
+    if skipped:
+        log.info("skipped %d container(s) owned by a live process", skipped)
+    if not to_remove:
         return
     try:
         removed = subprocess.run(
-            ["docker", "rm", "-f", *ids],
+            ["docker", "rm", "-f", *to_remove],
             timeout=REAP_TIMEOUT_S, capture_output=True, env=tools._probe_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -358,18 +468,59 @@ def _reap_orphaned_containers() -> None:
     if removed.returncode != 0:
         log.warning("orphan container reap failed: docker rm exited %d", removed.returncode)
         return
-    log.info("reaped %d orphaned exec container(s)", len(ids))
+    log.info("reaped %d orphaned exec container(s)", len(to_remove))
 
 
 def _ensure_empty_resolv(db_path: Path) -> Path:
-    """REQ-V11-INF-01: an empty file mounted read-only at /etc/resolv.conf so a
-    network-less container learns nothing about the host's DNS configuration."""
+    """REQ-V12-INF-01: an empty file mounted read-only at /etc/resolv.conf so a
+    network-less container learns nothing about the host's DNS configuration.
+
+    Creates or truncates the file unconditionally and refuses anything that is
+    not a plain empty file it owns: `path.exists()` follows symlinks, so a
+    symlink planted at this predictable, world-writable-adjacent path (finding
+    W-8-bis) would otherwise be mounted into every container unexamined.
+    """
     path = db_path.parent / ".resolv-empty"
-    if not path.exists():
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o644)
+    _refuse_shared_parent(path.parent)
+    try:
+        fd = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            0o644,
+        )
+    except OSError as exc:
+        raise ConfigError(
+            f'could not create the empty resolv file at "{path}": {exc.__class__.__name__}'
+        ) from None
+    try:
+        st = os.fstat(fd)
+        if not (
+            stat.S_ISREG(st.st_mode)
+            and st.st_size == 0
+            and st.st_uid == os.getuid()
+            and st.st_nlink == 1
+        ):
+            raise ConfigError(
+                f'refusing to use "{path}" as the empty resolv file: '
+                "it is not a plain file owned by this process"
+            )
+        os.fchmod(fd, 0o644)          # exact perms regardless of umask
+    finally:
         os.close(fd)
-        os.chmod(path, 0o644)         # exact perms regardless of umask
     return path
+
+
+def _refuse_shared_parent(parent: Path) -> None:
+    """A sticky world-writable directory such as `/tmp` still allows the race
+    on a pre-existing file, which `O_NOFOLLOW` + `O_TRUNC` + the `fstat`
+    checks above defeat; a non-sticky one does not even need a pre-existing
+    file, so it is refused outright."""
+    st = os.stat(parent)
+    if (st.st_mode & 0o002) and not (st.st_mode & stat.S_ISVTX):
+        raise ConfigError(
+            f'"{parent}" is world-writable and not sticky; move DB_PATH out of '
+            "a shared directory"
+        )
 
 
 def load_provider_override(conn: sqlite3.Connection) -> str | None:
@@ -822,12 +973,16 @@ def _selftest_failure(conn, tg, cfg: Config, root: Path) -> str | None:
     if len(tool_turns) != 1:
         return "expected exactly one assistant message carrying tool calls"
     calls = json.loads(tool_turns[0]["tool_calls_json"])
-    if len(calls) != 1 or calls[0]["id"] != "call_1" or calls[0]["function"]["name"] != "exec":
+    if len(calls) != 1 or calls[0]["function"]["name"] != "exec":
         return "the stored tool call is not the expected exec call"
 
     tool_rows = [row for row in rows if row["role"] == "tool"]
-    if len(tool_rows) != 1 or tool_rows[0]["tool_call_id"] != "call_1":
-        return "expected exactly one tool result carrying tool_call_id call_1"
+    if len(tool_rows) != 1:
+        return "expected exactly one tool result"
+    # REQ-V12-ID-04: the identifier is minted by the bot, not pinned to a
+    # literal the scripted model happens to emit — only the pairing matters.
+    if calls[0]["id"] != tool_rows[0]["tool_call_id"]:
+        return "the stored tool call and its result do not share an identifier"
     envelope = json.loads(tool_rows[0]["content"])
     if envelope.get("exit_code") != 0 or not str(envelope.get("stdout", "")).startswith("ok"):
         return "the exec tool did not produce a successful envelope"
@@ -1021,7 +1176,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     docker_version, docker_ok = exec_backend_status()
-    wrap_timeout, empty_resolv = _startup_docker_wiring(cfg, docker_ok)
+    try:
+        wrap_timeout, empty_resolv = _startup_docker_wiring(cfg, docker_ok)
+    except ConfigError as exc:
+        # REQ-V12-ERR-01: a configuration refusal must look like one, not an
+        # unhandled traceback — whether it comes from `load_config` above or
+        # from this seam (REQ-V12-INF-01, REQ-V12-SSR-02).
+        log.error("configuration error: %s", redact(str(exc)))
+        client.close()
+        conn.close()
+        return 2
     override = load_provider_override(conn)
     live = {"llm": build_llm_client(cfg, client=client, override=override)}
 
@@ -1054,6 +1218,7 @@ def main(argv: list[str] | None = None) -> int:
                 tools.fetch_url,
                 allowed_domains=cfg.fetch_allowed_domains,
                 client=client,
+                resolve=tools.resolve_host,
             ),
             docker_version=docker_version,
             docker_ok=docker_ok,

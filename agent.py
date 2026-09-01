@@ -122,25 +122,25 @@ def estimate_message(message: dict) -> int:
     return estimate_tokens(json.dumps(message, ensure_ascii=False))
 
 
-def normalize_tool_calls(calls: list[ToolCall]) -> list[ToolCall]:
-    """Truncate to the accept cap, then give every kept call a unique id."""
+def normalize_tool_calls(calls: list[ToolCall], *, turn_id: int = 0) -> list[ToolCall]:
+    """Truncate to the accept cap, then mint every kept call its own id.
+
+    REQ-V12-ID-01: the model's `raw.id` is discarded unconditionally — never
+    inspected, compared or used as a fallback. It is an attacker-controlled
+    channel (finding W-1); minted ids are unique by construction, so the v1
+    uniqueness bookkeeping (`seen`, the `auto_` fallback) no longer exists.
+    """
     if len(calls) > MAX_TOOL_CALLS_ACCEPTED:
         log.warning(
             "response carried %d tool calls; kept the first %d",
             len(calls),
             MAX_TOOL_CALLS_ACCEPTED,
         )
-    normalized: list[ToolCall] = []
-    seen: set[str] = set()
-    for index, raw in enumerate(calls[:MAX_TOOL_CALLS_ACCEPTED]):
-        call_id = raw.id.strip()
-        if not call_id or call_id in seen:
-            call_id = f"auto_{index}"
-        while call_id in seen:
-            call_id = call_id + "_"
-        seen.add(call_id)
-        normalized.append(ToolCall(id=call_id, name=raw.name.strip(), arguments=raw.arguments))
-    return normalized
+    kept = calls[:MAX_TOOL_CALLS_ACCEPTED]
+    return [
+        ToolCall(id=f"call_{turn_id}_{index}", name=raw.name.strip(), arguments=raw.arguments)
+        for index, raw in enumerate(kept)
+    ]
 
 
 def run_agent(
@@ -231,7 +231,11 @@ def run_agent(
                 _with_truncation_notice(response) if has_content else FALLBACK_NO_ANSWER
             )
 
-        normalized = normalize_tool_calls(response.tool_calls)
+        # REQ-V12-ID-01 item 3: minted fresh, per round, immediately before use —
+        # never once before the `while`, or round 2 would mint call_<T>_0... again.
+        normalized = normalize_tool_calls(
+            response.tool_calls, turn_id=storage.next_turn_id(conn, conv_id)
+        )
         results, tools_used = _execute_tool_calls(
             normalized, skills=skills, runner=runner, tools_used=tools_used,
             fetcher=fetcher, audit=audit, on_tool=on_tool,
@@ -343,18 +347,29 @@ def _first_argument(call: ToolCall) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _known_tool_names() -> set[str]:
+    """The source of truth for a valid tool name is what the bot itself
+    advertises — never a hand-copied literal list (REQ-V12-ID-01 item 4)."""
+    return {spec["function"]["name"] for spec in tool_specs()}
+
+
 def _to_wire(call: ToolCall) -> dict:
+    # REQ-V12-ID-01 item 4: a name outside the advertised tool set is recorded
+    # and transmitted as "unknown" — dispatch itself (execute_tool, called with
+    # the untouched `call.name`) is unaffected and still returns its own
+    # "unknown tool" envelope for this round.
+    name = call.name if call.name in _known_tool_names() else "unknown"
     return {
         "id": call.id,
         "type": "function",
-        "function": {"name": call.name, "arguments": call.arguments},
+        "function": {"name": name, "arguments": call.arguments},
     }
 
 
 def _redact_tool_calls(calls: list[dict]) -> list[dict]:
-    """Redact `function.arguments` in each wire-shaped call. Ids, names and
-    shape are preserved byte-for-byte, because the provider matches
-    `tool_call_id` against them (REQ-V11-RED-01)."""
+    """Redact `function.arguments` in each wire-shaped call. Ids and names are
+    safe to leave alone here — not because they are trusted, but because they
+    are minted and validated upstream (REQ-V12-ID-02) before this ever runs."""
     redacted = []
     for call in calls:
         function = dict(call["function"])

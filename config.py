@@ -28,8 +28,21 @@ DEFAULT_EXEC_SANDBOX_MAX_BYTES = 268435456
 MIN_EXEC_SANDBOX_MAX_BYTES = 1048576
 MAX_EXEC_SANDBOX_MAX_BYTES = 4294967296
 
+# v1.2 addition (REQ-V12-SSR-02): scopes `address_scope` can name, and the
+# backstop the six is_* flags alone would miss (finding W-6).
+FORBIDDEN_SCOPES = ("loopback", "private", "link-local", "multicast",
+                    "reserved", "unspecified", "non-global", "unparsable")
+
 _DIGITS_RE = re.compile(r"^[0-9]+$")
 _TG_ID_RE = re.compile(r"^[1-9][0-9]*$")
+# REQ-V12-SSR-01: a strict domain shape, checked after the four v1.1 clauses.
+# Rejects every shortened/hexadecimal IPv4 form by construction: a label made
+# only of digits (or "0x..") can never be a valid two-letter-or-more TLD nor an
+# `xn--` A-label, so `127.1`, `0x7f.1` and friends fail the last-label check
+# below even though they match this shape.
+_DOMAIN_SHAPE_RE = re.compile(
+    r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+)
 _secrets: set[str] = set()
 
 
@@ -65,6 +78,8 @@ class Config:
     fetch_allowed_domains: frozenset[str] = frozenset({DEFAULT_FETCH_DOMAINS})
     # v1.1 addition (REQ-V11-QTA-01).
     exec_sandbox_max_bytes: int = DEFAULT_EXEC_SANDBOX_MAX_BYTES
+    # v1.2 addition (REQ-V12-QTA-03).
+    exec_sandbox_clean_on_start: bool = True
 
 
 def register_secret(value: str) -> None:
@@ -191,6 +206,9 @@ def load_config(
         exec_sandbox_max_bytes=_parse_int(
             source, "EXEC_SANDBOX_MAX_BYTES", DEFAULT_EXEC_SANDBOX_MAX_BYTES,
             MIN_EXEC_SANDBOX_MAX_BYTES, MAX_EXEC_SANDBOX_MAX_BYTES,
+        ),
+        exec_sandbox_clean_on_start=_parse_bool(
+            source, "EXEC_SANDBOX_CLEAN_ON_START", True
         ),
     )
 
@@ -345,6 +363,45 @@ def _parse_float(source: Mapping[str, str], key: str, default: float, high: floa
     return parsed
 
 
+def _parse_bool(source: Mapping[str, str], key: str, default: bool) -> bool:
+    raw = _value(source, key).casefold()
+    if not raw:
+        return default
+    if raw in ("true", "1", "yes", "on"):
+        return True
+    if raw in ("false", "0", "no", "off"):
+        return False
+    raise ConfigError(f"{key} must be a boolean (true/false), got: {raw}")
+
+
+def address_scope(addr: str) -> str | None:
+    """The first matching forbidden scope for `addr`, or `None` for an ordinary
+    public address (REQ-V12-SSR-02). Never raises: an unparsable string is its
+    own scope, `"unparsable"`, rather than an exception the caller must guard."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return "unparsable"
+    if ip.is_loopback:
+        return "loopback"
+    if ip.is_private:
+        return "private"
+    if ip.is_link_local:
+        return "link-local"
+    if ip.is_multicast:
+        return "multicast"
+    if ip.is_reserved:
+        return "reserved"
+    if ip.is_unspecified:
+        return "unspecified"
+    # Backstop: the six flags above enumerate known-forbidden *forms*, and an
+    # address such as carrier-grade NAT (100.64.0.0/10) sets none of them while
+    # still being non-routable on the public internet.
+    if not ip.is_global:
+        return "non-global"
+    return None
+
+
 def _parse_docker_image(raw: str | None) -> str:
     """An unset variable takes the default; a set-but-blank one is a configuration
     error rather than a silent fallback."""
@@ -389,4 +446,14 @@ def _reject_ssrf_shaped_domain(entry: str) -> None:
     if ":" in entry or "/" in entry:
         raise ConfigError(
             f'FETCH_ALLOWED_DOMAINS rejects "{entry}": ports or paths are not allowed'
+        )
+    if not _DOMAIN_SHAPE_RE.match(entry):
+        raise ConfigError(
+            f'FETCH_ALLOWED_DOMAINS rejects "{entry}": does not look like a domain name'
+        )
+    last_label = entry.rsplit(".", 1)[-1]
+    if not ((last_label.isalpha() and len(last_label) >= 2) or last_label.startswith("xn--")):
+        raise ConfigError(
+            f'FETCH_ALLOWED_DOMAINS rejects "{entry}": '
+            f'"{last_label}" is not a valid top-level domain'
         )

@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import signal
+import socket
 import stat
 import subprocess
 import threading
@@ -56,16 +57,20 @@ DOCKER_ENV_PASSTHROUGH = ("DOCKER_HOST", "DOCKER_CONTEXT", "XDG_RUNTIME_DIR")
 CONTAINER_LABEL = "tgexec=1"
 IMAGE_PROBE_TIMEOUT_S = 15.0
 
-# v1.1 sandbox disk quota (REQ-V11-QTA-01/02).
+# v1.1 sandbox disk quota (REQ-V11-QTA-01/02); v1.2 makes the scan tri-state.
 SANDBOX_SCAN_MAX_ENTRIES = 200000
+SCAN_OK = "ok"
+SCAN_CUT_SHORT = "cut_short"          # entry limit reached
+SCAN_INCOMPLETE = "incomplete"        # a subtree could not be read
 
-# Network fetch (REQ-V1-FT-02). The four refusal messages are named because the
+# Network fetch (REQ-V1-FT-02). The five refusal messages are named because the
 # audit writer classifies an envelope as `refused` by recognising them.
 URL_REQUIRED = "url is required"
 URL_NOT_HTTPS = "url must use https"
 URL_NO_HOST = "url has no host"
 URL_MALFORMED = "url could not be parsed"
 URL_DOMAIN_PREFIX = "domain not allowed: "
+URL_RESOLVES_PREFIX = "url resolves to a "
 FETCH_TIMEOUT_S = 15.0
 FETCH_MAX_BYTES = 65536
 FETCH_MAX_REDIRECTS = 3
@@ -253,9 +258,10 @@ def build_docker_argv(
     container_name: str,
     wrap_timeout: bool = False,
     empty_resolv: Path | None = None,
+    owner: str | None = None,
 ) -> list[str]:
-    """The exact `docker run` invocation of REQ-V1-DK-03, extended by v1.1. Flag
-    order is normative."""
+    """The exact `docker run` invocation of REQ-V1-DK-03, extended by v1.1 and
+    v1.2. Flag order is normative."""
     command = argv
     if wrap_timeout:
         # REQ-V11-ORP-03: the container terminates on its own budget even when
@@ -263,6 +269,11 @@ def build_docker_argv(
         # from a per-call `timeout_s`, so the in-container budget never drifts
         # from the outer one.
         command = ["timeout", "--kill-after=5", str(int(EXEC_TIMEOUT_S)), *argv]
+    labels = ["--label", CONTAINER_LABEL]
+    if owner is not None:
+        # REQ-V12-ORP-01: a second label naming the owning bot process, so the
+        # reap can tell a live instance's container from a genuine orphan.
+        labels += ["--label", f"tgexec-owner={owner}"]
     mounts = ["--mount", f"type=bind,source={sandbox},target={CONTAINER_WORKDIR}"]
     if empty_resolv is not None:
         # REQ-V11-INF-01: a network-less container has no use for DNS, so the
@@ -274,7 +285,7 @@ def build_docker_argv(
     return [
         "docker", "run", "--rm", "--pull", "never",
         "--name", container_name,
-        "--label", CONTAINER_LABEL,
+        *labels,
         "--network", "none",
         "--user", f"{uid}:{gid}",
         "--read-only",
@@ -343,11 +354,19 @@ def image_has_timeout(image: str) -> bool:
     with the same hardening as a real exec container minus the mount and tmpfs
     it does not need. Never raises: a missing binary or a hung daemon degrades
     the in-container budget wrapper, exactly as a docker failure degrades
-    `exec` elsewhere."""
+    `exec` elsewhere.
+
+    REQ-V12-ORP-04: named and labelled like every other container, so a probe
+    that outlives its `--rm` is never an unreapable orphan.
+    """
+    container_name = f"tgexec-probe-{secrets.token_hex(4)}"
     try:
         completed = subprocess.run(
             [
                 "docker", "run", "--rm", "--pull", "never",
+                "--name", container_name,
+                "--label", CONTAINER_LABEL,
+                "--label", f"tgexec-owner={owner_key()}",
                 "--network", "none",
                 "--user", f"{os.getuid()}:{os.getgid()}",
                 "--read-only",
@@ -364,29 +383,107 @@ def image_has_timeout(image: str) -> bool:
     return completed.returncode == 0
 
 
-def sandbox_usage(path: Path) -> tuple[int, bool]:
-    """Total size in bytes of regular files under `path`, and whether the scan
-    was cut short (REQ-V11-QTA-02). Symlinks contribute nothing — `os.lstat`
-    reports their own (non-regular) type, so their target's size is never
-    counted. A missing directory returns `(0, False)` so the pre-existing
-    missing-sandbox error, which belongs to `_run_process`, still fires first."""
+def sandbox_usage(path: Path) -> tuple[int, str]:
+    """Total size in bytes of regular files under `path`, and a scan status —
+    one of `SCAN_OK`, `SCAN_CUT_SHORT` or `SCAN_INCOMPLETE` (REQ-V12-QTA-01).
+    Symlinks contribute nothing — `os.lstat` reports their own (non-regular)
+    type, so their target's size is never counted. A missing directory returns
+    `(0, SCAN_OK)` so the pre-existing missing-sandbox error, which belongs to
+    `_run_process`, still fires first.
+
+    Any unreadable part of the tree means the total is a lower bound, and a
+    lower bound MUST NOT be used to permit a run (finding W-4): both a walk
+    error (an unreadable subtree) and an individual `os.lstat` failure mark the
+    scan `SCAN_INCOMPLETE`, which wins over `SCAN_CUT_SHORT` when both occur.
+    """
     p = Path(path)
     if not p.is_dir():
-        return (0, False)
+        return (0, SCAN_OK)
     total = 0
     count = 0
-    for root, dirs, files in os.walk(p, followlinks=False):
+    status = SCAN_OK
+
+    def _on_walk_error(_exc: OSError) -> None:
+        nonlocal status
+        status = SCAN_INCOMPLETE
+
+    for root, dirs, files in os.walk(p, followlinks=False, onerror=_on_walk_error):
         for name in dirs + files:
             count += 1
             if count > SANDBOX_SCAN_MAX_ENTRIES:
-                return (total, True)
+                if status != SCAN_INCOMPLETE:
+                    status = SCAN_CUT_SHORT
+                return (total, status)
             try:
                 entry_stat = os.lstat(os.path.join(root, name))
             except OSError:
+                status = SCAN_INCOMPLETE
                 continue
             if stat.S_ISREG(entry_stat.st_mode):
                 total += entry_stat.st_size
-    return (total, False)
+    return (total, status)
+
+
+def _process_start_ticks(pid: int) -> int:
+    """Field 22 (`starttime`) of `/proc/<pid>/stat`.
+
+    Parse after the last `)`, never by splitting the whole line: field 2 (the
+    executable name in parentheses) is controlled by the *foreign* process this
+    is used to inspect (REQ-V12-ORP-02) and may itself contain spaces and
+    parentheses. `line.split()[21]` would silently read the wrong field for any
+    such process.
+    """
+    with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+        line = fh.read()
+    remainder = line.rsplit(")", 1)[1]
+    return int(remainder.split()[19])
+
+
+def owner_key() -> str:
+    """An unforgeable-in-practice tag for the current process: a recycled pid
+    has a different start time (REQ-V12-ORP-01). Never raises — `/proc` may be
+    unmounted or unreadable, and this runs on every exec, outside any `try`."""
+    pid = os.getpid()
+    try:
+        return f"{pid}-{_process_start_ticks(pid)}"
+    except (OSError, ValueError, IndexError):
+        # A `0` start time never matches a real one, so a container carrying
+        # this key is always treated as orphaned — the safe direction.
+        return f"{pid}-0"
+
+
+def owner_is_alive(key: str) -> bool:
+    """Whether `key` (as minted by `owner_key`) names a process that is still
+    the one that minted it. Any parse or read failure returns `False`: a
+    container whose owner cannot be established is exactly the orphan case."""
+    try:
+        pid_text, ticks_text = key.split("-", 1)
+        pid, ticks = int(pid_text), int(ticks_text)
+    except (ValueError, AttributeError):
+        return False
+    try:
+        return _process_start_ticks(pid) == ticks
+    except (OSError, ValueError, IndexError):
+        return False
+
+
+def resolve_host(host: str) -> list[str]:
+    """The addresses `host` resolves to, or `[]` on failure (REQ-V12-SSR-03).
+
+    Deliberate fail-open: an empty list means the request-time guard finds
+    nothing to reject and the request proceeds — the allowlist is the primary
+    control, and a transient DNS failure should degrade to an ordinary
+    connection error rather than a refusal the operator cannot explain.
+
+    Catches `OSError` only (`socket.gaierror` is a subclass), never a bare
+    `Exception`: a broad except would also swallow the `AssertionError` the
+    offline test guard raises, turning that guard into decoration.
+    """
+    try:
+        results = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return []
+    return [result[4][0] for result in results]
 
 
 def run_command_docker(
@@ -404,14 +501,31 @@ def run_command_docker(
     if not docker_ok:
         return {"error": "exec backend unavailable: docker is not available on this host"}
 
-    used, cut_short = sandbox_usage(Path(workdir))
-    if cut_short:
-        log.warning("sandbox scan hit the entry limit; treating the sandbox as full")
-    if cut_short or used >= sandbox_max_bytes:
-        # REQ-V11-QTA-02: refuse without starting a container. Do not add a
-        # directory-existence check here — the missing-sandbox error belongs
-        # to `_run_process` and `sandbox_usage` already reports `(0, False)`
-        # for a missing directory, so the two can never collide.
+    used, status = sandbox_usage(Path(workdir))
+    # REQ-V12-QTA-02: fail closed, and say which failure it is. Do not add a
+    # directory-existence check here — the missing-sandbox error belongs to
+    # `_run_process` and `sandbox_usage` already reports `(0, SCAN_OK)` for a
+    # missing directory, so the two can never collide.
+    if status == SCAN_CUT_SHORT:
+        log.warning("sandbox scan hit the entry limit")
+        return {
+            "error": (
+                f"sandbox holds too many files to measure (over "
+                f"{SANDBOX_SCAN_MAX_ENTRIES} entries); ask the operator to "
+                "clear the sandbox directory"
+            ),
+            "sandbox_scan": status,
+        }
+    if status == SCAN_INCOMPLETE:
+        log.warning("sandbox scan could not read part of the tree; refusing")
+        return {
+            "error": (
+                "sandbox size could not be measured; ask the operator to "
+                "inspect the sandbox directory"
+            ),
+            "sandbox_scan": status,
+        }
+    if used >= sandbox_max_bytes:
         return {
             "error": (
                 f"sandbox is full: {used} bytes of {sandbox_max_bytes} allowed; "
@@ -429,6 +543,7 @@ def run_command_docker(
         container_name=container_name,
         wrap_timeout=wrap_timeout,
         empty_resolv=empty_resolv,
+        owner=owner_key(),
     )
     # The command's own budget is `timeout_s`; the extra grace covers container
     # start/stop so that overhead does not eat it. The hard kill lands at the sum.
@@ -459,11 +574,13 @@ def run_command_docker(
         _record_sandbox_quota(failure, workdir, sandbox_max_bytes)
         return failure
 
-    # REQ-V11-ORP-03: one situation, one envelope — budget exhaustion must not
-    # look different depending on which killer won the race. `timed_out` is
-    # already False here (the outer `_run_process` kill did not fire); the
-    # in-container `timeout(1)` wrapper is the one that hit 124.
-    if wrap_timeout and exit_code == 124:
+    # REQ-V11-ORP-03/REQ-V12-ORP-03: one situation, one envelope — budget
+    # exhaustion must not look different depending on which killer won the
+    # race. `timed_out` is already False here (the outer `_run_process` kill
+    # did not fire); the in-container `timeout(1)` wrapper is the one that hit
+    # 124 (its own exit) or 137 (a command that ignored SIGTERM and was
+    # finished off by `--kill-after`).
+    if wrap_timeout and exit_code in (124, 137):
         envelope["timed_out"] = True
 
     envelope["notice"] = UNTRUSTED_NOTICE
@@ -472,13 +589,21 @@ def run_command_docker(
 
 
 def _record_sandbox_quota(envelope: dict, workdir, sandbox_max_bytes: int) -> None:
-    """REQ-V11-QTA-03: re-check usage after the container finishes. The
-    program's own result is reported honestly; the *next* exec is the one
-    that refuses."""
-    used, cut_short = sandbox_usage(Path(workdir))
-    if cut_short or used >= sandbox_max_bytes:
-        log.warning("sandbox over quota after exec: %d/%d bytes", used, sandbox_max_bytes)
+    """REQ-V11-QTA-03/REQ-V12-QTA-02: re-check usage after the container
+    finishes. The program's own result is reported honestly; the *next* exec
+    is the one that refuses. `sandbox_scan` is set on the envelope only when
+    the status is not `SCAN_OK` — never as an "ok" value, mirroring the
+    convention already used for `sandbox_over_quota` — so it is popped by
+    `_run_exec` with a default before the model ever sees it."""
+    used, status = sandbox_usage(Path(workdir))
+    if status != SCAN_OK or used >= sandbox_max_bytes:
+        log.warning(
+            "sandbox over quota after exec: %d/%d bytes (scan=%s)",
+            used, sandbox_max_bytes, status,
+        )
         envelope["sandbox_over_quota"] = True
+    if status != SCAN_OK:
+        envelope["sandbox_scan"] = status
 
 
 def _docker_kill(container_name: str) -> None:
@@ -505,10 +630,15 @@ def fetch_url(
     client: httpx.Client,
     timeout_s: float = FETCH_TIMEOUT_S,
     max_bytes: int = FETCH_MAX_BYTES,
+    resolve: Callable[[str], list[str]] | None = None,
 ) -> dict:
     error = _validate_url(url, allowed_domains)
     if error is not None:
         return error
+    if resolve is not None:
+        error = _check_resolved_scope(url, resolve)
+        if error is not None:
+            return error
 
     current = url
     hops = 0
@@ -530,6 +660,10 @@ def fetch_url(
                     error = _validate_url(nxt, allowed_domains)
                     if error is not None:
                         return error
+                    if resolve is not None:
+                        error = _check_resolved_scope(nxt, resolve)
+                        if error is not None:
+                            return error
                     current, hops = nxt, hops + 1
                     continue
                 # The body is never buffered whole: reading stops shortly past
@@ -579,6 +713,20 @@ def _validate_url(url: object, allowed_domains: frozenset[str]) -> dict | None:
         return {"error": URL_NO_HOST}
     if not any(host == domain or host.endswith("." + domain) for domain in allowed_domains):
         return {"error": f"{URL_DOMAIN_PREFIX}{host}"}
+    return None
+
+
+def _check_resolved_scope(
+    url: str, resolve: Callable[[str], list[str]]
+) -> dict | None:
+    """REQ-V12-SSR-03 layer 3: the host has already passed the allowlist
+    (`_validate_url`); this checks where its name actually points, right
+    before the request that host would receive."""
+    host = httpx.URL(url).host
+    for address in resolve(host):
+        scope = config.address_scope(address)
+        if scope is not None:
+            return {"error": f"{URL_RESOLVES_PREFIX}{scope} address: {host}"}
     return None
 
 
@@ -768,6 +916,13 @@ def _audit(audit: AuditHook | None, record: dict) -> None:
     if audit is None:
         return
     try:
+        # REQ-V12-AUD-01: the hook receives an already-redacted record — the
+        # default file writer (`append_audit`) is not the only sink, and the
+        # redaction guarantee belongs to this boundary, not to one
+        # implementation of it. Round-tripping through JSON keeps non-string
+        # values typed; a non-serialisable record is caught by the same `try`
+        # an audit failure already lives in, never a new way to go down.
+        record = json.loads(config.redact(json.dumps(record, ensure_ascii=False)))
         audit(record)
     except Exception as exc:                 # an audit failure is never fatal
         log.error("audit hook failed: %s", config.redact(str(exc)))
@@ -788,9 +943,11 @@ def _run_exec(arguments: dict, runner: CommandRunner) -> tuple[dict, dict]:
         payload = {"error": f"failed to run the command: {exc.__class__.__name__}"}
     duration_ms = int((time.monotonic() - started) * 1000)
     record = {"tool": "exec", "argv": _auditable_argv(argv)}
-    # REQ-V11-QTA-03: the internal bookkeeping key never leaks into the model's
-    # context or the stored tool row — it is popped into the audit record.
+    # REQ-V11-QTA-03/REQ-V12-QTA-02: the internal bookkeeping keys never leak
+    # into the model's context or the stored tool row — both are popped into
+    # the audit record before the envelope below is built, on every branch.
     record["sandbox_over_quota"] = payload.pop("sandbox_over_quota", False)
+    record["sandbox_scan"] = payload.pop("sandbox_scan", SCAN_OK)
     if "error" in payload:
         record.update(outcome="error", error=payload["error"], duration_ms=duration_ms)
     else:
@@ -864,9 +1021,11 @@ def _run_fetch(arguments: dict, fetcher: Fetcher | None) -> tuple[dict, dict]:
 
 def _is_pre_network(message: str) -> bool:
     """Validation refused the URL before any request left the process. The prefixes
-    are the same constants `_validate_url` returns, so the two cannot drift."""
+    are the same constants `_validate_url`/`_check_resolved_scope` return, so the
+    two cannot drift."""
     return message.startswith(
-        (URL_REQUIRED, URL_MALFORMED, URL_NOT_HTTPS, URL_NO_HOST, URL_DOMAIN_PREFIX)
+        (URL_REQUIRED, URL_MALFORMED, URL_NOT_HTTPS, URL_NO_HOST, URL_DOMAIN_PREFIX,
+         URL_RESOLVES_PREFIX)
     )
 
 

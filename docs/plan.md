@@ -13,40 +13,68 @@ implementation is produced by an AI agent from it.
 |---|---|
 | Repository scaffold | done |
 | `docs/spec/spec-v0.md` (implementation spec, 113 requirements) | done — reviewed, gate passed (0 high/medium findings, 3 review cycles) |
-| Implementation (`bot.py`, `agent.py`, `llm/`, `tools.py`, `storage.py`, tests) | done — all four gates green on the first full run, 113 tests, 1 fix cycle of 5 (closing the code review's finding) |
-| Live run against Telegram + LM Studio / OpenRouter | **pending — never executed**; the suite and `--selftest` are provably offline, so no real bot token, Telegram API or inference server has been exercised yet |
+| v0 implementation (`bot.py`, `agent.py`, `llm/`, `tools.py`, `storage.py`, tests) | done — all four gates green on the first full run, 113 tests, 1 fix cycle of 5 (closing the code review's finding). No container isolation yet — `exec` was honestly documented as not a security boundary |
+| `docs/spec/spec-v1.md` + implementation | done — adds the Docker sandbox (`exec` runs inside a disposable, network-isolated, non-root container instead of the bare host), the fetch tool with an allowlist, secret registration/redaction, storage schema v2 (summaries), and `--selftest-live`; five gates green, Appendix-B/C acceptance scenarios pass |
+| `docs/spec/spec-v1.1.md` + implementation | done — closes the v1 security audit's findings (secret-truncation headroom, sandbox quota accounting, orphaned-container reap, resolv-file hardening) plus a mutation-testing pass that found 4 test-suite defects; five gates green, one fix cycle of 5 |
+| `docs/spec/spec-v1.2.md` + implementation | done — closes two independent post-v1.1 audits (an adversarial security probe and an 83-mutation compliance review): minted tool-call ids, tri-state sandbox quota scanning, three-layer SSRF-resistant fetch allowlist, hardened resolv-file creation, ownership-aware container reap, audit-hook redaction, plus `devtools/mutation_check.py` as a standing gate; six gates green, 325 tests, 29/29 mutations killed, 0 repair cycles consumed |
+| Live run against Telegram + LM Studio / OpenRouter | done as of v1's `--selftest-live` and the Appendix-B/C/D acceptance drivers; a real Telegram conversation with a live operator account has not been exercised — every acceptance run to date has been driven by a script standing in for the operator's messages (declared as a deviation in each run's report) |
 
 ## How the implementation run works
 
-An AI agent is started with the single instruction `go docs/spec/spec-v0.md`.
-The spec opens with an Execution contract: repo root, tests-first
-implementation order, acceptance gates verbatim, at most 5 repair-and-rerun
-cycles, report or blocker template at the end. Prompts are logged under
-`docs/prompts/`, tokens/cost appended to `docs/llm-usage.md`.
+An AI agent is started with a single instruction of the form
+`go docs/spec/spec-vN.md`. Each spec opens with an Execution contract: repo
+root, tests-first implementation order, acceptance gates verbatim, at most 5
+repair-and-rerun cycles, report or blocker template at the end. Prompts are
+logged under `docs/prompts/`, tokens/cost appended to `docs/llm-usage.md`.
+From v1.2 on, a repair cycle only counts once a fix is followed by a complete
+re-run of every gate from the first — bugs found and fixed during test-first
+development, before that gate sequence starts, do not debit the budget.
 
-## Acceptance gates (from the spec, verbatim)
+## Acceptance gates (from the v1.2 spec, verbatim)
 
 ```bash
 uv sync --locked
 uv run --locked ruff check .
 uv run --locked pytest
 uv run --locked python bot.py --selftest
+uv run --locked python bot.py --selftest-live
+uv run --locked python devtools/mutation_check.py
 ```
 
-## Key design decisions (fixed in the spec)
+Gates 1–4 are unconditional and offline. Gate 5 needs the live environment
+(a provisioned `.env`, a reachable Docker daemon with the sandbox image
+pulled, LM Studio and an OpenRouter key). Gate 6, added in v1.2, is the
+custom stdlib-only mutation-testing gate: it reruns the full test suite once
+per mutation entry (currently 29) and fails if any mutation survives, errors,
+or drifts from its expected single occurrence in the source.
+
+## Key design decisions (fixed across the specs)
 
 - Plain Telegram Bot API long polling over httpx — no bot framework; Linux.
 - Swappable inference plugin: `llm/lmstudio.py` + `llm/openrouter.py`
-  (OpenAI-compatible chat-completions), selected via `LLM_PROVIDER`.
+  (OpenAI-compatible chat-completions), selected via `LLM_PROVIDER`, with
+  failover between them from v1.
 - Hard budgets per user message: ≤8 logical rounds, ≤9 HTTP attempts
   (shared pool), ≤12 tool executions; round 8 exposes no tools.
-- `exec(argv)` = bounded arbitrary execution (assignment requires a
-  universal console tool): shell=False, sandbox cwd, process-group
-  TERM→KILL, capped streaming capture, env allowlist — honestly documented
-  as NOT a security boundary; container isolation is a v0 non-goal.
+- `exec(argv)` runs inside a disposable Docker container (from v1 on):
+  `--network none`, non-root user, read-only root filesystem, capped tmpfs,
+  dropped capabilities, `no-new-privileges`, a tri-state disk-quota scan that
+  fails closed, and an empty read-only `/etc/resolv.conf` mount so the
+  sandbox learns nothing about host DNS.
 - Storage: conversations / messages (with `turn_id`, `tool_calls_json` +
-  `json_valid` CHECK) / `bot_state` for the polling cursor; at-most-once
-  delivery semantics; context window of 30 messages selected as whole turn
-  groups.
+  `json_valid` CHECK) / `bot_state` for the polling cursor / `summaries`
+  (schema v2, v1) for long-conversation compression; at-most-once delivery
+  semantics; context window of 30 messages selected as whole turn groups,
+  token-budget-aware from v1.
+- Secrets are registered at config load and redacted everywhere output can
+  reach the model, storage or Telegram; a stream-truncation headroom plus a
+  trailing-fragment stripper (v1.1) keep a secret from leaking half of itself
+  across a byte cap.
+- The fetch tool enforces a three-layer SSRF-resistant domain allowlist
+  (v1.2): strict syntax validation at config load, one-time DNS resolution at
+  startup, and a per-request resolution check before every hop including
+  redirects.
 - Tests are provably offline: FakeLLM, injected HTTP transport, injected
-  command runner; deterministic `--selftest`.
+  command runner, an autouse DNS guard that fails any un-stubbed lookup;
+  deterministic `--selftest`. `devtools/mutation_check.py` (v1.2) verifies the
+  test suite itself actually kills the regressions its tests claim to guard.
