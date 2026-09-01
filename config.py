@@ -256,7 +256,13 @@ def _check_sandbox_placement(exec_workdir: Path, db_path: Path, audit_log_path: 
 
 
 def _normalized(path: Path) -> Path:
-    return Path(os.path.normpath(str(path)))
+    """Follows symlinks, exactly like the `.resolve()` the container mount uses —
+    otherwise a symlinked EXEC_WORKDIR would pass the check and still mount the
+    project root read-write."""
+    try:
+        return path.resolve()
+    except OSError:
+        return Path(os.path.normpath(str(path)))
 
 
 def _same(left: Path, right: Path) -> bool:

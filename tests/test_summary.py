@@ -16,7 +16,8 @@ TOKEN = "123456789:sentinel-telegram-token-for-summary-tests"
 USER_ID = 424242
 BOT_USERNAME = "ThisBot"
 
-# The v0 DDL, verbatim: what a version-1 database on disk looks like.
+# A version-1 database on disk. The CHECK constraints and the message index of
+# REQ-DB-02 are omitted: the migration under test does not depend on them.
 V0_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
     id      INTEGER PRIMARY KEY CHECK (id = 1),
@@ -148,9 +149,14 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
 
     ahead = storage.connect(path)
     ahead.execute("UPDATE schema_version SET version = 3 WHERE id = 1")
+    ahead.execute("DROP TABLE summaries")
     with pytest.raises(RuntimeError) as raised:
         storage.init_schema(ahead)
     assert "3" in str(raised.value)
+    # A database from a future version is refused untouched, not half-migrated.
+    assert ahead.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
+    ).fetchone() is None
     ahead.close()
 
 

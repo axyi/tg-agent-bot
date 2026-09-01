@@ -274,6 +274,9 @@ def _assemble_context(
             storage.load_context_messages(conn, conv_id, CONTEXT_WINDOW_MESSAGES),
         )
 
+    # REQ-V1-TB-03 reserves `cfg.llm_max_tokens + TOKEN_BUDGET_MARGIN`. Without a
+    # Config the output cap is unknown, so only the margin is held back; `bot.py`
+    # always passes one, so the serving path always reserves both.
     reserve = (max_tokens or 0) + TOKEN_BUDGET_MARGIN
     system_prompt = build_system_prompt(skills, now, recent_goals)
     budget = context_length - estimate_tokens(system_prompt) - reserve
@@ -368,7 +371,9 @@ def summarize_conversation(
         parsed, _ = _ask_for_summary(llm, repair)
     if parsed is None:
         return None
-    return json.dumps(_normalise_summary(parsed), ensure_ascii=False)
+    # The summary is model output on its way to SQLite, so it takes the same
+    # redaction path every other stored model output takes (REQ-V1-SEC-06).
+    return config.redact(json.dumps(_normalise_summary(parsed), ensure_ascii=False))
 
 
 def _ask_for_summary(llm: LLMClient, messages: list[dict]) -> tuple[dict | None, str | None]:

@@ -123,17 +123,29 @@ def _restrict_permissions(db_path: Path) -> None:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
+    # The version is read before any DDL runs, so a database from a future version
+    # is refused untouched and the 1 -> 2 migration is the transaction the spec
+    # describes rather than a no-op after the fact.
+    existing = _existing_version(conn)
+    if existing is not None and existing not in (1, SCHEMA_VERSION):
+        raise RuntimeError(f"unsupported database schema version: {existing}")
+    if existing == 1:
+        conn.executescript(_MIGRATION_1_TO_2)
     conn.executescript(_SCHEMA)
     version = schema_version(conn)
-    if version == 1:
-        conn.executescript(_MIGRATION_1_TO_2)
-        version = schema_version(conn)
     if version != SCHEMA_VERSION:
         raise RuntimeError(f"unsupported database schema version: {version}")
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
+
+
+def _existing_version(conn: sqlite3.Connection) -> int | None:
+    present = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
+    ).fetchone()
+    return None if present is None else schema_version(conn)
 
 
 def utc_now_iso() -> str:

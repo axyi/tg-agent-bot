@@ -51,7 +51,12 @@ CONTAINER_WORKDIR = "/work"
 # these three variables — and only these — are forwarded to it (REQ-V1-DK-08).
 DOCKER_ENV_PASSTHROUGH = ("DOCKER_HOST", "DOCKER_CONTEXT", "XDG_RUNTIME_DIR")
 
-# Network fetch (REQ-V1-FT-02).
+# Network fetch (REQ-V1-FT-02). The four refusal messages are named because the
+# audit writer classifies an envelope as `refused` by recognising them.
+URL_REQUIRED = "url is required"
+URL_NOT_HTTPS = "url must use https"
+URL_NO_HOST = "url has no host"
+URL_DOMAIN_PREFIX = "domain not allowed: "
 FETCH_TIMEOUT_S = 15.0
 FETCH_MAX_BYTES = 65536
 FETCH_MAX_REDIRECTS = 3
@@ -376,7 +381,10 @@ def fetch_url(
                     location = response.headers.get("location")
                     if not location:
                         return {"error": "redirect without location"}
-                    nxt = str(httpx.URL(current).join(location))
+                    try:
+                        nxt = str(httpx.URL(current).join(location))
+                    except (httpx.InvalidURL, ValueError):
+                        return {"error": URL_NOT_HTTPS}
                     error = _validate_url(nxt, allowed_domains)
                     if error is not None:
                         return error
@@ -403,19 +411,26 @@ def fetch_url(
 
 
 def _validate_url(url: object, allowed_domains: frozenset[str]) -> dict | None:
+    """First failure wins; the result is always an envelope, never an exception."""
     if not isinstance(url, str) or not url.strip():
-        return {"error": "url is required"}
+        return {"error": URL_REQUIRED}
     try:
         parsed = httpx.URL(url)
+        scheme = parsed.scheme
     except (httpx.InvalidURL, ValueError):
-        return {"error": "url must use https"}
-    if parsed.scheme != "https":
-        return {"error": "url must use https"}
-    host = (parsed.host or "").casefold()
+        return {"error": URL_NOT_HTTPS}
+    if scheme != "https":
+        return {"error": URL_NOT_HTTPS}
+    try:
+        # `.host` is lazy and performs IDNA decoding, so it raises for a malformed
+        # A-label long after the URL itself parsed.
+        host = (parsed.host or "").casefold()
+    except (httpx.InvalidURL, ValueError, UnicodeError):
+        return {"error": URL_NO_HOST}
     if not host:
-        return {"error": "url has no host"}
+        return {"error": URL_NO_HOST}
     if not any(host == domain or host.endswith("." + domain) for domain in allowed_domains):
-        return {"error": f"domain not allowed: {host}"}
+        return {"error": f"{URL_DOMAIN_PREFIX}{host}"}
     return None
 
 
@@ -567,9 +582,9 @@ def execute_tool(
     try:
         parsed = json.loads(arguments)
     except (TypeError, ValueError):
-        return _envelope({"error": "arguments are not valid JSON"})
+        return _refuse(name, "arguments are not valid JSON", audit)
     if not isinstance(parsed, dict):
-        return _envelope({"error": "arguments must be a JSON object"})
+        return _refuse(name, "arguments must be a JSON object", audit)
     if name == "exec":
         payload, record = _run_exec(parsed, runner)
         _audit(audit, record)
@@ -581,6 +596,17 @@ def execute_tool(
         _audit(audit, record)
         return _envelope(payload)
     return _envelope({"error": f"unknown tool: {name}"})
+
+
+def _refuse(name: str, message: str, audit: AuditHook | None) -> str:
+    """REQ-TOOL-03 parses arguments before the tool name, so these refusals happen
+    before dispatch — but REQ-V1-AUD-01 wants every exec and fetch on record, and
+    the name is already known here."""
+    if name in ("exec", "fetch"):
+        record = {"tool": name, "outcome": "refused", "error": message}
+        record["argv" if name == "exec" else "url"] = [] if name == "exec" else ""
+        _audit(audit, record)
+    return _envelope({"error": message})
 
 
 def _envelope(payload: dict) -> str:
@@ -685,9 +711,10 @@ def _run_fetch(arguments: dict, fetcher: Fetcher | None) -> tuple[dict, dict]:
 
 
 def _is_pre_network(message: str) -> bool:
-    """Validation refused the URL before any request left the process."""
+    """Validation refused the URL before any request left the process. The prefixes
+    are the same constants `_validate_url` returns, so the two cannot drift."""
     return message.startswith(
-        ("url is required", "url must use https", "url has no host", "domain not allowed:")
+        (URL_REQUIRED, URL_NOT_HTTPS, URL_NO_HOST, URL_DOMAIN_PREFIX)
     )
 
 

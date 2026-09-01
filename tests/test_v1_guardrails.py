@@ -4,7 +4,6 @@ truncation notice, send retry, interrupt, status message, live-selftest plumbing
 
 import json
 import logging
-import os
 import stat
 import time
 
@@ -30,6 +29,16 @@ NOW = "2026-09-01T12:00:00Z"
 @pytest.fixture(autouse=True)
 def reset_shutdown(monkeypatch):
     monkeypatch.setattr(bot, "_shutdown", False)
+
+
+@pytest.fixture(autouse=True)
+def isolated_secret_registry():
+    """`config._secrets` is process-global. Restore it so that the sentinels this
+    file registers cannot make another module's redaction assertions pass."""
+    before = set(config._secrets)
+    yield
+    config._secrets.clear()
+    config._secrets.update(before)
 
 
 def make_cfg(tmp_path, **overrides):
@@ -198,6 +207,44 @@ def test_t_v1_aud_01_one_line_per_invocation(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+def test_t_v1_aud_01_tools_driven_through_process_update_are_audited(conn, tmp_path):
+    """REQ-V1-AUD-01 end to end: bot.py -> agent -> execute_tool -> the audit file."""
+    cfg = make_cfg(tmp_path)
+    llm = FakeLLM([
+        LLMResponse("", [exec_call(1, ["uname", "-a"])], "tool_calls"),
+        LLMResponse("", [ToolCall("call_2", "fetch",
+                                  '{"url": "https://wttr.in/Koln"}')], "tool_calls"),
+        LLMResponse("done", [], "stop"),
+    ])
+    process(conn, cfg, update(), llm=llm, fetcher=FakeFetcher())
+
+    lines = [json.loads(x) for x in cfg.audit_log_path.read_text().splitlines() if x]
+    assert [entry["tool"] for entry in lines] == ["exec", "fetch"]
+    conv_id = storage.get_or_create_active_conversation(conn, USER_ID)
+    for entry in lines:
+        assert entry["tg_user_id"] == USER_ID
+        assert entry["conv_id"] == conv_id
+        assert entry["outcome"] == "ok"
+        assert entry["ts"].endswith("Z")
+    assert lines[0]["argv"] == ["uname", "-a"]
+    assert lines[1]["url"] == "https://wttr.in/Koln"
+    assert stat.S_IMODE(cfg.audit_log_path.stat().st_mode) == 0o600
+
+
+def test_t_v1_aud_01_unparsable_arguments_still_leave_a_trace(tmp_path):
+    path = tmp_path / "audit.jsonl"
+    audit = lambda record: tools.append_audit(path, record)          # noqa: E731
+    tools.execute_tool("exec", "{not json", skills={}, runner=RecordingRunner(), audit=audit)
+    tools.execute_tool("fetch", "[1]", skills={}, runner=RecordingRunner(), audit=audit)
+    # load_skill is not audited at all, parseable arguments or not.
+    tools.execute_tool("load_skill", "{oops", skills={}, runner=RecordingRunner(), audit=audit)
+    lines = [json.loads(x) for x in path.read_text().splitlines() if x]
+    assert [entry["tool"] for entry in lines] == ["exec", "fetch"]
+    assert all(entry["outcome"] == "refused" for entry in lines)
+    assert lines[0]["error"] == "arguments are not valid JSON"
+    assert lines[1]["error"] == "arguments must be a JSON object"
+
+
 def test_t_v1_aud_01_error_outcome_is_distinct_from_refused(tmp_path):
     path = tmp_path / "audit.jsonl"
     runner = RecordingRunner({"error": "exec backend unavailable: docker is not available "
@@ -297,6 +344,14 @@ def test_t_v1_cfg_01_sandbox_may_not_hold_state_or_secrets(tmp_path):
     # by the first rule; an explicit sandbox holding it is refused too.
     with pytest.raises(ConfigError):
         load_config(env=env(EXEC_WORKDIR=str(tmp_path)), load_env_file=False)
+
+
+def test_t_v1_cfg_01_a_symlinked_sandbox_cannot_smuggle_in_the_project_root(tmp_path):
+    """The placement check must resolve symlinks, because the container mount does."""
+    (tmp_path / "box").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ConfigError) as raised:
+        load_config(env=env(EXEC_WORKDIR="./box"), load_env_file=False)
+    assert "EXEC_WORKDIR" in str(raised.value)
 
 
 def test_new_config_variables_are_validated(tmp_path):
@@ -515,6 +570,20 @@ def test_t_v1_ft_02_truncation_and_non_200(monkeypatch):
     result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=failing)
     assert result["status_code"] == 404
     assert result["body"] == "gone"
+
+
+def test_t_v1_ft_01_a_malformed_host_is_an_envelope_not_an_exception():
+    """`httpx.URL.host` decodes IDNA lazily and raises; validation must not."""
+    client = fetch_client(body_handler(b"never"))
+    for url in ("https://xn--wttr-in-/x", "https://xn--/x"):
+        assert tools.fetch_url(url, allowed_domains=ALLOWED, client=client) == {
+            "error": "url has no host"
+        }
+    assert json.loads(tools.execute_tool(
+        "fetch", json.dumps({"url": "https://xn--wttr-in-/x"}), skills={},
+        runner=RecordingRunner(),
+        fetcher=lambda url: tools.fetch_url(url, allowed_domains=ALLOWED, client=client),
+    )) == {"error": "url has no host"}
 
 
 def test_t_v1_ft_02_transport_failures():
@@ -1174,6 +1243,57 @@ def test_t_v1_lv_01_secrets_never_reach_the_output(tmp_path, capsys, stub_docker
     assert "live: FAIL telegram" in out
 
 
+def test_main_binds_the_container_runner_not_the_host_runner(tmp_path, monkeypatch):
+    """The single most important v1 wiring: no Telegram-driven command may reach
+    the host runner. Nothing else in the suite executes this line."""
+    cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db")
+    captured = {}
+
+    monkeypatch.setattr(bot, "load_config", lambda: cfg)
+    monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
+    monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot, "build_llm_client", lambda cfg, *, client, override=None: object())
+    monkeypatch.setattr(bot, "exec_backend_status", lambda: ("27.1.2", True))
+    monkeypatch.setattr(bot.signal, "signal", lambda signum, handler: None)
+    monkeypatch.setattr(bot, "poll_loop", lambda **kwargs: captured.update(kwargs) or 0)
+
+    assert bot.main([]) == 0
+
+    runner = captured["runner"]
+    assert runner.func is tools.run_command_docker
+    assert runner.func is not tools._run_process
+    assert runner.keywords == {
+        "workdir": cfg.exec_workdir,
+        "image": cfg.exec_docker_image,
+        "docker_ok": True,
+    }
+    fetcher = captured["fetcher"]
+    assert fetcher.func is tools.fetch_url
+    assert fetcher.keywords["allowed_domains"] == cfg.fetch_allowed_domains
+    assert isinstance(captured["limiter"], bot.RateLimiter)
+    assert captured["docker_version"] == "27.1.2"
+    assert captured["docker_ok"] is True
+    assert callable(captured["set_provider"]) and callable(captured["get_llm"])
+
+
+def test_main_disables_exec_when_the_backend_is_down(tmp_path, monkeypatch):
+    cfg = make_cfg(tmp_path, db_path=tmp_path / "main2.db")
+    captured = {}
+    monkeypatch.setattr(bot, "load_config", lambda: cfg)
+    monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
+    monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot, "build_llm_client", lambda cfg, *, client, override=None: object())
+    monkeypatch.setattr(bot, "exec_backend_status", lambda: (None, False))
+    monkeypatch.setattr(bot.signal, "signal", lambda signum, handler: None)
+    monkeypatch.setattr(bot, "poll_loop", lambda **kwargs: captured.update(kwargs) or 0)
+
+    assert bot.main([]) == 0
+    assert captured["runner"].keywords["docker_ok"] is False
+    assert captured["runner"](["uname"]) == {
+        "error": "exec backend unavailable: docker is not available on this host"
+    }
+
+
 def test_selftest_live_argv_is_accepted(monkeypatch, capsys):
     monkeypatch.setattr(bot, "run_selftest_live", lambda: 0)
     assert bot.main(["--selftest-live"]) == 0
@@ -1194,4 +1314,3 @@ def test_selftest_writes_nothing_under_the_project_root(monkeypatch):
     assert bot.run_selftest() == 0
     assert seen["argv"][0] != "docker"
     assert not (config.PROJECT_ROOT / "exec_audit.jsonl").exists()
-    assert not os.path.exists("exec_audit.jsonl")

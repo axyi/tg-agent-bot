@@ -803,7 +803,8 @@ def run_selftest_live(
         try:
             cfg = load_config()
         except ConfigError as exc:
-            return 1 if _live_fail("config", str(exc)) else 1
+            _live_fail("config", str(exc))
+            return 1
     print("live: OK config")
 
     owns_client = client is None
