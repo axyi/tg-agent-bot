@@ -28,6 +28,12 @@
 | 23 | v1 step 9 — `README.md`, `AGENTS.md` | claude-opus-5 | unknown | unknown |
 | 24 | v1 step 10 — five gates, Appendix-B acceptance probes, clean-context review, fix cycle 1/5, report | claude-opus-5 | unknown | unknown |
 | **Σ** (rows 15–24, one continuous session + the review subagent) | | claude-opus-5 | in 35.51M (280 uncached + 692k cache-write + 34.82M cache-read), out 243.3k — measured from the local session transcripts | ≈$27.82 (estimate at public API prices; actual billing: flat-rate subscription) |
+| 25 | v1.1 main session — preconditions, section-9.2 tests + section-9.1 amendments (observed the expected failures), the four mutation-check proofs, `config.py`/`storage.py`/`agent.py`/`tools.py`/`bot.py` in the order of section 8, five gates, Appendix-B live driver (C1–C7 + B1/B3/B4/B10 regression), documentation (`.env.example`, `.gitignore`, README, both spec doc-fixes, prompts 03/04/05, `report-v1.md` reconciliation), the review's `_record_sandbox_quota` completeness fix, the report, this table, and the final commit | claude-sonnet-5 | in 504 (uncached) + 534,939 (cache write) + 81,416,730 (cache read), out 229,845 — measured from the local Claude Code session transcript, per-request `usage` fields deduplicated by `requestId`, re-measured immediately before the commit | ≈$19.92 (estimate at public API prices: $2/$10 per MTok in/out, cache write ×1.25, cache read ×0.1; actual billing: flat-rate subscription) |
+| 26 | v1.1 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/06-code-review-v1.1.md`) | claude-sonnet-5 (subagent default) | 158,889 total (harness-reported aggregate; in/out/cache split not exposed to the parent session — unlike rows 1–24, the transcript backing this number is an async task-output file the harness instructs the parent session not to read) | not computed — the split needed for the cache-aware formula above is unavailable |
+| **Σ** (rows 25–26, one `go` run) | | claude-sonnet-5 | 82,182,018 (row 25) + 158,889 aggregate (row 26) | ≈$19.92 + unknown (row 26) |
+| 27 | v1.2 main session — precondition checks (incl. the LM Studio gate-5 exception), section-10.2 tests + section-10.1 amendments (observed red before green), `devtools/mutation_check.py` and its own test suite built before use, `config.py`/`storage.py`/`agent.py`/`tools.py`/`bot.py` in section-9 order, six gates (incl. one fix-and-rerun of the mutation gate itself — see report Fix cycles), Appendix-B live driver (D1–D8 + C1/C3/C4/C6 regression), documentation housekeeping (this table, `docs/plan.md`, both v1.1 report corrections, `AGENTS.md`'s gate list), the review, the report, and the final commits | claude-sonnet-5 | not computed — this run's harness did not expose a local session transcript to re-measure from at commit time (see note below); estimate at public API prices withheld rather than guessed | not computed, same reason |
+| 28 | v1.2 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/08-code-review-v1.2.md`) | claude-sonnet-5 (subagent default) | not computed — same async task-output constraint as row 26 | not computed |
+| **Σ** (rows 27–28, one `go` run) | | claude-sonnet-5 | not computed | not computed |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.
@@ -57,10 +63,6 @@ Appendix-B probes is separate and negligible: a handful of LM Studio calls
 (local, free) and two OpenRouter calls on `google/gemini-2.5-flash-lite` at
 $0.10/$0.40 per 1M tokens — well under a cent.
 
-| 25 | v1.1 main session — preconditions, section-9.2 tests + section-9.1 amendments (observed the expected failures), the four mutation-check proofs, `config.py`/`storage.py`/`agent.py`/`tools.py`/`bot.py` in the order of section 8, five gates, Appendix-B live driver (C1–C7 + B1/B3/B4/B10 regression), documentation (`.env.example`, `.gitignore`, README, both spec doc-fixes, prompts 03/04/05, `report-v1.md` reconciliation), the review's `_record_sandbox_quota` completeness fix, the report, this table, and the final commit | claude-sonnet-5 | in 504 (uncached) + 534,939 (cache write) + 81,416,730 (cache read), out 229,845 — measured from the local Claude Code session transcript, per-request `usage` fields deduplicated by `requestId`, re-measured immediately before the commit | ≈$19.92 (estimate at public API prices: $2/$10 per MTok in/out, cache write ×1.25, cache read ×0.1; actual billing: flat-rate subscription) |
-| 26 | v1.1 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/06-code-review-v1.1.md`) | claude-sonnet-5 (subagent default) | 158,889 total (harness-reported aggregate; in/out/cache split not exposed to the parent session — unlike rows 1–24, the transcript backing this number is an async task-output file the harness instructs the parent session not to read) | not computed — the split needed for the cache-aware formula above is unavailable |
-| **Σ** (rows 25–26, one `go` run) | | claude-sonnet-5 | 82,182,018 (row 25) + 158,889 aggregate (row 26) | ≈$19.92 + unknown (row 26) |
-
 Rows 25–26 are the spec-v1.1 implementation run (`go docs/spec/spec-v1.1.md`,
 prompt `docs/prompts/05-go-spec-v1.1.md`), covering the whole patch end to
 end: tests, implementation, five gates (one of which was additionally re-run
@@ -83,3 +85,23 @@ is separate and effectively free: LM Studio is local, and no OpenRouter call
 was made at all — the throwaway `OPENROUTER_API_KEY` was a synthetic canary
 that was deliberately never validated (`LLM_PROVIDER=lmstudio`,
 `LLM_FAILOVER=off`).
+
+Rows 27–28 are the spec-v1.2 implementation run (`go docs/spec/spec-v1.2.md`,
+prompt `docs/prompts/07-go-spec-v1.2.md`), covering the security-audit patch
+end to end: the section-10.2 tests and section-10.1 amendments, the
+`devtools/mutation_check.py` gate built before it verified a single fix, the
+five security fixes of section 5, six gates including a fix-and-rerun of the
+mutation gate itself (see `report-v1.2.md`'s Fix cycles — not counted against
+the 5-cycle repair budget, since it happened before the gates were run as the
+reported sequence), the Appendix-B live driver (D1–D8 plus the C1/C3/C4/C6
+v1.1 regression), documentation housekeeping, the `code-reviewer` subagent's
+review, and the report. Unlike row 25, this session's token/cost figures are
+marked `not computed` rather than reconstructed or estimated: this run did not
+re-measure a local transcript immediately before the commit the way row 25's
+run did, and reporting an unmeasured number as if it were the same kind of
+figure would misrepresent it. Inference the *bot* itself spent during the
+Appendix-B driver is separate and effectively free: LM Studio is local for
+the ordinary-message check in D2, and no OpenRouter call was made — D1's and
+C1's registered secret was a synthetic canary never sent through the LLM
+client, and D2's ordinary-turn check used a scripted `FakeLLM`, not a live
+provider call.
