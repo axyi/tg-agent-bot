@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -33,8 +34,17 @@ if verb == "version":
         sys.exit(1)
     sys.stdout.write(mode.get("version", "27.1.2") + "\\n")
     sys.exit(0)
+if verb == "ps":
+    for cid in mode.get("ps_ids", []):
+        sys.stdout.write(cid + "\\n")
+    sys.exit(0)
+if verb == "rm":
+    sys.exit(mode.get("rm_exit", 0))
 if mode.get("sleep"):
     time.sleep(mode["sleep"])
+if mode.get("write_bytes"):
+    with open("grown.bin", "wb") as fh:
+        fh.write(b"0" * mode["write_bytes"])
 sys.stdout.write(mode.get("stdout", ""))
 sys.stderr.write(mode.get("stderr", ""))
 sys.exit(mode.get("exit", 0))
@@ -87,14 +97,18 @@ def test_t_v1_dk_01_argv_is_exactly_the_specified_list():
         uid=1000,
         gid=1000,
         container_name="tgexec-deadbeef",
+        wrap_timeout=True,
+        empty_resolv=Path("/state/.resolv-empty"),
     )
     assert built == [
         "docker", "run", "--rm", "--pull", "never",
         "--name", "tgexec-deadbeef",
+        "--label", "tgexec=1",
         "--network", "none",
         "--user", "1000:1000",
         "--read-only",
         "--mount", "type=bind,source=/srv/sandbox,target=/work",
+        "--mount", "type=bind,source=/state/.resolv-empty,target=/etc/resolv.conf,readonly",
         "--tmpfs", "/tmp:rw,size=67108864,mode=1777",
         "--workdir", "/work",
         "--env", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -106,11 +120,12 @@ def test_t_v1_dk_01_argv_is_exactly_the_specified_list():
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
         "--init",
-        "python:3.13-slim", "uname", "-a",
+        "python:3.13-slim", "timeout", "--kill-after=5", "30", "uname", "-a",
     ]
 
 
 def test_t_v1_dk_02_isolation_flags_and_only_one_mount():
+    resolv = Path("/state/.resolv-empty")
     built = tools.build_docker_argv(
         ["/bin/sh", "-c", "echo hi"],
         image="python:3.13-slim",
@@ -118,6 +133,7 @@ def test_t_v1_dk_02_isolation_flags_and_only_one_mount():
         uid=1000,
         gid=1000,
         container_name="tgexec-00000000",
+        empty_resolv=resolv,
     )
     pairs = list(zip(built, built[1:]))
     assert ("--network", "none") in pairs
@@ -125,12 +141,20 @@ def test_t_v1_dk_02_isolation_flags_and_only_one_mount():
     assert ("--cap-drop", "ALL") in pairs
     assert ("--pull", "never") in pairs
     assert ("--security-opt", "no-new-privileges") in pairs
+    assert ("--label", tools.CONTAINER_LABEL) in pairs
 
+    # REQ-V11-INF-01: exactly two bind mounts — the sandbox (rw) and the
+    # neutralised resolv.conf (ro) — and no others.
     mounts = [value for flag, value in pairs if flag == "--mount"]
-    assert mounts == ["type=bind,source=/srv/sandbox,target=/work"]
+    assert mounts == [
+        "type=bind,source=/srv/sandbox,target=/work",
+        "type=bind,source=/state/.resolv-empty,target=/etc/resolv.conf,readonly",
+    ]
     assert "--volume" not in built and "-v" not in built
 
-    # REQ-V1-DK-03: the container environment is fixed, and it is these three only.
+    # REQ-V11-DOC-07: this pins the --env *flags the bot passes*, not the
+    # container's resulting environment, which additionally carries the
+    # image's own public build-time variables (HOSTNAME, GPG_KEY, ...).
     envs = [value for flag, value in pairs if flag == "--env"]
     assert envs == [
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -186,6 +210,7 @@ def test_t_v1_dk_04_program_exit_codes_are_not_docker_errors(docker_stub, sandbo
 
 
 def test_t_v1_dk_05_timeout_kills_the_container(docker_stub, sandbox, monkeypatch):
+    real_grace = tools.DOCKER_STARTUP_GRACE_S
     monkeypatch.setattr(tools, "DOCKER_STARTUP_GRACE_S", 0.0)
     docker_stub.set(sleep=30)
     result = tools.run_command_docker(
@@ -198,6 +223,26 @@ def test_t_v1_dk_05_timeout_kills_the_container(docker_stub, sandbox, monkeypatc
     run_argv = argv_of(docker_stub, "run")[0]
     name = run_argv[run_argv.index("--name") + 1]
     assert ["kill", name] in argv_of(docker_stub, "kill")
+
+    # REQ-V11-TST-04: with the real grace constant restored, the outer
+    # wall-clock kill carries EXEC_TIMEOUT_S + DOCKER_STARTUP_GRACE_S, not
+    # just `timeout_s` — the mutation this guards against monkeypatches the
+    # grace to 0.0 above and would otherwise go unnoticed.
+    monkeypatch.setattr(tools, "DOCKER_STARTUP_GRACE_S", real_grace)
+    seen = {}
+
+    def spy(full_argv, **kwargs):
+        seen["timeout_s"] = kwargs["timeout_s"]
+        return {
+            "exit_code": 0, "timed_out": False, "truncated": False,
+            "stdout": "", "stderr": "",
+        }
+
+    monkeypatch.setattr(tools, "_run_process", spy)
+    tools.run_command_docker(
+        ["true"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+    )
+    assert seen["timeout_s"] == tools.EXEC_TIMEOUT_S + real_grace
 
 
 def test_t_v1_dk_06_container_names_are_unique_and_shaped(docker_stub, sandbox):

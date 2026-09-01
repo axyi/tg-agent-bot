@@ -186,11 +186,11 @@ def start_new_conversation(conn: sqlite3.Connection, tg_user_id: int) -> int:
 
 
 def add_user_message(conn: sqlite3.Connection, conv_id: int, content: str) -> int:
-    return _add_single_row(conn, conv_id, "user", content)
+    return _add_single_row(conn, conv_id, "user", config.redact(content))
 
 
 def add_assistant_message(conn: sqlite3.Connection, conv_id: int, content: str) -> int:
-    return _add_single_row(conn, conv_id, "assistant", content)
+    return _add_single_row(conn, conv_id, "assistant", config.redact(content))
 
 
 def add_tool_turn(
@@ -200,15 +200,23 @@ def add_tool_turn(
     tool_calls: list[dict],
     results: list[tuple[str, str]],
 ) -> int:
+    # REQ-V11-RED-01: a last-line guard so no write path can bypass redaction,
+    # even one that reaches this function directly. `config.redact` is
+    # idempotent, so double redaction (agent.py already redacts once) is
+    # harmless and expected.
     turn_id = _next_turn_id(conn, conv_id)
-    payload = json.dumps(tool_calls, ensure_ascii=False)
+    redacted_content = config.redact(content)
+    payload = config.redact(json.dumps(tool_calls, ensure_ascii=False))
+    redacted_results = [
+        (tool_call_id, config.redact(result)) for tool_call_id, result in results
+    ]
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute(
             _INSERT_MESSAGE,
-            (conv_id, turn_id, "assistant", content, payload, None, utc_now_iso()),
+            (conv_id, turn_id, "assistant", redacted_content, payload, None, utc_now_iso()),
         )
-        for tool_call_id, result in results:
+        for tool_call_id, result in redacted_results:
             conn.execute(
                 _INSERT_MESSAGE,
                 (conv_id, turn_id, "tool", result, None, tool_call_id, utc_now_iso()),
@@ -265,7 +273,7 @@ def add_summary(
         "  tg_user_id = excluded.tg_user_id, "
         "  created_at = excluded.created_at, "
         "  summary_json = excluded.summary_json",
-        (conv_id, tg_user_id, utc_now_iso(), summary_json),
+        (conv_id, tg_user_id, utc_now_iso(), config.redact(summary_json)),
     )
 
 

@@ -4,6 +4,7 @@ Kept out of the entry point so that `llm/`, `tools.py`, `agent.py` and `bot.py`
 can share configuration and redaction without an import cycle.
 """
 
+import ipaddress
 import os
 import re
 from collections.abc import Mapping
@@ -18,10 +19,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 REDACTION = "***REDACTED***"
 MIN_SECRET_LENGTH = 8
+SECRET_FRAGMENT_MIN = 8
 PROVIDERS = ("lmstudio", "openrouter")
 FAILOVER_MODES = ("auto", "off")
 DEFAULT_DOCKER_IMAGE = "python:3.13-slim"
 DEFAULT_FETCH_DOMAINS = "wttr.in"
+DEFAULT_EXEC_SANDBOX_MAX_BYTES = 268435456
+MIN_EXEC_SANDBOX_MAX_BYTES = 1048576
+MAX_EXEC_SANDBOX_MAX_BYTES = 4294967296
 
 _DIGITS_RE = re.compile(r"^[0-9]+$")
 _TG_ID_RE = re.compile(r"^[1-9][0-9]*$")
@@ -58,6 +63,8 @@ class Config:
     rate_limit_refill_s: float = 6.0
     telegram_bot_name: str = ""
     fetch_allowed_domains: frozenset[str] = frozenset({DEFAULT_FETCH_DOMAINS})
+    # v1.1 addition (REQ-V11-QTA-01).
+    exec_sandbox_max_bytes: int = DEFAULT_EXEC_SANDBOX_MAX_BYTES
 
 
 def register_secret(value: str) -> None:
@@ -72,6 +79,29 @@ def redact(text: str) -> str:
     for secret in sorted(_secrets, key=len, reverse=True):
         result = result.replace(secret, REDACTION)
     return result
+
+
+def max_secret_length() -> int:
+    """The length in bytes (UTF-8) of the longest registered secret, or 0."""
+    if not _secrets:
+        return 0
+    return max(len(secret.encode("utf-8")) for secret in _secrets)
+
+
+def strip_secret_fragment(text: str) -> str:
+    """Remove from the end of `text` the longest suffix that is a proper prefix
+    of some registered secret and is at least `SECRET_FRAGMENT_MIN` characters
+    long. A text ending in a *complete* secret is `redact`'s job, not this
+    helper's: only proper (strictly shorter) prefixes are considered here."""
+    best_len = 0
+    for secret in _secrets:
+        max_len = min(len(text), len(secret) - 1)
+        for length in range(max_len, SECRET_FRAGMENT_MIN - 1, -1):
+            if text.endswith(secret[:length]):
+                if length > best_len:
+                    best_len = length
+                break
+    return text[:-best_len] if best_len else text
 
 
 def load_config(
@@ -158,6 +188,10 @@ def load_config(
         rate_limit_refill_s=_parse_float(source, "RATE_LIMIT_REFILL_S", 6.0, 3600.0),
         telegram_bot_name=_value(source, "TELEGRAM_BOT_NAME"),
         fetch_allowed_domains=_parse_domains(_value(source, "FETCH_ALLOWED_DOMAINS")),
+        exec_sandbox_max_bytes=_parse_int(
+            source, "EXEC_SANDBOX_MAX_BYTES", DEFAULT_EXEC_SANDBOX_MAX_BYTES,
+            MIN_EXEC_SANDBOX_MAX_BYTES, MAX_EXEC_SANDBOX_MAX_BYTES,
+        ),
     )
 
 
@@ -238,6 +272,12 @@ def _prepare_audit_path(audit_log_path: Path) -> Path:
 def _check_sandbox_placement(exec_workdir: Path, db_path: Path, audit_log_path: Path) -> None:
     """REQ-V1-CFG-03: the container mounts EXEC_WORKDIR read-write, so no state and
     no secret may live inside it."""
+    # REQ-V11-CFV-02: subsumes the "not the project root itself" check below for
+    # ordinary cases, but that check stays as delivered.
+    if not _is_strict_descendant(exec_workdir, PROJECT_ROOT):
+        raise ConfigError(
+            f'EXEC_WORKDIR must live inside the project directory; got "{exec_workdir}"'
+        )
     if _same(exec_workdir, PROJECT_ROOT):
         raise ConfigError(
             "EXEC_WORKDIR must not be the project root: the exec container mounts it "
@@ -272,6 +312,11 @@ def _same(left: Path, right: Path) -> bool:
 def _contains(parent: Path, child: Path) -> bool:
     parent, child = _normalized(parent), _normalized(child)
     return parent == child or parent in child.parents
+
+
+def _is_strict_descendant(child: Path, parent: Path) -> bool:
+    child, parent = _normalized(child), _normalized(parent)
+    return parent != child and parent in child.parents
 
 
 def _parse_int(source: Mapping[str, str], key: str, default: int, low: int, high: int) -> int:
@@ -318,4 +363,30 @@ def _parse_domains(raw: str) -> frozenset[str]:
     items = [item for item in items if item]
     if not items:
         raise ConfigError("FETCH_ALLOWED_DOMAINS must contain at least one domain")
+    for item in items:
+        _reject_ssrf_shaped_domain(item)
     return frozenset(items)
+
+
+def _reject_ssrf_shaped_domain(entry: str) -> None:
+    """REQ-V11-CFV-01: reject the misconfigurations that silently reproduce the
+    posture v1 claims to prevent (findings V-6/V-7)."""
+    is_ip = True
+    try:
+        ipaddress.ip_address(entry.strip("[]"))
+    except ValueError:
+        is_ip = False
+    if is_ip:
+        raise ConfigError(
+            f'FETCH_ALLOWED_DOMAINS rejects "{entry}": IP literals are not allowed (SSRF)'
+        )
+    if entry == "localhost" or entry.endswith(".localhost"):
+        raise ConfigError(f'FETCH_ALLOWED_DOMAINS rejects "{entry}": localhost is not allowed')
+    if "." not in entry:
+        raise ConfigError(
+            f'FETCH_ALLOWED_DOMAINS rejects "{entry}": bare hostnames are not allowed'
+        )
+    if ":" in entry or "/" in entry:
+        raise ConfigError(
+            f'FETCH_ALLOWED_DOMAINS rejects "{entry}": ports or paths are not allowed'
+        )

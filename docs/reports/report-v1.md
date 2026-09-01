@@ -34,7 +34,11 @@ named 'llm.failover'` for `tests/test_failover.py`, and `AttributeError: module
 import `tests/fakes.py`. Implementation then proceeded module by module in the
 order of section 8, each step re-running the suite.
 
-**Fix cycles used: 1/5.** All five gates were green on the first complete run of
+**`[doc-fix v1.1]`** (REQ-V11-DOC-06, reconciled with
+`docs/prompts/03-go-spec-v1.md`, which stated a different count for a
+different thing): **0/5 gate-repair cycles on the first full gate run; 1
+additional fix round applied after the clean-context code review.** All five
+gates were green on the first complete run of
 the chain (197 passed). The single cycle was spent on the code review below,
 which found gate 3 red *in the tree as committed* for a reason the first run
 could not have shown: `tests/test_v1_guardrails.py` asserted the absence of
@@ -122,6 +126,19 @@ flag for flag, in order.
    (REQ-TREE-02). The API list of REQ-V1-MEM-02 covers the summary additions
    only.
 
+`[doc-fix v1.1]` — two more deviations, surfaced by the spec-v1.1 audit
+(REQ-V11-DOC-02) and undeclared at the time:
+
+4. **REQ-V1-SEC-03 asks for per-element redaction of argv, URL and the
+   stderr excerpt; the delivered implementation redacts the serialised JSON
+   record as a whole.** Equivalent except for a secret that contains
+   JSON-escapable characters (see the Review section's note, extended below).
+5. **REQ-V1-VIS-02 says the status message is edited before each
+   *subsequent* tool execution; the delivered implementation edits before
+   the first one too** (which is better, and what the tests pin). The
+   matching sentence in `docs/spec/spec-v1.md` REQ-V1-VIS-02 is corrected to
+   "before each execution, including the first", tagged `[doc-fix v1.1]`.
+
 No other v0 test was modified, none was deleted, and no new Python dependency
 was added.
 
@@ -150,6 +167,14 @@ from its raw form (one containing `"` or `\`). Neither registered credential
 shape — a Telegram token `<digits>:<base64url>` or an OpenRouter key — contains
 such a character, and `finish()` redacts the raw text on the other path, so the
 limitation is recorded rather than worked around.
+
+`[doc-fix v1.1]` (REQ-V11-DOC-03) — the same limitation now applies in two more
+places introduced by spec-v1.1: the `agent._redact_tool_calls` helper and the
+`storage.py` guard over the serialised `tool_calls` JSON payload both redact
+JSON *text*, so a secret containing a character JSON escapes (a backslash, a
+quote, a control character) survives in its escaped form there too. Every
+credential this project handles is escape-free, which is why the simple form
+is accepted in all three places.
 
 The reviewer also confirmed, by direct probing, a set of negatives: the fetch
 allowlist is not bypassable by userinfo (`https://wttr.in@evil.example.com/`),

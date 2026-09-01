@@ -54,12 +54,22 @@ Fill in `TELEGRAM_BOT_TOKEN` and `ALLOWED_TG_IDS` (comma-separated ids).
 `.env` is git-ignored and is the only place secrets live.
 
 `EXEC_WORKDIR` is bind-mounted read-write into the exec container, so the bot
-refuses to start when it is the project root or when it would contain `DB_PATH`,
-`AUDIT_LOG_PATH` or `.env`.
+refuses to start when it is the project root, when it is outside the project
+directory entirely, or when it would contain `DB_PATH`, `AUDIT_LOG_PATH` or
+`.env`.
 
-`AUDIT_LOG_PATH` (default `./exec_audit.jsonl`) is the one file the bot writes
-on its own behalf. The default name is git-ignored; if you point the variable
-somewhere else inside the repository, git-ignore that name yourself.
+`EXEC_SANDBOX_MAX_BYTES` (default `268435456`, 256 MiB) caps the total size of
+the sandbox directory; `exec` refuses — without starting a container — once the
+sandbox is at or above the limit, and re-checks after every run so an exec that
+just crossed it is still reported honestly while the *next* one refuses. See
+[Limits](#limits) and the accepted trade-off below.
+
+The bot writes **two** files of its own: `AUDIT_LOG_PATH` (default
+`./exec_audit.jsonl`) and `.resolv-empty` next to the database (the neutralised
+`/etc/resolv.conf` mounted into every exec container, see
+[The exec sandbox](#the-exec-sandbox)). Both default names are git-ignored; if
+you point either variable — or `DB_PATH`, which decides where `.resolv-empty`
+lands — somewhere else inside the repository, git-ignore that name yourself.
 
 ## Run
 
@@ -113,7 +123,10 @@ is re-validated against the allowlist.
 
 **Never put an internal hostname or an IP literal in `FETCH_ALLOWED_DOMAINS`.**
 The request runs on the bot host, so an internal entry turns the model into an
-SSRF client against your own network.
+SSRF client against your own network. This is enforced at startup, not just
+advised: an IP literal (IPv4 or IPv6, bracketed or bare), `localhost` or a
+`.localhost` suffix, a bare hostname with no dot, or an entry carrying a port
+or a path is rejected with a `ConfigError` naming the offending entry.
 
 ## Add a skill
 
@@ -144,9 +157,21 @@ Docker container.** Each invocation gets a fresh container with:
 - no network (`--network none`);
 - a non-root user — the bot's own uid/gid;
 - a read-only root filesystem, a 64 MiB `tmpfs` on `/tmp`, and the sandbox
-  directory bind-mounted at `/work` as the only writable persistent path;
+  directory bind-mounted at `/work` as the only writable persistent path,
+  capped at `EXEC_SANDBOX_MAX_BYTES`;
+- an empty file mounted read-only at `/etc/resolv.conf` — DNS is useless in a
+  network-less container, and the host's real resolv.conf would otherwise leak
+  the operator's nameservers and search domains into the model's context;
 - 512 MiB memory, 1.0 CPU, 128 pids;
-- all capabilities dropped and `no-new-privileges`.
+- all capabilities dropped and `no-new-privileges`;
+- a label (`tgexec=1`) that lets a freshly started bot find and remove
+  containers a previous run left behind.
+
+The bot sets exactly three environment variables inside the container (`PATH`,
+`LANG`, `HOME`); the image additionally contributes its own public build-time
+variables (`HOSTNAME`, `GPG_KEY`, `PYTHON_VERSION`, `PYTHON_SHA256` for the
+default image). No host environment variable — including every credential — is
+ever forwarded.
 
 **The container is the security boundary** for file access and network reach.
 The bot's `.env`, its database, its audit log and the source tree are not
@@ -154,6 +179,32 @@ mounted and are unreachable from inside; that is why `EXEC_WORKDIR` may not
 contain any of them. Container escape through a kernel or runtime vulnerability
 remains out of scope; the defence in depth against it is the value redaction
 below and the low-privilege account recommendation, which stays in force.
+
+**Accepted residual risk:** `/proc/self/mountinfo` exposes host overlay paths
+(not their contents) inside the container even with the mounts above. Masking
+it needs runtime features outside `docker run`'s stock flags and is knowingly
+not mitigated in this release.
+
+**No container outlives the bot.** A `--rm` container only cleans itself up
+when it exits on its own; a bot process killed mid-run (`kill -9`, a crash)
+leaves its container running, holding its memory and CPU slice. Three layers
+close this:
+
+1. every container carries the `tgexec=1` label;
+2. at startup, when Docker is available, the bot runs `docker ps -aq --filter
+   label=tgexec=1` and force-removes whatever it finds, logging how many it
+   reaped;
+3. when the image provides GNU `timeout` (probed once at startup), the command
+   inside the container is wrapped in `timeout --kill-after=5 <budget>`, so the
+   container terminates on its own even when no parent is left to kill it. If
+   the probe fails — a missing `timeout(1)`, a hung daemon, `docker` itself
+   missing — the wrapper is skipped and a warning is logged; orphan protection
+   then rests on the startup reap alone.
+
+**This bot is a single process per Docker daemon.** The startup reap removes
+*every* container carrying the label, so running two instances of this bot
+against the same daemon would let a starting instance kill a running
+instance's sandbox. Multi-instance operation is not supported.
 
 **The honest price.** Membership in the `docker` group over a rootful daemon is
 **root-equivalent on the host**. The isolation of `exec` is bought at exactly
@@ -173,6 +224,41 @@ Accepted ambiguity: docker's client reports 125 (daemon/run error), 126 (not
 executable) and 127 (program not found) for its own failures. A program that
 itself exits with one of those codes inside the container is indistinguishable
 from a docker-level failure and is reported as one.
+
+A second, related ambiguity: `timeout(1)` exits 124 when it kills the wrapped
+command for exceeding its own budget. While the in-container wrapper is
+active, a program that legitimately exits 124 of its own accord is
+indistinguishable from one the wrapper killed, and both are reported as
+`timed_out: true`. With the wrapper active, the container now almost always
+dies on its own before the outer wall-clock kill, so that path (the
+`docker kill` on the timeout branch) becomes nearly unreachable in production;
+it stays in the code and stays tested, as the fallback for a container that
+ignores its own budget.
+
+**Sandbox quota trade-off.** The disk-quota scan (`EXEC_SANDBOX_MAX_BYTES`)
+walks the sandbox tree on every `exec`, refusing when it holds more than
+200,000 filesystem entries (directories and files, even empty ones) rather
+than finishing an unbounded walk. A model that creates that many entries
+disables `exec` until the operator clears the sandbox — a self-inflicted
+denial of service the model can trigger cheaply. The limit is set high enough
+that ordinary work never approaches it, and failing closed is preferred to an
+unbounded scan; recovery is one `rm -rf` of the sandbox contents.
+
+**Redaction is defence in depth, not a security boundary.** Every guard below
+matches **literal registered values**. Any transformation performed inside the
+sandbox — `base64`, `rot13`, chunking, compression — defeats it: the model can
+read a secret's absence from the sandbox, but nothing stops it from disguising
+data that *is* reachable before handing it back. Redaction protects against
+accidental echo, not against an adversary who already controls what runs in
+the sandbox; entropy-based or heuristic detection is deliberately out of
+scope. The real boundary for secrets is that they are never reachable from the
+container at all (see above). Separately, every redaction guard in this
+codebase (the tool envelope, the storage guards, the outgoing-message guard)
+matches against the **serialised** JSON text in some paths, which cannot
+recognise a secret whose JSON encoding differs from its raw form — a value
+containing a backslash, a quote or a control character survives there in its
+escaped form. Every credential this project handles is escape-free, which is
+why the simpler, per-record form is accepted.
 
 ### Secrets and the audit trail
 
@@ -210,10 +296,11 @@ delivery is not provided and is not claimed.
 | model output cap | `LLM_MAX_TOKENS` = 2048 |
 | context budget | provider context length − system prompt − output cap − 512 |
 | context window | 30 messages |
-| exec command budget | ~30 s; hard wall-clock kill at 30 + 10 s (container startup grace) |
-| exec output per stream | 4096 bytes |
+| exec command budget | ~30 s; hard wall-clock kill at 30 + 10 s (container startup grace); the in-container `timeout(1)` wrapper, when available, applies the same ~30 s budget from inside |
+| exec output per stream | 4096 bytes (up to that plus the longest registered secret is read before redaction, so a secret split by the cut never leaks a fragment) |
 | exec container memory / cpus / pids | 512 MiB / 1.0 / 128 |
-| fetch response cap / timeout / redirects | 65536 bytes / 15 s / 3 hops |
+| exec sandbox disk quota | `EXEC_SANDBOX_MAX_BYTES` = 268435456 bytes (256 MiB) |
+| fetch response cap / timeout / redirects | 65536 bytes / 15 s / 3 hops (same secret-headroom reading as exec output) |
 | agent rounds / HTTP attempts / tool executions | 8 / 9 / 12 |
 | malformed retries / empty repairs | 2 / 1 |
 | LLM request timeout | `LLM_TIMEOUT_S` = 120 s |
@@ -233,7 +320,8 @@ delivery is not provided and is not claimed.
 | empty model response | 1 repair round | on repeat: the "empty answer" fallback |
 | answer truncated by `max_tokens` | delivered with a notice | `[answer truncated by the model's output token limit]` |
 | Docker unavailable / bot run as root | exec refuses, the bot keeps serving | a tool error the model must relay honestly |
-| exec timeout | the container is killed | an envelope with `timed_out: true` |
+| exec timeout | the container is killed (outer kill, or the in-container wrapper) | an envelope with `timed_out: true` |
+| sandbox at or over `EXEC_SANDBOX_MAX_BYTES` | exec refuses without starting a container | a tool error envelope naming the used/allowed bytes |
 | fetch to a non-allowlisted domain | refused before any request leaves | a tool error envelope |
 | Telegram 429 on send | bounded retry honouring `retry_after` | delayed delivery |
 | Telegram send fails after retries | the reply is lost and logged | nothing |

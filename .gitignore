@@ -13,4 +13,5 @@ sandbox/
 *.db-wal
 *.db-shm
 exec_audit.jsonl
+.resolv-empty
 .claude/agent-memory/

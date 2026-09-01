@@ -4,6 +4,7 @@ truncation notice, send retry, interrupt, status message, live-selftest plumbing
 
 import json
 import logging
+import math
 import stat
 import time
 
@@ -345,6 +346,13 @@ def test_t_v1_cfg_01_sandbox_may_not_hold_state_or_secrets(tmp_path):
     with pytest.raises(ConfigError):
         load_config(env=env(EXEC_WORKDIR=str(tmp_path)), load_env_file=False)
 
+    # REQ-V11-CFV-02: EXEC_WORKDIR must be a strict descendant of the project
+    # root — a system directory outside it (the audit's `EXEC_WORKDIR=/etc`
+    # case) must be refused before it is ever mounted or chmod-ed.
+    with pytest.raises(ConfigError) as raised:
+        load_config(env=env(EXEC_WORKDIR="/etc"), load_env_file=False)
+    assert "EXEC_WORKDIR" in str(raised.value)
+
 
 def test_t_v1_cfg_01_a_symlinked_sandbox_cannot_smuggle_in_the_project_root(tmp_path):
     """The placement check must resolve symlinks, because the container mount does."""
@@ -570,6 +578,29 @@ def test_t_v1_ft_02_truncation_and_non_200(monkeypatch):
     result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=failing)
     assert result["status_code"] == 404
     assert result["body"] == "gone"
+
+    # REQ-V11-TST-03: the body is never buffered whole — reading must stop
+    # shortly past the cap, not after the streaming source is exhausted.
+    chunk_size = 8192
+    produced = []
+
+    def counting_chunks():
+        for _ in range(40):
+            produced.append(1)
+            yield b"x" * chunk_size
+
+    def streaming_handler(request):
+        return httpx.Response(200, content=counting_chunks())
+
+    result = tools.fetch_url(
+        "https://wttr.in/x", allowed_domains=ALLOWED, client=fetch_client(streaming_handler)
+    )
+    assert result["truncated"] is True
+    max_chunks = math.ceil(
+        (tools.FETCH_MAX_BYTES + config.max_secret_length() + 1) / chunk_size
+    ) + 1
+    assert len(produced) <= max_chunks
+    assert len(produced) < 40                 # the full 40-chunk body was never read
 
 
 def test_t_v1_ft_01_a_malformed_host_is_an_envelope_not_an_exception():
@@ -1044,17 +1075,37 @@ def test_t_v1_vis_01_edit_failures_are_swallowed(conn, tmp_path, caplog):
 
 
 def test_status_text_is_truncated_and_redacted(conn, tmp_path):
+    # REQ-V11-TST-01: the sentinel and the filler must sit in argv[0], because
+    # `agent._first_argument` returns argv[0] for `exec` — putting them in
+    # argv[1] (the v1 test's mistake) makes both assertions run against the
+    # program name "cat" instead, which is vacuous.
     config.register_secret(SENTINEL)
     cfg = make_cfg(tmp_path)
     tg = RecordingTelegram()
     llm = FakeLLM([
-        LLMResponse("", [exec_call(1, ["cat", SENTINEL + "-" + "y" * 90])], "tool_calls"),
+        LLMResponse("", [exec_call(1, [SENTINEL + "-" + "y" * 90])], "tool_calls"),
         LLMResponse("done", [], "stop"),
     ])
     process(conn, cfg, update(), tg=tg, llm=llm)
     first_edit = tg.edits[0][2]
     assert SENTINEL not in first_edit
     assert len(first_edit) <= 64
+    assert "***REDACTED***" in first_edit
+
+    # `_first_argument` takes a different branch for `fetch` (the whole URL),
+    # so the same hazard needs its own proof there.
+    tg2 = RecordingTelegram()
+    long_url = "https://wttr.in/" + SENTINEL + "-" + "z" * 90
+    llm2 = FakeLLM([
+        LLMResponse("", [ToolCall("call_1", "fetch", json.dumps({"url": long_url}))],
+                    "tool_calls"),
+        LLMResponse("done", [], "stop"),
+    ])
+    process(conn, cfg, update(update_id=2), tg=tg2, llm=llm2, fetcher=FakeFetcher())
+    first_edit2 = tg2.edits[0][2]
+    assert SENTINEL not in first_edit2
+    assert len(first_edit2) <= 64
+    assert "***REDACTED***" in first_edit2
 
 
 # --------------------------------------------------------------------------
@@ -1254,6 +1305,10 @@ def test_main_binds_the_container_runner_not_the_host_runner(tmp_path, monkeypat
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
     monkeypatch.setattr(bot, "build_llm_client", lambda cfg, *, client, override=None: object())
     monkeypatch.setattr(bot, "exec_backend_status", lambda: ("27.1.2", True))
+    # REQ-V11-WIR-01: stub the single startup seam so no `docker` command runs
+    # during pytest — this test does not touch PATH, so an unstubbed seam
+    # would shell out to the real daemon.
+    monkeypatch.setattr(bot, "_startup_docker_wiring", lambda cfg, docker_ok: (True, None))
     monkeypatch.setattr(bot.signal, "signal", lambda signum, handler: None)
     monkeypatch.setattr(bot, "poll_loop", lambda **kwargs: captured.update(kwargs) or 0)
 
@@ -1266,6 +1321,9 @@ def test_main_binds_the_container_runner_not_the_host_runner(tmp_path, monkeypat
         "workdir": cfg.exec_workdir,
         "image": cfg.exec_docker_image,
         "docker_ok": True,
+        "sandbox_max_bytes": cfg.exec_sandbox_max_bytes,
+        "wrap_timeout": True,
+        "empty_resolv": None,
     }
     fetcher = captured["fetcher"]
     assert fetcher.func is tools.fetch_url
@@ -1284,10 +1342,23 @@ def test_main_disables_exec_when_the_backend_is_down(tmp_path, monkeypatch):
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
     monkeypatch.setattr(bot, "build_llm_client", lambda cfg, *, client, override=None: object())
     monkeypatch.setattr(bot, "exec_backend_status", lambda: (None, False))
+    seam_calls = []
+
+    def seam(cfg, docker_ok):
+        seam_calls.append(docker_ok)
+        return (False, None)
+
+    monkeypatch.setattr(bot, "_startup_docker_wiring", seam)
     monkeypatch.setattr(bot.signal, "signal", lambda signum, handler: None)
     monkeypatch.setattr(bot, "poll_loop", lambda **kwargs: captured.update(kwargs) or 0)
 
+    def forbidden_subprocess(*args, **kwargs):
+        raise AssertionError("no docker subprocess may be attempted when docker_ok is False")
+
+    monkeypatch.setattr(bot.subprocess, "run", forbidden_subprocess)
+
     assert bot.main([]) == 0
+    assert seam_calls == [False]
     assert captured["runner"].keywords["docker_ok"] is False
     assert captured["runner"](["uname"]) == {
         "error": "exec backend unavailable: docker is not available on this host"

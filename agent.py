@@ -236,10 +236,15 @@ def run_agent(
             normalized, skills=skills, runner=runner, tools_used=tools_used,
             fetcher=fetcher, audit=audit, on_tool=on_tool,
         )
-        wire_tool_calls = [_to_wire(call) for call in normalized]
-        storage.add_tool_turn(conn, conv_id, response.content, wire_tool_calls, results)
+        # REQ-V11-RED-01: the assistant turn is redacted once, before either
+        # sink sees it, and the same redacted pair feeds both the database and
+        # the next request payload — a secret the model quotes back must not
+        # reach SQLite or the provider.
+        content = config.redact(response.content or "")
+        wire_tool_calls = _redact_tool_calls([_to_wire(call) for call in normalized])
+        storage.add_tool_turn(conn, conv_id, content, wire_tool_calls, results)
         messages.append(
-            {"role": "assistant", "content": response.content, "tool_calls": wire_tool_calls}
+            {"role": "assistant", "content": content, "tool_calls": wire_tool_calls}
         )
         for call_id, result in results:
             messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
@@ -344,6 +349,20 @@ def _to_wire(call: ToolCall) -> dict:
         "type": "function",
         "function": {"name": call.name, "arguments": call.arguments},
     }
+
+
+def _redact_tool_calls(calls: list[dict]) -> list[dict]:
+    """Redact `function.arguments` in each wire-shaped call. Ids, names and
+    shape are preserved byte-for-byte, because the provider matches
+    `tool_call_id` against them (REQ-V11-RED-01)."""
+    redacted = []
+    for call in calls:
+        function = dict(call["function"])
+        function["arguments"] = config.redact(function["arguments"])
+        new_call = dict(call)
+        new_call["function"] = function
+        redacted.append(new_call)
+    return redacted
 
 
 # --------------------------------------------------------------------------

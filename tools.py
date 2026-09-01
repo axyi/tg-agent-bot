@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -51,11 +52,19 @@ CONTAINER_WORKDIR = "/work"
 # these three variables — and only these — are forwarded to it (REQ-V1-DK-08).
 DOCKER_ENV_PASSTHROUGH = ("DOCKER_HOST", "DOCKER_CONTEXT", "XDG_RUNTIME_DIR")
 
+# v1.1 orphan-container cleanup (REQ-V11-ORP-01..04).
+CONTAINER_LABEL = "tgexec=1"
+IMAGE_PROBE_TIMEOUT_S = 15.0
+
+# v1.1 sandbox disk quota (REQ-V11-QTA-01/02).
+SANDBOX_SCAN_MAX_ENTRIES = 200000
+
 # Network fetch (REQ-V1-FT-02). The four refusal messages are named because the
 # audit writer classifies an envelope as `refused` by recognising them.
 URL_REQUIRED = "url is required"
 URL_NOT_HTTPS = "url must use https"
 URL_NO_HOST = "url has no host"
+URL_MALFORMED = "url could not be parsed"
 URL_DOMAIN_PREFIX = "domain not allowed: "
 FETCH_TIMEOUT_S = 15.0
 FETCH_MAX_BYTES = 65536
@@ -75,20 +84,26 @@ AuditHook = Callable[[dict], None]
 
 
 class _Capture:
-    """Bounded, thread-safe sink. Keeps the first `cap` bytes, discards the rest."""
+    """Bounded, thread-safe sink. Keeps the first `cap + headroom` bytes, discards
+    the rest. `truncated` still trips at more than `cap` fed bytes — the headroom
+    exists so redaction downstream can see a secret whole before the stream is cut
+    to `cap` (REQ-V11-TRN-02); it does not move the truncation threshold itself."""
 
-    def __init__(self, cap: int) -> None:
+    def __init__(self, cap: int, *, headroom: int = 0) -> None:
         self._cap = cap
+        self._room_cap = cap + headroom
         self._buf = bytearray()
+        self._fed = 0
         self._truncated = False
         self._lock = threading.Lock()
 
     def feed(self, chunk: bytes) -> None:
         with self._lock:
-            room = self._cap - len(self._buf)
+            self._fed += len(chunk)
+            room = self._room_cap - len(self._buf)
             if room > 0:
                 self._buf += chunk[:room]
-            if len(chunk) > room:
+            if self._fed > self._cap:
                 self._truncated = True
 
     def snapshot(self) -> tuple[bytes, bool]:
@@ -172,7 +187,9 @@ def _run_process(
     # so pgid == proc.pid. Capture it now: os.getpgid() raises after the child
     # is reaped.
     pgid = proc.pid
-    out, err = _Capture(EXEC_MAX_STREAM_BYTES), _Capture(EXEC_MAX_STREAM_BYTES)
+    headroom = config.max_secret_length()
+    out = _Capture(EXEC_MAX_STREAM_BYTES, headroom=headroom)
+    err = _Capture(EXEC_MAX_STREAM_BYTES, headroom=headroom)
     t_out = threading.Thread(target=_drain, args=(proc.stdout, out), daemon=True)
     t_err = threading.Thread(target=_drain, args=(proc.stderr, err), daemon=True)
     t_out.start()
@@ -206,9 +223,20 @@ def _run_process(
         "exit_code": proc.returncode,
         "timed_out": timed_out,
         "truncated": out_trunc or err_trunc,
-        "stdout": out_bytes.decode("utf-8", errors="replace"),
-        "stderr": err_bytes.decode("utf-8", errors="replace"),
+        "stdout": _finalize_stream(out_bytes),
+        "stderr": _finalize_stream(err_bytes),
     }
+
+
+def _finalize_stream(raw: bytes) -> str:
+    """REQ-V11-TRN-02 step 3: decode leniently, redact, strip any surviving
+    fragment of a secret split by the cut below, re-encode, cut to the byte
+    cap that reaches the model, decode leniently again. Both decodes must be
+    lenient: a strict decode would raise on binary stdout."""
+    text = raw.decode("utf-8", errors="replace")
+    text = config.redact(text)
+    text = config.strip_secret_fragment(text)
+    return text.encode("utf-8")[:EXEC_MAX_STREAM_BYTES].decode("utf-8", errors="replace")
 
 
 # --------------------------------------------------------------------------
@@ -223,15 +251,34 @@ def build_docker_argv(
     uid: int,
     gid: int,
     container_name: str,
+    wrap_timeout: bool = False,
+    empty_resolv: Path | None = None,
 ) -> list[str]:
-    """The exact `docker run` invocation of REQ-V1-DK-03. Flag order is normative."""
+    """The exact `docker run` invocation of REQ-V1-DK-03, extended by v1.1. Flag
+    order is normative."""
+    command = argv
+    if wrap_timeout:
+        # REQ-V11-ORP-03: the container terminates on its own budget even when
+        # no parent is left to kill it. Built from the module constant, never
+        # from a per-call `timeout_s`, so the in-container budget never drifts
+        # from the outer one.
+        command = ["timeout", "--kill-after=5", str(int(EXEC_TIMEOUT_S)), *argv]
+    mounts = ["--mount", f"type=bind,source={sandbox},target={CONTAINER_WORKDIR}"]
+    if empty_resolv is not None:
+        # REQ-V11-INF-01: a network-less container has no use for DNS, so the
+        # host's resolv.conf (nameservers, search domains) is never exposed.
+        mounts += [
+            "--mount",
+            f"type=bind,source={empty_resolv},target=/etc/resolv.conf,readonly",
+        ]
     return [
         "docker", "run", "--rm", "--pull", "never",
         "--name", container_name,
+        "--label", CONTAINER_LABEL,
         "--network", "none",
         "--user", f"{uid}:{gid}",
         "--read-only",
-        "--mount", f"type=bind,source={sandbox},target={CONTAINER_WORKDIR}",
+        *mounts,
         "--tmpfs", CONTAINER_TMPFS,
         "--workdir", CONTAINER_WORKDIR,
         "--env", f"PATH={CONTAINER_PATH}",
@@ -243,7 +290,7 @@ def build_docker_argv(
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
         "--init",
-        image, *argv,
+        image, *command,
     ]
 
 
@@ -291,17 +338,86 @@ def docker_image_present(image: str) -> bool:
     return completed.returncode == 0
 
 
+def image_has_timeout(image: str) -> bool:
+    """Whether the sandbox image provides GNU `timeout` (REQ-V11-ORP-04), probed
+    with the same hardening as a real exec container minus the mount and tmpfs
+    it does not need. Never raises: a missing binary or a hung daemon degrades
+    the in-container budget wrapper, exactly as a docker failure degrades
+    `exec` elsewhere."""
+    try:
+        completed = subprocess.run(
+            [
+                "docker", "run", "--rm", "--pull", "never",
+                "--network", "none",
+                "--user", f"{os.getuid()}:{os.getgid()}",
+                "--read-only",
+                "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges",
+                image, "timeout", "--version",
+            ],
+            timeout=IMAGE_PROBE_TIMEOUT_S,
+            capture_output=True,
+            env=_probe_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def sandbox_usage(path: Path) -> tuple[int, bool]:
+    """Total size in bytes of regular files under `path`, and whether the scan
+    was cut short (REQ-V11-QTA-02). Symlinks contribute nothing — `os.lstat`
+    reports their own (non-regular) type, so their target's size is never
+    counted. A missing directory returns `(0, False)` so the pre-existing
+    missing-sandbox error, which belongs to `_run_process`, still fires first."""
+    p = Path(path)
+    if not p.is_dir():
+        return (0, False)
+    total = 0
+    count = 0
+    for root, dirs, files in os.walk(p, followlinks=False):
+        for name in dirs + files:
+            count += 1
+            if count > SANDBOX_SCAN_MAX_ENTRIES:
+                return (total, True)
+            try:
+                entry_stat = os.lstat(os.path.join(root, name))
+            except OSError:
+                continue
+            if stat.S_ISREG(entry_stat.st_mode):
+                total += entry_stat.st_size
+    return (total, False)
+
+
 def run_command_docker(
     argv: list[str],
     *,
     workdir: Path,
     image: str,
     docker_ok: bool,
+    sandbox_max_bytes: int = config.DEFAULT_EXEC_SANDBOX_MAX_BYTES,
+    wrap_timeout: bool = False,
+    empty_resolv: Path | None = None,
     timeout_s: float = EXEC_TIMEOUT_S,
 ) -> dict:
     """The public exec runner. Every serving-path command goes through here."""
     if not docker_ok:
         return {"error": "exec backend unavailable: docker is not available on this host"}
+
+    used, cut_short = sandbox_usage(Path(workdir))
+    if cut_short:
+        log.warning("sandbox scan hit the entry limit; treating the sandbox as full")
+    if cut_short or used >= sandbox_max_bytes:
+        # REQ-V11-QTA-02: refuse without starting a container. Do not add a
+        # directory-existence check here — the missing-sandbox error belongs
+        # to `_run_process` and `sandbox_usage` already reports `(0, False)`
+        # for a missing directory, so the two can never collide.
+        return {
+            "error": (
+                f"sandbox is full: {used} bytes of {sandbox_max_bytes} allowed; "
+                "ask the operator to clear the sandbox directory"
+            )
+        }
 
     container_name = f"tgexec-{secrets.token_hex(4)}"
     full_argv = build_docker_argv(
@@ -311,6 +427,8 @@ def run_command_docker(
         uid=os.getuid(),
         gid=os.getgid(),
         container_name=container_name,
+        wrap_timeout=wrap_timeout,
+        empty_resolv=empty_resolv,
     )
     # The command's own budget is `timeout_s`; the extra grace covers container
     # start/stop so that overhead does not eat it. The hard kill lands at the sum.
@@ -326,17 +444,41 @@ def run_command_docker(
     if envelope["timed_out"]:
         _docker_kill(container_name)
         envelope["notice"] = UNTRUSTED_NOTICE
+        _record_sandbox_quota(envelope, workdir, sandbox_max_bytes)
         return envelope
 
     exit_code = envelope["exit_code"]
     if exit_code in DOCKER_CLIENT_EXIT_CODES:
         # Accepted ambiguity (README): a program that exits 125/126/127 inside the
-        # container is indistinguishable from a docker-level failure.
+        # container is indistinguishable from a docker-level failure. The
+        # container may still have written to the sandbox before that exit, so
+        # the quota is re-checked here too (REQ-V11-QTA-03: "after a container
+        # finishes", not just after a clean one).
         excerpt = config.redact(envelope["stderr"])[:DOCKER_STDERR_EXCERPT_CHARS]
-        return {"error": f"exec failed (docker exit {exit_code}): {excerpt}"}
+        failure = {"error": f"exec failed (docker exit {exit_code}): {excerpt}"}
+        _record_sandbox_quota(failure, workdir, sandbox_max_bytes)
+        return failure
+
+    # REQ-V11-ORP-03: one situation, one envelope — budget exhaustion must not
+    # look different depending on which killer won the race. `timed_out` is
+    # already False here (the outer `_run_process` kill did not fire); the
+    # in-container `timeout(1)` wrapper is the one that hit 124.
+    if wrap_timeout and exit_code == 124:
+        envelope["timed_out"] = True
 
     envelope["notice"] = UNTRUSTED_NOTICE
+    _record_sandbox_quota(envelope, workdir, sandbox_max_bytes)
     return envelope
+
+
+def _record_sandbox_quota(envelope: dict, workdir, sandbox_max_bytes: int) -> None:
+    """REQ-V11-QTA-03: re-check usage after the container finishes. The
+    program's own result is reported honestly; the *next* exec is the one
+    that refuses."""
+    used, cut_short = sandbox_usage(Path(workdir))
+    if cut_short or used >= sandbox_max_bytes:
+        log.warning("sandbox over quota after exec: %d/%d bytes", used, sandbox_max_bytes)
+        envelope["sandbox_over_quota"] = True
 
 
 def _docker_kill(container_name: str) -> None:
@@ -384,28 +526,34 @@ def fetch_url(
                     try:
                         nxt = str(httpx.URL(current).join(location))
                     except (httpx.InvalidURL, ValueError):
-                        return {"error": URL_NOT_HTTPS}
+                        return {"error": URL_MALFORMED}
                     error = _validate_url(nxt, allowed_domains)
                     if error is not None:
                         return error
                     current, hops = nxt, hops + 1
                     continue
-                # The body is never buffered whole: reading stops one byte past
-                # the cap, which is all it takes to know it was truncated.
+                # The body is never buffered whole: reading stops shortly past
+                # the cap, with headroom for redaction to see a straddling
+                # secret whole before the cut (REQ-V11-TRN-02).
+                secret_headroom = config.max_secret_length()
                 body = bytearray()
                 for chunk in response.iter_bytes():
                     body += chunk
-                    if len(body) > max_bytes:
+                    if len(body) > max_bytes + secret_headroom:
                         break
                 status_code = response.status_code
         except httpx.HTTPError as exc:
             return {"error": f"fetch failed: {exc.__class__.__name__}"}
 
         truncated = len(body) > max_bytes
+        text = bytes(body).decode("utf-8", errors="replace")
+        text = config.redact(text)
+        text = config.strip_secret_fragment(text)
+        final_body = text.encode("utf-8")[:max_bytes].decode("utf-8", errors="replace")
         return {
             "status_code": status_code,
             "truncated": truncated,
-            "body": bytes(body[:max_bytes]).decode("utf-8", errors="replace"),
+            "body": final_body,
             "notice": UNTRUSTED_NOTICE,
         }
 
@@ -418,7 +566,7 @@ def _validate_url(url: object, allowed_domains: frozenset[str]) -> dict | None:
         parsed = httpx.URL(url)
         scheme = parsed.scheme
     except (httpx.InvalidURL, ValueError):
-        return {"error": URL_NOT_HTTPS}
+        return {"error": URL_MALFORMED}
     if scheme != "https":
         return {"error": URL_NOT_HTTPS}
     try:
@@ -498,7 +646,8 @@ def tool_specs() -> list[dict]:
                     'as its own element, for example ["uname", "-a"]. The working directory is '
                     "the bot sandbox. The process is killed after about 30 seconds plus "
                     "container startup overhead; stdout and stderr are each truncated to "
-                    "4096 bytes."
+                    "4096 bytes. The sandbox directory holds at most EXEC_SANDBOX_MAX_BYTES "
+                    "bytes (default 256 MiB); commands that would exceed it are refused."
                 ),
                 "parameters": {
                     "type": "object",
@@ -639,6 +788,9 @@ def _run_exec(arguments: dict, runner: CommandRunner) -> tuple[dict, dict]:
         payload = {"error": f"failed to run the command: {exc.__class__.__name__}"}
     duration_ms = int((time.monotonic() - started) * 1000)
     record = {"tool": "exec", "argv": _auditable_argv(argv)}
+    # REQ-V11-QTA-03: the internal bookkeeping key never leaks into the model's
+    # context or the stored tool row — it is popped into the audit record.
+    record["sandbox_over_quota"] = payload.pop("sandbox_over_quota", False)
     if "error" in payload:
         record.update(outcome="error", error=payload["error"], duration_ms=duration_ms)
     else:
@@ -714,7 +866,7 @@ def _is_pre_network(message: str) -> bool:
     """Validation refused the URL before any request left the process. The prefixes
     are the same constants `_validate_url` returns, so the two cannot drift."""
     return message.startswith(
-        (URL_REQUIRED, URL_NOT_HTTPS, URL_NO_HOST, URL_DOMAIN_PREFIX)
+        (URL_REQUIRED, URL_MALFORMED, URL_NOT_HTTPS, URL_NO_HOST, URL_DOMAIN_PREFIX)
     )
 
 

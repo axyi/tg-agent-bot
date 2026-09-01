@@ -11,6 +11,7 @@ import os
 import random
 import signal
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -39,6 +40,7 @@ MAX_MESSAGE_CHARS = 4000          # the accepted length of one user message
 STATUS_MAX_CHARS = 64
 LIVE_READ_TIMEOUT_S = 30.0
 PROVIDER_OVERRIDE_KEY = "provider_override"
+REAP_TIMEOUT_S = 15.0             # REQ-V11-ORP-02
 
 NON_TEXT_REPLY = "I can only process plain text messages."
 NEW_CONVERSATION_REPLY = "New conversation started."
@@ -302,6 +304,72 @@ def exec_backend_status(
         log.warning("exec backend disabled: docker unavailable")
         docker_ok = False
     return version, docker_ok
+
+
+def _startup_docker_wiring(cfg: Config, docker_ok: bool) -> tuple[bool, Path | None]:
+    """REQ-V11-WIR-01: the one named seam everything this patch adds to startup
+    lives behind. Does nothing at all — no subprocess, no file creation — when
+    `docker_ok` is false.
+
+    This is a safety requirement, not a style choice: the existing tests that
+    monkeypatch `exec_backend_status` without touching PATH would otherwise
+    shell out to a real `docker` during `pytest`. Section 9.1 stubs this one
+    seam in both; no other startup path may call `docker`.
+    """
+    if not docker_ok:
+        return False, None
+    _reap_orphaned_containers()
+    wrap_timeout = tools.image_has_timeout(cfg.exec_docker_image)
+    if not wrap_timeout:
+        log.warning(
+            "exec container self-timeout unavailable: %s has no timeout(1); "
+            "relying on startup reap",
+            cfg.exec_docker_image,
+        )
+    empty_resolv = _ensure_empty_resolv(cfg.db_path)
+    return wrap_timeout, empty_resolv
+
+
+def _reap_orphaned_containers() -> None:
+    """REQ-V11-ORP-02: remove every container carrying the exec label. A failure
+    here is logged and never prevents startup."""
+    try:
+        listed = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", f"label={tools.CONTAINER_LABEL}"],
+            timeout=REAP_TIMEOUT_S, capture_output=True, env=tools._probe_env(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("orphan container reap failed: %s", redact(str(exc)))
+        return
+    if listed.returncode != 0:
+        log.warning("orphan container reap failed: docker ps exited %d", listed.returncode)
+        return
+    ids = [line for line in listed.stdout.decode("utf-8", errors="replace").split() if line]
+    if not ids:
+        return
+    try:
+        removed = subprocess.run(
+            ["docker", "rm", "-f", *ids],
+            timeout=REAP_TIMEOUT_S, capture_output=True, env=tools._probe_env(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("orphan container reap failed: %s", redact(str(exc)))
+        return
+    if removed.returncode != 0:
+        log.warning("orphan container reap failed: docker rm exited %d", removed.returncode)
+        return
+    log.info("reaped %d orphaned exec container(s)", len(ids))
+
+
+def _ensure_empty_resolv(db_path: Path) -> Path:
+    """REQ-V11-INF-01: an empty file mounted read-only at /etc/resolv.conf so a
+    network-less container learns nothing about the host's DNS configuration."""
+    path = db_path.parent / ".resolv-empty"
+    if not path.exists():
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o644)
+        os.close(fd)
+        os.chmod(path, 0o644)         # exact perms regardless of umask
+    return path
 
 
 def load_provider_override(conn: sqlite3.Connection) -> str | None:
@@ -856,6 +924,7 @@ def _live_docker(cfg: Config, probe: Callable[[], str | None]) -> int:
         workdir=cfg.exec_workdir,
         image=cfg.exec_docker_image,
         docker_ok=True,
+        sandbox_max_bytes=cfg.exec_sandbox_max_bytes,
     )
     if "error" in envelope:
         return _live_fail("docker", envelope["error"])
@@ -952,6 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     docker_version, docker_ok = exec_backend_status()
+    wrap_timeout, empty_resolv = _startup_docker_wiring(cfg, docker_ok)
     override = load_provider_override(conn)
     live = {"llm": build_llm_client(cfg, client=client, override=override)}
 
@@ -974,6 +1044,9 @@ def main(argv: list[str] | None = None) -> int:
                 workdir=cfg.exec_workdir,
                 image=cfg.exec_docker_image,
                 docker_ok=docker_ok,
+                sandbox_max_bytes=cfg.exec_sandbox_max_bytes,
+                wrap_timeout=wrap_timeout,
+                empty_resolv=empty_resolv,
             ),
             bot_username=bot_username,
             limiter=RateLimiter(cfg.rate_limit_capacity, cfg.rate_limit_refill_s),

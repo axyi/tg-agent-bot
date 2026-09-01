@@ -33,5 +33,10 @@ was verified by key name; no secret value was ever displayed, logged or copied.
 
 ## Outcome
 
-All five gates green on the first full run; 0/5 repair cycles used.
+`[doc-fix v1.1]` — reconciled per REQ-V11-DOC-06 with `docs/reports/report-v1.md`,
+which previously stated a different count for a different thing (fix cycles
+spent after the review, not gate-repair cycles during the first run):
+
+0/5 gate-repair cycles on the first full gate run; 1 additional fix round
+applied after the clean-context code review.
 See `docs/reports/report-v1.md`.

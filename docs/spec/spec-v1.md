@@ -1020,9 +1020,12 @@ reflects the surviving registry.
 
 **REQ-V1-VIS-02 (MUST)** Status message, entirely best-effort: when the
 first tool-carrying round of a run begins, send `⚙️ working…` and remember
-the returned `message_id`. Before each subsequent `exec`/`fetch` execution,
+the returned `message_id`. Before each execution, including the first,
 edit it to `⚙️ {tool}: {first argument}…` (rendered text truncated to 64
-characters, redacted). When the run finishes, edit it to `✅ done`. Every
+characters, redacted). `[doc-fix v1.1]` — corrected from "each subsequent"
+to match delivered behaviour: editing before the first execution too is
+strictly more informative and is what the tests pin (T-V1-VIS-01).
+When the run finishes, edit it to `✅ done`. Every
 Telegram error in this flow (including from the retry helper) is caught,
 logged redacted, and disables further edits for this run — the run itself
 is never affected. No status message is sent for runs that use no tools.
@@ -1233,7 +1236,7 @@ unmodified (10-field `Config(...)` calls, `build_payload("m", [], None)`,
 | ID | Asserts |
 |---|---|
 | T-V1-DK-01 | `build_docker_argv` returns exactly the REQ-V1-DK-03 list for a sample argv (flag-for-flag, order included) |
-| T-V1-DK-02 | the generated argv contains `--network none`, `--read-only`, `--cap-drop ALL`, `--pull never`, the sandbox mount and **no other mount**; `--env` values are exactly the three allowed ones |
+| T-V1-DK-02 | the generated argv contains `--network none`, `--read-only`, `--cap-drop ALL`, `--pull never`, the sandbox mount and **no other mount**; `--env` **flags the bot passes** are exactly the three allowed ones `[doc-fix v1.1]` — the container's *resulting* environment additionally carries the image's own public build-time variables (`HOSTNAME`, `GPG_KEY`, `PYTHON_VERSION`, `PYTHON_SHA256`); this assertion covers the argv, not the runtime environment |
 | T-V1-DK-03 | `docker_ok=False` → `run_command_docker` returns the unavailable-envelope without spawning anything (`subprocess` monkeypatched to fail the test) |
 | T-V1-DK-04 | with a stub `docker` executable on PATH (a python script in `tmp_path`): exit 125 with stderr → the docker-level error envelope (redacted, ≤200 chars); exit 7 → a normal envelope with `exit_code == 7` and the `notice` key |
 | T-V1-DK-05 | stub docker that sleeps past the timeout → `timed_out is True`, `exit_code != 0`, and the stub recorded a `docker kill <name>` invocation |

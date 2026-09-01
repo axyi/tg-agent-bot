@@ -56,3 +56,30 @@ write ×1.25, cache read ×0.1). Inference the *bot* itself spent during the
 Appendix-B probes is separate and negligible: a handful of LM Studio calls
 (local, free) and two OpenRouter calls on `google/gemini-2.5-flash-lite` at
 $0.10/$0.40 per 1M tokens — well under a cent.
+
+| 25 | v1.1 main session — preconditions, section-9.2 tests + section-9.1 amendments (observed the expected failures), the four mutation-check proofs, `config.py`/`storage.py`/`agent.py`/`tools.py`/`bot.py` in the order of section 8, five gates, Appendix-B live driver (C1–C7 + B1/B3/B4/B10 regression), documentation (`.env.example`, `.gitignore`, README, both spec doc-fixes, prompts 03/04/05, `report-v1.md` reconciliation), the review's `_record_sandbox_quota` completeness fix, the report, this table, and the final commit | claude-sonnet-5 | in 504 (uncached) + 534,939 (cache write) + 81,416,730 (cache read), out 229,845 — measured from the local Claude Code session transcript, per-request `usage` fields deduplicated by `requestId`, re-measured immediately before the commit | ≈$19.92 (estimate at public API prices: $2/$10 per MTok in/out, cache write ×1.25, cache read ×0.1; actual billing: flat-rate subscription) |
+| 26 | v1.1 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/06-code-review-v1.1.md`) | claude-sonnet-5 (subagent default) | 158,889 total (harness-reported aggregate; in/out/cache split not exposed to the parent session — unlike rows 1–24, the transcript backing this number is an async task-output file the harness instructs the parent session not to read) | not computed — the split needed for the cache-aware formula above is unavailable |
+| **Σ** (rows 25–26, one `go` run) | | claude-sonnet-5 | 82,182,018 (row 25) + 158,889 aggregate (row 26) | ≈$19.92 + unknown (row 26) |
+
+Rows 25–26 are the spec-v1.1 implementation run (`go docs/spec/spec-v1.1.md`,
+prompt `docs/prompts/05-go-spec-v1.1.md`), covering the whole patch end to
+end: tests, implementation, five gates (one of which was additionally re-run
+with `docker` removed from `PATH` to confirm no test shells out to a real
+daemon), the Appendix-B live driver script, the `code-reviewer` subagent's
+review, its one fix cycle (1/5), and this report. Unlike the v0 and v1 runs,
+this harness exposes the full per-request `usage` block directly in the
+local session transcript, so row 25 needed no separate after-the-fact
+reconstruction — the numbers above are a direct aggregation of that file
+(249 requests as of the re-measurement taken immediately before this commit),
+not an estimate. That re-measurement is itself the final action before the
+commit records it, so row 25 necessarily excludes the handful of tokens this
+commit step itself will spend — a residual, unavoidable undercount rather than
+a stale one. The subagent call is asynchronous and its
+transcript lives in a task-output file this session is explicitly instructed
+not to read (to avoid pulling tool-call noise into context), so row 26 uses
+only the aggregate the harness reported back in the task-completion
+notification. Inference the *bot* itself spent during the Appendix-B driver
+is separate and effectively free: LM Studio is local, and no OpenRouter call
+was made at all — the throwaway `OPENROUTER_API_KEY` was a synthetic canary
+that was deliberately never validated (`LLM_PROVIDER=lmstudio`,
+`LLM_FAILOVER=off`).
