@@ -16,6 +16,18 @@
 | 12 | implementation step 10 — `README.md`, prompt log, this table | claude-opus-5 | unknown | unknown |
 | 13 | implementation step 11 — the four acceptance gates + code review | claude-opus-5 | unknown | unknown |
 | **Σ** (rows 3–13, one continuous session) | | claude-opus-5 | in 14.78M (160 uncached + 260k cache-write + 14.52M cache-read), out 148.5k — measured from the local session transcript | ≈$12.60 (estimate at public API prices; actual billing: flat-rate subscription) |
+| 14 | spec-v1 authoring (writer + reviewer agents, separate session) | claude-fable-5 (lab session) | ~unknown (separate session; not measured here) | — |
+| 15 | v1 step 1 — preconditions: `.env` key-name checks, `docker pull python:3.13-slim`, LM Studio and OpenRouter model queries, `OPENROUTER_MODEL` appended; `.env.example`, `.gitignore` | claude-opus-5 | unknown | unknown |
+| 16 | v1 step 2 — the four new test files plus the section-9.1 amendments; first `pytest` observed failing (6 collection errors) | claude-opus-5 | unknown | unknown |
+| 17 | v1 step 3 — `config.py` (new variables, secret registration, sandbox placement) | claude-opus-5 | unknown | unknown |
+| 18 | v1 step 4 — `storage.py` (schema v2 + migration, summaries, budget-aware loader, DB chmod) | claude-opus-5 | unknown | unknown |
+| 19 | v1 step 5 — `tools.py` (docker argv/probe/runner, `_run_process`, `fetch_url`, audit, catalog) and both skills | claude-opus-5 | unknown | unknown |
+| 20 | v1 step 6 — `llm/base.py`, `llm/lmstudio.py`, `llm/openrouter.py`, `llm/failover.py`, `llm/__init__.py` | claude-opus-5 | unknown | unknown |
+| 21 | v1 step 7 — `agent.py` (repair rounds, truncation notice, token budget, interrupt, goals, summarizer) | claude-opus-5 | unknown | unknown |
+| 22 | v1 step 8 — `bot.py` (pipeline order, rate limiter, commands, status message, send retry, `--selftest-live`) | claude-opus-5 | unknown | unknown |
+| 23 | v1 step 9 — `README.md`, `AGENTS.md` | claude-opus-5 | unknown | unknown |
+| 24 | v1 step 10 — five gates, Appendix-B acceptance probes, clean-context review, fix cycle 1/5, report | claude-opus-5 | unknown | unknown |
+| **Σ** (rows 15–24, one continuous session + the review subagent) | | claude-opus-5 | in 35.51M (280 uncached + 692k cache-write + 34.82M cache-read), out 243.3k — measured from the local session transcripts | ≈$27.82 (estimate at public API prices; actual billing: flat-rate subscription) |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.
@@ -31,3 +43,16 @@ read ×0.1) — the session actually ran on a flat-rate subscription. The table 
 its original five columns — the spec's REQ-EC-11 names a six-column variant
 (`Tokens in` / `Tokens out`), but the instruction to keep the existing columns
 takes precedence over the parenthetical.
+
+Rows 15–24 are the spec-v1 implementation run (`go docs/spec/spec-v1.md`, prompt
+`docs/prompts/03-go-spec-v1.md`), one row per stage of that spec's section-8
+implementation order. As in the v0 run the harness exposes no per-request
+counts to the agent, so the per-step cells stay `unknown`; the Σ row was measured
+afterwards from the local Claude Code transcripts — the main session (108
+requests) plus the `code-reviewer` subagent's own transcript (29 requests) —
+keeping the final streaming `usage` row per request id. Cost is estimated at
+Anthropic's public price list for claude-opus-5 ($5/$25 per MTok in/out, cache
+write ×1.25, cache read ×0.1). Inference the *bot* itself spent during the
+Appendix-B probes is separate and negligible: a handful of LM Studio calls
+(local, free) and two OpenRouter calls on `google/gemini-2.5-flash-lite` at
+$0.10/$0.40 per 1M tokens — well under a cent.
