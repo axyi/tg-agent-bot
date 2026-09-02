@@ -1042,8 +1042,24 @@ after stage C (before D1). Findings fixed in the same stage's commit.
   basis and date; skipped scenarios; executor token usage (prompts,
   tokens, cost).
 - **REQ-V13-RPT-02 (MUST)** `docs/reports/tg-post-v1.3.md` per AGENTS.md
-  (Russian, < 1500 chars, executor model named, headline numbers: cost per
-  task before → after, success rate before → after, re-sent share, link).
+  (Russian, < 1500 chars, executor model named, link). v1.1 and v1.2 were
+  never posted, so this post covers **v1 → v1.3 as one story**: one line per
+  version (what changed, tests count, executor model), then the v1.3
+  headline numbers (cost per task before → after, success rate before →
+  after, re-sent share) and the cumulative token/cost line of RPT-07 with
+  its caveat. The per-version detail stays in the report; the post links it.
+- **REQ-V13-RPT-07 (MUST)** `report-v1.3.md` has a section **"Cumulative:
+  v1 → v1.3"** built only from files in this repository — `docs/spec/`,
+  `docs/reports/report-v1*.md`, `docs/llm-usage.md` — with two tables:
+  (a) per version: spec (REQ count, size), what was delivered (one line),
+  executor model, tests after the run, gates, bugs found by review / fixed,
+  prompts; (b) per version: tokens in/out and cost, copied from the `Σ` rows
+  of `docs/llm-usage.md` **verbatim including "unknown" and "not computed"
+  cells** — never re-estimated or back-filled; where a cell is not
+  computed, the table says so and a note names the lab ledger
+  (`economics.md`, outside this repository) as the place where the
+  maintainer records measured values. A final line gives the total over
+  the computed cells only, labelled as a lower bound.
 - **REQ-V13-RPT-03 (MUST)** README: new sections "Observability" (`/stats`,
   what is recorded, log lines, pricing env vars, the estimate caveat),
   "Benchmark" (how to run, what the JSON and the report contain, how to
@@ -1102,7 +1118,7 @@ open `.env`". The main context runs gates and benchmark commands itself
 | TC9 | C | docs: RPT-03, RPT-04 (README, AGENTS.md, `.env.example`) | sections touched |
 | — | C | main: gates 1–6, commit **C3** | — |
 | — | D | main: D1 (background), D2, `dashboard.py --compare`, optional 13.4 loop | summaries + verdict |
-| TD1 | D | report writer: RPT-01, RPT-05, RPT-06 from the two `bench-*.md` files and gate outputs (never from JSON) | the report |
+| TD1 | D | report writer: RPT-01, RPT-05, RPT-06, RPT-07 from the two `bench-*.md` files, gate outputs and `docs/reports/report-v1*.md` + `docs/llm-usage.md` (never from JSON) | the report |
 | TD2 | D | Telegram post: RPT-02 from `report-v1.3.md` | the post |
 | — | D | main: commit **C4**, tag `v1.3` | — |
 
