@@ -136,7 +136,7 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 2
+    assert storage.schema_version(conn) == storage.SCHEMA_VERSION
     assert conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
     ).fetchone() is not None
@@ -144,15 +144,15 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
 
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 2
+    assert storage.schema_version(conn) == storage.SCHEMA_VERSION
     conn.close()
 
     ahead = storage.connect(path)
-    ahead.execute("UPDATE schema_version SET version = 3 WHERE id = 1")
+    ahead.execute("UPDATE schema_version SET version = 4 WHERE id = 1")
     ahead.execute("DROP TABLE summaries")
     with pytest.raises(RuntimeError) as raised:
         storage.init_schema(ahead)
-    assert "3" in str(raised.value)
+    assert "4" in str(raised.value)
     # A database from a future version is refused untouched, not half-migrated.
     assert ahead.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
@@ -160,8 +160,8 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
     ahead.close()
 
 
-def test_t_v1_sum_01_fresh_database_is_version_two(conn):
-    assert storage.schema_version(conn) == 2
+def test_t_v1_sum_01_fresh_database_is_at_the_current_version(conn):
+    assert storage.schema_version(conn) == storage.SCHEMA_VERSION
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_summary(conn, conv, USER_ID, json.dumps(VALID_SUMMARY))
     storage.add_summary(conn, conv, USER_ID, json.dumps(dict(VALID_SUMMARY, goal="second")))

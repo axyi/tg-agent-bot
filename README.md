@@ -132,8 +132,11 @@ advice:
    port or a path is rejected with a `ConfigError` naming the offending entry;
 2. **at startup** — every allowlisted domain is resolved once; one that
    resolves to a loopback, private, link-local, multicast, reserved or
-   unspecified address is logged as a warning (not fatal, in case DNS is
-   transiently wrong at boot);
+   unspecified address is **fatal**: startup raises a `ConfigError` naming
+   the domain, the address and its scope, and the bot refuses to start.
+   Only a *failed* lookup is non-fatal — DNS can be transiently wrong at
+   boot, so an unresolvable entry is logged as a warning and startup
+   continues with layer 3 still in force;
 3. **at request time** — the initial URL and every redirect hop are resolved
    again immediately before the request, and refused if the resolved address
    falls in any of those same forbidden scopes.
@@ -224,9 +227,11 @@ leaves its container running, holding its memory and CPU slice. Three layers
 close this:
 
 1. every container carries the `tgexec=1` label;
-2. at startup, when Docker is available, the bot runs `docker ps -aq --filter
-   label=tgexec=1` and force-removes whatever it finds, logging how many it
-   reaped;
+2. at startup, when Docker is available, the bot lists every container
+   carrying that label together with its `tgexec-owner` label and
+   force-removes only the genuinely orphaned ones — an empty owner label (a
+   v1.1-era container) or one naming a process that is no longer alive. It
+   logs how many it reaped and how many it skipped as still-owned;
 3. when the image provides GNU `timeout` (probed once at startup), the command
    inside the container is wrapped in `timeout --kill-after=5 <budget>`, so the
    container terminates on its own even when no parent is left to kill it. If
@@ -284,6 +289,14 @@ disables `exec` until the operator clears the sandbox — a self-inflicted
 denial of service the model can trigger cheaply. The limit is set high enough
 that ordinary work never approaches it, and failing closed is preferred to an
 unbounded or silently-partial scan.
+
+**`EXEC_SANDBOX_MAX_BYTES` counts file contents, not the disk entries cost.**
+The scan sums the sizes of *regular files* only, so directories, symlinks and
+empty files consume real disk — an inode and a directory-entry slot each —
+while contributing nothing to the total the quota compares against. A model
+that fills the sandbox with empty files therefore stays under the byte limit;
+what bounds that case is the 200,000-entry cap above (and, on a small volume,
+the filesystem's own inode limit), not `EXEC_SANDBOX_MAX_BYTES`.
 
 **The sandbox is scratch space and is emptied on every start by default:**
 `EXEC_SANDBOX_CLEAN_ON_START=true` is the default, and at every startup the

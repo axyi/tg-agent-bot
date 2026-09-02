@@ -29,6 +29,9 @@ class LMStudioClient:
         self.context_length = context_length
         self._client = client
 
+    def describe(self) -> tuple[str, str]:
+        return ("lmstudio", self.model)
+
     def complete(
         self,
         messages: list[dict],

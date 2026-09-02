@@ -5,6 +5,7 @@ can share configuration and redaction without an import cycle.
 """
 
 import ipaddress
+import math
 import os
 import re
 from collections.abc import Mapping
@@ -80,6 +81,11 @@ class Config:
     exec_sandbox_max_bytes: int = DEFAULT_EXEC_SANDBOX_MAX_BYTES
     # v1.2 addition (REQ-V12-QTA-03).
     exec_sandbox_clean_on_start: bool = True
+    # v1.3 additions (REQ-V13-PRE-04): the three pricing variables. Empty is the
+    # default everywhere — an unpriced call stores NULL rather than a guess.
+    llm_price_ref_model: str = ""
+    llm_price_input_usd_per_mtok: float | None = None
+    llm_price_output_usd_per_mtok: float | None = None
 
 
 def register_secret(value: str) -> None:
@@ -171,6 +177,8 @@ def load_config(
             raise ConfigError("OPENROUTER_MODEL is required when LLM_PROVIDER is openrouter")
     lmstudio_base_url = lmstudio_base_url.rstrip("/")
 
+    manual_input_price, manual_output_price = _parse_manual_prices(source)
+
     # Paths are resolved before anything is created on disk: REQ-V1-CFG-03 must be
     # able to refuse a project-root sandbox without having chmod-ed it first.
     exec_workdir = _resolve(_value(source, "EXEC_WORKDIR") or "./sandbox")
@@ -210,6 +218,9 @@ def load_config(
         exec_sandbox_clean_on_start=_parse_bool(
             source, "EXEC_SANDBOX_CLEAN_ON_START", True
         ),
+        llm_price_ref_model=_value(source, "LLM_PRICE_REF_MODEL"),
+        llm_price_input_usd_per_mtok=manual_input_price,
+        llm_price_output_usd_per_mtok=manual_output_price,
     )
 
 
@@ -361,6 +372,37 @@ def _parse_float(source: Mapping[str, str], key: str, default: float, high: floa
     if not 0 < parsed <= high:
         raise ConfigError(f"{key} must be greater than 0 and at most {high:g}, got: {raw}")
     return parsed
+
+
+def _parse_manual_prices(
+    source: Mapping[str, str],
+) -> tuple[float | None, float | None]:
+    """The manual fallback prices of REQ-V13-PRE-04: both or neither. Half a
+    pair would price one half of every call and silently omit the other."""
+    keys = ("LLM_PRICE_INPUT_USD_PER_MTOK", "LLM_PRICE_OUTPUT_USD_PER_MTOK")
+    raw_input, raw_output = (_value(source, key) for key in keys)
+    if not raw_input and not raw_output:
+        return None, None
+    for key, raw in zip(keys, (raw_input, raw_output)):
+        if not raw:
+            raise ConfigError(f"{key} is required when {_other(keys, key)} is set")
+    return _parse_price(keys[0], raw_input), _parse_price(keys[1], raw_output)
+
+
+def _other(keys: tuple[str, str], key: str) -> str:
+    return keys[1] if key == keys[0] else keys[0]
+
+
+def _parse_price(key: str, raw: str) -> float:
+    """A price of zero is legitimate (a free model); a negative one is not, and
+    neither is an infinity or a NaN, which would poison every sum built on it."""
+    try:
+        price = float(raw)
+    except ValueError:
+        raise ConfigError(f"{key} must be a number, got: {raw}") from None
+    if not math.isfinite(price) or price < 0:
+        raise ConfigError(f"{key} must be a non-negative number, got: {raw}")
+    return price
 
 
 def _parse_bool(source: Mapping[str, str], key: str, default: bool) -> bool:

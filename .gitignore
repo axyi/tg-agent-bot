@@ -16,3 +16,7 @@ sandbox/
 exec_audit.jsonl
 .resolv-empty
 .claude/agent-memory/
+
+# benchmark harness (spec-v1.3 REQ-V13-BEN-03, REQ-V13-BEN-13)
+.bench/
+docs/assets/bench/*.log

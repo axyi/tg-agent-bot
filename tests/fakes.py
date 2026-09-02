@@ -35,6 +35,10 @@ class FakeLLM:
         # touching that test.
         self.max_tokens_calls = []
 
+    def describe(self):
+        """REQ-V13-OBS-04: `provider`/`model` are NOT NULL columns."""
+        return ("fake", "fake-model")
+
     def complete(self, messages, tool_definitions, *, max_tokens=None):
         # The agent reuses one `messages` list, so snapshot it before it grows.
         self.calls.append((list(messages), tool_definitions))

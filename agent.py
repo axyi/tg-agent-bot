@@ -13,7 +13,7 @@ from collections.abc import Callable
 import config
 import storage
 from config import Config
-from llm.base import LLMClient, LLMError, ToolCall
+from llm.base import CostResolver, LLMClient, LLMError, LLMResponse, ToolCall, describe_client
 from tools import AuditHook, CommandRunner, Fetcher, Skill, execute_tool, tool_specs
 
 ROUND_LIMIT = 8               # logical rounds per user message
@@ -158,6 +158,7 @@ def run_agent(
     recent_goals: list[str] | None = None,
     should_stop: Callable[[], bool] = lambda: False,
     on_tool: Callable[[str, str], None] | None = None,
+    resolve_cost: CostResolver | None = None,
 ) -> str:
     def finish(text: str) -> str:
         # Defence in depth: model output and user input can quote a secret that
@@ -193,10 +194,21 @@ def run_agent(
             request_messages = messages + [{"role": "system", "content": FINAL_INSTRUCTION}]
             request_tools = None
 
+        ts = storage.utc_now_iso()
+        started = time.monotonic()
         try:
             attempts += 1
             response = llm.complete(request_messages, request_tools, max_tokens=max_tokens)
         except LLMError as exc:
+            # Recorded first, before any of the three exits below is taken: a
+            # failed invocation is an invocation (REQ-V13-OBS-04).
+            _record_llm_call(
+                conn, conv_id, llm, resolve_cost,
+                purpose="agent", round_no=round_no, attempt=attempts, ts=ts,
+                latency_ms=_elapsed_ms(started), turn_id=None,
+                messages=request_messages, tools=request_tools,
+                response=None, error_kind=getattr(exc, "kind", "http"),
+            )
             if exc.retryable and attempts < HTTP_ATTEMPT_LIMIT:
                 sleep(RETRY_SLEEP_S)
                 continue                      # same round, same tool policy
@@ -211,6 +223,18 @@ def run_agent(
                 sleep(RETRY_SLEEP_S)
                 continue
             return finish(FALLBACK_LLM_ERROR.format(reason=str(exc)))
+
+        # REQ-V12-ID-01 item 3 and REQ-V13-OBS-04 read the same value: nothing is
+        # inserted into `messages` between here and `add_tool_turn` /
+        # `add_assistant_message`, so this is the turn this call will produce.
+        turn_id = storage.next_turn_id(conn, conv_id)
+        _record_llm_call(
+            conn, conv_id, llm, resolve_cost,
+            purpose="agent", round_no=round_no, attempt=attempts, ts=ts,
+            latency_ms=_elapsed_ms(started), turn_id=turn_id,
+            messages=request_messages, tools=request_tools,
+            response=response, error_kind=None,
+        )
 
         has_content = bool(response.content.strip())
         if not response.tool_calls:
@@ -233,12 +257,11 @@ def run_agent(
 
         # REQ-V12-ID-01 item 3: minted fresh, per round, immediately before use —
         # never once before the `while`, or round 2 would mint call_<T>_0... again.
-        normalized = normalize_tool_calls(
-            response.tool_calls, turn_id=storage.next_turn_id(conn, conv_id)
-        )
+        normalized = normalize_tool_calls(response.tool_calls, turn_id=turn_id)
         results, tools_used = _execute_tool_calls(
             normalized, skills=skills, runner=runner, tools_used=tools_used,
             fetcher=fetcher, audit=audit, on_tool=on_tool,
+            conn=conn, conv_id=conv_id, turn_id=turn_id,
         )
         # REQ-V11-RED-01: the assistant turn is redacted once, before either
         # sink sees it, and the same redacted pair feeds both the database and
@@ -309,11 +332,15 @@ def _execute_tool_calls(
     fetcher: Fetcher | None = None,
     audit: AuditHook | None = None,
     on_tool: Callable[[str, str], None] | None = None,
+    conn: sqlite3.Connection,
+    conv_id: int,
+    turn_id: int,
 ) -> tuple[list[tuple[str, str]], int]:
     executable = normalized[:MAX_TOOL_CALLS_PER_RESPONSE]
     excess = normalized[MAX_TOOL_CALLS_PER_RESPONSE:]
     results: list[tuple[str, str]] = []
     for call in executable:
+        started = time.monotonic()
         if tools_used < TOOL_EXECUTION_LIMIT:
             if on_tool is not None:
                 on_tool(call.name, _first_argument(call))
@@ -322,12 +349,143 @@ def _execute_tool_calls(
                 fetcher=fetcher, audit=audit,
             )
             tools_used += 1
+            outcome = _tool_outcome(result)
         else:
+            # `budget` and `rejected` below win over what `_tool_outcome` would
+            # say: both envelopes carry an `error`, but the reason the model
+            # never saw an answer is the harness, not the tool.
             result = BUDGET_EXHAUSTED_RESULT
+            outcome = "budget"
+        _record_tool_call(conn, conv_id, turn_id, call, result, outcome, _elapsed_ms(started))
         results.append((call.id, result))
     for call in excess:
+        # Never executed, still recorded: REQ-V13-OBS-05 counts what the model
+        # asked for, not only what the harness allowed.
+        _record_tool_call(conn, conv_id, turn_id, call, EXCESS_CALL_RESULT, "rejected", 0)
         results.append((call.id, EXCESS_CALL_RESULT))
     return results, tools_used
+
+
+def _tool_outcome(result: str) -> str:
+    """`error` for an envelope that reports one, `ok` otherwise. A non-zero exit
+    code is not an error of the tool: the command ran and said so."""
+    try:
+        parsed = json.loads(result)
+    except ValueError:
+        return "ok"
+    return "error" if isinstance(parsed, dict) and "error" in parsed else "ok"
+
+
+def _record_tool_call(
+    conn: sqlite3.Connection,
+    conv_id: int,
+    turn_id: int,
+    call: ToolCall,
+    result: str,
+    outcome: str,
+    duration_ms: int,
+) -> None:
+    storage.add_tool_call(
+        conn,
+        conv_id=conv_id,
+        turn_id=turn_id,
+        tool_call_id=call.id,
+        # The wire name, never the model's raw string: the column must not become
+        # a channel for attacker-chosen text (REQ-V12-ID-01 item 4).
+        tool=_wire_name(call),
+        ts=storage.utc_now_iso(),
+        input_chars=len(call.arguments),
+        # Stage A shows the model exactly what the tool produced; REQ-V13-TOO-03
+        # is what later makes the two measures differ.
+        raw_output_chars=len(result),
+        output_chars=len(result),
+        output_tokens_est=estimate_tokens(result),
+        duration_ms=duration_ms,
+        outcome=outcome,
+    )
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+_PROMPT_ROLES = ("system", "user", "assistant", "tool")
+
+
+def _prompt_chars_by_role(
+    messages: list[dict], tools: list[dict] | None
+) -> tuple[int, dict[str, int]]:
+    """The size of the request, split the way the token audit reads it. `tools`
+    is the schema block, not a message role, and gets its own bucket."""
+    by_role = {"system": 0, "tools": 0, "user": 0, "assistant": 0, "tool": 0}
+    for message in messages:
+        role = str(message.get("role") or "")
+        # Anything else can only be one of this module's own request-time
+        # nudges, which are sent as system messages.
+        key = role if role in _PROMPT_ROLES else "system"
+        by_role[key] += len(json.dumps(message, ensure_ascii=False))
+    if tools is not None:
+        by_role["tools"] = len(json.dumps(tools, ensure_ascii=False))
+    return sum(by_role.values()), by_role
+
+
+def _record_llm_call(
+    conn: sqlite3.Connection,
+    conv_id: int,
+    llm: LLMClient,
+    resolve_cost: CostResolver | None,
+    *,
+    purpose: str,
+    round_no: int,
+    attempt: int,
+    ts: str,
+    latency_ms: int,
+    turn_id: int | None,
+    messages: list[dict],
+    tools: list[dict] | None,
+    response: LLMResponse | None,
+    error_kind: str | None,
+) -> None:
+    """One row per `llm.complete` invocation (REQ-V13-OBS-04).
+
+    `describe()` is read *after* the invocation, so a failover performed inside
+    it names the client that actually served the call. The price is whatever
+    `resolve_cost` returns and nothing else: this function never fetches, reads
+    `bot_state` or computes a price of its own.
+    """
+    provider, model = describe_client(llm)
+    usage = response.usage if response is not None else None
+    cost_usd, cost_basis = (None, None)
+    if resolve_cost is not None:
+        cost_usd, cost_basis = resolve_cost(provider, model, usage)
+    prompt_chars, by_role = _prompt_chars_by_role(messages, tools)
+    storage.add_llm_call(
+        conn,
+        conv_id=conv_id,
+        turn_id=turn_id,
+        purpose=purpose,
+        round_no=round_no,
+        attempt=attempt,
+        ts=ts,
+        provider=provider,
+        model=model,
+        prompt_chars=prompt_chars,
+        prompt_chars_by_role=by_role,
+        messages_n=len(messages),
+        tools_exposed=len(tools) if tools else 0,
+        latency_ms=latency_ms,
+        prompt_tokens=None if usage is None else usage.prompt_tokens,
+        completion_tokens=None if usage is None else usage.completion_tokens,
+        total_tokens=None if usage is None else usage.total_tokens,
+        cached_tokens=None if usage is None else usage.cached_tokens,
+        reasoning_tokens=None if usage is None else usage.reasoning_tokens,
+        reasoning_chars=0 if response is None else response.reasoning_chars,
+        finish_reason=None if response is None else (response.finish_reason or None),
+        tool_calls_n=0 if response is None else len(response.tool_calls),
+        error_kind=error_kind,
+        cost_usd=cost_usd,
+        cost_basis=cost_basis,
+    )
 
 
 def _first_argument(call: ToolCall) -> str:
@@ -353,16 +511,19 @@ def _known_tool_names() -> set[str]:
     return {spec["function"]["name"] for spec in tool_specs()}
 
 
-def _to_wire(call: ToolCall) -> dict:
+def _wire_name(call: ToolCall) -> str:
     # REQ-V12-ID-01 item 4: a name outside the advertised tool set is recorded
     # and transmitted as "unknown" — dispatch itself (execute_tool, called with
     # the untouched `call.name`) is unaffected and still returns its own
     # "unknown tool" envelope for this round.
-    name = call.name if call.name in _known_tool_names() else "unknown"
+    return call.name if call.name in _known_tool_names() else "unknown"
+
+
+def _to_wire(call: ToolCall) -> dict:
     return {
         "id": call.id,
         "type": "function",
-        "function": {"name": name, "arguments": call.arguments},
+        "function": {"name": _wire_name(call), "arguments": call.arguments},
     }
 
 
@@ -385,7 +546,12 @@ def _redact_tool_calls(calls: list[dict]) -> list[dict]:
 # --------------------------------------------------------------------------
 
 def summarize_conversation(
-    conn: sqlite3.Connection, conv_id: int, llm: LLMClient, cfg: Config | None
+    conn: sqlite3.Connection,
+    conv_id: int,
+    llm: LLMClient,
+    cfg: Config | None,
+    *,
+    resolve_cost: CostResolver | None = None,
 ) -> str | None:
     """At most two calls: one ask, one repair. Returns normalised JSON or `None`.
 
@@ -395,14 +561,15 @@ def summarize_conversation(
     base = storage.load_context_messages(conn, conv_id, CONTEXT_WINDOW_MESSAGES)
     messages = base + [{"role": "user", "content": SUMMARY_PROMPT}]
 
-    parsed, reason = _ask_for_summary(llm, messages)
+    record = (conn, conv_id, resolve_cost)
+    parsed, reason = _ask_for_summary(llm, messages, record)
     if parsed is None and reason is not None:
         repair = messages + [{
             "role": "user",
             "content": f"Your reply was not valid JSON ({reason}). "
                        "Return only the JSON object.",
         }]
-        parsed, _ = _ask_for_summary(llm, repair)
+        parsed, _ = _ask_for_summary(llm, repair, record)
     if parsed is None:
         return None
     # The summary is model output on its way to SQLite, so it takes the same
@@ -410,12 +577,31 @@ def summarize_conversation(
     return config.redact(json.dumps(_normalise_summary(parsed), ensure_ascii=False))
 
 
-def _ask_for_summary(llm: LLMClient, messages: list[dict]) -> tuple[dict | None, str | None]:
+def _ask_for_summary(
+    llm: LLMClient, messages: list[dict], record: tuple
+) -> tuple[dict | None, str | None]:
+    conn, conv_id, resolve_cost = record
+    ts = storage.utc_now_iso()
+    started = time.monotonic()
+    # REQ-V13-OBS-04 pins the summary purpose to round 0 and attempt 1; the
+    # repair call is a second row, not a second attempt.
+    common = {
+        "purpose": "summary", "round_no": 0, "attempt": 1, "ts": ts, "turn_id": None,
+        "messages": messages, "tools": None,
+    }
     try:
         response = llm.complete(messages, None, max_tokens=SUMMARY_MAX_TOKENS)
     except LLMError as exc:
+        _record_llm_call(
+            conn, conv_id, llm, resolve_cost, latency_ms=_elapsed_ms(started),
+            response=None, error_kind=getattr(exc, "kind", "http"), **common,
+        )
         log.warning("summarization failed: %s", config.redact(str(exc)))
         return None, None
+    _record_llm_call(
+        conn, conv_id, llm, resolve_cost, latency_ms=_elapsed_ms(started),
+        response=response, error_kind=None, **common,
+    )
     return _parse_summary(response.content)
 
 

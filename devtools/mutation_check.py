@@ -32,6 +32,9 @@ DRIFTED = "drifted"
 # of REQ-V12-TST-02's table (11), one per named security requirement of
 # section 5 (11), the four v1.1 guards whose tests already pass (4), and the
 # two lines REQ-V12-TST-01 restores plus the SSR-02 backstop (2).
+#
+# spec-v1.3 section 12 adds its 20 stage-A rows (51 in all); the 13 rows that
+# section tags C land with the stage-C code they mutate.
 # --------------------------------------------------------------------------
 
 MUTATIONS = [
@@ -326,6 +329,224 @@ MUTATIONS = [
         "replace": "",
         "why": "REQ-V12-SSR-02: carrier-grade NAT must be caught by the is_global backstop",
     },
+    # -- spec-v1.3 section 12, stage A (20) ---------------------------------
+    {
+        "id": "v13-usage-parse-none",
+        "path": "llm/base.py",
+        "find": '        usage=parse_usage(data.get("usage")),\n',
+        "replace": "        usage=None,\n",
+        "why": "REQ-V13-OBS-01: parse_response must hand the parsed usage to the response",
+    },
+    {
+        "id": "v13-cached-tokens-dropped",
+        "path": "llm/base.py",
+        "find": (
+            "        cached_tokens=_as_int(\n"
+            '            prompt_details.get("cached_tokens") if isinstance(prompt_details, dict)'
+            " else None\n"
+            "        ),\n"
+        ),
+        "replace": "        cached_tokens=None,\n",
+        "why": "REQ-V13-OBS-01: a reported cached_tokens count must reach the row",
+    },
+    {
+        "id": "v13-think-not-stripped",
+        "path": "llm/base.py",
+        "find": (
+            "    reasoning_chars += sum(len(block) for block in _THINK_BLOCK.findall(content))\n"
+            '    content = _THINK_BLOCK.sub("", content)\n'
+        ),
+        "replace": (
+            "    reasoning_chars += sum(len(block) for block in _THINK_BLOCK.findall(content))\n"
+        ),
+        "why": "REQ-V13-OBS-02: a balanced <think> block must never reach the user",
+    },
+    {
+        "id": "v13-llm-call-not-recorded-on-error",
+        "path": "agent.py",
+        "find": (
+            "            _record_llm_call(\n"
+            "                conn, conv_id, llm, resolve_cost,\n"
+            '                purpose="agent", round_no=round_no, attempt=attempts, ts=ts,\n'
+            "                latency_ms=_elapsed_ms(started), turn_id=None,\n"
+            "                messages=request_messages, tools=request_tools,\n"
+            '                response=None, error_kind=getattr(exc, "kind", "http"),\n'
+            "            )\n"
+        ),
+        "replace": "",
+        "why": "REQ-V13-OBS-04: a failed invocation is an invocation and gets its own row",
+    },
+    {
+        "id": "v13-resent-formula",
+        "path": "metrics.py",
+        "find": "        fresh = prompt if previous is None else max(0, prompt - previous)\n",
+        "replace": "        fresh = prompt\n",
+        "why": "REQ-V13-OBS-08: new_i is the growth over the previous prompt, not all of it",
+    },
+    {
+        "id": "v13-cost-drops-output",
+        "path": "llm/pricing.py",
+        "find": (
+            "        + cached * cached_rate\n"
+            "        + completion * price.output_usd_per_mtok\n"
+        ),
+        "replace": "        + cached * cached_rate\n",
+        "why": "REQ-V13-PRC-01: the cost formula must charge the completion tokens",
+    },
+    {
+        "id": "v13-cost-none-as-zero",
+        "path": "llm/pricing.py",
+        "find": (
+            "    if prompt is None or completion is None:\n"
+            "        return None\n"
+        ),
+        "replace": (
+            "    if prompt is None or completion is None:\n"
+            "        return 0.0\n"
+        ),
+        "why": "REQ-V13-PRC-01: a partially reported usage stores NULL, never a cost of 0.0",
+    },
+    {
+        "id": "v13-bench-gate-threshold",
+        "path": "devtools/bench.py",
+        "find": "COST_GATE_FACTOR = 0.70\n",
+        "replace": "COST_GATE_FACTOR = 1.00\n",
+        "why": "REQ-V13-BEN-12: the gate demands a 30% cut, not merely no regression",
+    },
+    {
+        "id": "v13-bench-skipset-ignored",
+        "path": "devtools/bench.py",
+        "find": '    "scenarios_sha256", "skipped_scenarios", "constants", "config_sha256",\n',
+        "replace": '    "scenarios_sha256", "constants", "config_sha256",\n',
+        "why": "REQ-V13-BEN-12: two files with different skip sets may not be compared",
+    },
+    {
+        "id": "v13-bench-scenario-hash-ignored",
+        "path": "devtools/bench.py",
+        "find": '    "scenarios_sha256", "skipped_scenarios", "constants", "config_sha256",\n',
+        "replace": '    "skipped_scenarios", "constants", "config_sha256",\n',
+        "why": "REQ-V13-BEN-12: a differing scenarios_sha256 makes two files incomparable",
+    },
+    {
+        "id": "v13-bench-candidate-pricing",
+        "path": "devtools/bench.py",
+        "find": (
+            "    total_b = _recomputed_total(baseline, price)\n"
+            "    total_c = _recomputed_total(candidate, price)\n"
+        ),
+        "replace": (
+            "    total_b = _recomputed_total(baseline, price)\n"
+            "    total_c = _recomputed_total(\n"
+            '        candidate, _price_from_meta(candidate["meta"].get("pricing"))\n'
+            "    )\n"
+        ),
+        "why": "REQ-V13-BEN-12: both sides are priced with the baseline's snapshot",
+    },
+    {
+        "id": "v13-bench-quality-minus-one",
+        "path": "devtools/bench.py",
+        "find": "QUALITY_GATE_SLACK = 0.02\n",
+        "replace": "QUALITY_GATE_SLACK = 0.03\n",
+        "why": "REQ-V13-BEN-12: at 36 runs one lost run is 2.8 pp and must fail the gate",
+    },
+    {
+        "id": "v13-bench-redact-detail",
+        "path": "devtools/bench.py",
+        "find": (
+            "        if isinstance(value, list):\n"
+            "            return [walk(item) for item in value]\n"
+        ),
+        "replace": (
+            "        if isinstance(value, list):\n"
+            "            return [scrub(item) if isinstance(item, str) else item"
+            " for item in value]\n"
+        ),
+        "why": "REQ-V13-BEN-10: redaction recurses into arrays of objects (checks[].detail)",
+    },
+    {
+        "id": "v13-bench-turn-zero-based",
+        "path": "devtools/bench_scenarios.py",
+        "find": (
+            "        return len(non_command_turns(self.turns)) - 1 "
+            "if turn == LAST_TURN else turn - 1\n"
+        ),
+        "replace": (
+            "        return len(non_command_turns(self.turns)) - 1 "
+            "if turn == LAST_TURN else turn\n"
+        ),
+        "why": "REQ-V13-BEN-08: a positive turn is one-based over the non-command turns",
+    },
+    {
+        "id": "v13-bench-timeout-continues",
+        "path": "devtools/bench.py",
+        "find": (
+            "        if aborted is not None:\n"
+            "            break\n"
+            "\n"
+            "    if aborted is not None:\n"
+            '        meta["aborted"] = aborted\n'
+        ),
+        "replace": (
+            "    if aborted is not None:\n"
+            '        meta["aborted"] = aborted\n'
+        ),
+        "why": "REQ-V13-BEN-05: a timeout aborts the run; no later scenario is started",
+    },
+    {
+        "id": "v13-bench-check-trusts-summary",
+        "path": "devtools/bench.py",
+        "find": (
+            '    expected_summary = summarize(runs, meta["skipped_scenarios"], meta["repeats"])\n'
+            '    _compare_summary(summary, expected_summary, "summary")\n'
+        ),
+        "replace": '    _compare_summary(summary, summary, "summary")\n',
+        "why": "REQ-V13-BEN-01: check recomputes the summary instead of trusting the file",
+    },
+    {
+        "id": "v13-usage-missing-ignores-failed",
+        "path": "devtools/bench.py",
+        "find": (
+            '        row["error_kind"] is None\n'
+            '        and (row["prompt_tokens"] is None or row["completion_tokens"] is None)\n'
+        ),
+        "replace": (
+            '        (row["prompt_tokens"] is None or row["completion_tokens"] is None)\n'
+        ),
+        "why": "REQ-V13-BEN-01: a failed call's NULL token columns are not usage_missing",
+    },
+    {
+        "id": "v13-openrouter-cap-ignored",
+        "path": "devtools/bench.py",
+        "find": (
+            '    if cfg.llm_provider == "openrouter" '
+            "and arguments.max_cost_usd is None:\n"
+        ),
+        "replace": (
+            '    if False and cfg.llm_provider == "openrouter" '
+            "and arguments.max_cost_usd is None:\n"
+        ),
+        "why": "REQ-V13-BEN-02: an OpenRouter run without --max-cost-usd is refused",
+    },
+    {
+        "id": "v13-symlink-chmod",
+        "path": "bot.py",
+        "find": (
+            "            if os.path.islink(path):\n"
+            "                continue\n"
+        ),
+        "replace": "",
+        "why": "REQ-V13-CO-01: the recovery chmod must skip a symlink, never its target",
+    },
+    {
+        "id": "v13-only-typo-exit0",
+        "path": "devtools/mutation_check.py",
+        "find": '    if args.only is not None and all(m["id"] != args.only for m in MUTATIONS):\n',
+        "replace": (
+            "    if False and args.only is not None "
+            'and all(m["id"] != args.only for m in MUTATIONS):\n'
+        ),
+        "why": "REQ-V13-CO-06: --only with an unknown id exits 1, never a clean zero",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -477,6 +698,12 @@ def main(argv: list[str] | None = None) -> int:
         for mutation in MUTATIONS:
             print(f"{mutation['id']}\t{mutation['path']}\t{mutation['why']}")
         return 0
+
+    # REQ-V13-CO-06: a mistyped id used to select the empty set and report a
+    # clean gate over zero mutations. Fail loudly instead.
+    if args.only is not None and all(m["id"] != args.only for m in MUTATIONS):
+        print(f"unknown mutation id: {args.only}", file=sys.stderr)
+        return 1
 
     return run_all(MUTATIONS, only=args.only)
 

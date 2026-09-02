@@ -25,11 +25,12 @@ import httpx
 
 import agent
 import config
+import metrics
 import storage
 import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
-from llm import build_llm_client, provider_is_configured
-from llm.base import LLMResponse, ToolCall
+from llm import build_llm_client, pricing, provider_is_configured
+from llm.base import CostResolver, LLMResponse, ToolCall
 
 TELEGRAM_API_HOST = "https://api.telegram.org"
 LONG_POLL_TIMEOUT_S = 50
@@ -44,6 +45,8 @@ MAX_MESSAGE_CHARS = 4000          # the accepted length of one user message
 STATUS_MAX_CHARS = 64
 LIVE_READ_TIMEOUT_S = 30.0
 PROVIDER_OVERRIDE_KEY = "provider_override"
+PRICING_STATE_KEY = "pricing_json"    # REQ-V13-PRC-02: the persisted price snapshot
+STATS_MAX_CHARS = 3500            # REQ-V13-OBS-07
 REAP_TIMEOUT_S = 15.0             # REQ-V11-ORP-02
 
 NON_TEXT_REPLY = "I can only process plain text messages."
@@ -387,6 +390,13 @@ def _remove_sandbox_entry(entry: Path) -> None:
     shutil.rmtree(entry, onexc=lambda _func, path, _exc: failed_paths.append(path))
     if failed_paths:
         for path in failed_paths:
+            # REQ-V13-CO-01: `os.chmod` follows symlinks, so a symlink the
+            # first pass could not unlink would have its *target* — a
+            # bot-owned file anywhere on the host — chmod-ed to `u+rwX`.
+            # A symlink never needs a mode change: unlinking it needs only
+            # its parent directory's mode, which this same loop fixes.
+            if os.path.islink(path):
+                continue
             os.chmod(path, stat.S_IRWXU)
         shutil.rmtree(entry)
 
@@ -528,6 +538,55 @@ def load_provider_override(conn: sqlite3.Connection) -> str | None:
     return value if value in PROVIDERS else None
 
 
+def build_cost_resolver(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    client: httpx.Client,
+    *,
+    now: str | None = None,
+) -> CostResolver:
+    """The one path from a price to a stored row (REQ-V13-PRC-02).
+
+    Prices are fetched **once**, here at startup, and never again per message.
+    Nothing about this is allowed to block the bot: an unreachable `/models`
+    logs a warning and leaves the resolver to fall through to the manual env
+    prices and then to the snapshot an earlier run persisted.
+    """
+    stale = _load_pricing_state(conn)
+    fetched_at = now or storage.utc_now_iso()
+    snapshot = {}
+    try:
+        snapshot = pricing.fetch_openrouter_prices(
+            client,
+            (cfg.openrouter_model, cfg.llm_price_ref_model),
+            now=fetched_at,
+        )
+    except pricing.PricingError as exc:
+        log.warning("fetching OpenRouter prices failed: %s", redact(str(exc)))
+    if snapshot:
+        storage.set_state(
+            conn,
+            PRICING_STATE_KEY,
+            json.dumps(
+                pricing.snapshot_to_state(snapshot, fetched_at=fetched_at),
+                ensure_ascii=False,
+            ),
+        )
+    return pricing.make_resolver(cfg, snapshot, snapshot_basis=None, stale=stale)
+
+
+def _load_pricing_state(conn: sqlite3.Connection) -> dict | None:
+    raw = storage.get_state(conn, PRICING_STATE_KEY)
+    if not raw:
+        return None
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        log.warning("the persisted price snapshot is not valid json; ignored")
+        return None
+    return state if isinstance(state, dict) else None
+
+
 def process_update(
     update: dict,
     *,
@@ -543,6 +602,7 @@ def process_update(
     docker_version: str | None = None,
     docker_ok: bool = False,
     set_provider: Callable[[str | None], object] | None = None,
+    resolve_cost: CostResolver | None = None,
 ) -> None:
     if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
         log.warning("update without a usable update_id ignored")
@@ -596,16 +656,19 @@ def process_update(
             return
         name = command.casefold()
         if name == "/new":
-            _handle_new(conn, tg, cfg, llm, chat_id, from_id)
+            _handle_new(conn, tg, cfg, llm, chat_id, from_id, resolve_cost)
             return
         if name == "/status":
             _send(tg, chat_id, split_message(_render_status(
                 conn, cfg, llm, skills, docker_version, docker_ok,
-                load_provider_override(conn),
+                load_provider_override(conn), from_id,
             )))
             return
+        if name == "/stats":
+            _send(tg, chat_id, split_message(_render_stats(conn, from_id)))
+            return
         if name == "/summary":
-            _handle_summary(conn, tg, cfg, llm, chat_id, from_id)
+            _handle_summary(conn, tg, cfg, llm, chat_id, from_id, resolve_cost)
             return
         if name == "/model":
             parts = stripped.split()
@@ -634,6 +697,7 @@ def process_update(
         recent_goals=storage.recent_goals(conn, from_id),
         should_stop=lambda: _shutdown,
         on_tool=status.on_tool,
+        resolve_cost=resolve_cost,
     )
     status.finish()
     _send(tg, chat_id, split_message(reply))
@@ -651,11 +715,16 @@ def _write_audit(path: Path, tg_user_id: int, conv_id: int, record: dict) -> Non
     )
 
 
-def _handle_new(conn, tg, cfg: Config, llm, chat_id: int, from_id: int) -> None:
+def _handle_new(
+    conn, tg, cfg: Config, llm, chat_id: int, from_id: int,
+    resolve_cost: CostResolver | None = None,
+) -> None:
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     if len(storage.load_context_messages(conn, conv_id, agent.CONTEXT_WINDOW_MESSAGES)) >= 2:
         try:
-            summary = agent.summarize_conversation(conn, conv_id, llm, cfg)
+            summary = agent.summarize_conversation(
+                conn, conv_id, llm, cfg, resolve_cost=resolve_cost
+            )
             if summary is not None:
                 storage.add_summary(conn, conv_id, from_id, summary)
         except Exception as exc:      # summarization never blocks /new
@@ -664,13 +733,18 @@ def _handle_new(conn, tg, cfg: Config, llm, chat_id: int, from_id: int) -> None:
     _send(tg, chat_id, [NEW_CONVERSATION_REPLY])
 
 
-def _handle_summary(conn, tg, cfg: Config, llm, chat_id: int, from_id: int) -> None:
+def _handle_summary(
+    conn, tg, cfg: Config, llm, chat_id: int, from_id: int,
+    resolve_cost: CostResolver | None = None,
+) -> None:
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     if len(storage.load_context_messages(conn, conv_id, agent.CONTEXT_WINDOW_MESSAGES)) < 2:
         _send(tg, chat_id, [NOTHING_TO_SUMMARIZE_REPLY])
         return
     try:
-        summary = agent.summarize_conversation(conn, conv_id, llm, cfg)
+        summary = agent.summarize_conversation(
+            conn, conv_id, llm, cfg, resolve_cost=resolve_cost
+        )
     except Exception as exc:
         log.warning("summarizing on request failed: %s", redact(str(exc)))
         summary = None
@@ -704,7 +778,9 @@ def _render_status(
     docker_version: str | None,
     docker_ok: bool,
     override: str | None,
+    from_id: int,
 ) -> str:
+    here = metrics.conversation_stats(conn, storage.active_conversation_id(conn, from_id))
     uptime = max(0, int(time.monotonic() - _started_at))
     days, rest = divmod(uptime, 86400)
     hours, rest = divmod(rest, 3600)
@@ -719,8 +795,86 @@ def _render_status(
         f"Provider failures: {_render_failures(llm)}\n"
         f"Exec backend: {backend}\n"
         f"DB: {db_size} bytes, schema v{storage.schema_version(conn)}\n"
-        f"Skills: {len(skills)} loaded"
+        f"Skills: {len(skills)} loaded\n"
+        f"Tokens this conversation: in {here.tokens_in or 0} / out {here.tokens_out or 0}"
     )
+
+
+def _render_stats(conn, from_id: int) -> str:
+    """REQ-V13-OBS-07. Two columns — this conversation and all time — over the
+    rows `agent.py` recorded. Reading them never opens a conversation."""
+    conv_id = storage.active_conversation_id(conn, from_id)
+    here = metrics.conversation_stats(conn, conv_id)
+    everywhere = metrics.global_stats(conn)
+    return _fit([
+        "Stats (this conversation | all time)",
+        f"LLM calls: {here.calls} | {everywhere.calls} "
+        f"(errors {here.errors} | {everywhere.errors})",
+        f"Tokens in: {_pair(here.tokens_in, everywhere.tokens_in)} "
+        f"(cached: {_pair(here.cached_tokens, everywhere.cached_tokens)}, "
+        f"reasoning: {_pair(here.reasoning_tokens, everywhere.reasoning_tokens)})",
+        f"Tokens out: {_pair(here.tokens_out, everywhere.tokens_out)}",
+        f"Est. cost: {_render_cost(here.cost_usd)} | {_render_cost(everywhere.cost_usd)} "
+        f"(basis: {_pair(here.cost_basis, everywhere.cost_basis)})",
+        f"Avg prompt/call: {_pair(here.avg_prompt, everywhere.avg_prompt)}; "
+        f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}",
+        f"Top tools by output tokens (all time): {_render_top_tools(conn)}",
+        f"Last turn: {_render_last_turn(conn, conv_id)}",
+    ])
+
+
+def _fit(lines: list[str]) -> str:
+    """Hold the character cap without breaking the fixed layout: whole lines go
+    from the end, never half of one. Every line is bounded by a limit of its own
+    (`ROUND_LIMIT` rounds, `TOP_TOOLS_LIMIT` tools), so this only ever fires on
+    an absurdly long `cost_basis`; the final slice is the hard guarantee."""
+    while len(lines) > 1 and len("\n".join(lines)) > STATS_MAX_CHARS:
+        lines.pop()
+    return "\n".join(lines)[:STATS_MAX_CHARS]
+
+
+def _pair(left, right, render=None) -> str:
+    render = render or (lambda value: str(value))
+    return f"{_cell(left, render)} | {_cell(right, render)}"
+
+
+def _cell(value, render) -> str:
+    return "n/a" if value is None else render(value)
+
+
+def _render_cost(value: float | None) -> str:
+    """A side whose rows carry no `cost_basis` has no price at all, which is
+    not the same as a price of zero (REQ-V13-OBS-07)."""
+    return "n/a (no pricing)" if value is None else f"${value:.4f}"
+
+
+def _render_share(value: float) -> str:
+    return f"{round(value * 100)}%"
+
+
+def _render_top_tools(conn) -> str:
+    ranked = metrics.top_tools(conn)
+    if not ranked:
+        return "none"
+    return ", ".join(
+        f"{tool} {tokens} ({round(share * 100)}%)" for tool, tokens, share in ranked
+    )
+
+
+def _render_last_turn(conn, conv_id: int | None) -> str:
+    timeline = metrics.turn_timeline(conn, conv_id) if conv_id is not None else []
+    if not timeline:
+        return "none"
+    parts = []
+    for entry in timeline:
+        part = (f"r{entry['round']} in {_cell(entry['prompt_tokens'], str)} "
+                f"out {_cell(entry['completion_tokens'], str)}")
+        if entry["tools"]:
+            part += " → " + ", ".join(f"{tool} {ms} ms" for tool, ms in entry["tools"])
+        elif entry["final"]:
+            part += " (final)"
+        parts.append(part)
+    return "; ".join(parts)
 
 
 def _active_provider(cfg: Config, llm, override: str | None) -> str:
@@ -797,6 +951,7 @@ def poll_loop(
     docker_ok: bool = False,
     set_provider: Callable[[str | None], object] | None = None,
     get_llm: Callable[[], object] | None = None,
+    resolve_cost: CostResolver | None = None,
 ) -> int:
     raw = storage.get_state(conn, "last_update_id")
     offset = int(raw) + 1 if raw is not None else None
@@ -835,6 +990,7 @@ def poll_loop(
                     docker_version=docker_version,
                     docker_ok=docker_ok,
                     set_provider=set_provider,
+                    resolve_cost=resolve_cost,
                 )
                 if isinstance(update, dict) and isinstance(update.get("update_id"), int):
                     offset = update["update_id"] + 1
@@ -868,6 +1024,9 @@ class _SelftestLLM:
             LLMResponse("selftest ok", [], "stop"),
         ]
         self.calls = 0
+
+    def describe(self) -> tuple[str, str]:
+        return ("selftest", "selftest")
 
     def complete(self, messages, tool_definitions, *, max_tokens=None) -> LLMResponse:
         response = self._script[min(self.calls, len(self._script) - 1)]
@@ -1193,6 +1352,9 @@ def main(argv: list[str] | None = None) -> int:
         live["llm"] = build_llm_client(cfg, client=client, override=name)
         return live["llm"]
 
+    # REQ-V13-PRC-02: once, at startup, and never per message.
+    resolve_cost = build_cost_resolver(conn, cfg, client)
+
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
     log.info("polling as @%s with %d skill(s)", bot_username, len(skills))
@@ -1224,6 +1386,7 @@ def main(argv: list[str] | None = None) -> int:
             docker_ok=docker_ok,
             set_provider=set_provider,
             get_llm=lambda: live["llm"],
+            resolve_cost=resolve_cost,
         )
     finally:
         client.close()

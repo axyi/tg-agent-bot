@@ -9,7 +9,7 @@ import logging
 import time
 from collections.abc import Callable
 
-from llm.base import DEFAULT_CONTEXT_LENGTH, LLMClient, LLMError, LLMResponse
+from llm.base import DEFAULT_CONTEXT_LENGTH, LLMClient, LLMError, LLMResponse, describe_client
 
 FAILOVER_THRESHOLD = 3        # consecutive failures before the other side is tried
 FAILOVER_COOLDOWN_S = 300.0   # how long a demoted provider stays out of the way
@@ -34,6 +34,12 @@ class FailoverLLMClient:
         self.failure_counts = {primary_name: 0, secondary_name: 0}
         self._cooldown_until = {primary_name: 0.0, secondary_name: 0.0}
         self._clock = clock
+
+    def describe(self) -> tuple[str, str]:
+        """The client that served the last call. `_try_other` promotes the
+        fallback to active as soon as it answers, so reading the active client
+        after an invocation names whoever actually produced the response."""
+        return describe_client(self._clients[self.active_provider_name])
 
     @property
     def context_length(self) -> int:

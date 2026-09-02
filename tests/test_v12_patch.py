@@ -354,7 +354,14 @@ def test_t_v12_qta_04_a_chmod_000_subdirectory_is_removed_via_retry(tmp_path):
     (ghost / "x.bin").write_bytes(b"z")
     ghost.chmod(0)
     cfg = make_cfg(tmp_path, exec_workdir=box)
-    bot._clean_sandbox_at_start(cfg)
+    try:
+        # REQ-V13-CO-08: on the green path the cleanup removes `ghost`, so the
+        # restore is conditional; without it a failing assertion would leave an
+        # unreadable directory behind for pytest's tmp-dir reaper to trip over.
+        bot._clean_sandbox_at_start(cfg)
+    finally:
+        if ghost.is_dir():
+            ghost.chmod(0o700)
     assert list(box.iterdir()) == []
 
 

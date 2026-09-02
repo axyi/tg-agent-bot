@@ -173,16 +173,25 @@ def test_t_v11_red_04_summary_reply_redacted_only_by_send(conn, tmp_path, monkey
     storage.add_user_message(conn, conv_id, "hi")
     storage.add_assistant_message(conn, conv_id, "hello")
 
+    # The stub mirrors the *whole* caller-visible signature, `resolve_cost`
+    # included: a mismatch would raise inside `_handle_summary`'s `except
+    # Exception`, quietly routing this test down the SUMMARY_FAILED_REPLY path
+    # where the redaction below is vacuously true.
     monkeypatch.setattr(
         agent, "summarize_conversation",
-        lambda conn, conv_id, llm, cfg: json.dumps({
+        lambda conn, conv_id, llm, cfg, *, resolve_cost=None: json.dumps({
             "goal": SENTINEL, "files": [], "decisions": [], "errors": [], "next_action": "",
         }),
     )
     tg = RecordingTelegram()
     bot._handle_summary(conn, tg, cfg, object(), USER_ID, USER_ID)
-    assert tg.sent
-    assert all(SENTINEL not in text for _chat, text in tg.sent)
+    texts = [text for _chat, text in tg.sent]
+    # Pin the success path: only the rendered summary carries the secret that
+    # `_send` has to redact (REQ-V11-RED-04).
+    assert texts == [
+        "Goal: ***REDACTED***\nFiles: -\nDecisions: -\nErrors: -\nNext: "
+    ]
+    assert all(SENTINEL not in text for text in texts)
 
 
 # --------------------------------------------------------------------------

@@ -2233,3 +2233,95 @@ fixed without modifying the lab scripts, through the wrapper's documented
 `CODEX_CMD` seam: an exported shell function that writes the prompt to a
 file and calls the API from there. Rounds 6 and 7 ran through that seam
 with `cross_review=codex`.
+
+---
+
+## Appendix E — execution deltas (written during the v1.3 run)
+
+Four clauses of this spec turned out to be inconsistent with the code they
+describe or with each other. AGENTS.md ("spec drift") requires the delta to
+land in the same commit as the behaviour, so each is recorded here with the
+resolution the executor applied. Every one was found before the baseline
+benchmark; none changes a target, a gate threshold or the four-commit
+contract. The executor never chose between readings where a reading was
+available — each entry names the clause that survives and why.
+
+### E.1 REQ-V13-CO-02 — the example sentence is inverted (stage A)
+
+The requirement reads: "with two containers labelled with different owner keys
+(fake docker CLI), only the one whose owner label equals this process's
+`owner_key()` is reaped."
+
+`tools.owner_key()` returns `f"{pid}-{start_ticks}"` — a **per-process** tag.
+spec-v1.2 REQ-V12-ORP-02, still in force (§2: "Everything else in spec-v0 …
+spec-v1.2 stands"), requires the opposite and is already pinned by
+`test_t_v12_orp_02_three_containers`: a container labelled by a **still-live**
+bot process is left alone, "so starting a second instance can no longer kill
+the first one's running exec".
+
+**Resolution.** The normative instruction of CO-02 is its first clause — "Test
+the `owner=owner_key()` binding of the orphan reap" — and that is what was
+implemented (the binding plus the reap discrimination). The illustrative
+sentence is a defect: following it literally would regress REQ-V12-ORP-02 and
+reintroduce the v1.1 fault it fixed. REQ-V12-ORP-02 survives unchanged.
+
+### E.2 REQ-V13-BEN-01 run-set validation vs REQ-V13-AUD-03 / REQ-V13-RSN-02
+
+BEN-01 makes `check` — and therefore `report`, which runs the same validation —
+reject any file whose `runs[]` is not exactly
+`(SCENARIOS ∖ meta.skipped_scenarios) × 1..meta.repeats`. But AUD-03 (MUST)
+requires `docs/reports/bench-openrouter-smoke.md` to be the verbatim output of
+`bench.py report` on a file produced with `--only S02 --repeats 1`, and states
+that "a one-run file renders the same sections"; RSN-02 (MUST) requires the
+same for `docs/assets/bench/reasoning-probe.json`. Under the literal rule
+neither required file can exist. `meta.skipped_scenarios` cannot absorb the
+difference — BEN-01 constrains it to ids with `network: true`.
+
+**Resolution.** `run` records the selection as **`meta.only`**: the sorted list
+of selected scenario ids, or `null` for a full run. `check` validates the run
+set against `(SCENARIOS ∩ meta.only ∖ skipped) × 1..repeats` when `only` is
+non-null and against the spec's literal set when it is `null`;
+`summary.per_scenario` keys must equal the same set; omission, duplicate and
+unknown id remain exit 1. `meta.only` joins the **locked** meta fields of
+REQ-V13-BEN-01, so a `--only` file can never be gated against a full one
+(differing → exit 2, reason names `only`). B1 and D1 both carry `null`, so the
+two files the verdict compares are validated by the spec's literal rule and
+BEN-01's stated purpose — "a harness defect that drops a scenario from both
+files is therefore caught by `check`, never by eye" — is preserved exactly.
+
+`meta.only` is an additional required key of the §7.4 schema; a document
+missing it fails `check` with `meta.only is missing`.
+
+### E.3 REQ-V13-BEN-14 — `tools_exposed = 1` does not match the stored column
+
+§7.8 splits the `## Reasoning` figures into "rows with `tools_exposed = 1`" and
+"rows with `tools_exposed = 0`". The column stores a **count**
+(`agent.py`: `tools_exposed = len(tools) if tools else 0`, i.e. 3 for a normal
+agent round with the shipped catalog), parallel to `messages_n`, beside which
+§6.1 lists it. Under the literal `= 1` the tool-exposed group is empty on every
+real run: `## Reasoning` would always render `tool-exposed calls: calls: 0`,
+and REQ-V13-RSN-02 — which is conclusive only when that line shows `calls: 1`
+or more — would force O5 to `attempted_removed` on a false reading. The
+`tools-withheld` line worked only by accident, the final tools-withheld request
+setting `request_tools = None` → 0.
+
+**Resolution.** The column keeps its count semantics; the split reads
+**`tools_exposed > 0`** for tool-exposed and **`tools_exposed == 0`** for
+tools-withheld. `calls: N` still counts the rows of that group with
+`error_kind IS NULL`, so the RSN-02 conclusiveness rule is unchanged in
+meaning. The test that covered the split was rewritten to use production-shaped
+values (3 and 0) and to assert the rendered counts — it previously passed with
+the production path dead.
+
+### E.4 REQ-V13-BEN-02 — the cost-cap refusal is keyed on the effective provider
+
+BEN-02 says "`--provider openrouter` **refuses to run** unless `--max-cost-usd`
+is given". The harness sets `LLM_PROVIDER` only when `--provider` was passed,
+so on a box whose `.env` selects OpenRouter a plain
+`bench.py run --tag baseline` would have run 36 live scenarios with no cap and
+`run_bench`'s cap check disabled.
+
+**Resolution.** The refusal is keyed on the **effective** provider
+(`cfg.llm_provider == "openrouter"`), evaluated after the config is built and
+before anything is spent or written. This strictly widens the protection BEN-02
+asks for; the flag path behaves exactly as specified.

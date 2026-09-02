@@ -1126,7 +1126,8 @@ def test_t_v1_cmd_01_status(conn, tmp_path, monkeypatch):
     assert lines[1] == "Provider: lmstudio (override: none)"
     assert lines[2] == "Provider failures: lmstudio=0, openrouter=0"
     assert lines[3] == "Exec backend: docker 27.1.2"
-    assert lines[4].startswith("DB: ") and lines[4].endswith(" bytes, schema v2")
+    assert lines[4].startswith("DB: ") and lines[4].endswith(
+        f" bytes, schema v{storage.SCHEMA_VERSION}")
     assert lines[5] == "Skills: 1 loaded"
 
     tg, _, _ = process(
