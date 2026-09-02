@@ -34,6 +34,7 @@
 | 27 | v1.2 main session — precondition checks (incl. the LM Studio gate-5 exception), section-10.2 tests + section-10.1 amendments (observed red before green), `devtools/mutation_check.py` and its own test suite built before use, `config.py`/`storage.py`/`agent.py`/`tools.py`/`bot.py` in section-9 order, six gates (incl. one fix-and-rerun of the mutation gate itself — see report Fix cycles), Appendix-B live driver (D1–D8 + C1/C3/C4/C6 regression), documentation housekeeping (this table, `docs/plan.md`, both v1.1 report corrections, `AGENTS.md`'s gate list), the review, the report, and the final commits | claude-sonnet-5 | not computed — this run's harness did not expose a local session transcript to re-measure from at commit time (see note below); estimate at public API prices withheld rather than guessed | not computed, same reason |
 | 28 | v1.2 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/08-code-review-v1.2.md`) | claude-sonnet-5 (subagent default) | not computed — same async task-output constraint as row 26 | not computed |
 | **Σ** (rows 27–28, one `go` run) | | claude-sonnet-5 | not computed | not computed |
+| 29 | spec-v1.3 authoring — writer pass in the lab session plus two clean-context reviewer subagents (design review, then a consistency re-review after 25 fixes); executor of the spec is `claude-opus-5`, not yet run | claude-fable-5 (lab session; reviewers on the subagent default) | ≈258k subagent aggregate (≈134k design review + writer helpers, 123,557 consistency re-review; harness-reported, in/out split not exposed) + a main-session share that is not isolatable from the lab session transcript (that session also carried unrelated lab work) | — (flat-rate session) |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.
@@ -105,3 +106,12 @@ the ordinary-message check in D2, and no OpenRouter call was made — D1's and
 C1's registered secret was a synthetic canary never sent through the LLM
 client, and D2's ordinary-turn check used a scripted `FakeLLM`, not a live
 provider call.
+
+Row 29 is the authoring cost of `docs/spec/spec-v1.3.md`, recorded before
+the `go` run so that the implementation rows that follow start from a known
+baseline. It is an aggregate estimate, not a measurement of the kind rows
+15–25 give: the writing happened in the lab session's main context, which
+`tools/session-usage.py` cannot split by task, and the two reviewer
+subagents only report their totals. No inference was spent by the bot
+itself; the only live checks were `pytest --collect-only` (326 tests at
+`1ecc35e`) and a `len()` of `agent.SYSTEM_PROMPT`, both offline.

@@ -80,7 +80,7 @@ or drifts from its expected single occurrence in the source.
   deterministic `--selftest`. `devtools/mutation_check.py` (v1.2) verifies the
   test suite itself actually kills the regressions its tests claim to guard.
 
-## v1.3 (next)
+## v1.3 (next) — spec: `docs/spec/spec-v1.3.md` (2026-09-02, ready for `go`)
 
 Token economy for the agent's own code — folds in course assignment 5 (AI
 Agent Token Audit; assignment text: `base/assignments/05-agent-token-audit.md`
