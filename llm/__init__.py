@@ -2,7 +2,7 @@
 
 import httpx
 
-from config import Config, ConfigError
+from config import Config, ConfigError, parse_summary_model
 from llm.base import LLMClient, LLMError, LLMResponse, ToolCall
 from llm.failover import FailoverLLMClient
 from llm.lmstudio import LMStudioClient
@@ -28,8 +28,27 @@ def provider_is_configured(cfg: Config, provider: str) -> bool:
 
 
 def build_llm_client(
-    cfg: Config, *, client: httpx.Client, override: str | None = None
+    cfg: Config,
+    *,
+    client: httpx.Client,
+    override: str | None = None,
+    purpose: str = "agent",
 ) -> LLMClient:
+    """The client for one purpose, on the caller's `httpx.Client`.
+
+    REQ-V13-RTE-01: with `LLM_SUMMARY_MODEL` set, `purpose="summary"` gets its
+    own bare client on the routed provider — no failover, and no effect on the
+    agent's client, whose `LLM_FAILOVER` semantics are unchanged. Unset, the
+    summary purpose falls through to the main client below, so a caller that
+    wants one client per purpose must not build the summary one blindly: with
+    no routing that would be a second, needlessly independent main client.
+    """
+    if purpose == "summary":
+        routed = parse_summary_model(cfg.llm_summary_model)
+        if routed is not None:
+            provider, model = routed
+            return _client_for(cfg, provider, client, model=model)
+
     primary = override or cfg.llm_provider
     if primary not in ("lmstudio", "openrouter"):
         raise ConfigError(f"unknown provider: {primary}")
@@ -47,11 +66,15 @@ def build_llm_client(
     return _client_for(cfg, primary, client)
 
 
-def _client_for(cfg: Config, provider: str, client: httpx.Client) -> LLMClient:
+def _client_for(
+    cfg: Config, provider: str, client: httpx.Client, *, model: str | None = None
+) -> LLMClient:
+    """`model` overrides the provider's configured model (the routed purpose);
+    everything else — timeout, caps, context length — stays the provider's."""
     if provider == "lmstudio":
         return LMStudioClient(
             cfg.lmstudio_base_url,
-            cfg.lmstudio_model,
+            model or cfg.lmstudio_model,
             cfg.llm_timeout_s,
             client,
             max_tokens=cfg.llm_max_tokens,
@@ -59,7 +82,7 @@ def _client_for(cfg: Config, provider: str, client: httpx.Client) -> LLMClient:
         )
     return OpenRouterClient(
         cfg.openrouter_api_key,
-        cfg.openrouter_model,
+        model or cfg.openrouter_model,
         cfg.llm_timeout_s,
         client,
         max_tokens=cfg.llm_max_tokens,

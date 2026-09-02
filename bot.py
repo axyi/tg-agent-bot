@@ -603,6 +603,7 @@ def process_update(
     docker_ok: bool = False,
     set_provider: Callable[[str | None], object] | None = None,
     resolve_cost: CostResolver | None = None,
+    summary_llm=None,
 ) -> None:
     if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
         log.warning("update without a usable update_id ignored")
@@ -656,7 +657,7 @@ def process_update(
             return
         name = command.casefold()
         if name == "/new":
-            _handle_new(conn, tg, cfg, llm, chat_id, from_id, resolve_cost)
+            _handle_new(conn, tg, cfg, llm, chat_id, from_id, resolve_cost, summary_llm)
             return
         if name == "/status":
             _send(tg, chat_id, split_message(_render_status(
@@ -668,7 +669,7 @@ def process_update(
             _send(tg, chat_id, split_message(_render_stats(conn, from_id)))
             return
         if name == "/summary":
-            _handle_summary(conn, tg, cfg, llm, chat_id, from_id, resolve_cost)
+            _handle_summary(conn, tg, cfg, llm, chat_id, from_id, resolve_cost, summary_llm)
             return
         if name == "/model":
             parts = stripped.split()
@@ -717,13 +718,15 @@ def _write_audit(path: Path, tg_user_id: int, conv_id: int, record: dict) -> Non
 
 def _handle_new(
     conn, tg, cfg: Config, llm, chat_id: int, from_id: int,
-    resolve_cost: CostResolver | None = None,
+    resolve_cost: CostResolver | None = None, summary_llm=None,
 ) -> None:
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     if len(storage.load_context_messages(conn, conv_id, agent.CONTEXT_WINDOW_MESSAGES)) >= 2:
         try:
             summary = agent.summarize_conversation(
-                conn, conv_id, llm, cfg, resolve_cost=resolve_cost
+                # REQ-V13-RTE-01: the summary purpose, and only it, may run on
+                # the routed client; `summary_llm` is None unless it is configured.
+                conn, conv_id, summary_llm or llm, cfg, resolve_cost=resolve_cost
             )
             if summary is not None:
                 storage.add_summary(conn, conv_id, from_id, summary)
@@ -735,7 +738,7 @@ def _handle_new(
 
 def _handle_summary(
     conn, tg, cfg: Config, llm, chat_id: int, from_id: int,
-    resolve_cost: CostResolver | None = None,
+    resolve_cost: CostResolver | None = None, summary_llm=None,
 ) -> None:
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     if len(storage.load_context_messages(conn, conv_id, agent.CONTEXT_WINDOW_MESSAGES)) < 2:
@@ -743,7 +746,7 @@ def _handle_summary(
         return
     try:
         summary = agent.summarize_conversation(
-            conn, conv_id, llm, cfg, resolve_cost=resolve_cost
+            conn, conv_id, summary_llm or llm, cfg, resolve_cost=resolve_cost
         )
     except Exception as exc:
         log.warning("summarizing on request failed: %s", redact(str(exc)))
@@ -952,6 +955,7 @@ def poll_loop(
     set_provider: Callable[[str | None], object] | None = None,
     get_llm: Callable[[], object] | None = None,
     resolve_cost: CostResolver | None = None,
+    summary_llm=None,
 ) -> int:
     raw = storage.get_state(conn, "last_update_id")
     offset = int(raw) + 1 if raw is not None else None
@@ -991,6 +995,7 @@ def poll_loop(
                     docker_ok=docker_ok,
                     set_provider=set_provider,
                     resolve_cost=resolve_cost,
+                    summary_llm=summary_llm,
                 )
                 if isinstance(update, dict) and isinstance(update.get("update_id"), int):
                     offset = update["update_id"] + 1
@@ -1352,6 +1357,15 @@ def main(argv: list[str] | None = None) -> int:
         live["llm"] = build_llm_client(cfg, client=client, override=name)
         return live["llm"]
 
+    # REQ-V13-RTE-01: a second client, on the same `httpx.Client`, only when the
+    # routing is configured. Unset it stays None so the summary keeps running on
+    # whichever client `/model` has selected, exactly as before.
+    summary_llm = (
+        build_llm_client(cfg, client=client, purpose="summary")
+        if cfg.llm_summary_model
+        else None
+    )
+
     # REQ-V13-PRC-02: once, at startup, and never per message.
     resolve_cost = build_cost_resolver(conn, cfg, client)
 
@@ -1373,6 +1387,7 @@ def main(argv: list[str] | None = None) -> int:
                 sandbox_max_bytes=cfg.exec_sandbox_max_bytes,
                 wrap_timeout=wrap_timeout,
                 empty_resolv=empty_resolv,
+                output_default_chars=cfg.exec_output_default_chars,
             ),
             bot_username=bot_username,
             limiter=RateLimiter(cfg.rate_limit_capacity, cfg.rate_limit_refill_s),
@@ -1381,12 +1396,21 @@ def main(argv: list[str] | None = None) -> int:
                 allowed_domains=cfg.fetch_allowed_domains,
                 client=client,
                 resolve=tools.resolve_host,
+                # REQ-V13-TOO-06/07: where the full text of a truncated fetch is
+                # saved, and how much of it comes back inline.
+                workdir=cfg.exec_workdir,
+                sandbox_max_bytes=cfg.exec_sandbox_max_bytes,
+                max_chars=cfg.fetch_inline_default_chars,
             ),
             docker_version=docker_version,
             docker_ok=docker_ok,
             set_provider=set_provider,
             get_llm=lambda: live["llm"],
             resolve_cost=resolve_cost,
+            # Deliberately a value, not a getter like `get_llm`: `/model` moves
+            # the agent's client, never the routed summary one, which the
+            # configuration pins for the life of the process (REQ-V13-RTE-01).
+            summary_llm=summary_llm,
         )
     finally:
         client.close()

@@ -71,6 +71,18 @@ The bot writes **two** files of its own: `AUDIT_LOG_PATH` (default
 you point either variable — or `DB_PATH`, which decides where `.resolv-empty`
 lands — somewhere else inside the repository, git-ignore that name yourself.
 
+### Output windows, history and pricing
+
+| Variable | Default | Effect |
+|---|---|---|
+| `EXEC_OUTPUT_DEFAULT_CHARS` | `1500` | inline window per `exec` stream, in characters, before the head/tail window and the duplicate collapse kick in (200–4096). The model can ask for less or more per call with the tool argument `max_output_chars`, within the same range |
+| `FETCH_INLINE_DEFAULT_CHARS` | `5000` | inline window for a `fetch` result, in characters (500–20000); the model can override it per call with `max_chars`. The full text of a truncated fetch is saved under `<EXEC_WORKDIR>/fetch/` |
+| `HISTORY_TOOL_STUB` | `on` | replace tool results of earlier turns with a short stub **in the request only**. `off` sends every tool result verbatim. The database, the audit trail and `/summary` always keep the full text |
+| `LLM_SUMMARY_MODEL` | empty | route `/summary` and the `/new` hand-off to a second model, written `<provider>:<model>` — `lmstudio` or `openrouter`, and that provider must be configured. Empty keeps the summary on the main client; no failover applies to the routed client |
+| `LLM_PRICE_REF_MODEL` | empty | an OpenRouter model id whose list price is used as the **reference price** for local LM Studio calls. Empty leaves local calls unpriced. The resulting cost is an estimate — see [Observability](#observability) |
+| `LLM_PRICE_INPUT_USD_PER_MTOK` | empty | manual price in USD per million input tokens — the fallback when the OpenRouter price list is unreachable |
+| `LLM_PRICE_OUTPUT_USD_PER_MTOK` | empty | manual price in USD per million output tokens. Set both manual prices or neither; `0` is a valid (free) price |
+
 ## Run
 
 ```bash
@@ -83,13 +95,97 @@ uv run --locked python bot.py
 | Command | Effect |
 |---|---|
 | `/new` | summarize the current conversation, store the summary, start a fresh one |
-| `/status` | uptime, active provider, provider failure counts, exec backend, database size and schema version, loaded skills |
+| `/status` | uptime, active provider, provider failure counts, exec backend, database size and schema version, loaded skills, and one token line — `Tokens this conversation: in N / out M` |
+| `/stats` | token, cost and tool counters for this conversation and for all time — see [Observability](#observability) |
 | `/summary` | summarize the current conversation on demand and show the five-field rendering |
 | `/model [lmstudio\|openrouter\|auto]` | show or change the provider override; the override survives restarts |
 | `/reload_skills` | re-read `skills/` without restarting the bot |
 
 Any other `/…` text is passed to the model as an ordinary message. Commands are
 reachable only by allowlisted senders and are never stored in the conversation.
+
+## Observability
+
+Every model invocation and every tool call is measured and stored, so the cost
+of a conversation is a query rather than a guess.
+
+### `/stats`
+
+```
+Stats (this conversation | all time)
+LLM calls: 7 | 143 (errors 0 | 2)
+Tokens in: 21430 | 402118 (cached: n/a | n/a, reasoning: 0 | 0)
+Tokens out: 1204 | 38001
+Est. cost: $0.0123 | $0.4110 (basis: reference:<model> | mixed)
+Avg prompt/call: 3061 | 2813; re-sent share: 71% | 68%
+Top tools by output tokens (all time): exec 1812 (78%), fetch 401 (17%), load_skill 110 (5%)
+Last turn: r1 in 2980 out 88 → exec 412 ms; r2 in 3512 out 210 (final)
+```
+
+Both columns are computed from the stored rows; `n/a` stands where the provider
+reports nothing. The basis label is computed per side from the distinct bases of
+the rows summed on that side — exactly one basis prints that basis, several
+print `mixed`, none makes that side read `n/a (no pricing)`, which is not the
+same as a cost of zero. The **re-sent share** is the part of the prompt tokens
+that was already sent in the previous call of the same conversation
+(`new₁ = prompt₁`, `newᵢ = max(0, promptᵢ − promptᵢ₋₁)`), i.e. what the history
+costs on every round.
+
+### What is recorded
+
+`llm_calls` — one row per model invocation, including failed ones (a failed row
+carries `error_kind` and `NULL` token columns): `conv_id`, `turn_id`, `purpose`
+(`agent` or `summary`), `round`, `attempt`, `ts`, `provider`, `model`,
+`prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`,
+`reasoning_tokens`, `reasoning_chars`, `prompt_chars`, `prompt_chars_by_role`,
+`messages_n`, `tools_exposed`, `latency_ms`, `finish_reason`, `tool_calls_n`,
+`error_kind`, `cost_usd`, `cost_basis`.
+
+`tool_calls` — one row per tool call the agent decided on, whether it was
+executed, rejected or refused for budget: `conv_id`, `turn_id`, `tool_call_id`,
+`tool`, `ts`, `input_chars`, `raw_output_chars` (before compaction),
+`output_chars` (what the model actually received), `output_tokens_est`,
+`duration_ms`, `outcome`.
+
+**What is deliberately not recorded:** no message content, no tool arguments, no
+URLs, no Telegram ids — `conv_id` is the local database id, not a chat id.
+Counters and timings only.
+
+### Log lines
+
+Each stored row is also emitted as one structured INFO line: single-line JSON,
+prefixed `llm_call ` or `tool_call `, whose keys are exactly the columns of the
+table above. They go through the same redaction as everything else and carry no
+content key, so a log shipper sees sizes and timings, never text.
+
+```
+llm_call {"id": 41, "conv_id": 7, "turn_id": 12, "purpose": "agent", "round": 1, …}
+tool_call {"id": 18, "conv_id": 7, "turn_id": 12, "tool": "exec", "output_chars": 1500, …}
+```
+
+### Cost and the estimate caveat
+
+Prices are fetched **once**, at startup, from OpenRouter's public model list, and
+persisted. Each call is priced by the first source that applies:
+
+1. the cost OpenRouter reported for that very call (`basis: provider`);
+2. a price fetched in this process — for an OpenRouter call the model's own list
+   price (`openrouter-list`), for an LM Studio call the list price of
+   `LLM_PRICE_REF_MODEL` (`reference:<model>`);
+3. the manual `LLM_PRICE_INPUT_USD_PER_MTOK` / `LLM_PRICE_OUTPUT_USD_PER_MTOK`
+   (`manual`);
+4. the previously persisted fetched price (`openrouter-list-stale`,
+   `reference-stale:<model>`);
+5. otherwise nothing is recorded and the cost reads `n/a (no pricing)`.
+
+Manual prices therefore override a stale persisted price but never a fresh
+fetch. A failed price fetch logs a warning and never blocks startup.
+
+**Reference-priced costs are estimates, not bills.** Whenever a local LM Studio
+call is priced through `LLM_PRICE_REF_MODEL`, `/stats`, the reports and the
+dashboard label it as such — "reference price of `<model>` on OpenRouter as of
+`<date>`; local inference is free". The number answers "what would this
+conversation have cost on a cloud model", not "what was spent".
 
 ## Switch provider
 
@@ -120,6 +216,46 @@ reach — not from inside the sandbox. Only hosts in `FETCH_ALLOWED_DOMAINS`
 (default `wttr.in`) are allowed, matched as the exact domain or a dot-separated
 subdomain of it. Redirects are followed manually, at most 3 hops, and every hop
 is re-validated against the allowlist.
+
+**HTML becomes text before the model ever sees it.** A `text/html` response
+(by `Content-Type`, or by a body starting with `<!doctype html`/`<html`) is run
+through a stdlib parser: `script`, `style`, `noscript`, `template` and `svg`
+subtrees are dropped, block-level tags become newlines, entities are decoded,
+whitespace runs collapse, and `<title>` is kept as the first line. Other text
+bodies pass through unchanged; a binary body is refused with
+`{"error": "unsupported content type: <type>"}`.
+
+**Only an excerpt is inlined.** The envelope of a successful text response is
+
+```json
+{"url": "https://wttr.in/Berlin", "status": 200, "content_type": "text/plain",
+ "chars_total": 41022, "returned_chars": 5000, "truncated": true,
+ "saved_to": "fetch/1f4b9c0d2e3a5b71.txt", "save_error": null, "text": "…"}
+```
+
+`max_chars` (tool argument, 500–20000, default `FETCH_INLINE_DEFAULT_CHARS`)
+sizes the inline window. **The full extracted text is written to
+`<EXEC_WORKDIR>/fetch/<sha256(url)[:16]>.txt` only when the window truncated
+it** — an untruncated fetch writes no file and reports
+`"saved_to": null, "save_error": null`. When the save is refused (the sandbox
+quota, or a fail-closed symlink/hard-link check on the model-writable sandbox)
+the text is still returned inline and the envelope says
+`"saved_to": null, "save_error": "sandbox quota" | "refused"`; the two fields are
+never both non-null. The directory name is fixed and the file name comes only
+from the hash — no path component comes from the model. Every other outcome
+(malformed URL, disallowed domain, redirect limit, transport failure) keeps the
+single-key shape `{"error": "<reason>"}` and writes nothing.
+
+**Fetch once, grep locally.** The saved file lands in the sandbox that `exec`
+mounts at `/work`, so the model is told to search the rest of a long page
+instead of re-fetching it:
+
+```
+exec(["grep", "-n", "<pattern>", "fetch/1f4b9c0d2e3a5b71.txt"])
+```
+
+The startup sandbox cleanup treats `fetch/` like any other sandbox entry, and
+the sandbox quota bounds what it can accumulate.
 
 **Never put an internal hostname or an IP literal in `FETCH_ALLOWED_DOMAINS`.**
 The request runs on the bot host, so an internal entry turns the model into an
@@ -365,10 +501,12 @@ delivery is not provided and is not claimed.
 | context budget | provider context length − system prompt − output cap − 512 |
 | context window | 30 messages |
 | exec command budget | ~30 s; hard wall-clock kill at 30 + 10 s (container startup grace); the in-container `timeout(1)` wrapper, when available, applies the same ~30 s budget from inside |
-| exec output per stream | 4096 bytes (up to that plus the longest registered secret is read before redaction, so a secret split by the cut never leaks a fragment) |
+| exec output per stream | 4096 bytes (up to that plus the longest registered secret is read before redaction, so a secret split by the cut never leaks a fragment) — the capture cap, unchanged, and the security ceiling |
+| exec output shown to the model | `max_output_chars` per call, default `EXEC_OUTPUT_DEFAULT_CHARS` = 1500 characters, range 200–4096; what is left after the capture cap is compacted to this window, never beyond it |
 | exec container memory / cpus / pids | 512 MiB / 1.0 / 128 |
 | exec sandbox disk quota | `EXEC_SANDBOX_MAX_BYTES` = 268435456 bytes (256 MiB) |
 | fetch response cap / timeout / redirects | 65536 bytes / 15 s / 3 hops (same secret-headroom reading as exec output) |
+| fetch text shown to the model | `max_chars` per call, default `FETCH_INLINE_DEFAULT_CHARS` = 5000 characters, range 500–20000; the rest goes to `fetch/<hash>.txt` |
 | agent rounds / HTTP attempts / tool executions | 8 / 9 / 12 |
 | malformed retries / empty repairs | 2 / 1 |
 | LLM request timeout | `LLM_TIMEOUT_S` = 120 s |
@@ -397,6 +535,120 @@ delivery is not provided and is not claimed.
 | SIGTERM mid-run | the current round finishes, then the run is interrupted | the "shutting down" fallback, best-effort |
 | rate limit exceeded | rejected before storage | the fixed rate-limit message |
 | message too long | rejected before storage, no bucket token spent | the fixed too-long message |
+
+## Token economy
+
+v1.3 changed what the bot puts into a request, not what it can do. Five
+optimizations, measured against the benchmark below except where noted:
+
+- **O1 — token-aware tool output.** Tool output is compacted deterministically
+  before it reaches the model: ANSI escapes stripped, runs of three or more
+  identical lines collapsed into `line [×N]`, then a 40/60 head/tail window with
+  a `[… N chars / M lines omitted …]` marker. When a command failed, the window
+  is re-anchored so the last error line and its 20 preceding lines survive. The
+  envelope reports `compacted` and the true byte counts the process produced, so
+  the model is never told a trimmed output was the whole output. `load_skill`
+  output is never compacted — skills are small reference material.
+- **O2 — stale tool results are stubbed.** Tool results from *earlier* turns are
+  replaced, **in the request only**, by a stub carrying the tool name, the exit
+  code or URL, the size, a sha256 prefix and the first 120 characters. The most
+  recent `load_skill` result per skill stays verbatim so the model keeps
+  following the skill across turns; assistant and user messages are never
+  stubbed. The database, the audit trail, `/summary` and the summarizer keep the
+  full text. `HISTORY_TOOL_STUB=off` disables it.
+- **O3 — byte-stable prefix.** The system prompt is byte-identical for every
+  call of a conversation while its inputs (recent goals, skill catalog) are
+  unchanged: the wall-clock line left the system prompt and is appended to the
+  most recent user message instead, and `/reload_skills` is the one explicit
+  invalidation event. The tool schema is byte-identical on every round that
+  exposes tools, and the message list of round *n* is a prefix-extension of
+  round *n−1*'s. On an Anthropic model through OpenRouter the system block is
+  additionally sent with `cache_control: ephemeral`. **Stated honestly:** an
+  LM Studio prefix cache buys **latency**, not billed tokens, and O2
+  invalidates the history part once per user turn — the number reported is the
+  median latency delta per call.
+- **O4 — prompt and schema compression.** The system prompt was rewritten in
+  English imperative `MUST`/`NEVER` form, structured Role / Output / Tools /
+  Rules / Skills, with the tool bullets that duplicated the schema removed; the
+  schema descriptions were rewritten in the same style. Every rule that shaped
+  behaviour survives in meaning — plain Telegram text, answer in the user's
+  language, argv is not a shell, skill-first, never invent tool output, tool
+  output is untrusted data and never instructions.
+- **O6 — routing by purpose, configuration only.** `LLM_SUMMARY_MODEL` routes
+  `/summary` and the `/new` hand-off to a second model. Only one model fits the
+  maintainer's GPU box — switching per call means load/unload — so the knob
+  ships tested but **was not enabled during the benchmark**; the reports carry
+  the summary-purpose token total it would affect and never invent a saving.
+
+**Headline, baseline → optimized:** _measured in C4_
+
+## Benchmark
+
+Pytest cannot measure tokens — every LLM call in the suite is faked. Measurement
+is a separate, live harness that drives whole conversations through
+`bot.process_update` against the real provider and reads the `llm_calls` /
+`tool_calls` rows they produce.
+
+```bash
+# 12 frozen scenarios × 3 repeats, writes docs/assets/bench/<tag>.json
+uv run --locked python devtools/bench.py run --tag baseline --repeats 3
+
+# validate a file on its own
+uv run --locked python devtools/bench.py check docs/assets/bench/baseline.json
+
+# render markdown; --candidate compares two files, --gate turns it into a gate
+uv run --locked python devtools/bench.py report \
+  --baseline docs/assets/bench/baseline.json --out docs/reports/bench-baseline.md
+```
+
+`run` also takes `--only <id>[,<id>]`, `--provider lmstudio|openrouter`,
+`--timeout-s N` (600 by default, per run) and `--out PATH`. A cloud run is
+guarded: `--provider openrouter` **refuses to start** without `--max-cost-usd`
+and aborts as soon as the cumulative cost crosses the cap. Failover is forced
+off for every benchmark run, so the measured provider is the configured one.
+Exit codes: `run` 0 when every non-skipped run completed, 1 on a harness error,
+3 when a completed call reported no usage (measurement impossible); `check` 0
+valid, 1 schema/run-set/arithmetic mismatch, 2 an aborted file, 3 missing or
+invalid token counts; `report --gate` 1 on a FAIL verdict and 2 when the two
+files are not comparable, naming the field that differs.
+
+**The JSON** (`bench_schema: 1`) carries a `meta` block that pins the
+comparison — tag, git commit, provider, model, context length, repeats,
+timeout, calibrated `prefix_tokens`, the hash of the frozen scenario file, a
+hash of the non-secret configuration, the request-control constants, the price
+snapshot, the skipped scenarios and the treatment variables (one key each,
+`null` where a field does not exist at that commit) — then one entry per
+executed (scenario, repeat) pair with its checks, redacted final answers, raw
+`llm_calls` and `tool_calls` rows and recomputed totals. `check` recomputes
+every total from the embedded rows and verifies the run set is exactly
+scenarios × repeats, so a dropped scenario is caught by the tool, never by eye.
+
+**The report** renders fixed sections: `## Meta` (the locked fields side by
+side), `## Per scenario` (success `k/n` and the median of every total),
+`## Totals` (success rate, cost and tokens per success, re-sent share, prefix
+share, cache hit rate), `## Totals by purpose`, `## Audit` (most expensive tool,
+most expensive turn, fastest-growing context category, re-sent share),
+`## Reasoning`, `## Latency`, `## Failures` (per failed run: scenario, repeat,
+reason codes, truncated answers) and, with `--candidate`, `## Verdict`.
+
+**The dashboard** is one self-contained HTML file — inline CSS, no JavaScript,
+no external resources:
+
+```bash
+uv run --locked python devtools/dashboard.py docs/assets/bench/baseline.json \
+  --out docs/assets/dashboard-baseline.html
+```
+
+It has sections `#aggregates` (calls, tokens in/out/cached/reasoning, latency,
+cost, success rate, per-task averages), `#cache` (cache hit rate, re-sent share,
+prefix share), `#tools` (output tokens and time per tool) and `#timeline` (the
+median run of each scenario, round by round); `--compare other.json` adds
+`#compare`. Its only input is benchmark JSON — live-bot figures come from
+`/stats`.
+
+Per-run scratch directories go to `.bench/` and the per-call INFO records to
+`<tag>.log` next to the JSON; both are git-ignored, and the console summary of a
+run stays under 40 lines.
 
 ## Tests
 

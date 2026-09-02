@@ -29,6 +29,9 @@ def test_t_ex_01_success_envelope(tmp_path):
         "truncated": False,
         "stdout": "ok\n",
         "stderr": "",
+        # REQ-V13-TOO-02: the true byte counts, from `_Capture._fed`.
+        "stdout_bytes_total": 3,
+        "stderr_bytes_total": 0,
     }
 
 

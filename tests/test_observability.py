@@ -657,8 +657,14 @@ def test_obs05_an_executed_tool_call_is_recorded(conn):
     assert row["outcome"] == "ok"
     assert row["tool_call_id"] == "call_2_0"
     assert row["input_chars"] == len(EXEC_ARGS)
-    assert row["output_chars"] == row["raw_output_chars"] > 0
-    assert row["output_tokens_est"] == agent.estimate_tokens("x" * row["output_chars"])
+    # REQ-V13-TOO-03: the two chars columns measure the stream text (here an
+    # uncompacted `recorded\n`), while `output_tokens_est` stays on the
+    # envelope the model is actually sent — the basis the O1 metric
+    # `tool_output_tokens_est` was benchmarked on.
+    envelope = conn.execute(
+        "SELECT content FROM messages WHERE role = 'tool'").fetchone()[0]
+    assert row["output_chars"] == row["raw_output_chars"] == len("recorded\n")
+    assert row["output_tokens_est"] == agent.estimate_tokens(envelope)
     assert row["duration_ms"] >= 0
     assert row["turn_id"] == conn.execute(
         "SELECT turn_id FROM messages WHERE role = 'tool'").fetchone()[0]

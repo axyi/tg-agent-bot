@@ -1256,7 +1256,12 @@ def comparability(baseline: dict, candidate: dict) -> str | None:
     for side, flags in (("baseline", base_flags), ("candidate", cand_flags)):
         if flags.get("LLM_FAILOVER") != "off":
             return f"env_flags.LLM_FAILOVER is not 'off' on the {side} side"
-        if flags.get("LLM_SUMMARY_MODEL") != "":
+        # Appendix E.6: `LLM_SUMMARY_MODEL` is a stage-C key (REQ-V13-PRE-04,
+        # `[C3, TC5]`), so a baseline measured on the C1 tree carries `null` by
+        # REQ-V13-BEN-10 — demanding `""` there would reject the very pair the
+        # four-commit contract produces. `null` (no field) and `""` (the PRE-04
+        # default) are both "routing is off"; only a real model id is a breach.
+        if flags.get("LLM_SUMMARY_MODEL") not in ("", None):
             return f"env_flags.LLM_SUMMARY_MODEL is not empty on the {side} side"
     if base_flags.get("LLM_MAX_TOKENS") != cand_flags.get("LLM_MAX_TOKENS"):
         return "env_flags.LLM_MAX_TOKENS differs"

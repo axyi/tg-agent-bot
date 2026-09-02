@@ -34,10 +34,17 @@ changes behaviour without touching `docs/spec/` is incomplete.
   hard iteration cap
 - `llm/` — inference behind one swappable interface (local ↔ cloud provider),
   hard timeouts, clean error path
+- `llm/pricing.py` — price snapshot and the per-call cost resolver (no I/O
+  beyond the one startup fetch, no global state)
 - `tools.py` — tool definitions, including the exec tool
 - `storage.py` — conversation/state persistence
+- `metrics.py` — pure functions over the `llm_calls`/`tool_calls` rows; the one
+  implementation `/stats`, the benchmark report and the dashboard all use
 - `skills/` — skill definitions loaded by the agent
 - `tests/` — pytest suite
+- `devtools/` — operator tooling, never imported by the bot: `bench.py`
+  (live token benchmark), `dashboard.py` (static HTML report),
+  `mutation_check.py` (the mutation gate)
 - `docs/` — spec, prompt log, reports, token accounting
 
 Context boundaries: agents work inside this repository only. NEVER read or edit
@@ -77,8 +84,30 @@ uv run --locked python devtools/mutation_check.py
 Gates 1–4 are unconditional and offline. Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
-Telegram message. Gate 6 is the mutation-testing gate (`devtools/mutation_check.py`):
-offline, but slow (minutes, since it reruns the test suite once per mutation).
+Telegram message. **Gate 5 must be fully green at every commit, including its
+`lmstudio` check** — the v1.2 "record the failure and proceed" exception is
+withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
+the benchmark measures against it. Gate 6 is the mutation-testing gate
+(`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns the
+test suite once per mutation).
+
+## Benchmark
+
+Tokens are measured live, never by the test suite (all LLM traffic in pytest is
+faked):
+
+```bash
+uv run --locked python devtools/bench.py run --tag <tag> --repeats 3
+uv run --locked python devtools/bench.py report --baseline A.json [--candidate B.json] --out docs/reports/bench-<name>.md
+```
+
+**A behaviour change that touches tokens — prompts, tool schemas, tool output,
+history assembly, routing — MUST be accompanied by a benchmark run before and
+after, compared with `report --candidate`.** Both runs use the same provider,
+model and context length; `report --gate` machine-checks that (exit 2 when the
+pinned meta fields differ) so "same configuration" is never merely asserted.
+Scenarios are frozen once a baseline exists — changing `bench_scenarios.py`
+invalidates every file measured against it.
 
 ## go protocol
 

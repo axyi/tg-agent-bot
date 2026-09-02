@@ -4,7 +4,6 @@ import subprocess
 
 import httpx
 
-import tools
 from llm.base import LLMError
 
 _DEFAULT_ENVELOPE = {
@@ -13,13 +12,21 @@ _DEFAULT_ENVELOPE = {
     "truncated": False,
     "stdout": "recorded\n",
     "stderr": "",
+    "stdout_bytes_total": 9,
+    "stderr_bytes_total": 0,
 }
 
+# The REQ-V13-TOO-07 shape: exactly these keys, in this order.
 _DEFAULT_FETCH_ENVELOPE = {
-    "status_code": 200,
+    "url": "https://wttr.in/x",
+    "status": 200,
+    "content_type": "text/plain",
+    "chars_total": 8,
+    "returned_chars": 8,
     "truncated": False,
-    "body": "recorded",
-    "notice": tools.UNTRUSTED_NOTICE,
+    "saved_to": None,
+    "save_error": None,
+    "text": "recorded",
 }
 
 
@@ -75,9 +82,13 @@ class FakeFetcher:
     def __init__(self, result=None):
         self.result = dict(result) if result is not None else dict(_DEFAULT_FETCH_ENVELOPE)
         self.urls = []
+        self.kwargs = []
 
-    def __call__(self, url):
+    def __call__(self, url, **kwargs):
+        # `max_chars` reaches the bound `fetch_url` as a keyword (REQ-V13-TOO-07);
+        # the fake records what the dispatcher passed on.
         self.urls.append(url)
+        self.kwargs.append(dict(kwargs))
         return dict(self.result)
 
 

@@ -23,11 +23,23 @@ MIN_SECRET_LENGTH = 8
 SECRET_FRAGMENT_MIN = 8
 PROVIDERS = ("lmstudio", "openrouter")
 FAILOVER_MODES = ("auto", "off")
+HISTORY_TOOL_STUB_MODES = ("on", "off")
 DEFAULT_DOCKER_IMAGE = "python:3.13-slim"
 DEFAULT_FETCH_DOMAINS = "wttr.in"
 DEFAULT_EXEC_SANDBOX_MAX_BYTES = 268435456
 MIN_EXEC_SANDBOX_MAX_BYTES = 1048576
 MAX_EXEC_SANDBOX_MAX_BYTES = 4294967296
+
+# v1.3 token-aware tool output (REQ-V13-TOO-02, REQ-V13-TOO-07). The two
+# defaults are the inline window a tool result gets in the model's context; the
+# ranges are also the clamp the tool arguments `max_output_chars` / `max_chars`
+# are held to, so a model that asks for more than the ceiling never widens it.
+DEFAULT_EXEC_OUTPUT_CHARS = 1500
+MIN_EXEC_OUTPUT_CHARS = 200
+MAX_EXEC_OUTPUT_CHARS = 4096
+DEFAULT_FETCH_INLINE_CHARS = 5000
+MIN_FETCH_INLINE_CHARS = 500
+MAX_FETCH_INLINE_CHARS = 20000
 
 # v1.2 addition (REQ-V12-SSR-02): scopes `address_scope` can name, and the
 # backstop the six is_* flags alone would miss (finding W-6).
@@ -81,11 +93,21 @@ class Config:
     exec_sandbox_max_bytes: int = DEFAULT_EXEC_SANDBOX_MAX_BYTES
     # v1.2 addition (REQ-V12-QTA-03).
     exec_sandbox_clean_on_start: bool = True
+    # v1.3 additions (REQ-V13-PRE-04): the inline windows of section 10.1.
+    exec_output_default_chars: int = DEFAULT_EXEC_OUTPUT_CHARS
+    fetch_inline_default_chars: int = DEFAULT_FETCH_INLINE_CHARS
+    # v1.3 addition (REQ-V13-PRE-04, REQ-V13-HST-04): the O2 switch. `off`
+    # leaves `_assemble_context` byte-for-byte the un-stubbed assembly.
+    history_tool_stub: str = "on"
     # v1.3 additions (REQ-V13-PRE-04): the three pricing variables. Empty is the
     # default everywhere — an unpriced call stores NULL rather than a guess.
     llm_price_ref_model: str = ""
     llm_price_input_usd_per_mtok: float | None = None
     llm_price_output_usd_per_mtok: float | None = None
+    # v1.3 addition (REQ-V13-PRE-04, REQ-V13-RTE-01): `<provider>:<model>` for
+    # the summary purpose, normalised by `parse_summary_model`. Empty is the
+    # default — the summary then runs on the main client, as it always has.
+    llm_summary_model: str = ""
 
 
 def register_secret(value: str) -> None:
@@ -125,6 +147,28 @@ def strip_secret_fragment(text: str) -> str:
     return text[:-best_len] if best_len else text
 
 
+def parse_summary_model(raw: str) -> tuple[str, str] | None:
+    """Split `LLM_SUMMARY_MODEL` into `(provider, model)`; `None` when unset.
+
+    Shared by `load_config` and `llm.build_llm_client` so the routed value is
+    read in exactly one way (REQ-V13-RTE-01). Whether the named provider is
+    *configured* is a separate question, answered once, in `load_config`.
+    """
+    value = raw.strip()
+    if not value:
+        return None
+    provider, _, model = value.partition(":")
+    provider, model = provider.strip().lower(), model.strip()
+    if provider not in PROVIDERS:
+        raise ConfigError(
+            f"LLM_SUMMARY_MODEL must be '<provider>:<model>' with the provider one of "
+            f"{', '.join(PROVIDERS)}, got: {value}"
+        )
+    if not model:
+        raise ConfigError(f"LLM_SUMMARY_MODEL names no model after '{provider}:', got: {value}")
+    return provider, model
+
+
 def load_config(
     env: Mapping[str, str] | None = None,
     *,
@@ -157,6 +201,13 @@ def load_config(
             f"LLM_FAILOVER must be one of {', '.join(FAILOVER_MODES)}, got: {failover}"
         )
 
+    history_tool_stub = (_value(source, "HISTORY_TOOL_STUB").lower() or "on")
+    if history_tool_stub not in HISTORY_TOOL_STUB_MODES:
+        raise ConfigError(
+            f"HISTORY_TOOL_STUB must be one of {', '.join(HISTORY_TOOL_STUB_MODES)}, "
+            f"got: {history_tool_stub}"
+        )
+
     # REQ-V1-SEC-05: the OpenRouter key is a secret whenever it exists — failover can
     # activate that provider at any time, whatever LLM_PROVIDER says.
     register_secret(openrouter_api_key)
@@ -176,6 +227,26 @@ def load_config(
         if not openrouter_model:
             raise ConfigError("OPENROUTER_MODEL is required when LLM_PROVIDER is openrouter")
     lmstudio_base_url = lmstudio_base_url.rstrip("/")
+
+    # REQ-V13-RTE-01: routing the summary to a provider this process has no
+    # credentials for is a configuration error, not a runtime surprise. The
+    # configured-ness test mirrors `llm.provider_is_configured`, which config.py
+    # cannot import (the import goes the other way).
+    summary_model = ""
+    routed = parse_summary_model(_value(source, "LLM_SUMMARY_MODEL"))
+    if routed is not None:
+        routed_provider, routed_name = routed
+        configured = (
+            bool(lmstudio_base_url and lmstudio_model)
+            if routed_provider == "lmstudio"
+            else bool(openrouter_api_key and openrouter_model)
+        )
+        if not configured:
+            raise ConfigError(
+                f"LLM_SUMMARY_MODEL routes the summary to {routed_provider}, "
+                f"which is not configured"
+            )
+        summary_model = f"{routed_provider}:{routed_name}"
 
     manual_input_price, manual_output_price = _parse_manual_prices(source)
 
@@ -218,9 +289,19 @@ def load_config(
         exec_sandbox_clean_on_start=_parse_bool(
             source, "EXEC_SANDBOX_CLEAN_ON_START", True
         ),
+        exec_output_default_chars=_parse_int(
+            source, "EXEC_OUTPUT_DEFAULT_CHARS", DEFAULT_EXEC_OUTPUT_CHARS,
+            MIN_EXEC_OUTPUT_CHARS, MAX_EXEC_OUTPUT_CHARS,
+        ),
+        fetch_inline_default_chars=_parse_int(
+            source, "FETCH_INLINE_DEFAULT_CHARS", DEFAULT_FETCH_INLINE_CHARS,
+            MIN_FETCH_INLINE_CHARS, MAX_FETCH_INLINE_CHARS,
+        ),
+        history_tool_stub=history_tool_stub,
         llm_price_ref_model=_value(source, "LLM_PRICE_REF_MODEL"),
         llm_price_input_usd_per_mtok=manual_input_price,
         llm_price_output_usd_per_mtok=manual_output_price,
+        llm_summary_model=summary_model,
     )
 
 

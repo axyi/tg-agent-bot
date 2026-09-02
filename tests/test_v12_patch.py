@@ -484,7 +484,7 @@ def test_t_v12_ssr_04_resolve_none_is_exactly_v11_behaviour():
 
     client = httpx.Client(transport=mock_llm_transport(handler))
     result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=client)
-    assert result["status_code"] == 200
+    assert result["status"] == 200
 
 
 # T-V12-SSR-05 (the fetcher partial in main() carries the production

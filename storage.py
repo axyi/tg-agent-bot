@@ -313,24 +313,37 @@ def load_context_messages(
     *,
     token_budget: int | None = None,
     estimator: Callable[[dict], int] | None = None,
+    transform: Callable[[list[dict]], list[dict]] | None = None,
 ) -> list[dict]:
-    groups: list[list[sqlite3.Row]] = []
-    for row in _fetch_turn_rows(conn, conv_id):
-        if groups and groups[-1][0]["turn_id"] == row["turn_id"]:
-            groups[-1].append(row)
+    """`transform` rewrites the whole fetched window *before* the budget walk
+    (REQ-V13-HST-04: the budget is computed on the stubbed messages). It must
+    return a list of the same length in the same order — message `i` still
+    describes row `i` — so that turn grouping and eviction are unaffected by
+    what it did to the contents."""
+    rows = _fetch_turn_rows(conn, conv_id)
+    messages = [_to_message(row) for row in rows]
+    if transform is not None:
+        messages = transform(messages)
+        if len(messages) != len(rows):
+            raise ValueError("a context transform must preserve the message count")
+
+    groups: list[list[int]] = []
+    for index, row in enumerate(rows):
+        if groups and rows[groups[-1][0]]["turn_id"] == row["turn_id"]:
+            groups[-1].append(index)
         else:
-            groups.append([row])
+            groups.append([index])
 
     # With no budget the walk is byte-for-byte the v0 one (REQ-DB-09).
     budgeting = token_budget is not None and estimator is not None
-    selected: list[sqlite3.Row] = []
+    selected: list[int] = []
     total = 0
     tokens = 0
     for index, group in enumerate(reversed(groups)):
         if total >= limit:
             break
         if budgeting:
-            cost = sum(estimator(_to_message(row)) for row in group)
+            cost = sum(estimator(messages[position]) for position in group)
             # The newest group is always taken whole; the budget may exclude older
             # groups but never splits one.
             if index > 0 and tokens + cost > token_budget:
@@ -338,7 +351,7 @@ def load_context_messages(
             tokens += cost
         selected[0:0] = group
         total += len(group)
-    return [_to_message(row) for row in selected]
+    return [messages[position] for position in selected]
 
 
 def add_summary(

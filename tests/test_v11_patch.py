@@ -242,7 +242,11 @@ def test_t_v11_trn_03_fetch_url_headroom_strips_straddling_secret():
     # of fixed-size chunks makes the cut genuinely land inside the secret.
     secret = SENTINEL
     config.register_secret(secret)
-    filler_len = tools.FETCH_MAX_BYTES - len(secret) // 2
+    # v1.3: an explicit small `max_bytes` keeps the byte boundary inside the
+    # inline window of REQ-V13-TOO-07, so the assertions below still see the
+    # bytes the cut produced instead of a far-away excerpt.
+    max_bytes = 200
+    filler_len = max_bytes - len(secret) // 2
     body = ("A" * filler_len + secret + "B" * 100).encode("utf-8")
 
     def chunked(data: bytes, size: int = 8):
@@ -256,18 +260,19 @@ def test_t_v11_trn_03_fetch_url_headroom_strips_straddling_secret():
         return httpx.Response(200, content=chunked(body))
 
     client = httpx.Client(transport=mock_llm_transport(handler))
-    result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=client)
+    result = tools.fetch_url(
+        "https://wttr.in/x", allowed_domains=ALLOWED, client=client, max_bytes=max_bytes
+    )
 
-    assert secret not in result["body"]
+    assert secret not in result["text"]
     for length in range(8, len(secret)):
-        assert secret[:length] not in result["body"], length
-    assert result["truncated"] is True
-    assert len(result["body"].encode("utf-8")) <= tools.FETCH_MAX_BYTES
+        assert secret[:length] not in result["text"], length
+    assert len(result["text"].encode("utf-8")) <= max_bytes
     # Without headroom, strip_secret_fragment's own amputation of the partial
     # secret would satisfy every assertion above with the placeholder absent —
     # proving the secret was seen *whole* is what pins the `+ secret_headroom`
     # term specifically (REQ-V12-TST-02 #11's rationale, applied to TRN-03).
-    assert config.REDACTION in result["body"]
+    assert config.REDACTION in result["text"]
 
 
 def test_t_v11_trn_03_fetch_url_strips_a_fragment_left_by_a_short_response():
@@ -288,8 +293,8 @@ def test_t_v11_trn_03_fetch_url_strips_a_fragment_left_by_a_short_response():
     client = httpx.Client(transport=mock_llm_transport(handler))
     result = tools.fetch_url("https://wttr.in/x", allowed_domains=ALLOWED, client=client)
 
-    assert secret[:20] not in result["body"]
-    assert result["body"] == "hello world "
+    assert secret[:20] not in result["text"]
+    assert result["text"] == "hello world "
 
 
 def test_t_v11_trn_04_no_secrets_registered_matches_v1_behaviour(tmp_path):
@@ -629,7 +634,12 @@ def test_t_v11_qta_03_run_exec_pops_the_key_before_the_model_sees_it(docker_stub
     envelope = json.loads(tools.execute_tool(
         "exec", json.dumps({"argv": ["true"]}), skills={}, runner=runner1,
     ))
-    assert set(envelope) == {"exit_code", "timed_out", "truncated", "stdout", "stderr", "notice"}
+    assert set(envelope) == {
+        "exit_code", "timed_out", "truncated", "stdout", "stderr", "notice",
+        # REQ-V13-TOO-02 additions; `output_default_chars` is popped like the
+        # quota keys and must not appear here.
+        "compacted", "stdout_bytes_total", "stderr_bytes_total",
+    }
 
     box2 = tmp_path / "box2"
     box2.mkdir()

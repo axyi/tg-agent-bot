@@ -18,6 +18,35 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # unchanged.
 USAGE_ACCOUNTING = {"include": True}
 
+# REQ-V13-CCH-03: Anthropic models bill a cached prefix at a discount, but only
+# when the request marks a cache breakpoint explicitly. OpenRouter passes the
+# Anthropic content-block form through unchanged, so the system message — the
+# byte-stable prefix of REQ-V13-CCH-01 — becomes a single text block carrying
+# `cache_control`. Field shape verified against
+# https://openrouter.ai/docs/guides/best-practices/prompt-caching (REQ-V13-PRE-05).
+# Every other provider keeps the plain string form.
+ANTHROPIC_PREFIX = "anthropic/"
+CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def cache_system_prompt(messages: list[dict]) -> list[dict]:
+    """The first system message as one cache-marked text block.
+
+    Only the first: `run_agent` appends a second system message as a
+    request-time nudge, and marking that one would move the breakpoint to the
+    end of the volatile tail and cache nothing. Returns new objects — the agent
+    reuses its `messages` list across rounds and must not see the rewrite.
+    """
+    for index, message in enumerate(messages):
+        if message.get("role") != "system":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str) or not content:
+            return messages
+        block = {"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}
+        return [*messages[:index], {**message, "content": [block]}, *messages[index + 1:]]
+    return messages
+
 
 class OpenRouterClient:
     def __init__(
@@ -47,6 +76,8 @@ class OpenRouterClient:
         *,
         max_tokens: int | None = None,
     ) -> LLMResponse:
+        if self.model.startswith(ANTHROPIC_PREFIX):
+            messages = cache_system_prompt(messages)
         payload = build_payload(
             self.model,
             messages,

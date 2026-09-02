@@ -234,14 +234,16 @@ def test_t_ag_13_system_prompt(conn):
     reply, llm, runner, _, conv = run(conn, [answer("ok")], skills=skills)
     system = llm.calls[0][0][0]
     assert system["role"] == "system"
-    assert NOW in system["content"]
+    # REQ-V13-CCH-01: the clock left the prefix; it rides on the user message.
+    assert NOW not in system["content"]
+    assert llm.calls[0][0][-1]["content"].endswith(agent.format_now_line(NOW))
     for skill in skills.values():
         assert f"- {skill.name}: {skill.description}" in system["content"]
-    assert "- host-info:" in system["content"].split("Installed skills:")[1]
+    assert "- host-info:" in system["content"].split(agent.SKILLS_HEADER)[1]
     # REQ-AG-10: the system prompt is rebuilt per request and never persisted.
     stored = conn.execute("SELECT content FROM messages").fetchall()
     assert all(system["content"] not in row["content"] for row in stored)
-    assert all("Installed skills:" not in row["content"] for row in stored)
+    assert all(agent.SKILLS_HEADER not in row["content"] for row in stored)
 
 
 def test_t_ag_13_system_prompt_without_skills(conn):
@@ -258,8 +260,14 @@ def test_t_ag_14_weather_skill_url_reaches_the_fetcher(conn, monkeypatch):
         LLMResponse("", [ToolCall("call_2", "fetch", json.dumps({"url": url}))], "tool_calls"),
         answer("Koln: sunny"),
     ]
-    fetcher = FakeFetcher({"status_code": 200, "truncated": False,
-                           "body": "Koln: sunny +21C", "notice": tools.UNTRUSTED_NOTICE})
+    # REQ-V13-TOO-07 shape, not the dead v1.2 one: a stub that still spoke the
+    # old envelope made `tools._fetch_size` return None, so the size columns
+    # silently fell back to the envelope length and this end-to-end leg stopped
+    # covering TOO-07 at all.
+    fetcher = FakeFetcher({"url": url, "status": 200, "content_type": "text/plain",
+                           "chars_total": 128, "returned_chars": 16,
+                           "truncated": True, "saved_to": "fetch/" + "0" * 16 + ".txt",
+                           "save_error": None, "text": "Koln: sunny +21C"})
     runner = RecordingRunner()
     runner.forbid_real_processes(monkeypatch)
     reply, llm, runner, _, conv = run(
@@ -272,7 +280,13 @@ def test_t_ag_14_weather_skill_url_reaches_the_fetcher(conn, monkeypatch):
     assert runner.argv_calls == []
     tool_rows = [r for r in rows(conn, conv) if r["role"] == "tool"]
     assert json.loads(tool_rows[0]["content"])["name"] == "weather"
-    assert json.loads(tool_rows[1]["content"])["body"].startswith("Koln: sunny")
+    assert json.loads(tool_rows[1]["content"])["text"].startswith("Koln: sunny")
+    # REQ-V13-TOO-03: the fetch row is measured on `chars_total` against the
+    # inline excerpt — the assertion that goes red if the envelope shape rots.
+    row = conn.execute(
+        "SELECT * FROM tool_calls WHERE tool = 'fetch' ORDER BY id"
+    ).fetchone()
+    assert (row["raw_output_chars"], row["output_chars"]) == (128, 16)
 
 
 def test_t_ag_15_calls_beyond_the_accept_cap_are_dropped(conn):

@@ -110,3 +110,19 @@ def test_t_cfg_09_env_mapping_wins_over_os_environ(monkeypatch):
     assert cfg.telegram_bot_token == TOKEN
     assert cfg.allowed_tg_ids == frozenset({424242})
     assert cfg.llm_provider == "lmstudio"
+
+
+def test_history_tool_stub_defaults_to_on(monkeypatch):
+    """spec-v1.3 REQ-V13-PRE-04 / REQ-V13-HST-04: an `on|off` switch, on by
+    default, case-insensitive like the other enumerated variables."""
+    monkeypatch.setattr(config, "_secrets", set())
+    assert load_config(env=base_env(), load_env_file=False).history_tool_stub == "on"
+    cfg = load_config(env=base_env(HISTORY_TOOL_STUB=" OFF "), load_env_file=False)
+    assert cfg.history_tool_stub == "off"
+
+
+@pytest.mark.parametrize("value", ["maybe", "true", "1"])
+def test_history_tool_stub_rejects_anything_else(value):
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(HISTORY_TOOL_STUB=value), load_env_file=False)
+    assert "HISTORY_TOOL_STUB" in str(exc.value)

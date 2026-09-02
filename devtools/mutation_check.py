@@ -33,8 +33,8 @@ DRIFTED = "drifted"
 # section 5 (11), the four v1.1 guards whose tests already pass (4), and the
 # two lines REQ-V12-TST-01 restores plus the SSR-02 backstop (2).
 #
-# spec-v1.3 section 12 adds its 20 stage-A rows (51 in all); the 13 rows that
-# section tags C land with the stage-C code they mutate.
+# spec-v1.3 section 12 adds its 33 rows: 20 tagged A and the 13 tagged C that
+# land with the stage-C code they mutate — 64 in all.
 # --------------------------------------------------------------------------
 
 MUTATIONS = [
@@ -316,11 +316,15 @@ MUTATIONS = [
         "id": "trn-03-strip-secret-fragment",
         "path": "tools.py",
         "find": (
+            "        text = text.encode(\"utf-8\")[:max_bytes]"
+            ".decode(\"utf-8\", errors=\"replace\")\n"
             "        text = config.strip_secret_fragment(text)\n"
-            "        final_body = text.encode(\"utf-8\")[:max_bytes]"
         ),
-        "replace": "        final_body = text.encode(\"utf-8\")[:max_bytes]",
-        "why": "REQ-V12-TST-01: fetch_url must strip a surviving fragment before the cut",
+        "replace": (
+            "        text = text.encode(\"utf-8\")[:max_bytes]"
+            ".decode(\"utf-8\", errors=\"replace\")\n"
+        ),
+        "why": "REQ-V13-TOO-09: fetch_url must strip a surviving fragment after the byte cut",
     },
     {
         "id": "ssr-is-global-backstop",
@@ -546,6 +550,135 @@ MUTATIONS = [
             'and all(m["id"] != args.only for m in MUTATIONS):\n'
         ),
         "why": "REQ-V13-CO-06: --only with an unknown id exits 1, never a clean zero",
+    },
+    # -- spec-v1.3 section 12, stage C (13) ---------------------------------
+    {
+        "id": "v13-compact-keeps-head-only",
+        "path": "tools.py",
+        "find": "    tail = _suffix_within(lines[len(head):], tail_budget)\n",
+        "replace": "    tail = []\n",
+        "why": "REQ-V13-TOO-01: compaction keeps a tail window, not the head alone",
+    },
+    {
+        "id": "v13-dedup-threshold",
+        "path": "tools.py",
+        "find": "DUPLICATE_RUN_MIN = 3",
+        "replace": "DUPLICATE_RUN_MIN = 2",
+        "why": "REQ-V13-TOO-04: a run of exactly two identical lines is not collapsed",
+    },
+    {
+        "id": "v13-fragment-after-cut",
+        "path": "tools.py",
+        "find": (
+            "    return config.strip_secret_fragment("
+            "head_part + marker + text[-tail_budget:])"
+        ),
+        "replace": "    return head_part + marker + text[-tail_budget:]",
+        "why": "REQ-V13-TOO-01: the single-line fallback strips a fragment after the cut",
+    },
+    {
+        "id": "v13-fetch-inline-fragment-after-cut",
+        "path": "tools.py",
+        "find": "        excerpt = config.strip_secret_fragment(text[:max_chars])\n",
+        "replace": "        excerpt = text[:max_chars]\n",
+        "why": "REQ-V13-TOO-09: the inline max_chars cut is followed by a fragment strip",
+    },
+    {
+        "id": "v13-fetch-script-kept",
+        "path": "tools.py",
+        "find": 'HTML_DROP_TAGS = frozenset({"script", "style", "noscript", "template", "svg"})',
+        "replace": 'HTML_DROP_TAGS = frozenset({"style", "noscript", "template", "svg"})',
+        "why": "REQ-V13-TOO-05: script bodies are markup, never extracted text",
+    },
+    {
+        "id": "v13-fetch-save-path",
+        "path": "tools.py",
+        "find": (
+            '    name = hashlib.sha256(url.encode("utf-8")).hexdigest()'
+            '[:FETCH_HASH_CHARS] + ".txt"'
+        ),
+        "replace": '    name = url.rstrip("/").rsplit("/", 1)[-1] + ".txt"',
+        "why": "REQ-V13-TOO-06: the saved name is the URL hash, never a model-chosen path",
+    },
+    {
+        "id": "v13-fetch-dir-follows-symlink",
+        "path": "tools.py",
+        "find": (
+            "            FETCH_DIR_NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,"
+            " dir_fd=root_fd\n"
+        ),
+        "replace": "            FETCH_DIR_NAME, os.O_RDONLY | os.O_DIRECTORY, dir_fd=root_fd\n",
+        "why": "REQ-V13-TOO-06: a symlinked fetch/ directory must be refused, not followed",
+    },
+    {
+        "id": "v13-fetch-save-reuses-inode",
+        "path": "tools.py",
+        "find": (
+            "        try:\n"
+            "            os.unlink(name, dir_fd=fetch_fd)\n"
+            "        except FileNotFoundError:\n"
+            "            pass\n"
+            "        fd = os.open(\n"
+            "            name,\n"
+            "            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,\n"
+        ),
+        "replace": (
+            "        fd = os.open(\n"
+            "            name,\n"
+            "            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,\n"
+        ),
+        "why": "REQ-V13-TOO-06: a fresh inode, never a truncating write into a hard link",
+    },
+    {
+        "id": "v13-fetch-save-always",
+        "path": "tools.py",
+        "find": "        saved_to = save_error = None\n        if truncated:\n",
+        "replace": "        saved_to = save_error = None\n        if True:\n",
+        "why": "REQ-V13-TOO-06: only a truncated fetch leaves a file behind",
+    },
+    {
+        "id": "v13-compact-over-budget",
+        "path": "tools.py",
+        "find": "    budget = max_chars - MARKER_RESERVE\n",
+        "replace": "    budget = max_chars\n",
+        "why": "REQ-V13-TOO-01: the marker is reserved, so len(result) <= max_chars holds",
+    },
+    {
+        "id": "v13-stub-current-turn",
+        "path": "agent.py",
+        "find": (
+            "        if expose_tools:\n"
+            "            request_messages = messages\n"
+        ),
+        "replace": (
+            "        if expose_tools:\n"
+            "            request_messages = _stub_stale_tool_results(messages)\n"
+        ),
+        "why": "REQ-V13-HST-01: a result of this invocation is never stale, never stubbed",
+    },
+    {
+        "id": "v13-stub-skill-latest",
+        "path": "agent.py",
+        "find": "    keep = set(latest_skill.values())\n",
+        "replace": "    keep = set()\n",
+        "why": "REQ-V13-HST-02: the most recent load of each skill survives verbatim",
+    },
+    {
+        "id": "v13-now-in-system",
+        "path": "agent.py",
+        "find": "    prompt = SYSTEM_PROMPT.format(skill_lines=skill_lines)\n",
+        "replace": (
+            "    prompt = SYSTEM_PROMPT.format(skill_lines=skill_lines)"
+            ' + f" current date: {now}"\n'
+        ),
+        "why": "REQ-V13-CCH-01: the clock stays out of the cacheable prefix",
+    },
+    {
+        "id": "v13-routing-agent-too",
+        "path": "llm/__init__.py",
+        "find": '    if purpose == "summary":\n',
+        "replace": '    if purpose in ("summary", "agent"):\n',
+        "why": "REQ-V13-RTE-01: LLM_SUMMARY_MODEL routes the summary purpose and only it",
     },
 ]
 

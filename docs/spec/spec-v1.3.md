@@ -2357,3 +2357,26 @@ parameters — is recorded as a v1.4 candidate in `docs/plan.md`, not fixed here
 changing it would alter the measured treatment, and the resulting failures are
 already reported honestly as `failed_calls` and handled by the conservative
 cost gate of §13.3.
+
+### E.6 REQ-V13-BEN-03 — the treatment rule contradicts itself for `LLM_SUMMARY_MODEL`
+
+BEN-03 makes `report --gate` "exit 2 unless `LLM_FAILOVER` is `"off"` and
+`LLM_SUMMARY_MODEL` is `""` **in both files**, `LLM_MAX_TOKENS` is equal, and
+every **stage-C key is `null` on the baseline side** and equal to its PRE-04
+default on the candidate side".
+
+`LLM_SUMMARY_MODEL` is a stage-C key: REQ-V13-PRE-04 introduces it at
+`[C3, TC5]`, and REQ-V13-BEN-10 requires `null` for any variable whose
+`config.Config` field does not exist at that commit. The baseline is measured
+on the C1 tree, which by REQ-V13-EC-06's commit split has no such field, so
+`baseline.json` necessarily carries `"LLM_SUMMARY_MODEL": null` — and the
+"`""` in both files" clause then rejects the very pair the spec's own
+four-commit contract produces. The two clauses are unsatisfiable together.
+
+**Resolution.** The key is treated under the stage-C rule, preserving the
+purpose of the first clause — routing is never benchmarked, on either side:
+the baseline side must be `null` or `""`, the candidate side `""` (or `null`
+where the field does not exist), and a **non-empty model id on either side
+remains a hard exit 2** naming the key and the side. `LLM_FAILOVER` must still
+be `"off"` on both sides, unchanged. This is report-time validation only; no
+measured treatment and no committed benchmark datum is affected.

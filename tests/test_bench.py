@@ -655,6 +655,19 @@ def test_config_sha256_ignores_secrets_and_identifiers_but_not_the_treatment(tmp
     assert digest != bench.config_sha256(dataclasses.replace(base, llm_max_tokens=1024))
 
 
+def test_the_pinned_treatment_tracks_the_config_defaults():
+    """`STAGE_C_DEFAULTS` spells the treatment out in its own literals, so a
+    drift in `config` would leave the harness measuring one window while the
+    bot serves another — and the final gate would not notice."""
+    assert bench.STAGE_C_DEFAULTS["EXEC_OUTPUT_DEFAULT_CHARS"] == (
+        config.DEFAULT_EXEC_OUTPUT_CHARS
+    )
+    assert bench.STAGE_C_DEFAULTS["FETCH_INLINE_DEFAULT_CHARS"] == (
+        config.DEFAULT_FETCH_INLINE_CHARS
+    )
+    assert bench.STAGE_C_DEFAULTS["HISTORY_TOOL_STUB"] in config.HISTORY_TOOL_STUB_MODES
+
+
 def test_constants_record_the_request_defaults_verbatim():
     recorded = bench.constants()
     assert recorded["REQUEST_DEFAULTS"] == bench.llm_base.REQUEST_DEFAULTS
@@ -1209,6 +1222,40 @@ def test_gate_enforces_the_ben_03_treatment_rule(side, key, value, needle):
     document["meta"]["env_flags"][key] = value
     reason = bench.comparability(baseline, candidate)
     assert reason is not None and needle in reason
+
+
+@pytest.mark.parametrize("base_value,cand_value", [
+    (None, ""),          # the shape the four-commit contract actually produces
+    ("", ""),
+    (None, None),
+    ("", None),
+])
+def test_gate_accepts_every_empty_summary_model_shape(base_value, cand_value):
+    """Appendix E.6: `LLM_SUMMARY_MODEL` is a stage-C key (PRE-04, `[C3, TC5]`),
+    so the C1 baseline carries `null` by REQ-V13-BEN-10 — the shape
+    `docs/assets/bench/baseline.json` really has. Empty is empty on both sides."""
+    baseline, candidate = _pair()
+    baseline["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = base_value
+    candidate["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = cand_value
+    assert bench.comparability(baseline, candidate) is None
+
+
+@pytest.mark.parametrize("side", ["baseline", "candidate"])
+def test_gate_refuses_a_routed_summary_model_on_either_side(side, tmp_path, capsys):
+    """The purpose of the clause survives E.6: routing is never benchmarked."""
+    baseline, candidate = _pair()
+    baseline["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = None
+    document = baseline if side == "baseline" else candidate
+    document["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = "openrouter:cheap/model"
+    reason = bench.comparability(baseline, candidate)
+    assert reason is not None and "LLM_SUMMARY_MODEL" in reason and side in reason
+
+    code = bench.main(["report",
+                       "--baseline", str(_write(tmp_path, "baseline.json", baseline)),
+                       "--candidate", str(_write(tmp_path, "optimized.json", candidate)),
+                       "--gate"])
+    assert code == 2
+    assert "LLM_SUMMARY_MODEL" in capsys.readouterr().err
 
 
 def test_a_correct_pair_is_comparable():
