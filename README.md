@@ -580,7 +580,7 @@ optimizations, measured against the benchmark below except where noted:
   ships tested but **was not enabled during the benchmark**; the reports carry
   the summary-purpose token total it would affect and never invent a saving.
 
-**Headline, baseline → optimized:** _measured in C4_
+**Headline, baseline → optimized:** cost per successful task $0.002687 → $0.002492 (**−7.3 %**), success rate 100.0 % → 94.4 % (**−5.6 pp**). The −30 % target was **not** met and the verdict is FAIL: the largest lever the audit found — suppressing reasoning, 71.8 % of all completion tokens — proved unavailable, because LM Studio does not honour the model's documented thinking switch. Prompt tokens still fell 18.1 %, tool output 31.3 % and latency 36.7 %. Full numbers and the analysis: [docs/reports/bench-v1.3.md](docs/reports/bench-v1.3.md).
 
 ## Benchmark
 

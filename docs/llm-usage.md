@@ -35,6 +35,9 @@
 | 28 | v1.2 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/08-code-review-v1.2.md`) | claude-sonnet-5 (subagent default) | not computed — same async task-output constraint as row 26 | not computed |
 | **Σ** (rows 27–28, one `go` run) | | claude-sonnet-5 | not computed | ≈$33.11 + unknown (row 28) |
 | 29 | spec-v1.3 authoring — writer pass in the lab session plus two clean-context reviewer subagents (design review, then a consistency re-review after 25 fixes); executor of the spec is `claude-opus-5`, not yet run | claude-fable-5 (lab session; reviewers on the subagent default) | ≈258k subagent aggregate (≈134k design review + writer helpers, 123,557 consistency re-review; harness-reported, in/out split not exposed) + a main-session share that is not isolatable from the lab session transcript (that session also carried unrelated lab work) | — (flat-rate session) |
+| 30 | v1.3 implementation run — the whole `go docs/spec/spec-v1.3.md` run across its four commits: stage A (v1.2 carry-over, observability, pricing, benchmark harness, dashboard, mutation entries), the baseline benchmark and the OpenRouter smoke, the token audit, stage C (optimizations O1–O6 incl. the O5 probe), the optimized run and the gate report, the six gates at C1/C3/C4, two clean-context reviews with one fix round each, and the C4 documentation | claude-opus-5 | unknown | unknown |
+| 31 | v1.3 task subagents — 18 of the run's 19 prompt files (`docs/prompts/10-v13-TA1-carryover.md` … `27-v13-TC9-docs.md`; the 19th is row 30's own `09-go-spec-v1.3.md`), including the two `code-reviewer` clean-context reviews (`16-…`, `25-…`) and the audit subagent (`18-…`) | claude-opus-5 | unknown | unknown |
+| **Σ** (rows 30–31, one `go` run) | | claude-opus-5 | unknown | unknown |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.
@@ -119,3 +122,25 @@ baseline. It is an aggregate estimate, not a measurement of the kind rows
 subagents only report their totals. No inference was spent by the bot
 itself; the only live checks were `pytest --collect-only` (326 tests at
 `1ecc35e`) and a `len()` of `agent.SYSTEM_PROMPT`, both offline.
+
+Rows 30–31 are the spec-v1.3 implementation run (`go docs/spec/spec-v1.3.md`,
+prompt `docs/prompts/09-go-spec-v1.3.md`), covering the token-economy patch end
+to end — the four commits `69ebc75`, `f0572c8`, `c11f590` and the C4
+documentation commit — with **19 prompt files** logged for this run
+(`09-go-spec-v1.3.md` through `27-v13-TC9-docs.md`). The prompt count is the
+only directly observable figure: every token and cost cell is the literal
+`unknown`, never an estimate and never a number without a named source
+(REQ-V13-RPT-06). The executor has no API to its own session usage, and this
+run's harness displayed no usage or cost line to it — unlike row 25, where the
+session transcript was available for a direct re-measurement, there is nothing
+here to cite. The measured values are filled in after the run by the maintainer
+from the lab's session transcripts (`tools/session-usage.py`, outside this
+repository) and recorded in `economics.md`; `docs/reports/report-v1.3.md`'s
+"Cumulative: v1 → v1.3" section copies whatever this table says, `unknown`
+cells included. Inference the *bot* itself spent is measured and reported
+separately in `docs/reports/report-v1.3.md`: the two full benchmark runs at
+$0.09675 and $0.084729 and the O5 probe at $0.001876 are all
+reference-priced ESTIMATES over free local LM Studio inference
+(REQ-V13-PRC-03), and the only real money spent was the OpenRouter smoke's
+$0.000212 on `google/gemini-2.5-flash-lite` — one S02 run, capped at
+`--max-cost-usd 0.50`.
