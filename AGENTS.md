@@ -5,6 +5,16 @@ exec tool, skills (course assignment 3).
 
 Standards summary (self-contained): SDD — the spec is the contract; atomic commits (one prompt → one commit); review in a clean context; deterministic gates before done.
 
+## Spec
+
+SDD: implementation task → spec first (`docs/spec/spec-vN.md`); the spec is
+the contract.
+
+**Spec drift:** architecture, tests/interfaces, behaviour, limits, security
+posture, storage schema or the command set change → update the relevant
+`docs/spec/spec-vN.md` delta (or add a new one) in the same commit. A PR that
+changes behaviour without touching `docs/spec/` is incomplete.
+
 ## Stack
 
 - Language: Python 3.13 (pinned via .python-version; requires-python ">=3.12,<3.14"), environment managed by **uv**
@@ -15,6 +25,7 @@ Standards summary (self-contained): SDD — the spec is the contract; atomic com
   no bot framework, no agent framework
 - Tooling: uv (lockfile-pinned), pytest, ruff
 - Platform: Linux
+- NEVER add dependencies beyond the allowed list without asking.
 
 ## Project layout
 
@@ -29,29 +40,30 @@ Standards summary (self-contained): SDD — the spec is the contract; atomic com
 - `tests/` — pytest suite
 - `docs/` — spec, prompt log, reports, token accounting
 
-Context boundaries: agents work inside this repository only. Never read or edit
+Context boundaries: agents work inside this repository only. NEVER read or edit
 anything above the repository root.
 The exec tool runs untrusted model output — it executes only inside the
-sandbox described in the spec, never against the host working tree.
+sandbox described in the spec, NEVER against the host working tree.
 
 ## Commit format
 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`.
 - **One prompt → one commit.** Reference the prompt file in the body:
   `(prompt: docs/prompts/NN-<slug>.md)`.
-- Never mix results of different prompts in one commit or MR.
+- NEVER mix results of different prompts in one commit or MR.
+<!-- SYNC: canonical text lives in standards/workflow.md §6 (lab repo); this copy is intentionally self-contained -->
 
 ## Branch strategy
 
 - One task → one branch: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`.
 - Exception: a single-agent run implementing a whole spec end-to-end may
   commit directly to `main`; branches are for parallel or partial work.
-- Parallel agent work: **one git worktree per agent**, merge via MR; never two
+- Parallel agent work: **one git worktree per agent**, merge via MR; NEVER two
   agents in one working tree.
 
 ## Gates — run before reporting success
 
-All six must exit 0, run in this order:
+All six MUST exit 0, run in this order:
 
 ```bash
 uv sync --locked
@@ -70,6 +82,8 @@ offline, but slow (minutes, since it reruns the test suite once per mutation).
 
 ## go protocol
 
+<!-- SYNC: canonical text lives in standards/workflow.md §9 (lab repo); this copy is intentionally self-contained -->
+
 `go docs/spec/spec-v0.md` is a standing instruction meaning: **execute that spec
 end-to-end, following its own Execution contract section.** Concretely:
 
@@ -84,18 +98,10 @@ end-to-end, following its own Execution contract section.** Concretely:
 
 The spec is the contract. Where the spec and this file disagree, stop and ask.
 
-## Spec sync
-
-The spec under docs/spec/ is the contract. Any change that alters
-architecture, behaviour, limits, security posture, storage schema or the
-command set MUST update the relevant spec delta (or add a new one) in the
-same commit. A PR that changes behaviour without touching docs/spec/ is
-incomplete.
-
 ## Review
 
 Code review is performed by the `code-reviewer` subagent
-(`.claude/agents/code-reviewer.md`) in its own clean context — never
+(`.claude/agents/code-reviewer.md`) in its own clean context — NEVER
 self-review in the writing context.
 
 ## Reporting
@@ -115,4 +121,4 @@ link to this project's GitHub repository
 ## Secrets
 
 Secrets live in `.env` (git-ignored) — the Telegram bot token and the LLM API
-key never leave it. Never write secrets into code, docs, prompts, or reports.
+key never leave it. NEVER write secrets into code, docs, prompts, or reports.
