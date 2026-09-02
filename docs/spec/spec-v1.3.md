@@ -2325,3 +2325,35 @@ so on a box whose `.env` selects OpenRouter a plain
 (`cfg.llm_provider == "openrouter"`), evaluated after the config is built and
 before anything is spent or written. This strictly widens the protection BEN-02
 asks for; the flag path behaves exactly as specified.
+
+### E.5 REQ-V13-BEN-05 — the 600 s cap contradicts its own stated construction
+
+BEN-05 justifies the per-run wall-clock cap as "deliberately above the sum of
+the per-operation timeouts a run can hit (LLM HTTP timeout ×
+`HTTP_ATTEMPT_LIMIT` × rounds, exec timeout × tool calls)", so that "a run that
+reaches it is a harness defect, not a slow model".
+
+With the live configuration (`LLM_TIMEOUT_S = 120`, `HTTP_ATTEMPT_LIMIT = 9`,
+`RETRY_SLEEP_S = 2`), a **single** user message can legitimately consume
+`9 × 120 + 8 × 2 = 1096 s` — and `attempts` is counted per user message, while
+S09 and S12 have three. The stated property is therefore arithmetically false
+at 600 s. The first baseline attempt demonstrated it: S12 repeat 2 hit four
+consecutive 120 s read timeouts on one message and tripped the abort while the
+harness and the model were both behaving exactly as designed.
+
+**Resolution.** B1 and D1 are both run with `--timeout-s 1800`, which restores
+the intended property for a fully-retried message plus the remainder of a
+scenario while still bounding a genuinely hung run. `timeout_s` is a locked
+meta field (REQ-V13-BEN-01), so the same value on both sides keeps the two
+files comparable. Nothing about the measured treatment changes: this is the
+harness's abort threshold, not a bot configuration, and §13.2 benchmark steps
+are "blocking, not permanent gates", so the AGENTS.md verbatim-gate rule is
+untouched.
+
+The underlying mismatch — `LLM_MAX_TOKENS = 2048` is unreachable within
+`LLM_TIMEOUT_S = 120` at the measured `21.1 s + 0.093 s/token`, so any
+completion beyond ~1064 tokens times out and is retried with identical
+parameters — is recorded as a v1.4 candidate in `docs/plan.md`, not fixed here:
+changing it would alter the measured treatment, and the resulting failures are
+already reported honestly as `failed_calls` and handled by the conservative
+cost gate of §13.3.

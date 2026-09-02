@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark dashboard — baseline</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 2rem 1.5rem 4rem; background: #f6f7f9; color: #16191d;
+       font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial,
+       sans-serif; }
+main { max-width: 68rem; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+h2 { font-size: 1.15rem; margin: 2.5rem 0 .75rem; padding-bottom: .3rem;
+     border-bottom: 2px solid #d8dce2; }
+h3 { font-size: .95rem; margin: 1.5rem 0 .5rem; font-weight: 600; }
+p.sub { margin: 0 0 1rem; color: #5a6472; font-size: .85rem; }
+nav { margin: 1rem 0 0; font-size: .85rem; }
+nav a { color: #1f5fb0; text-decoration: none; margin-right: 1rem; }
+nav a:hover { text-decoration: underline; }
+section { background: #fff; border: 1px solid #e2e6eb; border-radius: 8px;
+          padding: .25rem 1.25rem 1.25rem; margin-top: 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+caption { text-align: left; font-weight: 600; padding: .5rem 0; }
+th, td { padding: .35rem .6rem; border-bottom: 1px solid #eceff3; text-align: left;
+         vertical-align: top; }
+th { font-weight: 600; color: #47505d; font-size: .8rem; text-transform: uppercase;
+     letter-spacing: .02em; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
+                 font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+tr:last-child td { border-bottom: none; }
+.bar { background: #eef1f5; border-radius: 3px; height: .7rem; min-width: 6rem; }
+.bar span { display: block; height: 100%; border-radius: 3px; background: #3f7fd0; }
+.bar.time span { background: #d08a3f; }
+.tag { display: inline-block; padding: .05rem .45rem; border-radius: 999px;
+       font-size: .75rem; border: 1px solid #ccd3db; color: #47505d; }
+.ok { color: #1c7a4a; }
+.bad { color: #b23636; }
+.warn { background: #fff4e5; border: 1px solid #e0b678; border-radius: 6px;
+        padding: .6rem .9rem; margin: 1rem 0; font-size: .875rem; }
+.meta { font-size: .8rem; color: #5a6472; }
+.na { color: #8b95a3; }
+footer { margin-top: 3rem; color: #8b95a3; font-size: .78rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Benchmark dashboard — baseline</h1>
+<p class="sub">tag <b>baseline</b> · provider lmstudio · model qwen/qwen3.8-27b · repeats 3 · commit 69ebc7575550 · started 2026-09-02T16:33:54Z · prefix tokens 1126 · pricing reference:qwen/qwen3.8-27b</p>
+<nav><a href="#aggregates">aggregates</a><a href="#cache">cache</a><a href="#tools">tools</a><a href="#timeline">timeline</a></nav>
+
+<section id="aggregates">
+<h2>Aggregates</h2>
+<p class="sub">Every figure below is the document's own <code>summary</code>, which <code>bench.py check</code> recomputes from the embedded rows. Live-bot figures live in <code>/stats</code>.</p>
+<table><caption>Totals over 36 runs</caption><tbody>
+<tr><th>LLM calls</th><td class="num" id="m-calls">88</td></tr>
+<tr><th>failed calls</th><td class="num" id="m-failed_calls">1</td></tr>
+<tr><th>prompt tokens</th><td class="num" id="m-prompt_tokens">126109</td></tr>
+<tr><th>completion tokens</th><td class="num" id="m-completion_tokens">16923</td></tr>
+<tr><th>cached tokens</th><td class="num" id="m-cached_tokens">0</td></tr>
+<tr><th>reasoning tokens</th><td class="num" id="m-reasoning_tokens">12144</td></tr>
+<tr><th>tool calls</th><td class="num" id="m-tool_calls">45</td></tr>
+<tr><th>tool output tokens (est)</th><td class="num" id="m-tool_output_tokens_est">13116</td></tr>
+<tr><th>re-sent prompt tokens</th><td class="num" id="m-resent_tokens">62431</td></tr>
+<tr><th>new prompt tokens</th><td class="num" id="m-new_tokens">63678</td></tr>
+<tr><th>LLM latency, ms</th><td class="num" id="m-latency_ms">3540575</td></tr>
+<tr><th>wall clock, ms</th><td class="num" id="m-wall_ms">3564244</td></tr>
+<tr><th>cost, USD</th><td class="num" id="m-cost_usd">$0.096750</td></tr>
+<tr><th>runs</th><td class="num" id="m-runs">36</td></tr>
+<tr><th>skipped runs</th><td class="num" id="m-skipped">0</td></tr>
+<tr><th>successes</th><td class="num" id="m-successes">36</td></tr>
+<tr><th>success rate</th><td class="num" id="m-success_rate">100.00%</td></tr>
+<tr><th>cost per success</th><td class="num" id="m-cost_per_success">$0.002687</td></tr>
+<tr><th>tokens per success</th><td class="num" id="m-tokens_per_success">3973.1</td></tr>
+</tbody></table>
+<h3>Per task (per executed run)</h3>
+<table><tbody>
+<tr><th>tokens per task</th><td class="num" id="m-avg-tokens">3973.1</td></tr>
+<tr><th>rounds per task</th><td class="num" id="m-avg-rounds">2.3</td></tr>
+<tr><th>tool calls per task</th><td class="num" id="m-avg-tool_calls">1.2</td></tr>
+<tr><th>LLM latency per task, ms</th><td class="num" id="m-avg-latency_ms">98349.3</td></tr>
+</tbody></table>
+<h3>Context growth, chars per run</h3>
+<table><tbody>
+<tr><th>system</th><td class="num" id="m-growth-system">0.0</td></tr>
+<tr><th>tools</th><td class="num" id="m-growth-tools">0.0</td></tr>
+<tr><th>user</th><td class="num" id="m-growth-user">20.8</td></tr>
+<tr><th>assistant</th><td class="num" id="m-growth-assistant">311.1</td></tr>
+<tr><th>tool</th><td class="num" id="m-growth-tool">1301.4</td></tr>
+</tbody></table>
+<h3>Most expensive turn</h3>
+<p class="meta" id="m-top_turn">S05 repeat 1, turn 3, round 2 — 5402 prompt tokens</p>
+</section>
+<section id="cache">
+<h2>Cache and re-sent context</h2>
+<table><tbody>
+<tr><th>cache hit rate</th><td class="num na" id="m-cache_hit_rate">n/a</td><td>the provider reported no cached tokens</td></tr>
+<tr><th>re-sent share</th><td class="num" id="m-resent_share">49.51%</td><td>prompt tokens already sent in an earlier call of the same conversation</td></tr>
+<tr><th>prefix share</th><td class="num" id="m-prefix_share">78.57%</td><td>prefix tokens × calls ÷ prompt tokens</td></tr>
+<tr><th>re-sent tokens</th><td class="num" id="m-cache-resent_tokens">62431</td><td>absolute</td></tr>
+<tr><th>new tokens</th><td class="num" id="m-cache-new_tokens">63678</td><td>absolute</td></tr>
+</tbody></table>
+</section>
+<section id="tools">
+<h2>Tools</h2>
+<p class="sub">Every tool call of every run, by output tokens and by wall time.</p>
+<table><thead><tr><th>tool</th><th class="num">calls</th><th class="num">output tokens</th><th>by output</th><th class="num">share</th><th class="num">time, ms</th><th>by time</th><th class="num">share</th></tr></thead><tbody>
+<tr><th>exec</th><td class="num" id="m-tool-exec-calls">36</td><td class="num" id="m-tool-exec-tokens">11523</td><td><div class="bar"><span style="width:100.0%"></span></div></td><td class="num">87.85%</td><td class="num" id="m-tool-exec-ms">9855</td><td><div class="bar time"><span style="width:100.0%"></span></div></td><td class="num">96.91%</td></tr>
+<tr><th>load_skill</th><td class="num" id="m-tool-load_skill-calls">6</td><td class="num" id="m-tool-load_skill-tokens">1455</td><td><div class="bar"><span style="width:12.6%"></span></div></td><td class="num">11.09%</td><td class="num" id="m-tool-load_skill-ms">0</td><td><div class="bar time"><span style="width:0.0%"></span></div></td><td class="num">0.00%</td></tr>
+<tr><th>fetch</th><td class="num" id="m-tool-fetch-calls">3</td><td class="num" id="m-tool-fetch-tokens">138</td><td><div class="bar"><span style="width:1.2%"></span></div></td><td class="num">1.05%</td><td class="num" id="m-tool-fetch-ms">314</td><td><div class="bar time"><span style="width:3.2%"></span></div></td><td class="num">3.09%</td></tr>
+</tbody></table>
+</section>
+<section id="timeline">
+<h2>Timeline — the median run of every scenario</h2>
+<p class="sub">A scenario's runs are sorted ascending by cost (by prompt + completion tokens when any repeat reported no cost), ties keep execution order, and the run at index <code>n // 2</code> is shown.</p>
+<h3 id="timeline-S01">S01 — repeat <span id="median-S01">1</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.001029, 1352 tokens, wall 45444 ms · context growth system +0, tools +0, user +0, assistant +0, tool +0</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1138</td><td class="num">214</td><td class="num na">n/a</td><td class="num">45169</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S02">S02 — repeat <span id="median-S02">2</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.001267, 2502 tokens, wall 41165 ms · context growth system +0, tools +0, user +0, assistant +193, tool +235</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1148</td><td class="num">81</td><td class="num na">n/a</td><td class="num">33069</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1258</td><td class="num">15</td><td class="num na">n/a</td><td class="num">7485</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S03">S03 — repeat <span id="median-S03">1</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.003407, 3381 tokens, wall 119534 ms · context growth system +0, tools +0, user +0, assistant +286, tool +233</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1161</td><td class="num">881</td><td class="num na">n/a</td><td class="num">108053</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1293</td><td class="num">46</td><td class="num na">n/a</td><td class="num">10882</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S04">S04 — repeat <span id="median-S04">2</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.001890, 2803 tokens, wall 64712 ms · context growth system +0, tools +0, user +0, assistant +201, tool +399</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1161</td><td class="num">200</td><td class="num na">n/a</td><td class="num">44734</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1313</td><td class="num">129</td><td class="num na">n/a</td><td class="num">19283</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S05">S05 — repeat <span id="median-S05">1</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.004141, 7108 tokens, wall 172439 ms · context growth system +0, tools +0, user +0, assistant +263, tool +6436</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1179</td><td class="num">490</td><td class="num na">n/a</td><td class="num">71646</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">5402</td><td class="num">37</td><td class="num na">n/a</td><td class="num">100174</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S06">S06 — repeat <span id="median-S06">2</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.002791, 3843 tokens, wall 102094 ms · context growth system +0, tools +0, user +0, assistant +238, tool +4371</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1167</td><td class="num">467</td><td class="num na">n/a</td><td class="num">69476</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">2131</td><td class="num">78</td><td class="num na">n/a</td><td class="num">31949</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S07">S07 — repeat <span id="median-S07">1</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.002935, 4610 tokens, wall 86192 ms · context growth system +0, tools +0, user +0, assistant +597, tool +1534</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1141</td><td class="num">71</td><td class="num na">n/a</td><td class="num">32043</td><td>load_skill</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1317</td><td class="num">183</td><td class="num na">n/a</td><td class="num">24612</td><td>exec, exec, exec</td></tr>
+<tr><td class="num">3</td><td><span class="tag">agent</span></td><td class="num">1693</td><td class="num">205</td><td class="num na">n/a</td><td class="num">28541</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S08">S08 — repeat <span id="median-S08">2</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.002433, 4455 tokens, wall 67789 ms · context growth system +0, tools +0, user +0, assistant +360, tool +1267</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1157</td><td class="num">118</td><td class="num na">n/a</td><td class="num">37181</td><td>load_skill</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1472</td><td class="num">107</td><td class="num na">n/a</td><td class="num">20226</td><td>fetch</td></tr>
+<tr><td class="num">3</td><td><span class="tag">agent</span></td><td class="num">1572</td><td class="num">29</td><td class="num na">n/a</td><td class="num">9963</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S09">S09 — repeat <span id="median-S09">1</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.005140, 7949 tokens, wall 187384 ms · context growth system +0, tools +0, user +180, assistant +928, tool +526</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1163</td><td class="num">426</td><td class="num na">n/a</td><td class="num">66175</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1346</td><td class="num">65</td><td class="num na">n/a</td><td class="num">14016</td><td>—</td></tr>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1422</td><td class="num">102</td><td class="num na">n/a</td><td class="num">41242</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1556</td><td class="num">62</td><td class="num na">n/a</td><td class="num">12354</td><td>—</td></tr>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1633</td><td class="num">174</td><td class="num na">n/a</td><td class="num">52657</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S10">S10 — repeat <span id="median-S10">1</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.001309, 1465 tokens, wall 55469 ms · context growth system +0, tools +0, user +0, assistant +0, tool +0</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1142</td><td class="num">323</td><td class="num na">n/a</td><td class="num">55182</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S11">S11 — repeat <span id="median-S11">2</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.000737, 1250 tokens, wall 35333 ms · context growth system +0, tools +0, user +0, assistant +0, tool +0</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1153</td><td class="num">97</td><td class="num na">n/a</td><td class="num">35041</td><td>—</td></tr>
+</tbody></table>
+<h3 id="timeline-S12">S12 — repeat <span id="median-S12">3</span>, <span class="ok">success</span></h3>
+<p class="meta">median of 3 run(s), ranked by cost; cost $0.005884, 7060 tokens, wall 204373 ms · context growth system +0, tools +0, user +69, assistant +548, tool +518</p>
+<table><thead><tr><th class="num">round</th><th>purpose</th><th class="num">prompt</th><th class="num">completion</th><th class="num">cached</th><th class="num">latency, ms</th><th>tools called</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1141</td><td class="num">737</td><td class="num na">n/a</td><td class="num">94152</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1285</td><td class="num">32</td><td class="num na">n/a</td><td class="num">9333</td><td>—</td></tr>
+<tr><td class="num">1</td><td><span class="tag">agent</span></td><td class="num">1326</td><td class="num">62</td><td class="num na">n/a</td><td class="num">35275</td><td>exec</td></tr>
+<tr><td class="num">2</td><td><span class="tag">agent</span></td><td class="num">1452</td><td class="num">34</td><td class="num na">n/a</td><td class="num">7786</td><td>—</td></tr>
+<tr><td class="num">0</td><td><span class="tag">summary</span></td><td class="num">499</td><td class="num">492</td><td class="num na">n/a</td><td class="num">56975</td><td>—</td></tr>
+</tbody></table>
+</section>
+<footer>Generated by devtools/dashboard.py from benchmark JSON (spec-v1.3 section 8). Static file: no script, no network.</footer>
+</main>
+</body>
+</html>

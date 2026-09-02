@@ -1,0 +1,235 @@
+{
+  "bench_schema": 1,
+  "meta": {
+    "tag": "openrouter-smoke",
+    "started_at": "2026-09-02T17:34:37Z",
+    "finished_at": "2026-09-02T17:34:42Z",
+    "git_commit": "69ebc7575550731b981e6799f55dfd5eaaec8317",
+    "provider": "openrouter",
+    "model": "google/gemini-2.5-flash-lite",
+    "context_length": 131072,
+    "repeats": 1,
+    "only": [
+      "S02"
+    ],
+    "timeout_s": 600,
+    "prefix_tokens": null,
+    "scenarios_sha256": "586ed397cae5caef1ef464d41addde3963803e27b559443bbea5e31e5a0d0a48",
+    "pricing": {
+      "basis": "openrouter-list",
+      "model": "google/gemini-2.5-flash-lite",
+      "input_usd_per_mtok": 0.09999999999999999,
+      "output_usd_per_mtok": 0.39999999999999997,
+      "cached_input_usd_per_mtok": 0.01,
+      "fetched_at": "2026-09-02T17:34:37Z"
+    },
+    "skipped_scenarios": [],
+    "env_flags": {
+      "HISTORY_TOOL_STUB": null,
+      "EXEC_OUTPUT_DEFAULT_CHARS": null,
+      "FETCH_INLINE_DEFAULT_CHARS": null,
+      "LLM_REASONING": null,
+      "LLM_SUMMARY_MODEL": null,
+      "LLM_FAILOVER": "off",
+      "LLM_MAX_TOKENS": 2048
+    },
+    "config_sha256": "0c5886a2cbdef1a424819d96ac09616cd9aaa41194bdd2cfc1b2f10fe3918b4d",
+    "constants": {
+      "CONTEXT_WINDOW_MESSAGES": 30,
+      "EXEC_MAX_STREAM_BYTES": 4096,
+      "FETCH_MAX_BYTES": 65536,
+      "ROUND_LIMIT": 8,
+      "TOOL_ROUND_LIMIT": 7,
+      "TOOL_EXECUTION_LIMIT": 12,
+      "HTTP_ATTEMPT_LIMIT": 9,
+      "REQUEST_DEFAULTS": {
+        "temperature": 0,
+        "stream": false,
+        "tool_choice": "auto"
+      }
+    }
+  },
+  "runs": [
+    {
+      "scenario": "S02",
+      "repeat": 1,
+      "success": true,
+      "failure": null,
+      "checks": [
+        {
+          "kind": "tool_used",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_regex",
+          "ok": true,
+          "detail": "ok"
+        }
+      ],
+      "answers": [
+        "396"
+      ],
+      "llm_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-02T17:34:39Z",
+          "provider": "openrouter",
+          "model": "google/gemini-2.5-flash-lite",
+          "prompt_tokens": 728,
+          "completion_tokens": 152,
+          "total_tokens": 880,
+          "cached_tokens": 0,
+          "reasoning_tokens": 137,
+          "reasoning_chars": 0,
+          "prompt_chars": 3902,
+          "prompt_chars_by_role": "{\"assistant\": 0, \"system\": 1764, \"tool\": 0, \"tools\": 2041, \"user\": 97}",
+          "messages_n": 2,
+          "tools_exposed": 3,
+          "latency_ms": 1855,
+          "finish_reason": "tool_calls",
+          "tool_calls_n": 1,
+          "error_kind": null,
+          "cost_usd": 0.0001336,
+          "cost_basis": "provider",
+          "conv_seq": 1
+        },
+        {
+          "id": 2,
+          "turn_id": 3,
+          "purpose": "agent",
+          "round": 2,
+          "attempt": 2,
+          "ts": "2026-09-02T17:34:41Z",
+          "provider": "openrouter",
+          "model": "google/gemini-2.5-flash-lite",
+          "prompt_tokens": 772,
+          "completion_tokens": 3,
+          "total_tokens": 775,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "reasoning_chars": 0,
+          "prompt_chars": 4325,
+          "prompt_chars_by_role": "{\"assistant\": 188, \"system\": 1764, \"tool\": 235, \"tools\": 2041, \"user\": 97}",
+          "messages_n": 4,
+          "tools_exposed": 3,
+          "latency_ms": 579,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 7.84e-05,
+          "cost_basis": "provider",
+          "conv_seq": 1
+        }
+      ],
+      "tool_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "tool_call_id": "call_2_0",
+          "tool": "exec",
+          "ts": "2026-09-02T17:34:41Z",
+          "input_chars": 41,
+          "raw_output_chars": 157,
+          "output_chars": 157,
+          "output_tokens_est": 52,
+          "duration_ms": 267,
+          "outcome": "ok",
+          "conv_seq": 1
+        }
+      ],
+      "totals": {
+        "calls": 2,
+        "failed_calls": 0,
+        "prompt_tokens": 1500,
+        "completion_tokens": 155,
+        "cached_tokens": 0,
+        "reasoning_tokens": 137,
+        "tool_calls": 1,
+        "tool_output_tokens_est": 52,
+        "latency_ms": 2434,
+        "cost_usd": 0.000212,
+        "resent_tokens": 728,
+        "new_tokens": 772,
+        "wall_ms": 3054
+      }
+    }
+  ],
+  "summary": {
+    "runs": 1,
+    "skipped": 0,
+    "successes": 1,
+    "success_rate": 1.0,
+    "per_scenario": {
+      "S02": {
+        "success": 1,
+        "of": 1,
+        "median": {
+          "calls": 2,
+          "failed_calls": 0,
+          "prompt_tokens": 1500,
+          "completion_tokens": 155,
+          "cached_tokens": 0,
+          "reasoning_tokens": 137,
+          "tool_calls": 1,
+          "tool_output_tokens_est": 52,
+          "latency_ms": 2434,
+          "cost_usd": 0.000212,
+          "resent_tokens": 728,
+          "new_tokens": 772,
+          "wall_ms": 3054
+        }
+      }
+    },
+    "totals": {
+      "calls": 2,
+      "failed_calls": 0,
+      "prompt_tokens": 1500,
+      "completion_tokens": 155,
+      "cached_tokens": 0,
+      "reasoning_tokens": 137,
+      "tool_calls": 1,
+      "tool_output_tokens_est": 52,
+      "latency_ms": 2434,
+      "cost_usd": 0.000212,
+      "resent_tokens": 728,
+      "new_tokens": 772,
+      "wall_ms": 3054
+    },
+    "avg_per_task": {
+      "tokens": 1655.0,
+      "rounds": 2.0,
+      "tool_calls": 1.0,
+      "latency_ms": 2434.0
+    },
+    "cost_per_success": 0.000212,
+    "tokens_per_success": 1655.0,
+    "resent_share": 0.48533333333333334,
+    "cache_hit_rate": 0.0,
+    "top_tools": [
+      {
+        "name": "exec",
+        "calls": 1,
+        "output_tokens_est": 52
+      }
+    ],
+    "top_turn": {
+      "scenario": "S02",
+      "repeat": 1,
+      "turn": 3,
+      "round": 2,
+      "prompt_tokens": 772
+    },
+    "context_growth": {
+      "system": 0.0,
+      "tools": 0.0,
+      "user": 0.0,
+      "assistant": 188.0,
+      "tool": 235.0
+    }
+  }
+}
