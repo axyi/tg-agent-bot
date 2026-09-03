@@ -119,6 +119,7 @@ Install provenance (REQ-V15-DEP-03):
 | semgrep 1.176.0 (T3) | `uv tool install semgrep==1.176.0` (PyPI) | — | — (uv-tool channel, no standalone binary checksum applies) |
 | trivy 0.74.0 (T4) | GitHub release asset + checksum | `trivy_0.74.0_Linux-64bit.tar.gz` | `2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a` (matched `trivy_0.74.0_checksums.txt`, `sha256sum -c` OK) |
 | skylos 4.35.0 (T5) | `uv tool install skylos==4.35.0` (PyPI) | — | — (uv-tool channel) |
+| rtk 0.47.0 (T6) | GitHub release asset + checksum | `rtk-x86_64-unknown-linux-musl.tar.gz` | `7c0175d867f96c4f8f788479af82ca8f0990ea944226268834d224a525186fb7` (matched `checksums.txt`, `sha256sum -c` OK) |
 
 **T2 — gitleaks 8.30.1.** Installed to `~/.local/bin/gitleaks` (already on
 `PATH`, replacing 8.24.3; the old binary kept as a local backup outside the
@@ -182,6 +183,18 @@ release wires. Output is a categorised JSON object (`unused_functions`,
 rollup carrying per-directory `severities` counts) rather than a flat
 findings list like gitleaks/trivy/semgrep — `skylos_json` (T7) will need
 its own flattening logic, not a shared shape.
+
+**T6 — rtk 0.47.0.** Installed to `~/.local/bin/rtk` (release asset:
+musl-linked static binary, `rtk-x86_64-unknown-linux-musl.tar.gz`,
+checksum verified). `rtk --version` → `rtk 0.47.0`. `rtk telemetry
+status` still reports `consent: never asked`, `enabled: no` after the
+upgrade — REQ-V15-RTK-02/03's constraint holds. Only the `tools.rtk.version`
+pin moved; `doctor.warn_only_tools: [rtk]` was already in place from T1
+(REQ-V15-RTK-03: rtk is a warn-only doctor entry, no gate depends on it).
+
+All five external tools (§11) are now installed at their T15-DEP-02
+targets: gitleaks 8.30.1, semgrep 1.176.0, trivy 0.74.0, skylos 4.35.0,
+rtk 0.47.0.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 

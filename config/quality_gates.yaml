@@ -23,7 +23,7 @@ tools:
               version_argv: [gitleaks, version] }
   semgrep:  { version: "1.176.0", via: uv-tool, version_parser: bare,
               version_argv: [semgrep, --version] }
-  rtk:      { version: "0.46.0", via: binary, version_parser: last_token,
+  rtk:      { version: "0.47.0", via: binary, version_parser: last_token,
               version_argv: [rtk, --version] }
   trivy:    { version: "0.74.0", via: binary, version_parser: last_token,
               version_argv: [trivy, --version] }
