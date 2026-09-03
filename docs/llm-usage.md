@@ -152,9 +152,10 @@ $0.000212 on `google/gemini-2.5-flash-lite` — one S02 run, capped at
 
 Row 34 is the spec-v1.4 implementation run (`go docs/spec/spec-v1.4.md`,
 prompt `docs/prompts/31-go-spec-v1.4.md`), covering the whole patch end to
-end across 9 commits (`30c7a16`, `f6e634d`, `51ac747`, `818bbde`, `485fcc5`,
-`e5fc230`, `718e4eb`, `3fe860a`, `9a32cda`, plus this report/errata/post/
-ledger commit): as in rows 27/30–32, this harness exposed no per-request
+end across 11 commits (`30c7a16`, `f6e634d`, `51ac747`, `818bbde`, `485fcc5`,
+`e5fc230`, `718e4eb`, `3fe860a`, `9a32cda`, `64aa5da`, plus this
+`advisor()`-follow-up correction commit — report/errata/post/ledger
+accuracy fixes, `docs/prompts/42-…`): as in rows 27/30–32, this harness exposed no per-request
 usage or cost line to the executor, so every cell stays `unknown` rather
 than an invented estimate — reconciled later by the maintainer from the
 lab's own session tooling, outside this repository, per RPT-05's

@@ -23,7 +23,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | `718e4eb` | T8 | Default selection, STOP branch: `.env.example` `LLM_TIMEOUT_S=240`, README `## Benchmark` baseline-v1.4 paragraph; BEN-09 released (`docs/prompts/38-…`) |
 | `3fe860a` | T9 | Mutations, STOP branch: two `v14-*` entries (BEN-03 unknown-column, REL-01 boundary), stale header comment fixed — **67 mutations, 67 killed** (`docs/prompts/39-…`) |
 | `9a32cda` | T9 | REV-01 review: BEN-03's missing-column mutation added, dead `env_flags()` branch removed, one waiver formalized — **68 mutations, 68 killed** (`docs/prompts/40-…`) |
-| _this commit_ | T10 | Verdict (FAIL, no honored mechanism), GATE-02 enumeration, errata E1/E2, RPT-05 conflict resolved, Appendix-B (E5/E8/E10 PASS, D1/D3 regression PASS-by-unchanged-code, rest not-executed), known defects, `tg-post-v1.4.md`, `docs/llm-usage.md` rows 34–35, `docs/plan.md` (`docs/prompts/41-…`) |
+| `64aa5da` | T10 | Verdict (FAIL, no honored mechanism), GATE-02 enumeration, errata E1/E2, RPT-05 conflict resolved, Appendix-B (E5/E8/E10 PASS, D1/D3 regression PASS-by-unchanged-code, rest not-executed), known defects, `tg-post-v1.4.md`, `docs/llm-usage.md` rows 34–35, `docs/plan.md` (`docs/prompts/41-…`) |
+| _this commit_ | T10 | `advisor()` follow-up: Fix cycles section (RPT-01 item 6), E1/E2 evidence commands executed (not just asserted), commit count 9→11 corrected in `docs/plan.md`/`docs/llm-usage.md`, preconditions deviation 4 forward-pointer (`docs/prompts/42-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -84,8 +85,10 @@ own PRE-03 text; no drift found.
 4. **A spec / `AGENTS.md` conflict is flagged for T10**: RPT-05 asks for a
    row appended to lab-root `economics.md`, which sits outside the
    repository root; `AGENTS.md` says stop and ask when the spec and it
-   disagree. Not yet a blocker — T0…T9 are unaffected, and RPT-04's E1
-   already quotes `economics.md`'s existing figures without writing to it.
+   disagree. Not yet a blocker at T0 — T0…T9 are unaffected, and RPT-04's
+   E1 already quotes `economics.md`'s existing figures without writing to
+   it. **Resolved at T10, in favor of `EC-01`** — see "Deferred conflict,
+   resolved" below.
 5. **T2: `tests/fixtures/bench/baseline.json`/`candidate.json` patched**,
    outside TREE-01's/§12.1's exhaustive change lists. Forced by BEN-05's two
    MUSTs (env_flags key set → nine; validation stays strict equality)
@@ -112,7 +115,8 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T8 (default selection, docs only) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change, not the final tree (GATE-01)_ |
 | T9 (mutations, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change; `tests/test_mutation_check.py`'s generic loops cover the two new entries) | rc=0 | rc=0 — all six OK | rc=0 — **67 mutations, 67 killed**, 0 survived, 0 errored, 0 drifted (65 existing + 2 new `v14-*`: `v14-ben-03-unknown-column-accepted`, `v14-rel-01-timeout-budget-boundary-disabled`) |
 | T9 (REV-01 review fixes) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted (+1: `v14-ben-03-missing-column-accepted`, the sibling half of BEN-03's rule the review found uncovered) |
-| **T10 (final tree)** | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — run alone, sequentially after every other T10 change, per GATE-01's "and on the final tree" clause |
+| T10 (report/post/errata/ledger) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — run alone, sequentially after every other T10 change, per GATE-01's "and on the final tree" clause |
+| **T10 (advisor follow-up — final tree)** | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — docs-only fix commit (Fix cycles section, E1/E2 verification executed, RPT-05 forward-pointer, 9→10 commit count in `plan.md`/`llm-usage.md`); run alone, sequentially, per the same clause |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -485,9 +489,11 @@ correct, complete count for this branch, not a shortfall against 71.
 
 ## Errata to earlier reports (T10 — REQ-V14-RPT-04)
 
-No edit to any earlier report or to `docs/llm-usage.md` rows 1…31, which
-stay byte-unchanged (`git diff --stat` confirms `docs/llm-usage.md`'s
-diff in this run starts at row 33).
+No edit to any earlier report or to `docs/llm-usage.md` rows 1…32, which
+stay byte-unchanged — executed, not merely asserted:
+`git diff 3bc8e8b..HEAD -- docs/llm-usage.md` shows row 33 (already
+present before this `go` run, from spec-v1.4's own authoring) as
+unmodified context, with the first added line being row 34.
 
 - **E1 — the v1.2 cost, `docs/llm-usage.md` row 27.** That row's cost cell
   reads `≈$33.11`; the figure has since been reproduced exactly, as two
@@ -502,9 +508,9 @@ diff in this run starts at row 33).
   09–27") and `docs/llm-usage.md` row 31 ("18 of 19") are stale: the v1.3
   `go` run logged **21** prompt files, `09-go-spec-v1.3.md` through
   `29-v13-TD2-tg-post.md` (28 and 29 are stage D of the same run — verified
-  again here: `ls docs/prompts/09-*.md docs/prompts/1[0-9]-*.md
-  docs/prompts/2[0-9]-*.md | grep -c v13` would count 21 files matching
-  that range). Row 32 already says 21, and `economics.md` already says
+  again here, executed: `ls docs/prompts/09-*.md docs/prompts/1[0-9]-*.md
+  docs/prompts/2[0-9]-*.md | grep -v "v14\|3[0-9]-" | wc -l` → **21**.
+  Row 32 already says 21, and `economics.md` already says
   "21 (+1 post-verify docs fix)". Row 31 is **not** edited — the corrected
   count lives in row 32 and here.
 
@@ -586,6 +592,43 @@ classified not-executed by construction.
   and **v1.3's accepted risk** (O6 routing ships tested but disabled,
   since only one model fits the maintainer's GPU box) both carry forward
   unchanged — this run touched neither.
+
+---
+
+## Fix cycles
+
+**2 of the 5-cycle repair budget consumed.** `docs/plan.md`'s rule: a
+repair cycle counts "once a fix is followed by a complete re-run of every
+gate from the first"; test-first failures caught before that gate
+sequence starts do not debit it. Both events below happened inside a
+formal, already-started six-gate run, not during test-first development —
+so both count.
+
+1. **T6 — `tests/test_v1_guardrails.py` collision (1 cycle).** REL-01's
+   own test-first sequence (its two new/changed cases in
+   `tests/test_v14_patch.py`/`test_config.py`) was already green before
+   the six-gate sequence for the commit started. Gate 3's full-suite
+   `pytest` run then failed a third, unrelated, pre-existing test
+   (`test_new_config_variables_are_validated` — `LLM_MAX_TOKENS="8192"`
+   became unreachable under the new timeout floor at any
+   `LLM_TIMEOUT_S`). Fixed (see "Deviation" above); gates re-confirmed
+   green end to end (`docs/prompts/37-v14-t6-reliability.md`'s closing
+   "All six green").
+2. **T9 — BEN-03's first mutation entry survived (1 cycle).** Not caught
+   during authoring — the entry's own text says it surfaced in "the real
+   gate run": `mutation_check.py` returned rc≠0 (67 mutations, 66 killed,
+   1 survived), a formal gate-6 failure. Root-caused, retargeted to the
+   entry's *unknown*-column half, and the full six-gate sequence re-run
+   end to end (`docs/prompts/39-v14-t9-mutations.md`'s closing "All six
+   green on the corrected entries," 67/67). The concurrent `--only`
+   verification run described in the same prompt is a process note, not
+   a third cycle — it produced a misleading reading on an unrelated,
+   already-superseded check, not a gate failure of record.
+
+No other task in this run (T0–T5, T8, T10) needed a fix after its formal
+gate sequence had already started; each ran green on the first pass or is
+recorded above as pre-gate test-first friction, which does not debit the
+budget under `docs/plan.md`'s rule.
 
 ---
 
