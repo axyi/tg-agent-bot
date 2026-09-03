@@ -270,7 +270,152 @@ green.
 
 ## Hook chain (T8 — REQ-V15-HOOK-*)
 
-(pending)
+**The three shims.** `.githooks/commit-msg`, `.githooks/pre-commit`,
+`.githooks/pre-push` are each three lines (shebang, `set -eu`, one
+`exec python3 devtools/checks.py …` call), mode `0755`. `pre-push` adds
+`--stdin-refs` and relies on `exec` to hand its own stdin through
+unchanged — no explicit forwarding code needed.
+
+**Two bugs found before activation, both from an advisor review of the
+T7 engine ahead of wiring T8 on top of it.**
+
+1. `execute_command_gate` set `values.setdefault("target", ".")`
+   unconditionally, so `ruff-check` (`diff_scoped: true`, `{target}`
+   placeholder) always linted the whole tree in `pre-commit`, never the
+   staged set — silently defeating the diff-scoping REQ-V15-GATE-07
+   promises for that gate specifically (`ruff-format` was already
+   correct via its own `blocking_paths` partition). Fixed: for an
+   `exit_status` + `diff_scoped` gate with no gate-supplied `target`,
+   `{target}` now expands to the sorted scope-file list, and an empty
+   list short-circuits to a clean result instead of invoking the tool
+   with zero paths. `render_argv` already supported list expansion for a
+   bare `{target}` token (used by the ruff-format partition); no new
+   mechanism was needed, just applying it on this path too.
+2. T7's `T-V15-SCAN-11/12` fixture value (a non-default-allowlisted-
+   looking AWS key, `"AKIAQWERTY" + "UIOPASDFGH"` once split) appeared
+   five times as a contiguous literal in `tests/test_v15_standards.py`
+   itself — a real tracked file. Once `core.hooksPath` activates,
+   `gitleaks-staged`
+   would scan that file on every future commit that touches it and find
+   the same five matches every time, since the value is real and
+   present regardless of what changed. Fixed: split into
+   `_FAKE_AWS_KEY = "AKIAQWERTY" + "UIOPASDFGH"` — concatenation still
+   produces the real 20-character value inside the throwaway fixture
+   repos these tests write it into, but the raw pattern never appears
+   contiguous in this repo's own tracked source. Verified via
+   `gitleaks git --staged` against the real staged diff: `no leaks
+   found`, exit 0.
+
+**`install_hooks.py` (REQ-V15-HOOK-05).** `install(repo_root)`/
+`check(repo_root)` take an explicit `repo_root` (not a hardcoded
+constant) so fixture repos can be exercised in isolation; `main()`
+defaults both to the real repository. `_configured_hooks_path` reads
+`git config --local --get core.hooksPath` — **not** the unscoped
+`--get`, discovered empirically: this machine has a *global*
+`core.hooksPath` (`~/.git-hooks`, unrelated to this project), and an
+unscoped read after `git config --unset` on the local key still returned
+the inherited global value, which would have misreported "unset" as
+"points elsewhere" and made the four `--check` problem messages
+indistinguishable. `--local` scoping fixed it without touching the
+operator's global git config. `install`/`check` are otherwise exactly
+REQ-V15-HOOK-05: idempotent (second run: `nothing to change`, byte- and
+mode-identical), and `--check` reports the first of four problems
+(`core.hooksPath` unset / wrong / a hook missing / a hook not
+executable) with a distinct message per case, never mutating state.
+
+**`checks.py replay` (REQ-V15-GATE-05).** Walks
+`git rev-list --reverse <base>..<head>`; per commit, runs the
+commit-msg checks against `git log -1 --format=%B`, then for every
+changed `.py` blob (`git diff-tree --diff-filter=ACMR`, so a deleted
+file is never re-read) pipes `git show <sha>:<path>` into `ruff check
+--force-exclude --stdin-filename <path> -` and `ruff format --check
+--stdin-filename <path> -` (the `ruff-format` blocking/shadow partition
+reused from `ruff-format.blocking_paths`, same as `pre-commit`), then
+runs the gitleaks substitute exactly as specified: `gitleaks git
+--no-banner --redact --config .gitleaks.toml --report-format json
+--report-path <artefact> --log-opts "--no-walk <sha>" .` — re-verified
+directly against this repository's own HEAD before wiring it in
+(`1 commits scanned`, exit 1, real findings from T7's own then-unfixed
+AWS-key fixture — confirming both the invocation form on the installed
+8.30.1 and, incidentally, the second bug above). Tool names, the
+`.gitleaks.toml` path and both severity/`blocking_paths` policies are
+read from `config["gates"]["ruff-check"|"ruff-format"|"gitleaks-staged"]`
+rather than re-declared; the replay-specific flags the spec spells out
+verbatim (`--stdin-filename`, `-`, `--report-format`, `--log-opts`,
+`--no-walk`) are Python literals implementing that named substitute
+procedure, not a policy value REQ-V15-GATE-02 requires be config-driven.
+It never checks out, resets or touches the working tree — every read is
+`git show`/`git cat-file`/`git log`.
+
+**Why `T-V15-GATE-06` doesn't use `per-file-ignores` after all.** The
+spec's own framing (`$TMPDIR/<random>/pkg/x.py` matches different
+patterns than `pkg/x.py`) was tested empirically first: a two-segment
+`per-file-ignores` pattern like `"legacy/old.py"` turned out to suppress
+`E501` for *both* a repository-relative `--stdin-filename` and an
+unrelated absolute one (measured directly, three variants, same `cwd`)
+— ruff's glob matching for that pattern shape is suffix-based, not
+anchored to the resolved project root, so it can't discriminate a
+correct replay from a `$TMPDIR`-materialising one. Rather than chase the
+exact pattern shape that would happen to discriminate, `T-V15-GATE-06`
+instead mocks `checks.run_argv` and asserts directly on what
+REQ-V15-GATE-05 actually requires: every ruff invocation's `cwd` equals
+`repo_root` and its `--stdin-filename` argument equals the exact
+repository-relative path, never absolute — the property a
+`$TMPDIR`-materialising implementation would violate by construction.
+Faster (no `uv run`, no worktree) and deterministic rather than
+contingent on one ruff version's glob semantics.
+
+**Testing infrastructure.** A new `git_worktree` fixture (a disposable
+`git worktree add --detach HEAD` on a throwaway branch, removed in
+teardown) gives `uv run`-dependent gates a real `pyproject.toml`/
+`uv.lock` to resolve against without ever touching the main working
+tree — used by `N6` (a real failing `pytest` gate against a minimal
+custom pre-push config, asserting the `pytest` gate's own result line
+names it). Confirmed cheap: `.venv` creation in a fresh worktree reuses
+the shared `uv` cache, ~30-90 ms, no network. `T-V15-HOOK-05`'s
+first-push scenario needed a genuine forked branch (an initial commit on
+`main`, then three commits on a `feature` branch) — an earlier draft put
+all three commits directly on `main`, making `merge-base(main, HEAD)`
+trivially equal `HEAD` and the scope vacuously empty, which is exactly
+the trap REQ-V15-GATE-07 describes for a different profile; fixed by
+branching before the three commits so the fork point is real. `N1`/`N2`/
+`N3` copy the real `.githooks/commit-msg` and `devtools/checks.py` into
+an isolated fixture repo and run real `git commit` subprocesses against
+it — commit-msg needs no `uv`/pyproject dependency, so no worktree is
+needed there.
+
+**Activation.** `devtools/install_hooks.py` run for real against this
+repository: `set core.hooksPath to '.githooks'`; `--check` then reports
+`hooks installed correctly`; a second `install` reports `nothing to
+change`. This commit is the first produced through the now-active
+`commit-msg` and `pre-commit` hooks — live evidence, not just the
+fixture-repo tests, that the chain accepts a well-formed commit.
+
+**A third bug the activation attempt itself caught.** The first real
+`git commit` through the live hooks failed both `ruff-check` and
+`gitleaks-staged` — the latter was the second bug above (fixed by
+re-editing the report paragraph that had, ironically, restated the
+fixture value contiguously while describing the fix for restating it
+contiguously); the former was new: the `{target}` fix's scope list was
+every staged path, unfiltered, so `ruff check --force-exclude
+.githooks/commit-msg docs/reports/report-v1.5.md …` tried to parse a
+shell script and a markdown file as Python (`invalid-syntax: Simple
+statements must be separated by newlines or semicolons`) — ruff checks
+every explicitly-given path regardless of extension; only its own
+directory-walk discovery is extension-filtered. `_execute_ruff_format_
+partitioned` had the identical latent bug, masked only because no
+non-`.py` staged file had ever also been one of `ruff-format.
+blocking_paths`. Fixed both call sites to filter the scope to `p.
+endswith(".py")` before building the target list, matching
+REQ-V15-HOOK-03's own wording ("staged .py files"). Re-verified: all
+four `pre-commit` gates `[PASS]` against this commit's real staged
+diff before it was attempted again.
+
+**Tests.** T8 adds 14 tests (`T-V15-HOOK-01` through `-05` — `-03` has
+four parametrised variants, `-05` has two — `N1`, `N2`, `N3`, `N6`,
+`T-V15-GATE-06`) on top of T7's 78, for 92 `test_v15_standards.py` tests
+total. Full suite: 820 tests, all green. `uv run --locked ruff check .`
+green, `bot.py --selftest` `OK`.
 
 ## `checks.py doctor` (T9 — REQ-V15-GATE-03)
 
@@ -315,6 +460,9 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 |---|---|---|---|
 | T0 | no (two mapped files, both under threshold) | no | — |
 | T1 | yes (§7, 322 lines/18 KB) | no — see Deviations | content already in the main context from the session-start full-spec read |
+| T2–T6 | no (each task's reading map is one tool's install section, under threshold) | no | — |
+| T7 | yes (§8, 212 lines/12 KB) | no — see Deviations | content already in the main context from the session-start full-spec read |
+| T8 | yes (a single read of §7:600-730, 130 lines, for REQ-V15-GATE-05) | no — see Deviations | content already in the main context from the session-start full-spec read; §6 (HOOK) itself is under threshold, no delegation needed there |
 
 (rest of the table fills in as each task lands)
 
@@ -351,6 +499,22 @@ evidence lands in the T19 evidence-only commit)
    note, so nothing breaks — but `full`'s wall-clock and RPT-02 item 3 will
    report against 72 mutations once T12 adds the four `v15-*` entries, not
    43+4=47. Prose drift in the spec, not a defect in this run.
+3. **A fourth network step REQ-V15-PRE-01.5 does not name.** Item 5 of
+   §3's precondition checklist sanctions exactly three network-step
+   categories: the five tool installs (T2–T6), the image pulls, and T7's
+   one-off semgrep ruleset resolution — "everything else … MUST work
+   offline." T4's trivy install needed a fourth, unnamed one: pulling
+   trivy's own vulnerability DB (~110 MiB) and misconfig checks bundle
+   (~235 KiB) on first use, cached under `~/.cache/trivy/` thereafter —
+   already recorded as "an empirical finding not anticipated by the
+   spec" in T4's own section, cross-referenced here per PRE-01.5's
+   "record which step needed the network" so the full inventory is
+   findable in one place. Every later `trivy` gate run stays offline
+   within this run's timeframe (cache confirmed warm by a smoke test);
+   nothing about T7's semgrep resolution being "the run's last
+   sanctioned network step" (`.semgrep/SOURCES.md`) is contradicted by
+   this — T4 precedes T7, so semgrep's pull is still the last one
+   chronologically, sanctioned or not.
 
 ## Ledger row (paste into `economics.md`)
 

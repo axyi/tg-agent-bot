@@ -10,15 +10,24 @@ never the real one.
 from __future__ import annotations
 
 import json
+import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from devtools import checks
+from devtools import checks, install_hooks
 
 _ALL_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"}
+
+# Split so the 20-char pattern never appears contiguous in this file's own
+# tracked source -- once the pre-commit hook is live (T8), a literal match
+# would make gitleaks-staged block every future commit touching this file.
+# The concatenation still produces the real matchable value inside the
+# throwaway fixture repos these tests write it into.
+_FAKE_AWS_KEY = "AKIAQWERTY" + "UIOPASDFGH"
 
 
 def _init_repo(path: Path) -> Path:
@@ -745,8 +754,8 @@ def test_v15_scan_10_unknown_severity_fails_closed(tmp_path: Path):
 def test_v15_scan_11_gitleaks_tree_committed_vs_gitignored(tmp_path: Path):
     repo = _init_repo(tmp_path)
     (repo / ".gitignore").write_text("ignored.py\n")
-    (repo / "committed.py").write_text("AWS_KEY = 'AKIAQWERTYUIOPASDFGH'\n")
-    (repo / "ignored.py").write_text("AWS_KEY = 'AKIAQWERTYUIOPASDFGH'\n")
+    (repo / "committed.py").write_text("AWS_KEY = '" + _FAKE_AWS_KEY + "'\n")
+    (repo / "ignored.py").write_text("AWS_KEY = '" + _FAKE_AWS_KEY + "'\n")
     _commit_all(repo)
 
     tree_dir = tmp_path / "materialized"
@@ -781,19 +790,19 @@ def test_v15_scan_11_gitleaks_tree_committed_vs_gitignored(tmp_path: Path):
 
 def test_v15_scan_12_committed_content_survives_deletion(tmp_path: Path):
     repo = _init_repo(tmp_path)
-    (repo / "secret.py").write_text("AWS_KEY = 'AKIAQWERTYUIOPASDFGH'\n")
+    (repo / "secret.py").write_text("AWS_KEY = '" + _FAKE_AWS_KEY + "'\n")
     _commit_all(repo)
     (repo / "secret.py").unlink()
 
     tree_dir = tmp_path / "materialized"
     tree_dir.mkdir()
     checks.materialize_tracked_tree(checks.list_tree_entries("HEAD", repo), tree_dir, repo)
-    assert (tree_dir / "secret.py").read_text() == "AWS_KEY = 'AKIAQWERTYUIOPASDFGH'\n"
+    assert (tree_dir / "secret.py").read_text() == "AWS_KEY = '" + _FAKE_AWS_KEY + "'\n"
 
 
 def test_v15_scan_12_committed_content_survives_overwrite(tmp_path: Path):
     repo = _init_repo(tmp_path)
-    (repo / "secret.py").write_text("AWS_KEY = 'AKIAQWERTYUIOPASDFGH'\n")
+    (repo / "secret.py").write_text("AWS_KEY = '" + _FAKE_AWS_KEY + "'\n")
     _commit_all(repo)
     (repo / "secret.py").write_text("clean = True\n")
 
@@ -946,3 +955,300 @@ def test_n5_semgrep_offline_with_vendored_ruleset_and_empty_cache(tmp_path: Path
     assert result.returncode == 1, result.stderr.decode(errors="replace")
     findings = json.loads(out_path.read_text())
     assert findings["results"]
+
+
+# ---------------------------------------------------------------------------
+# T-V15-HOOK-01 .. T-V15-HOOK-05, N1, N2, N3, N6, T-V15-GATE-06
+# (REQ-V15-HOOK-01..06, REQ-V15-GATE-05, REQ-V15-GATE-07's pre-push scope)
+# ---------------------------------------------------------------------------
+
+
+def _fixture_hooks_dir(repo: Path) -> Path:
+    """A `.githooks/` whose three files exist but start non-executable --
+    exactly what `install_hooks.install()` is supposed to fix."""
+    hooks = repo / ".githooks"
+    hooks.mkdir()
+    for name in install_hooks.HOOK_NAMES:
+        (hooks / name).write_text("#!/bin/sh\nset -eu\nexit 0\n")
+        (hooks / name).chmod(0o644)
+    return hooks
+
+
+def test_v15_hook_01_install_sets_hooks_path_and_executable(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _fixture_hooks_dir(repo)
+    changed = install_hooks.install(repo)
+    assert changed
+    assert install_hooks._configured_hooks_path(repo) == ".githooks"
+    for name in install_hooks.HOOK_NAMES:
+        assert (repo / ".githooks" / name).stat().st_mode & stat.S_IXUSR
+
+
+def test_v15_hook_02_second_run_is_idempotent_and_byte_identical(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _fixture_hooks_dir(repo)
+    install_hooks.install(repo)
+    before_bytes = {n: (repo / ".githooks" / n).read_bytes() for n in install_hooks.HOOK_NAMES}
+    before_mode = {n: (repo / ".githooks" / n).stat().st_mode for n in install_hooks.HOOK_NAMES}
+
+    changed = install_hooks.install(repo)
+
+    assert changed == []
+    assert install_hooks.check(repo) == []
+    after_bytes = {n: (repo / ".githooks" / n).read_bytes() for n in install_hooks.HOOK_NAMES}
+    after_mode = {n: (repo / ".githooks" / n).stat().st_mode for n in install_hooks.HOOK_NAMES}
+    assert before_bytes == after_bytes
+    assert before_mode == after_mode
+
+
+@pytest.mark.parametrize("problem", ["unset", "wrong_path", "missing_hook", "not_executable"])
+def test_v15_hook_03_check_reports_each_problem_distinctly(tmp_path: Path, problem: str):
+    repo = _init_repo(tmp_path)
+    _fixture_hooks_dir(repo)
+    install_hooks.install(repo)
+
+    if problem == "unset":
+        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo, check=True)
+        needle = "core.hooksPath is not set"
+    elif problem == "wrong_path":
+        subprocess.run(["git", "config", "core.hooksPath", "elsewhere"], cwd=repo, check=True)
+        needle = "core.hooksPath is 'elsewhere'"
+    elif problem == "missing_hook":
+        (repo / ".githooks" / "pre-push").unlink()
+        needle = "hook missing"
+    else:
+        (repo / ".githooks" / "pre-commit").chmod(0o644)
+        needle = "hook not executable"
+
+    problems = install_hooks.check(repo)
+    assert problems
+    assert any(needle in p for p in problems)
+
+
+def test_v15_hook_04_check_passes_on_correctly_installed_repo(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _fixture_hooks_dir(repo)
+    install_hooks.install(repo)
+    assert install_hooks.check(repo) == []
+
+
+def test_v15_hook_05_first_push_scope_covers_every_commit_not_just_head(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    (repo / "root.txt").write_text("1\n")
+    _commit_all(repo, "root")
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "checkout", "-q", "-b", "feature"], cwd=repo, check=True)
+
+    (repo / "a.txt").write_text("1\n")
+    _commit_all(repo, "c1")
+    (repo / "b.txt").write_text("1\n")
+    _commit_all(repo, "c2")  # second-to-last commit
+    (repo / "c.txt").write_text("1\n")
+    _commit_all(repo, "c3")
+    local_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    zero_sha = "0" * 40
+    stdin_text = f"refs/heads/feature {local_sha} refs/heads/feature {zero_sha}\n"
+    scope_cfg = {"base_branch": "main", "zero_sha": zero_sha}
+
+    files, tree_dir = checks._pre_push_scope(stdin_text, scope_cfg, repo)
+    try:
+        assert "b.txt" in files
+        head1_only = checks.changed_files_in_range("HEAD~1", "HEAD", repo)
+        assert "b.txt" not in head1_only
+    finally:
+        shutil.rmtree(tree_dir, ignore_errors=True)
+
+
+def test_v15_hook_05_empty_or_unparseable_stdin_fails_closed(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _commit_all(repo, "c1")
+    scope_cfg = {"base_branch": "main", "zero_sha": "0" * 40}
+    with pytest.raises(checks.GateRunError):
+        checks._pre_push_scope("", scope_cfg, repo)
+    with pytest.raises(checks.GateRunError):
+        checks._pre_push_scope("not a valid ref record\n", scope_cfg, repo)
+
+
+def _install_commit_msg_hook(repo: Path) -> None:
+    hooks_dir = repo / ".githooks"
+    hooks_dir.mkdir()
+    shutil.copy(checks.REPO_ROOT / ".githooks" / "commit-msg", hooks_dir / "commit-msg")
+    (hooks_dir / "commit-msg").chmod(0o755)
+    dest_devtools = repo / "devtools"
+    dest_devtools.mkdir()
+    (dest_devtools / "__init__.py").write_text("")
+    shutil.copy(checks.REPO_ROOT / "devtools" / "checks.py", dest_devtools / "checks.py")
+    subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=repo, check=True)
+
+
+def _commit_via_real_hook(repo: Path, subject: str) -> subprocess.CompletedProcess[str]:
+    (repo / "a.txt").write_text("x\n")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True)
+    return subprocess.run(
+        ["git", "commit", "-m", subject], cwd=repo, capture_output=True, text=True
+    )
+
+
+def test_n1_bad_header_rejected_by_the_real_hook(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _install_commit_msg_hook(repo)
+    result = _commit_via_real_hook(repo, "added stuff")
+    assert result.returncode != 0
+    assert "header" in (result.stdout + result.stderr)
+
+
+def test_n2_missing_prompt_reference_rejected_by_the_real_hook(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _install_commit_msg_hook(repo)
+    result = _commit_via_real_hook(repo, "feat: add the runner")
+    assert result.returncode != 0
+    assert "body" in (result.stdout + result.stderr)
+
+
+def test_n3_overlong_header_rejected_by_the_real_hook(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _install_commit_msg_hook(repo)
+    subject = "feat: " + "x" * 74  # 80 chars total
+    assert len(subject) == 80
+    result = _commit_via_real_hook(repo, subject)
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "length" in combined
+    assert "80" in combined
+
+
+@pytest.fixture
+def git_worktree(tmp_path: Path):
+    """A disposable worktree of this repo's own HEAD on a throwaway branch --
+    gives `uv run`/pyproject.toml-dependent gates (ruff, pytest) a real
+    project to run against without ever touching the main working tree."""
+    wt = tmp_path / "wt"
+    branch = f"v15-test-{tmp_path.name}"
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(wt), "HEAD"],
+        cwd=checks.REPO_ROOT,
+        check=True,
+        capture_output=True,
+    )
+    try:
+        subprocess.run(
+            ["git", "checkout", "-q", "-b", branch], cwd=wt, check=True, capture_output=True
+        )
+        subprocess.run(["git", "config", "user.email", "t@t.local"], cwd=wt, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=wt, check=True)
+        yield wt
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(wt)],
+            cwd=checks.REPO_ROOT,
+            check=False,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "branch", "-D", branch], cwd=checks.REPO_ROOT, check=False, capture_output=True
+        )
+
+
+def test_v15_gate_06_replay_ruff_invocation_uses_repo_root_cwd_and_relative_path(
+    tmp_path: Path, monkeypatch
+):
+    """REQ-V15-GATE-05: ruff runs with the repository root as cwd (so
+    pyproject.toml resolves) and `--stdin-filename` set to the exact
+    repository-relative path -- never a $TMPDIR path a materialized-blob
+    implementation would produce, which `exclude`/`per-file-ignores` would
+    then resolve differently than `pre-commit` does."""
+    repo = _init_repo(tmp_path)
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "x.py").write_text("x = 1\n")
+    (repo / "docs" / "prompts").mkdir(parents=True)
+    (repo / "docs" / "prompts" / "44-go-spec-v1.5.md").write_text("x")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "commit",
+            "-q",
+            "-m",
+            "feat: add pkg/x.py",
+            "-m",
+            "(prompt: docs/prompts/44-go-spec-v1.5.md)",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    calls: list[tuple[list[str], Path]] = []
+
+    def fake_run_argv(argv, cwd, timeout_seconds, **kwargs):
+        calls.append((list(argv), Path(cwd)))
+        return checks.CommandResult(True, 0, b"", b"", None)
+
+    monkeypatch.setattr(checks, "run_argv", fake_run_argv)
+
+    config = checks.load_gate_config()
+    problems = checks._replay_one_commit(sha, config, repo)
+
+    assert not problems, problems
+    ruff_calls = [c for c in calls if "ruff" in c[0]]
+    assert ruff_calls
+    for argv, cwd in ruff_calls:
+        assert cwd == repo
+        idx = argv.index("--stdin-filename")
+        stdin_path = argv[idx + 1]
+        assert stdin_path == "pkg/x.py"
+        assert not Path(stdin_path).is_absolute()
+
+
+def test_n6_pre_push_refused_when_pytest_fails(git_worktree: Path):
+    wt = git_worktree
+    (wt / "tests" / "test_v15_tmp_failing.py").write_text(
+        "def test_deliberately_failing():\n    assert False\n"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+    subprocess.run(
+        [
+            "git",
+            "commit",
+            "-q",
+            "-m",
+            "test: add a deliberately failing test",
+            "-m",
+            "(prompt: docs/prompts/44-go-spec-v1.5.md)",
+        ],
+        cwd=wt,
+        check=True,
+    )
+    local_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=wt, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    config = {
+        "scope": {"base_branch": "main", "zero_sha": "0" * 40},
+        "profiles": {"pre-push": ["pytest"]},
+        "gates": {
+            "pytest": {
+                "kind": "command",
+                "result_mode": "exit_status",
+                "argv": ["uv", "run", "--locked", "pytest", "tests/test_v15_tmp_failing.py"],
+                "placeholders": {},
+                "success_exit_codes": [0],
+                "blocking": True,
+                "diff_scoped": False,
+                "timeout_seconds": 60,
+            }
+        },
+    }
+    stdin_text = f"refs/heads/{wt.name} {local_sha} refs/heads/main {'0' * 40}\n"
+
+    result = checks.run_profile("pre-push", config, wt, stdin_refs=stdin_text)
+
+    assert result.blocked
+    pytest_result = next(g for g in result.gate_results if g.name == "pytest")
+    assert pytest_result.blocked
+    assert "pytest" in pytest_result.message

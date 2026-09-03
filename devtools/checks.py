@@ -847,6 +847,134 @@ def compute_scope(
 
 
 # ---------------------------------------------------------------------------
+# replay history helpers (REQ-V15-GATE-05). Reads blobs via `git show`/
+# `git cat-file` only -- never checks out, resets or otherwise touches the
+# working tree.
+# ---------------------------------------------------------------------------
+
+
+def commits_in_range(base: str, head: str, repo_root: Path) -> list[str]:
+    out = _run_git(["rev-list", "--reverse", f"{base}..{head}"], repo_root)
+    return [line for line in out.splitlines() if line]
+
+
+def commit_changed_files(sha: str, repo_root: Path) -> list[str]:
+    out = _run_git(
+        ["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "--diff-filter=ACMR", sha],
+        repo_root,
+    )
+    return [line for line in out.splitlines() if line]
+
+
+def commit_message(sha: str, repo_root: Path) -> tuple[str, str]:
+    raw = _run_git(["log", "-1", "--format=%B", sha], repo_root)
+    subject, _, body = raw.partition("\n")
+    return subject, body.strip("\n")
+
+
+def show_blob(sha: str, path: str, repo_root: Path) -> bytes | None:
+    result = subprocess.run(
+        ["git", "show", f"{sha}:{path}"], cwd=repo_root, capture_output=True, check=False
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _replay_one_commit(sha: str, config: dict[str, Any], repo_root: Path) -> list[str]:
+    problems: list[str] = []
+
+    subject, body = commit_message(sha, repo_root)
+    problems.extend(f"commit-msg: {f}" for f in run_commit_msg_checks(subject, body, repo_root))
+
+    check_gate = config["gates"]["ruff-check"]
+    format_gate = config["gates"]["ruff-format"]
+    blocking_paths = set(format_gate["blocking_paths"])
+    check_prefix = check_gate["argv"][:-2]  # drop --force-exclude, {target}
+    format_prefix = format_gate["argv"][:-2]  # drop --force-exclude, {target}
+
+    py_files = [p for p in commit_changed_files(sha, repo_root) if p.endswith(".py")]
+    for path in py_files:
+        blob = show_blob(sha, path, repo_root)
+        if blob is None:
+            continue  # the path existed in the diff but not at this blob (rare race) -- skip
+
+        check = run_argv(
+            [*check_prefix, "--force-exclude", "--stdin-filename", path, "-"],
+            repo_root,
+            check_gate["timeout_seconds"],
+            input_bytes=blob,
+        )
+        if not check.ok:
+            problems.append(f"ruff check {path}: {check.error}")
+        elif check.returncode not in check_gate["success_exit_codes"]:
+            problems.append(f"ruff check {path}: {check.stdout.decode(errors='replace').strip()}")
+
+        fmt = run_argv(
+            [*format_prefix, "--stdin-filename", path, "-"],
+            repo_root,
+            format_gate["timeout_seconds"],
+            input_bytes=blob,
+        )
+        if not fmt.ok:
+            problems.append(f"ruff format {path}: {fmt.error}")
+        elif fmt.returncode not in format_gate["success_exit_codes"] and path in blocking_paths:
+            problems.append(f"ruff format {path}: would reformat")
+
+    gitleaks_gate = config["gates"]["gitleaks-staged"]
+    artefact = repo_root / ".bench" / "checks" / "replay" / f"gitleaks-{sha}.json"
+    artefact.parent.mkdir(parents=True, exist_ok=True)
+    tool, subcommand = gitleaks_gate["argv"][0], gitleaks_gate["argv"][1]
+    argv = [
+        tool,
+        subcommand,
+        "--no-banner",
+        "--redact",
+        "--config",
+        gitleaks_gate["placeholders"]["config"],
+        "--report-format",
+        "json",
+        "--report-path",
+        str(artefact),
+        "--log-opts",
+        f"--no-walk {sha}",
+        ".",
+    ]
+    result = run_argv(argv, repo_root, gitleaks_gate["timeout_seconds"])
+    if not result.ok:
+        problems.append(f"gitleaks: {result.error}")
+    elif result.returncode in gitleaks_gate["findings_exit_codes"]:
+        if not artefact.exists():
+            problems.append("gitleaks: no artefact produced")
+        else:
+            blocking_severities = set(gitleaks_gate["severity"])
+            findings = PARSERS[gitleaks_gate["parser"]](artefact.read_bytes())
+            for finding in findings:
+                if finding["severity"] in blocking_severities:
+                    problems.append(f"gitleaks: {finding['path']}: {finding['severity']}")
+    elif result.returncode not in gitleaks_gate["success_exit_codes"]:
+        problems.append(f"gitleaks: unexpected exit code {result.returncode}")
+
+    return problems
+
+
+def replay_range(range_arg: str, config: dict[str, Any], repo_root: Path) -> bool:
+    base, sep, head = range_arg.partition("..")
+    if not sep or not base or not head:
+        raise GateRunError(f"replay --range must be <rev>..<rev>, got {range_arg!r}")
+
+    ok = True
+    for sha in commits_in_range(base, head, repo_root):
+        problems = _replay_one_commit(sha, config, repo_root)
+        status = "FAIL" if problems else "PASS"
+        detail = "; ".join(problems) if problems else "clean"
+        print(f"[{status}] {sha[:12]}: {detail}")
+        if problems:
+            ok = False
+    return ok
+
+
+# ---------------------------------------------------------------------------
 # adapters: turn a scanner's own JSON into normalised findings. Adapter
 # identifiers are mechanism names, permitted as literals (REQ-V15-GATE-02);
 # no policy value (a threshold, an argv fragment) lives here.
@@ -967,10 +1095,17 @@ class CommandResult:
     error: str | None = None
 
 
-def run_argv(argv: list[str], cwd: Path, timeout_seconds: int) -> CommandResult:
+def run_argv(
+    argv: list[str], cwd: Path, timeout_seconds: int, *, input_bytes: bytes | None = None
+) -> CommandResult:
     try:
         proc = subprocess.run(
-            argv, cwd=cwd, capture_output=True, timeout=timeout_seconds, check=False
+            argv,
+            cwd=cwd,
+            input=input_bytes,
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
         )
     except FileNotFoundError as exc:
         return CommandResult(False, None, b"", b"", f"binary not found: {exc}")
@@ -1041,6 +1176,7 @@ def _execute_ruff_format_partitioned(
 ) -> GateResult:
     blocking_paths = set(gate["blocking_paths"])
     scope = scope_files if scope_files is not None else set(blocking_paths)
+    scope = {p for p in scope if p.endswith(".py")}
     new_files = sorted(p for p in scope if p in blocking_paths)
     legacy_files = sorted(p for p in scope if p not in blocking_paths)
 
@@ -1089,7 +1225,17 @@ def execute_command_gate(
     values.setdefault("profile", profile)
     if tracked_tree is not None:
         values.setdefault("tracked_tree", str(tracked_tree))
-    values.setdefault("target", ".")
+
+    if result_mode == "exit_status" and gate["diff_scoped"] and "target" not in values:
+        if scope_files is None:
+            values["target"] = "."
+        else:
+            paths = sorted(p for p in scope_files if p.endswith(".py"))
+            if not paths:
+                return GateResult(name, ran=True, blocked=False, message="no files in scope")
+            values["target"] = paths
+    else:
+        values.setdefault("target", ".")
 
     artefact_path = None
     if result_mode == "findings":
@@ -1275,8 +1421,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
-    print("checks.py replay: lands in T8", file=sys.stderr)
-    return 2
+    config = load_gate_config()
+    try:
+        ok = replay_range(args.range, config, REPO_ROOT)
+    except GateRunError as exc:
+        print(f"checks.py replay: {exc}", file=sys.stderr)
+        return 2
+    return 0 if ok else 1
 
 
 def cmd_lint_docs(args: argparse.Namespace) -> int:
