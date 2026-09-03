@@ -34,7 +34,13 @@ DRIFTED = "drifted"
 # two lines REQ-V12-TST-01 restores plus the SSR-02 backstop (2).
 #
 # spec-v1.3 section 12 adds its 33 rows: 20 tagged A and the 13 tagged C that
-# land with the stage-C code they mutate — 64 in all.
+# land with the stage-C code they mutate — 65 in all (corrected: this
+# comment previously said 64).
+#
+# spec-v1.4 adds 2 more, TST-05's STOP-branch minimum (RSN-06/GATE-02
+# narrowed the mechanism-found branch's six down to the two defending
+# shipped code): BEN-03's row-key rule and REL-01's timeout/budget
+# boundary — 67 in all.
 # --------------------------------------------------------------------------
 
 MUTATIONS = [
@@ -679,6 +685,25 @@ MUTATIONS = [
         "find": '    if purpose == "summary":\n',
         "replace": '    if purpose in ("summary", "agent"):\n',
         "why": "REQ-V13-RTE-01: LLM_SUMMARY_MODEL routes the summary purpose and only it",
+    },
+    # -- spec-v1.4, STOP branch (TST-05's narrowed minimum, 2) --------------
+    {
+        "id": "v14-ben-03-unknown-column-accepted",
+        "path": "devtools/bench.py",
+        "find": "            unknown = row_keys - allowed\n",
+        "replace": "            unknown = set()\n",
+        "why": "REQ-V14-BEN-03: a row carrying a key neither REQUIRED nor ALLOWED "
+               "expects must be rejected, naming it — this mutation accepts any "
+               "unknown column silently",
+    },
+    {
+        "id": "v14-rel-01-timeout-budget-boundary-disabled",
+        "path": "config.py",
+        "find": "    if llm_timeout_s < floor:\n",
+        "replace": "    if False and llm_timeout_s < floor:\n",
+        "why": "REQ-V14-REL-01: an LLM_TIMEOUT_S/LLM_MAX_TOKENS pair under the "
+               "latency-model floor must be refused before it ever reaches a live "
+               "request, not silently accepted",
     },
 ]
 

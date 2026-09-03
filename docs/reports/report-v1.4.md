@@ -20,7 +20,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | `818bbde` | T3 | `baseline-v1.4`: 35/36 successes, `B_plain = $0.003008745` (`docs/prompts/35-…`) |
 | `485fcc5` | T4 | RSN spike: a/c/d probed live, b `unsupported`, e no control found — **STOP, no honored+shippable mechanism** (`docs/prompts/36-…`) |
 | `e5fc230` | T6 | Reliability, STOP branch: REL-01 (timeout/budget consistency, default 120→240); REL-03 released (`docs/prompts/37-…`) |
-| _pending_ | T8 | Default selection, STOP branch: `.env.example` `LLM_TIMEOUT_S=240`, README `## Benchmark` baseline-v1.4 paragraph; BEN-09 released (`docs/prompts/38-…`) |
+| `718e4eb` | T8 | Default selection, STOP branch: `.env.example` `LLM_TIMEOUT_S=240`, README `## Benchmark` baseline-v1.4 paragraph; BEN-09 released (`docs/prompts/38-…`) |
+| _pending_ | T9 | Mutations, STOP branch: two `v14-*` entries (BEN-03 unknown-column, REL-01 boundary), stale header comment fixed — **67 mutations, 67 killed** (`docs/prompts/39-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -107,6 +108,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T4 (RSN spike, STOP) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change; scratch patches to `llm/base.py`/`llm/lmstudio.py`/`agent.py` reverted before commit) | rc=0 | rc=0 — all six OK | _not run — same reason, and not the final tree_ |
 | T6 (REL-01, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (+2: `T-V14-REL-01`, `test_t_cfg_06_timeout_default_is_240_rel_01`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted (unchanged count — no new `v14-*` entries authored yet; TST-05's STOP-narrowed minimum `{BEN-03, REL-01}` lands at T9) |
 | T8 (default selection, docs only) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change, not the final tree (GATE-01)_ |
+| T9 (mutations, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change; `tests/test_mutation_check.py`'s generic loops cover the two new entries) | rc=0 | rc=0 — all six OK | rc=0 — **67 mutations, 67 killed**, 0 survived, 0 errored, 0 drifted (65 existing + 2 new `v14-*`: `v14-ben-03-unknown-column-accepted`, `v14-rel-01-timeout-budget-boundary-disabled`) |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
