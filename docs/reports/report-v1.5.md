@@ -116,6 +116,7 @@ Install provenance (REQ-V15-DEP-03):
 | tool | channel | asset | verified SHA-256 |
 |---|---|---|---|
 | gitleaks 8.30.1 (T2) | GitHub release asset + checksum | `gitleaks_8.30.1_linux_x64.tar.gz` | `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb` (matched `gitleaks_8.30.1_checksums.txt`, `sha256sum -c` OK) |
+| semgrep 1.176.0 (T3) | `uv tool install semgrep==1.176.0` (PyPI) | — | — (uv-tool channel, no standalone binary checksum applies) |
 
 **T2 — gitleaks 8.30.1.** Installed to `~/.local/bin/gitleaks` (already on
 `PATH`, replacing 8.24.3; the old binary kept as a local backup outside the
@@ -126,6 +127,14 @@ matches `version_parser: bare`). Re-confirmed against `gitleaks --help`,
 --log-opts` all present unchanged from 8.24.3 — REQ-V15-SCAN-01's and
 REQ-V15-GATE-05's argv need no correction. Only the `tools.gitleaks.version`
 pin moved in `config/quality_gates.yaml`.
+
+**T3 — semgrep 1.176.0.** `uv tool install semgrep==1.176.0` (pulled in
+click 8.4.2, mcp 1.29.0 as transitive updates within the uv tool venv —
+not this project's own dependency set). `semgrep --version` → `1.176.0`.
+`semgrep scan --help` confirms `--config`, `--severity`, `--error`,
+`--metrics`, `--disable-version-check`, `--json`, `--output` all present
+unchanged — REQ-V15-SCAN-04's argv needs no correction. Only the
+`tools.semgrep.version` pin moved.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 
