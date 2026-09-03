@@ -117,6 +117,7 @@ Install provenance (REQ-V15-DEP-03):
 |---|---|---|---|
 | gitleaks 8.30.1 (T2) | GitHub release asset + checksum | `gitleaks_8.30.1_linux_x64.tar.gz` | `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb` (matched `gitleaks_8.30.1_checksums.txt`, `sha256sum -c` OK) |
 | semgrep 1.176.0 (T3) | `uv tool install semgrep==1.176.0` (PyPI) | — | — (uv-tool channel, no standalone binary checksum applies) |
+| trivy 0.74.0 (T4) | GitHub release asset + checksum | `trivy_0.74.0_Linux-64bit.tar.gz` | `2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a` (matched `trivy_0.74.0_checksums.txt`, `sha256sum -c` OK) |
 
 **T2 — gitleaks 8.30.1.** Installed to `~/.local/bin/gitleaks` (already on
 `PATH`, replacing 8.24.3; the old binary kept as a local backup outside the
@@ -135,6 +136,28 @@ not this project's own dependency set). `semgrep --version` → `1.176.0`.
 `--metrics`, `--disable-version-check`, `--json`, `--output` all present
 unchanged — REQ-V15-SCAN-04's argv needs no correction. Only the
 `tools.semgrep.version` pin moved.
+
+**T4 — trivy 0.74.0.** `[[VERIFY]]` marker resolved: `trivy fs --help`
+confirms `--scanners` (values `vuln,misconfig,secret,license` — `vuln,
+misconfig` valid), `--severity`, `--exit-code`, `--ignore-unfixed`,
+`--format` (json is a listed value), `--output` all present exactly as
+REQ-V15-SCAN-03 transcribed them — **no argv correction needed**.
+`trivy --version` prints `Version: 0.74.0` (`last_token` parser →
+`0.74.0`, matches the pin).
+
+Empirical finding not anticipated by the spec: `trivy fs` needs a local
+vulnerability DB (~110 MiB, `mirror.gcr.io/aquasec/trivy-db:2`) and a
+misconfig "checks bundle" (~235 KiB), neither vendorable the way semgrep's
+ruleset is. Both were pulled once here at T4 (a fourth network step,
+alongside the five tool installs / image pulls / semgrep ruleset
+resolution REQ-V15-PRE-01.5 names) and cached under `~/.cache/trivy/`
+(`db/`, `policy/`) — a host-level cache outside the repository, matching
+the treatment tool caches get under REQ-V15-EC-01. A second invocation
+with the cache warm reused it with no network activity (`INFO
+[checks-client] Using existing checks from cache`), confirmed by smoke
+test. This keeps every later `trivy` gate run offline within this run's
+timeframe (the DB's default freshness window is well beyond this run's
+duration); a stale cache on a later run is v1.6's concern, not this one's.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 

@@ -25,6 +25,8 @@ tools:
               version_argv: [semgrep, --version] }
   rtk:      { version: "0.46.0", via: binary, version_parser: last_token,
               version_argv: [rtk, --version] }
+  trivy:    { version: "0.74.0", via: binary, version_parser: last_token,
+              version_argv: [trivy, --version] }
 
 gates:
   ruff-check:
@@ -141,8 +143,8 @@ gates:
     diff_scoped: false
     timeout_seconds: 60
 
-  # trivy 0.74.0 not installed until T4; argv transcribed from REQ-V15-SCAN-03,
-  # [[VERIFY]] against `trivy fs --help` at the pin before it ever executes.
+  # Confirmed against trivy fs --help at 0.74.0 (T4): --scanners, --severity,
+  # --exit-code, --ignore-unfixed, --format json, --output all unchanged.
   trivy:
     kind: command
     result_mode: findings
