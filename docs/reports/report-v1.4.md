@@ -16,7 +16,8 @@ Commits on `main` (grows per task; ORD-01 order):
 |---|---|---|
 | `30c7a16` | T0 | preconditions, this report's skeleton (`docs/prompts/31-…`, `32-…`) |
 | `f6e634d` | T1 | S01 root cause: H1 classified, check repaired, `s01-repro`/`s01-verify` (`docs/prompts/33-…`) |
-| _pending_ | T2 | harness readiness: BEN-03 row-key rule, BEN-04 guards, BEN-05 nine `env_flags` keys, BEN-02 item 5 dry run (`docs/prompts/34-…`) |
+| `51ac747` | T2 | harness readiness: BEN-03 row-key rule, BEN-04 guards, BEN-05 nine `env_flags` keys, BEN-02 item 5 dry run (`docs/prompts/34-…`) |
+| _pending_ | T3 | `baseline-v1.4`: 35/36 successes, `B_plain = $0.003008745` (`docs/prompts/35-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -165,14 +166,41 @@ this commit forward. A fresh `baseline-v1.4` (T3) is mandatory.
 
 ---
 
+## Baseline-v1.4 (T3 — REQ-V14-BEN-02, BEN-06)
+
+Stage-A tree (`69ebc75`) measured through the v1.4 harness and scenario
+file, via `git worktree` (removed after the run) — see
+`docs/prompts/35-v14-t3-baseline-v14.md` for the full procedure.
+
+- `prefix_tokens=1126` (pre-optimization, matches `bench-v1.3.md:21`).
+- **35/36 successes (97.2 %)** — one S12 repeat lost `summary_exists`
+  (baseline runs are exempt from candidate-only assertions, BEN-08).
+- **`meta.skipped_scenarios == []`**, confirmed before and after the run
+  (wttr.in reachable both times).
+- `meta.env_flags`: all nine keys present, every stage-C key `null` on this
+  side, `LLM_FAILOVER="off"`, `LLM_MAX_TOKENS=2048` — as BEN-05 predicts.
+- **`B_plain = Σcost / successes = $0.105306075 / 35 = $0.003008745`.**
+  **Cost-gate threshold (`0.70 × B_plain`) = `$0.0021061215`.**
+- `meta.git_commit` is `""`, not `69ebc75` — `_git_commit()`'s naive
+  `.git/HEAD` read doesn't resolve through a linked worktree's redirect
+  file; harmless, since `git_commit` is not a `LOCKED_META_FIELDS` entry.
+  Not fixed (out of scope, NG-08).
+- Artefacts: `baseline-v1.4.json`/`.log`, `bench-baseline-v1.4.md`, all
+  committed.
+
+The full verdict (`C_plain`, `C_conservative`, gate outcomes, honored rate)
+lands in T7/T8 once a candidate exists.
+
+---
+
 ## Sections pending later tasks
 
 The following REQ-V14-RPT-01 items are written by the task that produces
 their evidence and are placeholders until then:
 
-1. **Verdict against `B_v1.4`** (`B_plain`, `C_plain`, `C_conservative`,
-   threshold, gate outcomes, honored rate, any `DRIFT:`/`FINISH-LENGTH:`
-   line) — T7/T8/T10.
+1. **Full verdict against `B_v1.4`** (`C_plain`, `C_conservative`, both gate
+   outcomes, honored rate, any `DRIFT:`/`FINISH-LENGTH:` line — `B_plain`
+   itself is recorded above) — T7/T8/T10.
 2. **The mechanism table** (RSN-04) — T4.
 3. **Errata to earlier reports** (RPT-04, E1/E2) — T10.
 5. **Gates table, full** and exact test/mutation counts — grows per commit,
