@@ -21,7 +21,7 @@ Commits on `main` (grows per task; ORD-01 order):
 | `485fcc5` | T4 | RSN spike: a/c/d probed live, b `unsupported`, e no control found — **STOP, no honored+shippable mechanism** (`docs/prompts/36-…`) |
 | `e5fc230` | T6 | Reliability, STOP branch: REL-01 (timeout/budget consistency, default 120→240); REL-03 released (`docs/prompts/37-…`) |
 | `718e4eb` | T8 | Default selection, STOP branch: `.env.example` `LLM_TIMEOUT_S=240`, README `## Benchmark` baseline-v1.4 paragraph; BEN-09 released (`docs/prompts/38-…`) |
-| _pending_ | T9 | Mutations, STOP branch: two `v14-*` entries (BEN-03 unknown-column, REL-01 boundary), stale header comment fixed — **67 mutations, 67 killed** (`docs/prompts/39-…`) |
+| `3fe860a` | T9 | Mutations, STOP branch: two `v14-*` entries (BEN-03 unknown-column, REL-01 boundary), stale header comment fixed — **67 mutations, 67 killed** (`docs/prompts/39-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -109,6 +109,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T6 (REL-01, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (+2: `T-V14-REL-01`, `test_t_cfg_06_timeout_default_is_240_rel_01`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted (unchanged count — no new `v14-*` entries authored yet; TST-05's STOP-narrowed minimum `{BEN-03, REL-01}` lands at T9) |
 | T8 (default selection, docs only) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change, not the final tree (GATE-01)_ |
 | T9 (mutations, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change; `tests/test_mutation_check.py`'s generic loops cover the two new entries) | rc=0 | rc=0 — all six OK | rc=0 — **67 mutations, 67 killed**, 0 survived, 0 errored, 0 drifted (65 existing + 2 new `v14-*`: `v14-ben-03-unknown-column-accepted`, `v14-rel-01-timeout-budget-boundary-disabled`) |
+| T9 (REV-01 review fixes) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted (+1: `v14-ben-03-missing-column-accepted`, the sibling half of BEN-03's rule the review found uncovered) |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -365,6 +366,60 @@ touched here. Full change list: `docs/prompts/38-v14-t8-default-selection.md`.
 
 ---
 
+## Mutations and review (T9 — REQ-V14-TST-05, REV-01; STOP branch)
+
+**TST-05, narrowed.** GATE-02 reduces the mechanism-found branch's
+six-entry minimum to the `v14-*` entries defending code this run actually
+shipped: BEN-03's row-key rule and REL-01's timeout/budget boundary.
+Header comment corrected (was stale at "64 in all" while 65 entries
+already existed — confirmed by direct count — a discrepancy `GATE-01`'s
+own text names). `tests/test_mutation_check.py` needed no change: its two
+`v12`-era tests already iterate `mc.MUTATIONS` generically. Full trial
+log, including a first BEN-03 attempt that survived (a vacuous mutation,
+since `REQUIRED_LLM_ROW_KEYS == LLM_ROW_KEYS` on this tree with no
+OBS-01 column added): `docs/prompts/39-v14-t9-mutations.md`.
+
+**REV-01.** Code review by the `code-reviewer` subagent in a clean
+context, on the T8 tree, per the spec's own requirement. Full brief and
+findings: `docs/prompts/40-v14-t9-review.md`. Summary:
+
+- **Two real, fixed findings.** (1) BEN-03's *missing*-required-column
+  half had no mutation entry (the sibling half, *unknown*-column, did) —
+  added `v14-ben-03-missing-column-accepted`, verified killed. Mutation
+  total: 65 + 3 = **68**, all killed, 0 survived/errored/drifted. (2) The
+  `env_flags()` frozenset-serialization branch added at T2 was dead code
+  on this branch — `Config` never gains the field this run's STOP branch
+  doesn't implement (T5 not-executed), so the branch never executed and
+  had no coverage; `REQ-V14-BEN-05`'s own text confirms the plain
+  field-absence→`None` fallback already satisfies the requirement here.
+  Removed; `env_flags()` reduced to that fallback alone.
+- **One waiver formalized, not reopened.** `tests/test_v1_guardrails.py`'s
+  `LLM_MAX_TOKENS` literal change (T6, commit `e5fc230`) was disclosed as
+  a deviation there but never logged as a REV-01 waiver. REL-01's own
+  arithmetic makes the old `8192` value unreachable at any legal
+  `LLM_TIMEOUT_S` — not an implementation choice to revisit. **Waived**,
+  tier-3 (test-only, invalidates nothing).
+- **`TOOL_ROW_KEYS` needs no separate REQUIRED constant** (BEN-03's own
+  "or state in the report why not"): the `tool_calls` schema is untouched
+  by this spec, so REQUIRED == current for that row type and one
+  variable (`TOOL_ROW_KEYS`) already serves both bounds — no widening
+  ever occurs for `tool_calls`, unlike `llm_calls` (which OBS-01 would
+  widen, on the mechanism-found branch only).
+- **One limitation recorded, not fixed:** S01's widened regex has the
+  same substring/negation blind spot the original pattern always had
+  (a refusal containing "инструмент" would still match) — pre-existing,
+  not introduced by this repair, and `bench_scenarios.py` is now
+  BEN-10-frozen (any further change forces a T3 re-baseline). Carried
+  to the known-defects list (T10).
+- Verdict was "request changes" at review time (the process gap of
+  finding 1, since resolved by this section, and finding 2); no shipped
+  correctness defect was found in REL-01, the RSN spike's STOP
+  conclusion, or the baseline-v1.4 worktree procedure.
+
+All six gates green throughout (see Gates table, T9 rows).
+
+---
+
 ## Sections pending later tasks
 
 The following REQ-V14-RPT-01 items are written by the task that produces
@@ -380,4 +435,5 @@ their evidence and are placeholders until then:
    finalized T10.
 6. **Appendix-B results**, how each was driven, deviations, fix cycles — T10.
 7. ~~Known defects carried forward (incl. REL-03's disposition)~~ — REL-03
-   recorded above (T6): released, not fixed. Final consolidated list at T10.
+   recorded above (T6): released, not fixed. S01's regex negation blind
+   spot recorded above (T9, REV-01 note 5). Final consolidated list at T10.

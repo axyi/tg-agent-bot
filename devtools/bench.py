@@ -202,19 +202,19 @@ def scenarios_sha256() -> str:
 
 
 def env_flags(cfg: Config) -> dict:
-    """Exactly the nine keys of the 7.4/REQ-V14-POL-01 schema, at every commit."""
+    """Exactly the nine keys of the 7.4/REQ-V14-POL-01 schema, at every commit.
+
+    REQ-V14-BEN-05: a `Config` field absent at the running commit (every
+    field this run's STOP branch never adds — RSN-06) resolves to `None`
+    with no further handling; the `frozenset[str]` serialization
+    `LLM_REASONING_ON_PURPOSES` needs once REQ-V14-POL-01 actually lands
+    the field is that task's own responsibility, not this STOP-branch run's.
+    """
     present = {item.name for item in dataclasses.fields(Config)}
-    flags = {
+    return {
         key: (getattr(cfg, field_name) if field_name in present else None)
         for key, field_name in ENV_FLAG_FIELDS.items()
     }
-    # REQ-V14-BEN-05: `LLM_REASONING_ON_PURPOSES` is a `frozenset[str]` on
-    # `Config` (once REQ-V14-POL-01 lands) — serialized as a sorted,
-    # comma-joined string so the JSON stays stable across runs.
-    purposes = flags.get("LLM_REASONING_ON_PURPOSES")
-    if isinstance(purposes, (frozenset, set)):
-        flags["LLM_REASONING_ON_PURPOSES"] = ",".join(sorted(purposes))
-    return flags
 
 
 def config_sha256(cfg: Config) -> str:

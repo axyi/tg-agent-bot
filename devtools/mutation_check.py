@@ -37,10 +37,10 @@ DRIFTED = "drifted"
 # land with the stage-C code they mutate — 65 in all (corrected: this
 # comment previously said 64).
 #
-# spec-v1.4 adds 2 more, TST-05's STOP-branch minimum (RSN-06/GATE-02
-# narrowed the mechanism-found branch's six down to the two defending
-# shipped code): BEN-03's row-key rule and REL-01's timeout/budget
-# boundary — 67 in all.
+# spec-v1.4 adds 3 more, TST-05's STOP-branch minimum (RSN-06/GATE-02
+# narrowed the mechanism-found branch's six down to the ones defending
+# shipped code): both halves of BEN-03's row-key rule (missing column,
+# unknown column) and REL-01's timeout/budget boundary — 68 in all.
 # --------------------------------------------------------------------------
 
 MUTATIONS = [
@@ -695,6 +695,14 @@ MUTATIONS = [
         "why": "REQ-V14-BEN-03: a row carrying a key neither REQUIRED nor ALLOWED "
                "expects must be rejected, naming it — this mutation accepts any "
                "unknown column silently",
+    },
+    {
+        "id": "v14-ben-03-missing-column-accepted",
+        "path": "devtools/bench.py",
+        "find": "            missing = required - row_keys\n",
+        "replace": "            missing = set()\n",
+        "why": "REQ-V14-BEN-03: a row missing a REQUIRED column must be rejected, "
+               "naming it — this mutation silently accepts a row lacking one",
     },
     {
         "id": "v14-rel-01-timeout-budget-boundary-disabled",
