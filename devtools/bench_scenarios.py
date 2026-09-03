@@ -152,7 +152,13 @@ SCENARIOS: list[Scenario] = [
         turns=["Привет! Что ты умеешь? Ответь кратко."],
         checks=[
             no_tools,
-            answer_regex("exec|команд|скилл|skill|fetch|python"),
+            # REQ-V14-SCN-03 (H1): a tool NAME (exec/команд/скилл/skill/fetch/
+            # python) or a capability PHRASE (инструмент/контейнер/навык), so
+            # a fluent paraphrase that names no tool still passes.
+            answer_regex(
+                "exec|команд|скилл|skill|fetch|python"
+                "|инструмент|контейнер|навык"
+            ),
             answer_max_chars(900),
         ],
     ),

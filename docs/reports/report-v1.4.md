@@ -14,7 +14,8 @@ Commits on `main` (grows per task; ORD-01 order):
 
 | commit | task | contents |
 |---|---|---|
-| _pending_ | T0 | preconditions, this report's skeleton (`docs/prompts/31-…`, `32-…`) |
+| `30c7a16` | T0 | preconditions, this report's skeleton (`docs/prompts/31-…`, `32-…`) |
+| _pending_ | T1 | S01 root cause: H1 classified, check repaired, `s01-repro`/`s01-verify` (`docs/prompts/33-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -87,11 +88,70 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | point | 1 `uv sync --locked` | 2 `ruff check .` | 3 `pytest` | 4 `--selftest` | 5 `--selftest-live` | 6 `mutation_check.py` |
 |---|---|---|---|---|---|---|
 | T0 (pre-change) | rc=0 | rc=0, all checks passed | rc=0 — **719 passed** | rc=0 | rc=0 — `config`/`db`/`docker (29.7.2)`/`telegram`/`lmstudio`/`openrouter` all OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
+| T1 (S01 repair) | rc=0 | rc=0, all checks passed | rc=0 — **720 passed** (+1: `tests/test_v14_patch.py::test_t_v14_scn_01_s01_check_accepts_capability_paraphrase`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
 code, configuration behaviour, benchmark verdict logic, tests or mutations,
 and on the final tree.)_
+
+---
+
+## S01 root cause (T1 — REQ-V14-SCN-01…04)
+
+**Reproduction did not reproduce.** `bench.py run --only S01 --repeats 3
+--tag s01-repro` on the untouched HEAD tree: **3/3**, not v1.3's 1/3.
+Repeats 1–2 were byte-identical, repeat 3 diverged — direct confirmation
+that sampling is not deterministic end to end at `temperature: 0`.
+`s01-repro.json`/`.log`, `bench-s01-repro.md` committed.
+
+**Discriminating question, answered directly:** does the current
+(stage-C) system prompt still name `exec`, `fetch` and the skill
+mechanism? Inspected `agent.py:84-94` directly — **`exec`: named.
+Skill mechanism (`load_skill`): named. `fetch`: NOT named anywhere**,
+though the pre-optimization (`69ebc75`) prompt enumerated all three. This
+fact alone points toward H2, and is recorded honestly rather than omitted.
+
+**Why it doesn't carry the classification.** The check pattern is
+`exec|команд|скилл|skill|fetch|python`. The two answers that actually
+*failed* in v1.3 contain **none** of the six tokens — not even `exec` or
+`команд`, both of which the current prompt still names. The dropped
+`fetch` line cannot be the failure's cause if the still-present `exec`
+line didn't save it either. And the SCN-01 reproduction — same tree, same
+missing-`fetch` prompt — got 3/3, with an answer explicitly describing
+*both* exec and network-fetch capability ("выполнять команды в
+изолированном Linux-контейнере и получать данные из сети") despite the
+prose never naming `fetch` (the tools-JSON schema, untouched by the
+prefix rewrite, still carries it). Three phrasings of one true fact, one
+regex keyed to six literal surface tokens: **the check measures phrasing,
+not capability.**
+
+**Classification: H1 — check defect.** Full v1.3 candidate answers (from
+`docs/assets/bench/optimized.json`, S01 runs 1–3 — designated as the
+transcript by SCN-01, read once, cited here) are all fluent, on-topic,
+accurate; the only variable between pass and fail is whether one of six
+literal tokens happens to appear.
+
+**Repair (H1 branch, `checks` only, `id`/`title`/`turns` unchanged, no
+other scenario touched):**
+
+- Old: `exec|команд|скилл|skill|fetch|python`
+- New: `exec|команд|скилл|skill|fetch|python|инструмент|контейнер|навык`
+- Rationale: the failing answers already correctly describe capabilities
+  using the generic nouns "инструменты"/"контейнер"/"навык"; accepting
+  those alongside the tool names lets a fluent paraphrase pass while an
+  off-topic or refusing answer (using none of these words) still fails.
+
+**Verification:** `s01-verify`, fresh 3-repeat run — **3/3**.
+`s01-verify.json`/`.log`, `bench-s01-verify.md` committed.
+REQ-V13-BEN-08's `\|`-free loading test stays green.
+
+Full evidence, quoted answers and the H1/H2 evidence table:
+`docs/prompts/33-v14-t1-s01-root-cause.md`.
+
+**Consequence:** `bench_scenarios.py` changed → `scenarios_sha256` changed
+→ BEN-01 applies: every v1.3 benchmark file is incomparable with v1.4 from
+this commit forward. A fresh `baseline-v1.4` (T3) is mandatory.
 
 ---
 
@@ -104,9 +164,7 @@ their evidence and are placeholders until then:
    threshold, gate outcomes, honored rate, any `DRIFT:`/`FINISH-LENGTH:`
    line) — T7/T8/T10.
 2. **The mechanism table** (RSN-04) — T4.
-3. **The S01 root cause** (hypothesis, evidence, check diff if H1,
-   `temperature: 0` note) — T1.
-4. **Errata to earlier reports** (RPT-04, E1/E2) — T10.
+3. **Errata to earlier reports** (RPT-04, E1/E2) — T10.
 5. **Gates table, full** and exact test/mutation counts — grows per commit,
    finalized T10.
 6. **Appendix-B results**, how each was driven, deviations, fix cycles — T10.

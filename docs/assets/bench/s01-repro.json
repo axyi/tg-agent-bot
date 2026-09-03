@@ -1,0 +1,334 @@
+{
+  "bench_schema": 1,
+  "meta": {
+    "tag": "s01-repro",
+    "started_at": "2026-09-03T09:56:26Z",
+    "finished_at": "2026-09-03T10:00:02Z",
+    "git_commit": "30c7a16fb357854106b1c61b03da02d339314cf7",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.8-27b",
+    "context_length": 42496,
+    "repeats": 3,
+    "only": [
+      "S01"
+    ],
+    "timeout_s": 600,
+    "prefix_tokens": 842,
+    "scenarios_sha256": "586ed397cae5caef1ef464d41addde3963803e27b559443bbea5e31e5a0d0a48",
+    "pricing": {
+      "basis": "reference:qwen/qwen3.8-27b",
+      "model": "qwen/qwen3.8-27b",
+      "input_usd_per_mtok": 0.425,
+      "output_usd_per_mtok": 2.5500000000000003,
+      "cached_input_usd_per_mtok": 0.08499999999999999,
+      "fetched_at": "2026-09-03T09:56:26Z"
+    },
+    "skipped_scenarios": [],
+    "env_flags": {
+      "HISTORY_TOOL_STUB": "on",
+      "EXEC_OUTPUT_DEFAULT_CHARS": 1500,
+      "FETCH_INLINE_DEFAULT_CHARS": 5000,
+      "LLM_REASONING": null,
+      "LLM_SUMMARY_MODEL": "",
+      "LLM_FAILOVER": "off",
+      "LLM_MAX_TOKENS": 2048
+    },
+    "config_sha256": "754a468695063016a03f79cc58d01230daa2d46fd51f616908dbe6a11d54c91e",
+    "constants": {
+      "CONTEXT_WINDOW_MESSAGES": 30,
+      "EXEC_MAX_STREAM_BYTES": 4096,
+      "FETCH_MAX_BYTES": 65536,
+      "ROUND_LIMIT": 8,
+      "TOOL_ROUND_LIMIT": 7,
+      "TOOL_EXECUTION_LIMIT": 12,
+      "HTTP_ATTEMPT_LIMIT": 9,
+      "REQUEST_DEFAULTS": {
+        "temperature": 0,
+        "stream": false,
+        "tool_choice": "auto"
+      }
+    }
+  },
+  "runs": [
+    {
+      "scenario": "S01",
+      "repeat": 1,
+      "success": true,
+      "failure": null,
+      "checks": [
+        {
+          "kind": "no_tools",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_regex",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_max_chars",
+          "ok": true,
+          "detail": "ok"
+        }
+      ],
+      "answers": [
+        "\n\nПривет! Я Qwen — большая языковая модель. Могу:\n\n— отвечать на вопросы, объяснять темы, вести диалог;\n— писать и редактировать тексты, переводить, суммировать;\n— работать с кодом: писать, объяснять, отлаживать;\n— анализировать документы и длинные контексты;\n— проверять погоду в любом городе;\n— выполнять команды в изолированном Linux-контейнере и получать данные из сети.\n\nСпрашивай — помогу."
+      ],
+      "llm_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-03T09:57:04Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 876,
+          "completion_tokens": 344,
+          "total_tokens": 1220,
+          "cached_tokens": null,
+          "reasoning_tokens": 228,
+          "reasoning_chars": 1050,
+          "prompt_chars": 2431,
+          "prompt_chars_by_role": "{\"assistant\": 0, \"system\": 946, \"tool\": 0, \"tools\": 1388, \"user\": 97}",
+          "messages_n": 2,
+          "tools_exposed": 3,
+          "latency_ms": 35623,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.0012495,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "conv_seq": 1
+        }
+      ],
+      "tool_calls": [],
+      "totals": {
+        "calls": 1,
+        "failed_calls": 0,
+        "prompt_tokens": 876,
+        "completion_tokens": 344,
+        "cached_tokens": 0,
+        "reasoning_tokens": 228,
+        "tool_calls": 0,
+        "tool_output_tokens_est": 0,
+        "latency_ms": 35623,
+        "cost_usd": 0.0012495,
+        "resent_tokens": 0,
+        "new_tokens": 876,
+        "wall_ms": 36081
+      }
+    },
+    {
+      "scenario": "S01",
+      "repeat": 2,
+      "success": true,
+      "failure": null,
+      "checks": [
+        {
+          "kind": "no_tools",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_regex",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_max_chars",
+          "ok": true,
+          "detail": "ok"
+        }
+      ],
+      "answers": [
+        "\n\nПривет! Я Qwen — большая языковая модель. Могу:\n\n— отвечать на вопросы, объяснять темы, вести диалог;\n— писать и редактировать тексты, переводить, суммировать;\n— работать с кодом: писать, объяснять, отлаживать;\n— анализировать документы и длинные контексты;\n— проверять погоду в любом городе;\n— выполнять команды в изолированном Linux-контейнере и получать данные из сети.\n\nСпрашивай — помогу."
+      ],
+      "llm_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-03T09:57:40Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 876,
+          "completion_tokens": 344,
+          "total_tokens": 1220,
+          "cached_tokens": null,
+          "reasoning_tokens": 228,
+          "reasoning_chars": 1050,
+          "prompt_chars": 2431,
+          "prompt_chars_by_role": "{\"assistant\": 0, \"system\": 946, \"tool\": 0, \"tools\": 1388, \"user\": 97}",
+          "messages_n": 2,
+          "tools_exposed": 3,
+          "latency_ms": 35556,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.0012495,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "conv_seq": 1
+        }
+      ],
+      "tool_calls": [],
+      "totals": {
+        "calls": 1,
+        "failed_calls": 0,
+        "prompt_tokens": 876,
+        "completion_tokens": 344,
+        "cached_tokens": 0,
+        "reasoning_tokens": 228,
+        "tool_calls": 0,
+        "tool_output_tokens_est": 0,
+        "latency_ms": 35556,
+        "cost_usd": 0.0012495,
+        "resent_tokens": 0,
+        "new_tokens": 876,
+        "wall_ms": 36133
+      }
+    },
+    {
+      "scenario": "S01",
+      "repeat": 3,
+      "success": true,
+      "failure": null,
+      "checks": [
+        {
+          "kind": "no_tools",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_regex",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_max_chars",
+          "ok": true,
+          "detail": "ok"
+        }
+      ],
+      "answers": [
+        "\n\nПривет! Я помогаю с вопросами и текстами, понимаю длинные документы и видео, показываю погоду и прогноз для любого города, а ещё могу выполнить команды в изолированном Linux-контейнере и рассказать о нём. Спрашивай!"
+      ],
+      "llm_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-03T09:58:17Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 876,
+          "completion_tokens": 1055,
+          "total_tokens": 1931,
+          "cached_tokens": null,
+          "reasoning_tokens": 995,
+          "reasoning_chars": 4378,
+          "prompt_chars": 2431,
+          "prompt_chars_by_role": "{\"assistant\": 0, \"system\": 946, \"tool\": 0, \"tools\": 1388, \"user\": 97}",
+          "messages_n": 2,
+          "tools_exposed": 3,
+          "latency_ms": 105182,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.0030625500000000007,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "conv_seq": 1
+        }
+      ],
+      "tool_calls": [],
+      "totals": {
+        "calls": 1,
+        "failed_calls": 0,
+        "prompt_tokens": 876,
+        "completion_tokens": 1055,
+        "cached_tokens": 0,
+        "reasoning_tokens": 995,
+        "tool_calls": 0,
+        "tool_output_tokens_est": 0,
+        "latency_ms": 105182,
+        "cost_usd": 0.0030625500000000007,
+        "resent_tokens": 0,
+        "new_tokens": 876,
+        "wall_ms": 105865
+      }
+    }
+  ],
+  "summary": {
+    "runs": 3,
+    "skipped": 0,
+    "successes": 3,
+    "success_rate": 1.0,
+    "per_scenario": {
+      "S01": {
+        "success": 3,
+        "of": 3,
+        "median": {
+          "calls": 1,
+          "failed_calls": 0,
+          "prompt_tokens": 876,
+          "completion_tokens": 344,
+          "cached_tokens": 0,
+          "reasoning_tokens": 228,
+          "tool_calls": 0,
+          "tool_output_tokens_est": 0,
+          "latency_ms": 35623,
+          "cost_usd": 0.0012495,
+          "resent_tokens": 0,
+          "new_tokens": 876,
+          "wall_ms": 36133
+        }
+      }
+    },
+    "totals": {
+      "calls": 3,
+      "failed_calls": 0,
+      "prompt_tokens": 2628,
+      "completion_tokens": 1743,
+      "cached_tokens": 0,
+      "reasoning_tokens": 1451,
+      "tool_calls": 0,
+      "tool_output_tokens_est": 0,
+      "latency_ms": 176361,
+      "cost_usd": 0.00556155,
+      "resent_tokens": 0,
+      "new_tokens": 2628,
+      "wall_ms": 178079
+    },
+    "avg_per_task": {
+      "tokens": 1457.0,
+      "rounds": 1.0,
+      "tool_calls": 0.0,
+      "latency_ms": 58787.0
+    },
+    "cost_per_success": 0.00185385,
+    "tokens_per_success": 1457.0,
+    "resent_share": 0.0,
+    "cache_hit_rate": null,
+    "top_tools": [],
+    "top_turn": {
+      "scenario": "S01",
+      "repeat": 1,
+      "turn": 2,
+      "round": 1,
+      "prompt_tokens": 876
+    },
+    "context_growth": {
+      "system": 0.0,
+      "tools": 0.0,
+      "user": 0.0,
+      "assistant": 0.0,
+      "tool": 0.0
+    }
+  }
+}
