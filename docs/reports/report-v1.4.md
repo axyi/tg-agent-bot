@@ -19,7 +19,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | `51ac747` | T2 | harness readiness: BEN-03 row-key rule, BEN-04 guards, BEN-05 nine `env_flags` keys, BEN-02 item 5 dry run (`docs/prompts/34-…`) |
 | `818bbde` | T3 | `baseline-v1.4`: 35/36 successes, `B_plain = $0.003008745` (`docs/prompts/35-…`) |
 | `485fcc5` | T4 | RSN spike: a/c/d probed live, b `unsupported`, e no control found — **STOP, no honored+shippable mechanism** (`docs/prompts/36-…`) |
-| _pending_ | T6 | Reliability, STOP branch: REL-01 (timeout/budget consistency, default 120→240); REL-03 released (`docs/prompts/37-…`) |
+| `e5fc230` | T6 | Reliability, STOP branch: REL-01 (timeout/budget consistency, default 120→240); REL-03 released (`docs/prompts/37-…`) |
+| _pending_ | T8 | Default selection, STOP branch: `.env.example` `LLM_TIMEOUT_S=240`, README `## Benchmark` baseline-v1.4 paragraph; BEN-09 released (`docs/prompts/38-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -105,6 +106,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T3 (baseline-v1.4) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change (GATE-01)_ |
 | T4 (RSN spike, STOP) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change; scratch patches to `llm/base.py`/`llm/lmstudio.py`/`agent.py` reverted before commit) | rc=0 | rc=0 — all six OK | _not run — same reason, and not the final tree_ |
 | T6 (REL-01, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (+2: `T-V14-REL-01`, `test_t_cfg_06_timeout_default_is_240_rel_01`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted (unchanged count — no new `v14-*` entries authored yet; TST-05's STOP-narrowed minimum `{BEN-03, REL-01}` lands at T9) |
+| T8 (default selection, docs only) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change, not the final tree (GATE-01)_ |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -339,6 +341,25 @@ forward, not fixed this run.**
 
 **`.env.example` not touched at T6** — REL-01's `LLM_TIMEOUT_S=240` line
 there is T8's job (GATE-02), not T6's; T6's own file scope never names it.
+
+---
+
+## Default selection (T8 — REQ-V14-BEN-09 released, RPT-06 T8 half)
+
+**BEN-09 released** — no honored+shippable mechanism exists (RSN-06), so
+there is no default to flip; the shipped policy stays what it has always
+been (no reasoning-control env var at all — `LLM_REASONING` was already
+superseded and never resurrected).
+
+RPT-06's T8 half narrows to its mechanism-independent line only
+(`GATE-02`): `.env.example`'s `LLM_TIMEOUT_S` default updated `120 → 240`
+with a three-line comment stating REL-01's consistency formula, and one
+new `README.md` § "Benchmark" paragraph documenting the `git worktree`
+procedure `baseline-v1.4.json` was measured with. Every other RPT-06
+item-2 line (`§ Configure`, `§ Token economy`, `§ Observability`'s two new
+columns) describes the reasoning policy this run never shipped and is
+correspondingly not-executed. `docs/plan.md` (RPT-07) is T10's file, not
+touched here. Full change list: `docs/prompts/38-v14-t8-default-selection.md`.
 
 ---
 

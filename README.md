@@ -612,6 +612,20 @@ valid, 1 schema/run-set/arithmetic mismatch, 2 an aborted file, 3 missing or
 invalid token counts; `report --gate` 1 on a FAIL verdict and 2 when the two
 files are not comparable, naming the field that differs.
 
+**Measuring a pre-optimization baseline against the current harness.** When
+the scenario file or the harness itself changes, every earlier benchmark
+file becomes incomparable (a `scenarios_sha256` mismatch), and a fresh
+baseline must be measured with the *old* code but the *current*
+harness/scenarios — otherwise the delta would conflate the code change
+with the harness change. `baseline-v1.4.json` was produced this way: a
+temporary `git worktree` checks out the pre-optimization commit, only
+`devtools/bench.py` / `bench_scenarios.py` / `__init__.py` are copied in
+from the current tree (the measured code is exactly what that commit
+shipped), `.env` is reached by a symlink to the main tree's file (never
+opened for content), and `--out` writes into the main tree's
+`docs/assets/bench/` before the worktree is removed. Full procedure and
+figures: [docs/reports/report-v1.4.md](docs/reports/report-v1.4.md).
+
 **The JSON** (`bench_schema: 1`) carries a `meta` block that pins the
 comparison — tag, git commit, provider, model, context length, repeats,
 timeout, calibrated `prefix_tokens`, the hash of the frozen scenario file, a
