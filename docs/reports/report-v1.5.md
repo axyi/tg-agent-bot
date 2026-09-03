@@ -466,7 +466,44 @@ inside one now goes through the live `pre-commit` chain too. Renamed to
 
 ## RTK project-local hook (T10 — REQ-V15-RTK-*)
 
-(pending)
+**`.claude/settings.json` (REQ-V15-RTK-01).** New, committed (not
+git-ignored — `.claude/agent-memory/` already is, confirmed via `git
+check-ignore`), the exact shape REQ-V15-RTK-01 specifies: a
+`hooks.PreToolUse` array, one entry, `matcher: "Bash"`, single hook
+`{type: "command", command: "rtk hook claude"}`. Verified against
+current Claude Code hook syntax via context7
+(`/anthropics/claude-code`, `hooks/hooks.json`/`settings.json`
+examples) before writing, per this project's own global config-change
+rule — the doc's `PreToolUse`/`matcher`/`hooks` shape matches the
+spec's description exactly. The `.agents → .claude` symlink
+REQ-V15-RTK-01 mentions already existed (predates this task).
+
+**`CLAUDE.md` (REQ-V15-RTK-02).** Kept the existing `@AGENTS.md` import,
+appended the RTK block copied from this project's own inherited
+org-level instructions (already present verbatim in this session's own
+context, not fetched or read from outside the repository) and adjusted
+only to name this repository's own `.claude/settings.json` rather than
+the lab's. Contains, verbatim, the required telemetry sentence:
+"Telemetry consent was never granted — NEVER enable it (`rtk telemetry
+status` must stay `consent: never asked`)." — character-for-character
+diffed against the spec's own quoted text.
+
+**Verification, and its limit.** `rtk --version` → `0.47.0` (matches
+the pin). `rtk telemetry status` → `consent: never asked`, `enabled:
+no` — unchanged, as required. `rtk hook check "git status"` →
+`rtk git status`; `rtk hook check "pytest"` → `rtk pytest` — the
+rewrite engine itself works correctly against 0.47.0. What this run
+**cannot** verify: the task table's third acceptance item, "a Bash call
+in a fresh session shows the filter active" — Claude Code hooks load at
+session start, not hot-reloaded mid-session, and this run's own session
+started before `.claude/settings.json` existed here. REQ-V15-RTK-01's
+own rationale text is corroborating, unplanned evidence of the bug this
+task fixes: "the lab-level hook never reached [this repository]... every
+Bash command here has run unfiltered" — true for every command this
+entire run has issued, confirmed by there being no project-local
+`.claude/settings.json` until this commit. Verifying the fresh-session
+activation itself is left to the next session that starts in this
+repository.
 
 ## Prompt format and lint-docs (T11 — REQ-V15-PRM-*)
 
@@ -507,6 +544,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T7 | yes (§8, 212 lines/12 KB) | no — see Deviations | content already in the main context from the session-start full-spec read |
 | T8 | yes (a single read of §7:600-730, 130 lines, for REQ-V15-GATE-05) | no — see Deviations | content already in the main context from the session-start full-spec read; §6 (HOOK) itself is under threshold, no delegation needed there |
 | T9 | no (its own reading map: §7's `tools:`/GATE-03 paragraph ≈30 lines, REQ-V15-RTK-03 ≈15 lines — both under threshold) | no | content already in the main context from the session-start full-spec read |
+| T10 | no (its own reading map: §9 in full, ≈35 lines — under threshold) | no | content already in the main context from the session-start full-spec read; the copied block was already in this session's own inherited config context, not read from outside the repository |
 
 (rest of the table fills in as each task lands)
 
