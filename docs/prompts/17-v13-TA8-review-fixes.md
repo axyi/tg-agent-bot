@@ -1,6 +1,7 @@
 # Prompt 17 — v1.3 TA8: fix the stage-A review findings
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Input:** the TA7 (`code-reviewer`) finding list, § 13.5 one fix round
 - **REQ ids:** REQ-V13-BEN-01/02/13/14, REQ-V13-RSN-02 (its decision input),
   REQ-V13-OBS-08

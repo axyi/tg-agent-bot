@@ -1,6 +1,7 @@
 # Prompt 14 — v1.3 TA5: static HTML dashboard (stage A)
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `devtools/dashboard.py` (new), `tests/test_dashboard.py` (new)
 - **REQ ids:** REQ-V13-DSH-01, REQ-V13-DSH-02
 

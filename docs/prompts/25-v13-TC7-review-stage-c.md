@@ -1,6 +1,7 @@
 # Prompt 25 — v1.3 TC7: clean-context review of stage C
 
 - **Sent to:** `code-reviewer` subagent (own clean context, AGENTS.md § Review)
+- **Model reason:** `code-reviewer` subagent, own clean context (AGENTS.md § Review — never self-review in the writing context); ran on claude-opus-5, this run's pin (docs/llm-usage.md row 31).
 - **Scope:** the whole stage-C diff before commit
 - **REQ ids:** section 13.5 ("after stage C, before D1")
 

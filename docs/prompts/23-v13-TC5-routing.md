@@ -1,6 +1,7 @@
 # Prompt 23 — v1.3 TC5: O6 model routing by purpose (stage C)
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `config.py` (`LLM_SUMMARY_MODEL`), `llm/__init__.py`, `bot.py`
   summary wiring, `tests/test_routing.py` (new), `.env.example`
 - **REQ ids:** REQ-V13-RTE-01

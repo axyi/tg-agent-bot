@@ -2,6 +2,7 @@
 
 - **Date:** 2026-09-02
 - **Executor model:** claude-opus-5 (Claude Code, background session)
+- **Model reason:** spec-v1.3 pins claude-opus-5 for this run (spec-v1.3.md, "Executor model for this run"): judgment calls — reading what the audit numbers mean, keeping four commits honest, driving subagents on minimal context — need a larger model.
 - **Harness:** Claude Code CLI, working directory `projects/tg-agent-bot`
 - **Standing instruction:** AGENTS.md § "go protocol"
 

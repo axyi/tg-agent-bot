@@ -1,6 +1,7 @@
 # Prompt 26 — v1.3 TC8: fix the stage-C review findings
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Input:** the TC7 finding list; § 13.5 one fix round
 - **REQ ids:** REQ-V13-TOO-02, TOO-07, TOO-09, REQ-V13-CCH-01
 

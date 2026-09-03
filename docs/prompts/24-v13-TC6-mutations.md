@@ -1,6 +1,7 @@
 # Prompt 24 — v1.3 TC6: mutations tagged C (stage C)
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `devtools/mutation_check.py` (the 13 C-tagged mutations)
 - **REQ ids:** section 12 of spec-v1.3, rows tagged `C`
 

@@ -1,6 +1,7 @@
 # Prompt 29 — v1.3 TD2: the Telegram post (stage D)
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `docs/reports/tg-post-v1.3.md` (new)
 - **REQ ids:** REQ-V13-RPT-02, AGENTS.md § Reporting
 

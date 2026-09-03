@@ -1,6 +1,7 @@
 # Prompt 10 — v1.3 TA1: v1.2 carry-over (stage A)
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `bot.py` (`_remove_sandbox_entry` only), `devtools/mutation_check.py`
   (`--only` exit code only), `tests/test_v13_carryover.py` (new),
   `tests/test_v12_patch.py` / `tests/test_v11_patch.py` (chmod-000 hygiene only),

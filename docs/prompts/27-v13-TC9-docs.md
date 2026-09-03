@@ -1,6 +1,7 @@
 # Prompt 27 — v1.3 TC9: README and AGENTS.md for stage C
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `README.md`, `AGENTS.md`
 - **REQ ids:** REQ-V13-RPT-03, REQ-V13-RPT-04
 

@@ -38,6 +38,7 @@
 | 30 | v1.3 implementation run — the whole `go docs/spec/spec-v1.3.md` run across its four commits: stage A (v1.2 carry-over, observability, pricing, benchmark harness, dashboard, mutation entries), the baseline benchmark and the OpenRouter smoke, the token audit, stage C (optimizations O1–O6 incl. the O5 probe), the optimized run and the gate report, the six gates at C1/C3/C4, two clean-context reviews with one fix round each, and the C4 documentation | claude-opus-5 | unknown | unknown |
 | 31 | v1.3 task subagents — 18 of the run's 19 prompt files (`docs/prompts/10-v13-TA1-carryover.md` … `27-v13-TC9-docs.md`; the 19th is row 30's own `09-go-spec-v1.3.md`), including the two `code-reviewer` clean-context reviews (`16-…`, `25-…`) and the audit subagent (`18-…`) | claude-opus-5 | unknown | unknown |
 | **Σ** (rows 30–31, one `go` run) | | claude-opus-5 | unknown | unknown |
+| 32 | v1.3 verify-run docs fixes (prompt 30): trimmed `docs/reports/tg-post-v1.3.md` under the 1500-char limit, added the `Model reason` bullet required by `standards/reporting.md` to all 21 v1.3 prompt files (`09-go-spec-v1.3.md`–`29-v13-TD2-tg-post.md`), and this row | claude-sonnet-5 | unknown | unknown |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.

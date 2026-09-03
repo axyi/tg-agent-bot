@@ -1,6 +1,7 @@
 # Prompt 15 — v1.3 TA6: mutations tagged A (stage A)
 
 - **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
 - **Owner of:** `devtools/mutation_check.py` (the 20 A-tagged mutations only)
 - **REQ ids:** section 12 of spec-v1.3 (rows tagged `A`)
 
