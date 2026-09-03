@@ -19,7 +19,7 @@ profiles:
 tools:
   ruff:     { version: "0.16.5", via: uv, version_parser: last_token,
               version_argv: [uv, run, --locked, ruff, --version] }
-  gitleaks: { version: "8.24.3", via: binary, version_parser: bare,
+  gitleaks: { version: "8.30.1", via: binary, version_parser: bare,
               version_argv: [gitleaks, version] }
   semgrep:  { version: "1.167.0", via: uv-tool, version_parser: bare,
               version_argv: [semgrep, --version] }

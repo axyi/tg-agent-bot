@@ -111,7 +111,21 @@ yet (T9).
 
 ## Dependency and tooling refresh (T2–T6, T13 — REQ-V15-DEP-*)
 
-(pending)
+Install provenance (REQ-V15-DEP-03):
+
+| tool | channel | asset | verified SHA-256 |
+|---|---|---|---|
+| gitleaks 8.30.1 (T2) | GitHub release asset + checksum | `gitleaks_8.30.1_linux_x64.tar.gz` | `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb` (matched `gitleaks_8.30.1_checksums.txt`, `sha256sum -c` OK) |
+
+**T2 — gitleaks 8.30.1.** Installed to `~/.local/bin/gitleaks` (already on
+`PATH`, replacing 8.24.3; the old binary kept as a local backup outside the
+repository, not committed). `gitleaks version` → `8.30.1` (bare token,
+matches `version_parser: bare`). Re-confirmed against `gitleaks --help`,
+`gitleaks dir --help`, `gitleaks git --help`: `--no-banner`, `--redact`,
+`--config`, `--report-format`, `--report-path`, `git --staged`, `git
+--log-opts` all present unchanged from 8.24.3 — REQ-V15-SCAN-01's and
+REQ-V15-GATE-05's argv need no correction. Only the `tools.gitleaks.version`
+pin moved in `config/quality_gates.yaml`.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 
