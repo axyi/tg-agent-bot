@@ -1,0 +1,264 @@
+version: "2026-09-03.1"
+
+scope:
+  base_branch: main
+  zero_sha: "0000000000000000000000000000000000000000"
+
+profiles:
+  pre-commit: [ruff-check, ruff-format, gitleaks-staged, branch-name]
+  pre-push:   [ruff-check-all, ruff-format, branch-name, pytest, selftest,
+               gitleaks-tree, trivy, semgrep, skylos, mutation-v15,
+               hooks-installed, doctor]
+  full:       [uv-sync, ruff-check-all, ruff-format, branch-name, pytest,
+               selftest, selftest-live, mutation-all, gitleaks-tree, trivy,
+               semgrep, skylos, hooks-installed, doctor, lint-docs]
+
+# T1 writes each pin at its currently-installed version (REQ-V15-DEP-04);
+# trivy and skylos are not installed yet and stay absent from this block
+# until T4/T5 -- doctor iterates only what's here.
+tools:
+  ruff:     { version: "0.16.5", via: uv, version_parser: last_token,
+              version_argv: [uv, run, --locked, ruff, --version] }
+  gitleaks: { version: "8.24.3", via: binary, version_parser: bare,
+              version_argv: [gitleaks, version] }
+  semgrep:  { version: "1.167.0", via: uv-tool, version_parser: bare,
+              version_argv: [semgrep, --version] }
+  rtk:      { version: "0.46.0", via: binary, version_parser: last_token,
+              version_argv: [rtk, --version] }
+
+gates:
+  ruff-check:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, ruff, check, --force-exclude, "{target}"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: true
+    timeout_seconds: 30
+
+  ruff-check-all:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, ruff, check, "."]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 30
+
+  ruff-format:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, ruff, format, --check, --force-exclude, "{target}"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: true
+    blocking_paths: [devtools/checks.py, devtools/install_hooks.py,
+                      tests/test_v15_standards.py]
+    timeout_seconds: 30
+
+  branch-name:
+    kind: builtin
+    handler: branch_name
+    pattern: "^(main|(feat|fix|docs|test|chore)/[a-z0-9][a-z0-9._-]*)$"
+    warn_refs: [main]
+    warn_on_detached: true
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 5
+
+  gitleaks-staged:
+    kind: command
+    result_mode: findings
+    argv: [gitleaks, git, --staged, --no-banner, --redact, --config, "{config}",
+           --report-format, json, --report-path, "{artefact}", "."]
+    placeholders: { config: .gitleaks.toml }
+    output_format: json
+    parser: gitleaks_json
+    success_exit_codes: [0]
+    findings_exit_codes: [1]
+    artefact: .bench/checks/{profile}/gitleaks-staged.json
+    blocking: true
+    diff_scoped: false
+    severity: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
+    timeout_seconds: 60
+
+  gitleaks-tree:
+    kind: command
+    result_mode: findings
+    argv: [gitleaks, dir, --no-banner, --redact, --config, "{config}",
+           --report-format, json, --report-path, "{artefact}", "{tracked_tree}"]
+    placeholders: { config: .gitleaks.toml }
+    output_format: json
+    parser: gitleaks_json
+    success_exit_codes: [0]
+    findings_exit_codes: [1]
+    artefact: .bench/checks/{profile}/gitleaks-tree.json
+    blocking: true
+    diff_scoped: false
+    severity: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
+    timeout_seconds: 120
+
+  uv-sync:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, sync, --locked]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 60
+
+  pytest:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, pytest]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 120
+
+  selftest:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, bot.py, --selftest]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 30
+
+  selftest-live:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, bot.py, --selftest-live]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 60
+
+  # trivy 0.74.0 not installed until T4; argv transcribed from REQ-V15-SCAN-03,
+  # [[VERIFY]] against `trivy fs --help` at the pin before it ever executes.
+  trivy:
+    kind: command
+    result_mode: findings
+    argv: [trivy, fs, --scanners, "vuln,misconfig", --severity, "HIGH,CRITICAL",
+           --exit-code, "1", --ignore-unfixed, --format, json, --output,
+           "{artefact}", "{target}"]
+    placeholders: { target: "." }
+    output_format: json
+    parser: trivy_json
+    success_exit_codes: [0]
+    findings_exit_codes: [1]
+    artefact: .bench/checks/{profile}/trivy.json
+    blocking: true
+    diff_scoped: true
+    severity: [CRITICAL, HIGH]
+    timeout_seconds: 240
+
+  semgrep:
+    kind: command
+    result_mode: findings
+    argv: [semgrep, scan, --config, "{config}", --severity, ERROR, --error,
+           --metrics=off, --disable-version-check, --json, --output,
+           "{artefact}", "{target}"]
+    placeholders: { config: .semgrep/, target: "." }
+    output_format: json
+    parser: semgrep_json
+    success_exit_codes: [0]
+    findings_exit_codes: [1]
+    artefact: .bench/checks/{profile}/semgrep.json
+    blocking: true
+    diff_scoped: true
+    severity: [ERROR]
+    timeout_seconds: 180
+
+  # skylos 4.35.0 not installed until T5; argv is a placeholder,
+  # [[VERIFY]] against `skylos --help` at the pin before it ever executes.
+  skylos:
+    kind: command
+    result_mode: findings
+    argv: [skylos, "{target}"]
+    placeholders: { target: "." }
+    output_format: json
+    parser: skylos_json
+    success_exit_codes: [0]
+    findings_exit_codes: [1]
+    artefact: .bench/checks/{profile}/skylos.json
+    blocking: false
+    diff_scoped: true
+    severity: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
+    timeout_seconds: 120
+
+  mutation-v15:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, "v15-"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 180
+
+  mutation-all:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 1200
+
+  hooks-installed:
+    kind: command
+    result_mode: exit_status
+    argv: [python3, devtools/install_hooks.py, --check]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 10
+
+  doctor:
+    kind: builtin
+    handler: doctor
+    warn_only_tools: [rtk]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 30
+
+  lint-docs:
+    kind: builtin
+    handler: lint_docs
+    prompt_glob: "docs/prompts/[0-9][0-9]*.md"
+    exempt_files: [01-go-spec-v0.md, 02-code-review.md, 03-go-spec-v1.md,
+                   04-code-review-v1.md, 05-go-spec-v1.1.md,
+                   06-code-review-v1.1.md, 07-go-spec-v1.2.md,
+                   08-code-review-v1.2.md, 09-go-spec-v1.3.md,
+                   10-v13-TA1-carryover.md, 11-v13-TA2-observability.md,
+                   12-v13-TA3-pricing.md, 13-v13-TA4-bench.md,
+                   14-v13-TA5-dashboard.md, 15-v13-TA6-mutations.md,
+                   16-v13-TA7-review-stage-a.md, 17-v13-TA8-review-fixes.md,
+                   18-v13-TB1-audit.md, 19-v13-TC1-tool-output.md,
+                   20-v13-TC2-history-stub.md, 21-v13-TC3-prefix.md,
+                   22-v13-TC4-reasoning.md, 23-v13-TC5-routing.md,
+                   24-v13-TC6-mutations.md, 25-v13-TC7-review-stage-c.md,
+                   26-v13-TC8-review-fixes.md, 27-v13-TC9-docs.md,
+                   28-v13-TD1-report.md, 29-v13-TD2-tg-post.md,
+                   30-v13-verify-run-fixes.md, 31-go-spec-v1.4.md,
+                   32-v14-t0-preconditions.md, 33-v14-t1-s01-root-cause.md,
+                   34-v14-t2-harness-readiness.md, 35-v14-t3-baseline-v14.md,
+                   36-v14-t4-rsn-spike.md, 37-v14-t6-reliability.md,
+                   38-v14-t8-default-selection.md, 39-v14-t9-mutations.md,
+                   40-v14-t9-review.md, 41-v14-t10-report.md,
+                   42-v14-t10-advisor-followup.md, 43-v14-verify-run-fixes.md]
+    report_path: docs/reports/report-v1.5.md
+    ledger_header: "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |"
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 15

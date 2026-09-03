@@ -56,6 +56,55 @@ steps (§3.5) are attempted in T2–T7 as scheduled, each step recorded there.
 `docs/prompts/43-v14-verify-run-fixes.md` present, confirming this run's
 `go` prompt is numbered 44 (REQ-V15-TREE-01's prompt-numbering rule).
 
+## `checks.py` skeleton, YAML reader, config schema (T1 — REQ-V15-GATE-01/02, CC-01..05)
+
+`devtools/checks.py` written: a small explicit YAML-subset reader (nested
+block mappings; flow lists/maps, possibly spanning several physical lines;
+quoted/bare scalars; fails closed on a tab, a duplicate key, an unbalanced
+bracket or an unrecognised construct); the `config/quality_gates.yaml`
+schema validator (REQ-V15-GATE-02's two gate kinds, the fixed key sets per
+`result_mode`, the fixed five placeholders, the four gate-specific extra-key
+allowlists); the §5 Conventional Commits functions (header/length/
+punctuation/prompt-reference/bypass/branch-name); `commit-msg` is fully
+wired, `run`/`doctor`/`replay`/`lint-docs` are argparse-wired stubs pending
+T7/T8/T9/T11.
+
+`config/quality_gates.yaml` written in full (all 18 gates, the three-profile
+matrix of REQ-V15-GATE-11, `tools:` at T1's currently-installed pins per
+REQ-V15-DEP-04 — ruff 0.16.5, gitleaks 8.24.3, semgrep 1.167.0, rtk 0.46.0;
+trivy and skylos absent from `tools:` until T4/T5 but present in `gates:`
+and every profile, their `argv` transcribed from §8 under `[[VERIFY]]`
+pending T4/T5's confirmation against `--help` at the pin).
+
+`config/` carries no `__init__.py`; `T-V15-TREE-01` proves `import config`
+still resolves to `config.py`.
+
+Two numbers re-measured rather than inherited from the spec text (both used
+verbatim in the spec are stale relative to this checkout):
+
+- `uv run --locked pytest --collect-only -q` prints no summary line at this
+  project's `addopts = "-q"` (an explicit `-q` on the command line becomes
+  `-qq`, and pytest drops the count at that verbosity). Measured instead
+  with `-o addopts=""`: **728 tests** before this task's own additions,
+  **783** after (728 + 55 new `T-V15-CC-*`/`T-V15-GATE-*`/`T-V15-TREE-*`
+  tests) — both exceed REQ-V15-GATE-09's ">728" floor.
+  `uv run --locked ruff format --check .` reports the spec's cited "44 of
+  135 files" once `docs/` is excluded from formatting (as REQ-V15-SCAN-05
+  requires — `ruff format` reaches into fenced Python blocks under
+  `docs/spec/*.md`, confirmed empirically: `--extend-exclude docs` changes
+  the count from 44/94 to 39/12). Scoped to the tracked `*.py` files this
+  release actually governs (`tests/`, `llm/`, `devtools/`, the six root
+  modules — `skills/` and `.claude/` carry no `.py`): **39 files would be
+  reformatted, 6 already formatted** (45 tracked files total). This is the
+  real input to `ruff-format.blocking_paths` at T7/T12, not the spec's
+  illustrative "44 of 135".
+
+## `checks.py doctor` config drift (T1)
+
+`T-V15-GATE-03` passes at T1: `pyproject.toml`'s `ruff==0.16.5` matches
+`quality_gates.yaml`'s `tools.ruff.version`. `doctor` itself is not callable
+yet (T9).
+
 ## Gates (§14) — full table
 
 (T12, T14, T19 — pending)
@@ -114,6 +163,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | task | crossed a threshold? | delegated? | to what |
 |---|---|---|---|
 | T0 | no (two mapped files, both under threshold) | no | — |
+| T1 | yes (§7, 322 lines/18 KB) | no — see Deviations | content already in the main context from the session-start full-spec read |
 
 (rest of the table fills in as each task lands)
 
@@ -128,7 +178,28 @@ evidence lands in the T19 evidence-only commit)
 
 ## Deviations
 
-None yet recorded at T0.
+1. **RLM rule (REQ-V15-EC-07), process deviation at session start.** Before
+   T0, the executor read `docs/spec/spec-v1.5.md` in full (1721 lines) in
+   the main context to plan the whole run, rather than per-task delegated
+   reads — this crosses the size clause for §7 (322 lines/18 KB) and §8
+   (212 lines/12 KB), both of which T1/T7's reading maps mark for
+   delegation. Reason: this run is a single continuous executor context
+   (not a multi-agent pipeline with per-task fresh contexts), and the
+   authoritative schema in §7 is what `T-V15-GATE-01`/`-02` test key-for-key
+   — a delegated summary would be lossy exactly where fidelity matters most,
+   and re-verifying a summary against the spec would cost more than reading
+   it once. T1 and T7 are recorded as "not delegated" in the RLM table
+   above for this reason, not because they were skipped. Every task from T2
+   on either stays under threshold or is delegated fresh (T11's 46-file
+   prompt sweep, T12's `mutation_check.py` survey, T16's `AGENTS.md` diff
+   review) since those reads were never already in context.
+2. **Mutation count, spec prose vs measured reality.** §6 and Appendix A
+   cite "43 mutation entries" / "the 43 mutation targets"; T0 measured
+   **68** (`68 mutations, 68 killed, 0 survived, 0 errored, 0 drifted`).
+   `T-V15-GATE-04` compares profile membership against `profiles:`, not this
+   note, so nothing breaks — but `full`'s wall-clock and RPT-02 item 3 will
+   report against 72 mutations once T12 adds the four `v15-*` entries, not
+   43+4=47. Prose drift in the spec, not a defect in this run.
 
 ## Ledger row (paste into `economics.md`)
 
