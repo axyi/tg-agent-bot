@@ -1311,6 +1311,67 @@ def execute_command_gate(
     )
 
 
+_VERSION_PARSERS: dict[str, Any] = {
+    "bare": lambda text: text.strip(),
+    "last_token": lambda text: text.splitlines()[0].split()[-1] if text.strip() else "",
+}
+
+
+def _doctor_check_tool(
+    name: str, spec: dict[str, Any], repo_root: Path, timeout: int
+) -> tuple[str, str]:
+    """(status, message) where status is 'ok', 'mismatch' or 'error'."""
+    result = run_argv(spec["version_argv"], repo_root, timeout)
+    if not result.ok:
+        return "error", f"{name}: could not run: {result.error}"
+    if result.returncode != 0:
+        return "error", f"{name}: version command exited {result.returncode}"
+    output = result.stdout.decode("utf-8", errors="replace")
+    try:
+        found = _VERSION_PARSERS[spec["version_parser"]](output)
+    except IndexError:
+        found = ""
+    if not found:
+        return "error", f"{name}: could not parse a version from its output"
+    expected = spec["version"]
+    if found != expected:
+        return "mismatch", f"{name}: expected {expected}, found {found}"
+    return "ok", f"{name}: {found}"
+
+
+def _run_doctor(
+    name: str, gate: dict[str, Any], config: dict[str, Any], repo_root: Path
+) -> GateResult:
+    timeout = gate["timeout_seconds"]
+    warn_only = set(gate["warn_only_tools"])
+    problems: list[str] = []
+    warnings: list[str] = []
+    for tool_name, spec in config["tools"].items():
+        status, msg = _doctor_check_tool(tool_name, spec, repo_root, timeout)
+        if status == "ok":
+            continue
+        (warnings if tool_name in warn_only else problems).append(msg)
+
+    hooks_check = run_argv(
+        [sys.executable, str(repo_root / "devtools" / "install_hooks.py"), "--check"],
+        repo_root,
+        timeout,
+    )
+    if not hooks_check.ok:
+        problems.append(f"hooks: could not run install_hooks.py --check: {hooks_check.error}")
+    elif hooks_check.returncode != 0:
+        detail = hooks_check.stderr.decode("utf-8", errors="replace").strip()
+        problems.append(f"hooks: {detail or 'install_hooks.py --check failed'}")
+
+    parts = []
+    if problems:
+        parts.append(f"{len(problems)} problem(s): " + "; ".join(problems))
+    if warnings:
+        parts.append(f"{len(warnings)} warning(s): " + "; ".join(warnings))
+    message = "; ".join(parts) if parts else "all tools at pin, hooks installed"
+    return GateResult(name, ran=True, blocked=gate["blocking"] and bool(problems), message=message)
+
+
 def execute_builtin_gate(
     name: str, gate: dict[str, Any], *, config: dict[str, Any], repo_root: Path, profile: str
 ) -> GateResult:
@@ -1323,7 +1384,7 @@ def execute_builtin_gate(
             name, ran=True, blocked=gate["blocking"] and status == "fail", message=msg
         )
     if handler == "doctor":
-        return GateResult(name, ran=False, blocked=True, message="doctor: lands in T9")
+        return _run_doctor(name, gate, config, repo_root)
     if handler == "lint_docs":
         return GateResult(name, ran=False, blocked=True, message="lint-docs: lands in T11")
     raise GateConfigError(f"gates.{name}: unknown handler {handler!r}")
@@ -1416,8 +1477,13 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    print("checks.py doctor: lands in T9", file=sys.stderr)
-    return 2
+    config = load_gate_config()
+    result = execute_builtin_gate(
+        "doctor", config["gates"]["doctor"], config=config, repo_root=REPO_ROOT, profile="doctor"
+    )
+    status = "FAIL" if result.blocked else "PASS"
+    print(f"[{status}] {result.name}: {result.message}")
+    return 1 if result.blocked else 0
 
 
 def cmd_replay(args: argparse.Namespace) -> int:

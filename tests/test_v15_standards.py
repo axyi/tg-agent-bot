@@ -1126,7 +1126,7 @@ def git_worktree(tmp_path: Path):
     gives `uv run`/pyproject.toml-dependent gates (ruff, pytest) a real
     project to run against without ever touching the main working tree."""
     wt = tmp_path / "wt"
-    branch = f"v15-test-{tmp_path.name}"
+    branch = f"test/v15-{tmp_path.name}"
     subprocess.run(
         ["git", "worktree", "add", "--detach", str(wt), "HEAD"],
         cwd=checks.REPO_ROOT,
@@ -1252,3 +1252,119 @@ def test_n6_pre_push_refused_when_pytest_fails(git_worktree: Path):
     pytest_result = next(g for g in result.gate_results if g.name == "pytest")
     assert pytest_result.blocked
     assert "pytest" in pytest_result.message
+
+
+# ---------------------------------------------------------------------------
+# N7, checks.py doctor (REQ-V15-GATE-03, REQ-V15-RTK-03)
+# ---------------------------------------------------------------------------
+
+
+def _doctor_ready_repo(tmp_path: Path) -> Path:
+    """A fixture repo with install_hooks.py copied in and hooks installed --
+    so doctor's own hook-chain check passes, isolating a test's assertions
+    to whatever tool-version behaviour it actually exercises."""
+    repo = _init_repo(tmp_path)
+    _commit_all(repo, "c1")
+    dest_devtools = repo / "devtools"
+    dest_devtools.mkdir()
+    (dest_devtools / "__init__.py").write_text("")
+    shutil.copy(
+        checks.REPO_ROOT / "devtools" / "install_hooks.py", dest_devtools / "install_hooks.py"
+    )
+    hooks_dir = repo / ".githooks"
+    hooks_dir.mkdir()
+    for hook_name in ("commit-msg", "pre-commit", "pre-push"):
+        (hooks_dir / hook_name).write_text("#!/bin/sh\nset -eu\nexit 0\n")
+    install_hooks.install(repo)
+    return repo
+
+
+def _doctor_gate(*, blocking: bool = True, warn_only_tools=()):
+    return {
+        "kind": "builtin",
+        "handler": "doctor",
+        "warn_only_tools": list(warn_only_tools),
+        "blocking": blocking,
+        "diff_scoped": False,
+        "timeout_seconds": 10,
+    }
+
+
+def _version_tool(pinned: str, printed: str, *, parser: str = "bare"):
+    return {
+        "version": pinned,
+        "via": "binary",
+        "version_argv": [sys.executable, "-c", f"print({printed!r})"],
+        "version_parser": parser,
+    }
+
+
+@pytest.mark.parametrize("printed", ["0.9.0", "1.1.0"])
+def test_n7_doctor_fails_on_version_mismatch_including_newer(tmp_path: Path, printed: str):
+    repo = _doctor_ready_repo(tmp_path)
+    config = {"tools": {"widget": _version_tool("1.0.0", printed)}}
+    result = checks._run_doctor("doctor", _doctor_gate(), config, repo)
+    assert result.blocked
+    assert "widget" in result.message
+    assert "1.0.0" in result.message
+    assert printed in result.message
+
+
+def test_v15_gate_doctor_passes_when_every_tool_matches_its_pin(tmp_path: Path):
+    repo = _doctor_ready_repo(tmp_path)
+    config = {"tools": {"widget": _version_tool("1.0.0", "1.0.0")}}
+    result = checks._run_doctor("doctor", _doctor_gate(), config, repo)
+    assert not result.blocked
+    assert "all tools at pin" in result.message
+
+
+def test_v15_gate_doctor_rtk_mismatch_is_warn_only_not_blocking(tmp_path: Path):
+    repo = _doctor_ready_repo(tmp_path)
+    config = {
+        "tools": {
+            "widget": _version_tool("1.0.0", "1.0.0"),
+            "rtk": _version_tool("0.47.0", "0.46.0"),
+        }
+    }
+    result = checks._run_doctor("doctor", _doctor_gate(warn_only_tools=["rtk"]), config, repo)
+    assert not result.blocked
+    assert "rtk" in result.message
+    assert "warning" in result.message.lower()
+
+
+def test_v15_gate_doctor_missing_binary_fails_closed(tmp_path: Path):
+    repo = _doctor_ready_repo(tmp_path)
+    config = {
+        "tools": {
+            "ghost": {
+                "version": "1.0.0",
+                "via": "binary",
+                "version_argv": ["a-binary-that-does-not-exist-anywhere"],
+                "version_parser": "bare",
+            }
+        }
+    }
+    result = checks._run_doctor("doctor", _doctor_gate(), config, repo)
+    assert result.blocked
+    assert "ghost" in result.message
+
+
+def test_v15_gate_doctor_checks_hook_installation(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    _commit_all(repo, "c1")
+    dest_devtools = repo / "devtools"
+    dest_devtools.mkdir()
+    (dest_devtools / "__init__.py").write_text("")
+    shutil.copy(
+        checks.REPO_ROOT / "devtools" / "install_hooks.py", dest_devtools / "install_hooks.py"
+    )
+    config = {"tools": {}}
+    result = checks._run_doctor("doctor", _doctor_gate(), config, repo)
+    assert result.blocked
+    assert "hooks" in result.message
+
+
+def test_v15_gate_doctor_real_config_against_the_real_repository():
+    config = checks.load_gate_config()
+    result = checks._run_doctor("doctor", config["gates"]["doctor"], config, checks.REPO_ROOT)
+    assert not result.blocked, result.message

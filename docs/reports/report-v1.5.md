@@ -419,7 +419,50 @@ green, `bot.py --selftest` `OK`.
 
 ## `checks.py doctor` (T9 — REQ-V15-GATE-03)
 
-(pending)
+**Two version parsers, both mechanism names permitted as literals
+(REQ-V15-GATE-02) alongside the existing four findings adapters.**
+`bare` strips the output; `last_token` splits the output's *first line
+only* on whitespace and takes the last token — not the whole (possibly
+multi-line) output, discovered by inspecting `trivy --version`'s real
+output (`Version: 0.74.0\nVulnerability DB:\n  Version: 2\n…`): taking
+the last token of the *entire* blob would have picked up a byte from
+the checks-bundle digest instead of the version. Measured all five
+pinned tools' real `version_argv` output before writing the parsers:
+`ruff 0.16.5`, `8.30.1` (gitleaks), `1.176.0` (semgrep), the trivy blob
+above, `skylos 4.35.0` — confirming `bare` for gitleaks/semgrep and
+`last_token` (first-line semantics) for the rest, exactly as
+`quality_gates.yaml` already declared.
+
+**`_run_doctor`.** For every `tools:` entry, runs `version_argv`
+verbatim via the existing `run_argv`, parses with the named
+`version_parser`, and compares against the pinned `version` —
+**equality, not an ordering check**, so a newer installed version fails
+exactly like an older one (REQ-V15-GATE-03's explicit requirement,
+verified by `N7`'s two parametrised cases). A tool in
+`doctor.warn_only_tools` (`[rtk]`) reports a mismatch as a warning, never
+blocking (REQ-V15-RTK-03) — the single documented exception. Separately,
+shells out to `python3 devtools/install_hooks.py --check` (the same
+invocation the `hooks-installed` gate itself uses) and folds any
+non-zero exit into the same problem list, matching the CLI table's
+description of `doctor` (§7): tool pins *and* hook-chain installation,
+both checked, deliberately overlapping the standalone `hooks-installed`
+gate in `pre-push`/`full` rather than trusting doctor's own inference.
+`checks.py doctor` (the CLI) now calls this for real; run against the
+live repository: `[PASS] doctor: all tools at pin, hooks installed`.
+
+**Tests.** `N7` (two cases: an older and a newer stub version, both
+blocked, both naming the tool/expected/found) plus five supporting
+tests (all tools at pin passes; an `rtk`-shaped mismatch warns without
+blocking; a missing binary fails closed; a repo with hooks never
+installed is caught; the real config against the real repository
+passes) — 7 new tests, 99 `test_v15_standards.py` tests total. Full
+suite: 827 tests (820 + 7), all green. One incidental fix alongside:
+the `git_worktree` fixture's throwaway branch name
+(`v15-test-<tmp_path.name>`) stopped matching `branch-name`'s regex the
+moment T8 activated `core.hooksPath` on the real repository — a
+worktree shares its parent's git config, so `N6`'s real `git commit`
+inside one now goes through the live `pre-commit` chain too. Renamed to
+`test/v15-<tmp_path.name>`, a valid `test/*` branch.
 
 ## RTK project-local hook (T10 — REQ-V15-RTK-*)
 
@@ -463,6 +506,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T2–T6 | no (each task's reading map is one tool's install section, under threshold) | no | — |
 | T7 | yes (§8, 212 lines/12 KB) | no — see Deviations | content already in the main context from the session-start full-spec read |
 | T8 | yes (a single read of §7:600-730, 130 lines, for REQ-V15-GATE-05) | no — see Deviations | content already in the main context from the session-start full-spec read; §6 (HOOK) itself is under threshold, no delegation needed there |
+| T9 | no (its own reading map: §7's `tools:`/GATE-03 paragraph ≈30 lines, REQ-V15-RTK-03 ≈15 lines — both under threshold) | no | content already in the main context from the session-start full-spec read |
 
 (rest of the table fills in as each task lands)
 
