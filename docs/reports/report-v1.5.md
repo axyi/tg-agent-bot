@@ -198,7 +198,75 @@ rtk 0.47.0.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 
-(pending)
+**The gate execution engine.** `devtools/checks.py` gained: git helpers
+(staged-file listing, merge-base, changed-file ranges, tracked-tree
+materialisation from `git ls-tree`/`cat-file` — never the filesystem);
+four adapters (`gitleaks_json`, `trivy_json`, `semgrep_json`, `skylos_json`)
+turning each scanner's own JSON into `{path, severity, rule_id, message}`;
+`execute_command_gate` (dispatch by `result_mode`, diff-scope partition,
+severity-membership blocking, fail-closed on missing binary/timeout/bad
+exit code/unparseable output/unnormalisable path/unrecognised severity);
+`execute_builtin_gate`; `run_profile`/`compute_scope` (pre-commit staged
+set, pre-push stdin-derived ranges, full's merge-base/`--since` and the
+empty-scope trap). `cmd_run` now calls `run_profile` for real.
+
+**A design bug found and fixed while writing the SCAN-04 test.** The first
+draft set `blocked = gate["blocking"]` on every operational-failure path
+(missing binary, timeout, bad exit code, unparseable output, unnormalisable
+path, unrecognised severity) — which let a shadow gate's (`blocking: false`)
+operational failure pass silently, contradicting REQ-V15-GATE-06's explicit
+"blocking: false withholds findings, never operational failures." Fixed:
+every operational-failure path now sets `blocked = True` unconditionally;
+only the two legitimate-verdict paths (a findings gate's blocking-severity
+membership check, an exit_status gate's non-zero-but-ran verdict) still
+respect `gate["blocking"]`. `T-V15-SCAN-04` is the test that caught it.
+
+**`.gitleaks.toml` (N4, REQ-V15-SCAN-02).** Extends the default ruleset,
+adds the repository-local `synthetic-canary-test` rule, and a `[[allowlists]]`
+(plural) global allowlist scoped via `targetRules` to that one rule and
+`paths` under `tests/`/`docs/`. Measured against the installed **8.30.1**:
+the plural form **is honoured** — contradicts the sibling lab project's
+8.24.3 finding that it was silently ignored; version-specific, not a fixed
+fact, and recorded as such. All three `N4` assertions pass: control (canary
+under `tests/`, allowlist entry stripped) → detected, exit 1; suppression
+(same value, same path, real allowlist) → suppressed, exit 0, `[]`; escape
+(`SYNTHETIC-CANARY-NOT-ALLOWLISTED-1` under `src/`) → caught, exit 1,
+`Secret` and `Match` both `"REDACTED"`.
+
+**Vendored `.semgrep/` (REQ-V15-SCAN-04).** `p-python.yaml` (151 rules,
+`p/python`, SHA-256 `31c1dfa4…7035`) and `p-security-audit.yaml` (225
+rules, `p/security-audit`, SHA-256 `b109a039…602f`) resolved via the
+registry's direct config endpoint and committed verbatim; `.semgrep/SOURCES.md`
+records both, their resolution date, ETags (the closest thing to an
+upstream revision the registry exposes) and ids. 30 rule ids overlap
+between the two files; `semgrep scan --config .semgrep/` tolerates this
+without error (measured: 94 `ERROR`-severity Python rules loaded, one
+real finding, exit 1). `N5` proves the offline claim: fresh `$HOME`
+(so no warm `~/.semgrep` cache to rely on) plus a black-hole HTTP(S)
+proxy, scanning a fixture with a dynamic-argument `subprocess(...,
+shell=True)` call — exit 1, one finding, from `.semgrep/` alone.
+(One dead end recorded for completeness: a bare `subprocess.call("ls",
+shell=True)` fixture does **not** trigger the rule — its own
+`pattern-not: subprocess.$FUNC("...", shell=True, ...)` clause explicitly
+excludes a literal-string command as a non-issue; the fixture needs a
+non-literal argument, e.g. string concatenation with `input()`.)
+
+**trivy and skylos wiring.** Both gates' `argv` were already resolved at
+T4/T5; T7 wires their adapters (above) and confirms end-to-end: trivy's
+JSON shape is `Results[].{Target, Vulnerabilities[].Severity,
+Misconfigurations[].Severity}` (measured against a real Dockerfile
+misconfig finding, `DS-0002`, `HIGH`); skylos's categorised JSON
+(`unused_functions`/`unused_imports`/`unused_classes`/`unused_variables`/
+`unused_parameters`/`unused_files`) is flattened by `skylos_json`, every
+finding emitted at `severity: LOW` (skylos's own per-directory rollup
+shows dead-code findings are always LOW in this default, non-`--danger`
+configuration).
+
+**Tests.** T7 adds 23 tests (`T-V15-SCAN-01` through `-12`, `N4`, `N5`,
+plus the diff-scoping/empty-scope/gitlink/severity variants each id's row
+implies) on top of T1's 55, for 78 new `test_v15_standards.py` tests total.
+Full suite: 806 tests (728 + 78), all green. `uv run --locked ruff check .`
+green.
 
 ## Hook chain (T8 — REQ-V15-HOOK-*)
 

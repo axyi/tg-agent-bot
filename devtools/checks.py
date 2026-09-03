@@ -8,9 +8,14 @@ only the standard library: a small explicit reader for the YAML subset
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -226,9 +231,7 @@ def _coerce_bare(v: str) -> Any:
     return v
 
 
-def _parse_flow_tokens(
-    tokens: list[tuple[str, str]], pos: int, line_no: int
-) -> tuple[Any, int]:
+def _parse_flow_tokens(tokens: list[tuple[str, str]], pos: int, line_no: int) -> tuple[Any, int]:
     if pos >= len(tokens):
         raise YamlError(f"unexpected end of flow value at line {line_no}")
     kind, val = tokens[pos]
@@ -415,8 +418,7 @@ def _validate_tools(tools: Any) -> None:
             raise GateConfigError(f"tools.{name}.via must be a string")
         if spec["version_parser"] not in KNOWN_VERSION_PARSERS:
             raise GateConfigError(
-                f"tools.{name}.version_parser names no known parser: "
-                f"{spec['version_parser']!r}"
+                f"tools.{name}.version_parser names no known parser: {spec['version_parser']!r}"
             )
         argv = spec["version_argv"]
         if not isinstance(argv, list) or not argv or not all(isinstance(t, str) for t in argv):
@@ -498,8 +500,10 @@ def _validate_command_gate(name: str, gate: dict[str, Any], extra_allowed: set[s
         if not isinstance(gate["artefact"], str):
             raise GateConfigError(f"gates.{name}.artefact must be a string")
         severity = gate["severity"]
-        if not isinstance(severity, list) or not severity or not all(
-            isinstance(s, str) for s in severity
+        if (
+            not isinstance(severity, list)
+            or not severity
+            or not all(isinstance(s, str) for s in severity)
         ):
             raise GateConfigError(f"gates.{name}.severity must be a non-empty list of strings")
         _validate_placeholders_used(name, [gate["artefact"]])
@@ -591,8 +595,7 @@ def check_length(subject: str) -> tuple[bool, str]:
     if n <= HEADER_MAX_LEN:
         return True, ""
     return False, (
-        f"length check failed: header is {n} characters "
-        f"(limit {HEADER_MAX_LEN}): {subject!r}"
+        f"length check failed: header is {n} characters (limit {HEADER_MAX_LEN}): {subject!r}"
     )
 
 
@@ -658,6 +661,584 @@ def check_branch_name(
 
 
 # ---------------------------------------------------------------------------
+# git helpers (REQ-V15-GATE-07): scope computation reads git state, never
+# assumes it.
+# ---------------------------------------------------------------------------
+
+
+class GitError(RuntimeError):
+    pass
+
+
+class GitlinkRejected(RuntimeError):
+    pass
+
+
+def _run_git(args: list[str], cwd: Path) -> str:
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise GitError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def staged_files(repo_root: Path) -> list[str]:
+    out = _run_git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"], repo_root)
+    return [line for line in out.splitlines() if line]
+
+
+def current_branch(repo_root: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def merge_base(base_branch: str, rev: str, repo_root: Path) -> str:
+    return _run_git(["merge-base", base_branch, rev], repo_root).strip()
+
+
+def changed_files_in_range(base: str, head: str, repo_root: Path) -> set[str]:
+    out = _run_git(["diff", "--name-only", "--diff-filter=ACMR", f"{base}..{head}"], repo_root)
+    return {line for line in out.splitlines() if line}
+
+
+def working_tree_dirty(repo_root: Path) -> bool:
+    return bool(_run_git(["status", "--porcelain"], repo_root).strip())
+
+
+def commit_count_in_range(base: str, head: str, repo_root: Path) -> int:
+    out = _run_git(["rev-list", "--count", f"{base}..{head}"], repo_root)
+    return int(out.strip() or "0")
+
+
+def list_tree_entries(rev: str, repo_root: Path) -> list[tuple[str, str, str]]:
+    """(mode, blob_sha, repo-relative path) for every entry `git ls-tree -r` names."""
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", rev],
+        cwd=repo_root,
+        capture_output=True,
+        text=False,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise GitError(f"git ls-tree -r {rev} failed: {result.stderr!r}")
+    entries = []
+    for record in result.stdout.split(b"\x00"):
+        if not record:
+            continue
+        meta, _, path = record.partition(b"\t")
+        mode, _obj_type, sha = meta.split(b" ")
+        entries.append((mode.decode(), sha.decode(), path.decode("utf-8", "surrogateescape")))
+    return entries
+
+
+def materialize_tracked_tree(
+    entries: list[tuple[str, str, str]], dest_dir: Path, repo_root: Path
+) -> None:
+    """Writes each entry's blob bytes to dest_dir/path -- from git objects, never
+    from filesystem paths (REQ-V15-SCAN-01). A 120000 (symlink) blob's content
+    *is* its link text, so writing those bytes as a regular file is already the
+    required "never re-created as a symlink" behaviour; 160000 (gitlink) is
+    rejected outright."""
+    for mode, sha, path in entries:
+        if mode == "160000":
+            raise GitlinkRejected(f"gitlink entry rejected: {path}")
+        target = dest_dir / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        blob = subprocess.run(
+            ["git", "cat-file", "-p", sha], cwd=repo_root, capture_output=True, check=False
+        )
+        if blob.returncode != 0:
+            raise GitError(f"git cat-file -p {sha} failed for {path}")
+        target.write_bytes(blob.stdout)
+
+
+def parse_pre_push_stdin(text: str) -> list[tuple[str, str, str, str]]:
+    records = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 4:
+            raise GateRunError(f"unparseable pre-push stdin line: {line!r}")
+        records.append((parts[0], parts[1], parts[2], parts[3]))
+    if not records:
+        raise GateRunError("empty pre-push stdin")
+    return records
+
+
+def _pre_push_scope(
+    stdin_text: str, scope_cfg: dict[str, Any], repo_root: Path
+) -> tuple[set[str], Path]:
+    records = parse_pre_push_stdin(stdin_text)
+    files: set[str] = set()
+    heads: list[str] = []
+    for _local_ref, local_sha, _remote_ref, remote_sha in records:
+        base = (
+            merge_base(scope_cfg["base_branch"], local_sha, repo_root)
+            if remote_sha == scope_cfg["zero_sha"]
+            else remote_sha
+        )
+        files |= changed_files_in_range(base, local_sha, repo_root)
+        heads.append(local_sha)
+    tmp = Path(tempfile.mkdtemp(prefix="checks-tracked-tree-"))
+    latest: dict[str, tuple[str, str]] = {}
+    for head in heads:
+        for mode, sha, path in list_tree_entries(head, repo_root):
+            latest[path] = (mode, sha)
+    materialize_tracked_tree(
+        [(mode, sha, path) for path, (mode, sha) in latest.items()], tmp, repo_root
+    )
+    return files, tmp
+
+
+class GateRunError(RuntimeError):
+    pass
+
+
+class EmptyScopeError(RuntimeError):
+    pass
+
+
+def compute_scope(
+    profile: str,
+    config: dict[str, Any],
+    repo_root: Path,
+    *,
+    since: str | None = None,
+    stdin_refs: str | None = None,
+) -> tuple[set[str] | None, Path | None, list[Path]]:
+    """Returns (scope_files, tracked_tree_dir, dirs_to_clean_up_afterwards)."""
+    scope_cfg = config["scope"]
+    if profile == "pre-commit":
+        return set(staged_files(repo_root)), None, []
+    if profile == "pre-push":
+        if not stdin_refs:
+            raise GateRunError("profile 'pre-push' requires --stdin-refs input")
+        files, tree_dir = _pre_push_scope(stdin_refs, scope_cfg, repo_root)
+        return files, tree_dir, [tree_dir]
+    if profile == "full":
+        branch = current_branch(repo_root)
+        if branch == scope_cfg["base_branch"]:
+            if not since:
+                raise GateRunError("run --profile full on the base branch requires --since <rev>")
+            base = since
+        else:
+            base = since or merge_base(scope_cfg["base_branch"], "HEAD", repo_root)
+        files = changed_files_in_range(base, "HEAD", repo_root)
+        if not files and (
+            working_tree_dirty(repo_root) or commit_count_in_range(base, "HEAD", repo_root) > 0
+        ):
+            raise EmptyScopeError(
+                f"profile 'full' at {base}..HEAD computed an empty scope while the "
+                f"tree or commit range is non-empty -- scope computation is wrong"
+            )
+        tmp = Path(tempfile.mkdtemp(prefix="checks-tracked-tree-"))
+        materialize_tracked_tree(list_tree_entries("HEAD", repo_root), tmp, repo_root)
+        return files, tmp, [tmp]
+    raise GateRunError(f"unknown profile {profile!r}")
+
+
+# ---------------------------------------------------------------------------
+# adapters: turn a scanner's own JSON into normalised findings. Adapter
+# identifiers are mechanism names, permitted as literals (REQ-V15-GATE-02);
+# no policy value (a threshold, an argv fragment) lives here.
+# ---------------------------------------------------------------------------
+
+
+def gitleaks_json(raw: bytes) -> list[dict[str, Any]]:
+    data = json.loads(raw) or []
+    return [
+        {
+            "path": item.get("File", ""),
+            "severity": "UNKNOWN",
+            "rule_id": item.get("RuleID", ""),
+            "message": item.get("Description", ""),
+        }
+        for item in data
+    ]
+
+
+def trivy_json(raw: bytes) -> list[dict[str, Any]]:
+    data = json.loads(raw)
+    findings: list[dict[str, Any]] = []
+    for result in data.get("Results") or []:
+        target = result.get("Target", "")
+        for vuln in result.get("Vulnerabilities") or []:
+            findings.append(
+                {
+                    "path": target,
+                    "severity": str(vuln.get("Severity", "")).upper(),
+                    "rule_id": vuln.get("VulnerabilityID", ""),
+                    "message": vuln.get("Title", ""),
+                }
+            )
+        for mis in result.get("Misconfigurations") or []:
+            findings.append(
+                {
+                    "path": target,
+                    "severity": str(mis.get("Severity", "")).upper(),
+                    "rule_id": mis.get("ID", ""),
+                    "message": mis.get("Title", ""),
+                }
+            )
+    return findings
+
+
+def semgrep_json(raw: bytes) -> list[dict[str, Any]]:
+    data = json.loads(raw)
+    findings = []
+    for item in data.get("results") or []:
+        findings.append(
+            {
+                "path": item.get("path", ""),
+                "severity": str(item.get("extra", {}).get("severity", "")).upper(),
+                "rule_id": item.get("check_id", ""),
+                "message": item.get("extra", {}).get("message", ""),
+            }
+        )
+    return findings
+
+
+_SKYLOS_CATEGORIES = (
+    "unused_functions",
+    "unused_imports",
+    "unused_classes",
+    "unused_variables",
+    "unused_parameters",
+    "unused_files",
+)
+
+
+def skylos_json(raw: bytes) -> list[dict[str, Any]]:
+    data = json.loads(raw)
+    findings = []
+    for category in _SKYLOS_CATEGORIES:
+        for item in data.get(category) or []:
+            findings.append(
+                {
+                    "path": item.get("file", ""),
+                    "severity": "LOW",
+                    "rule_id": category,
+                    "message": item.get("full_name") or item.get("name", ""),
+                }
+            )
+    return findings
+
+
+PARSERS = {
+    "gitleaks_json": gitleaks_json,
+    "trivy_json": trivy_json,
+    "semgrep_json": semgrep_json,
+    "skylos_json": skylos_json,
+}
+
+
+def normalise_finding_path(path: str, repo_root: Path) -> str | None:
+    if not path:
+        return None
+    p = Path(path)
+    if p.is_absolute():
+        try:
+            return p.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            return None
+    return p.as_posix()
+
+
+# ---------------------------------------------------------------------------
+# the gate execution engine (REQ-V15-GATE-06/07/08/12, REQ-V15-SCAN-*).
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CommandResult:
+    ok: bool
+    returncode: int | None
+    stdout: bytes
+    stderr: bytes
+    error: str | None = None
+
+
+def run_argv(argv: list[str], cwd: Path, timeout_seconds: int) -> CommandResult:
+    try:
+        proc = subprocess.run(
+            argv, cwd=cwd, capture_output=True, timeout=timeout_seconds, check=False
+        )
+    except FileNotFoundError as exc:
+        return CommandResult(False, None, b"", b"", f"binary not found: {exc}")
+    except subprocess.TimeoutExpired:
+        return CommandResult(False, None, b"", b"", f"timed out after {timeout_seconds}s")
+    return CommandResult(True, proc.returncode, proc.stdout, proc.stderr, None)
+
+
+def render_token(token: str, values: dict[str, str]) -> str:
+    def _sub(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in values:
+            raise GateRunError(f"unresolved placeholder {{{name}}}")
+        return values[name]
+
+    return _PLACEHOLDER_RE.sub(_sub, token)
+
+
+def render_argv(argv: list[str], values: dict[str, Any]) -> list[str]:
+    rendered: list[str] = []
+    for token in argv:
+        m = re.fullmatch(r"\{(\w+)\}", token)
+        if m and isinstance(values.get(m.group(1)), list):
+            rendered.extend(values[m.group(1)])
+            continue
+        rendered.append(
+            render_token(token, {k: v for k, v in values.items() if isinstance(v, str)})
+        )
+    return rendered
+
+
+@dataclass
+class GateResult:
+    name: str
+    ran: bool
+    blocked: bool
+    findings_in_scope: list[dict[str, Any]] = field(default_factory=list)
+    findings_out_of_scope: list[dict[str, Any]] = field(default_factory=list)
+    message: str = ""
+    artefact_path: Path | None = None
+
+
+def _artefact_path(gate: dict[str, Any], repo_root: Path, profile: str) -> Path:
+    return repo_root / render_token(gate["artefact"], {"profile": profile})
+
+
+def _partition_findings(
+    raw_findings: list[dict[str, Any]],
+    repo_root: Path,
+    scope_files: set[str] | None,
+    diff_scoped: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+    in_scope, out_of_scope = [], []
+    for finding in raw_findings:
+        norm = normalise_finding_path(finding["path"], repo_root)
+        if norm is None:
+            return [], [], finding["path"]
+        finding = {**finding, "path": norm}
+        if not diff_scoped or scope_files is None or norm in scope_files:
+            in_scope.append(finding)
+        else:
+            out_of_scope.append(finding)
+    return in_scope, out_of_scope, None
+
+
+def _execute_ruff_format_partitioned(
+    name: str, gate: dict[str, Any], *, repo_root: Path, scope_files: set[str] | None, timeout: int
+) -> GateResult:
+    blocking_paths = set(gate["blocking_paths"])
+    scope = scope_files if scope_files is not None else set(blocking_paths)
+    new_files = sorted(p for p in scope if p in blocking_paths)
+    legacy_files = sorted(p for p in scope if p not in blocking_paths)
+
+    blocked = False
+    reports = []
+    for label, paths, counts_toward_blocking in (
+        ("new", new_files, True),
+        ("legacy", legacy_files, False),
+    ):
+        if not paths:
+            continue
+        argv = render_argv(gate["argv"], {"target": paths})
+        cmd = run_argv(argv, repo_root, timeout)
+        if not cmd.ok:
+            return GateResult(name, ran=False, blocked=True, message=f"gate {name}: {cmd.error}")
+        clean = cmd.returncode in gate["success_exit_codes"]
+        if not clean and counts_toward_blocking:
+            blocked = True
+        reports.append(f"{label}: {len(paths)} file(s), {'clean' if clean else 'would reformat'}")
+    return GateResult(
+        name,
+        ran=True,
+        blocked=blocked and gate["blocking"],
+        message="; ".join(reports) or "no files in scope",
+    )
+
+
+def execute_command_gate(
+    name: str,
+    gate: dict[str, Any],
+    *,
+    repo_root: Path,
+    profile: str,
+    scope_files: set[str] | None,
+    tracked_tree: Path | None,
+    known_severities: set[str],
+) -> GateResult:
+    timeout = gate["timeout_seconds"]
+    if gate.get("blocking_paths") is not None:
+        return _execute_ruff_format_partitioned(
+            name, gate, repo_root=repo_root, scope_files=scope_files, timeout=timeout
+        )
+
+    result_mode = gate["result_mode"]
+    values: dict[str, Any] = dict(gate.get("placeholders", {}))
+    values.setdefault("profile", profile)
+    if tracked_tree is not None:
+        values.setdefault("tracked_tree", str(tracked_tree))
+    values.setdefault("target", ".")
+
+    artefact_path = None
+    if result_mode == "findings":
+        artefact_path = _artefact_path(gate, repo_root, profile)
+        artefact_path.parent.mkdir(parents=True, exist_ok=True)
+        values["artefact"] = str(artefact_path)
+
+    argv = render_argv(gate["argv"], values)
+    cmd = run_argv(argv, repo_root, timeout)
+    if not cmd.ok:
+        return GateResult(
+            name, ran=False, blocked=True, message=f"gate {name} could not run: {cmd.error}"
+        )
+
+    if result_mode == "exit_status":
+        if cmd.returncode in gate["success_exit_codes"]:
+            return GateResult(name, ran=True, blocked=False, message="clean")
+        return GateResult(
+            name, ran=True, blocked=gate["blocking"], message=f"gate {name} exited {cmd.returncode}"
+        )
+
+    if cmd.returncode in gate["success_exit_codes"]:
+        raw_findings: list[dict[str, Any]] = []
+    elif cmd.returncode in gate["findings_exit_codes"]:
+        if artefact_path is None or not artefact_path.exists():
+            return GateResult(
+                name, ran=False, blocked=True, message=f"gate {name}: no artefact produced"
+            )
+        try:
+            raw_findings = PARSERS[gate["parser"]](artefact_path.read_bytes())
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            return GateResult(
+                name, ran=False, blocked=True, message=f"gate {name}: unparseable output: {exc}"
+            )
+    else:
+        return GateResult(
+            name,
+            ran=False,
+            blocked=True,
+            message=f"gate {name}: unexpected exit code {cmd.returncode}",
+        )
+
+    in_scope, out_of_scope, bad_path = _partition_findings(
+        raw_findings, repo_root, scope_files, gate["diff_scoped"]
+    )
+    if bad_path is not None:
+        return GateResult(
+            name,
+            ran=False,
+            blocked=True,
+            message=f"gate {name}: finding path could not be normalised: {bad_path!r}",
+        )
+    for finding in in_scope + out_of_scope:
+        severity = finding["severity"]
+        if not severity or severity not in known_severities:
+            return GateResult(
+                name,
+                ran=False,
+                blocked=True,
+                message=f"gate {name}: finding has an unrecognised severity {severity!r}",
+            )
+
+    blocking_findings = [f for f in in_scope if f["severity"] in gate["severity"]]
+    blocked = gate["blocking"] and bool(blocking_findings)
+    return GateResult(
+        name,
+        ran=True,
+        blocked=blocked,
+        findings_in_scope=in_scope,
+        findings_out_of_scope=out_of_scope,
+        message=f"{len(in_scope)} in-scope finding(s), {len(out_of_scope)} out-of-scope",
+        artefact_path=artefact_path,
+    )
+
+
+def execute_builtin_gate(
+    name: str, gate: dict[str, Any], *, config: dict[str, Any], repo_root: Path, profile: str
+) -> GateResult:
+    handler = gate["handler"]
+    if handler == "branch_name":
+        status, msg = check_branch_name(
+            current_branch(repo_root), gate["pattern"], gate["warn_refs"], gate["warn_on_detached"]
+        )
+        return GateResult(
+            name, ran=True, blocked=gate["blocking"] and status == "fail", message=msg
+        )
+    if handler == "doctor":
+        return GateResult(name, ran=False, blocked=True, message="doctor: lands in T9")
+    if handler == "lint_docs":
+        return GateResult(name, ran=False, blocked=True, message="lint-docs: lands in T11")
+    raise GateConfigError(f"gates.{name}: unknown handler {handler!r}")
+
+
+@dataclass
+class ProfileResult:
+    profile: str
+    gate_results: list[GateResult]
+
+    @property
+    def blocked(self) -> bool:
+        return any(g.blocked for g in self.gate_results)
+
+
+def _known_severities(config: dict[str, Any]) -> set[str]:
+    values: set[str] = set()
+    for gate in config["gates"].values():
+        if gate.get("result_mode") == "findings":
+            values |= set(gate["severity"])
+    return values
+
+
+def run_profile(
+    profile: str,
+    config: dict[str, Any],
+    repo_root: Path,
+    *,
+    since: str | None = None,
+    stdin_refs: str | None = None,
+) -> ProfileResult:
+    scope_files, tracked_tree, cleanup_dirs = compute_scope(
+        profile, config, repo_root, since=since, stdin_refs=stdin_refs
+    )
+    known_severities = _known_severities(config)
+    results: list[GateResult] = []
+    try:
+        for gate_name in config["profiles"][profile]:
+            gate = config["gates"][gate_name]
+            if gate["kind"] == "builtin":
+                result = execute_builtin_gate(
+                    gate_name, gate, config=config, repo_root=repo_root, profile=profile
+                )
+            else:
+                result = execute_command_gate(
+                    gate_name,
+                    gate,
+                    repo_root=repo_root,
+                    profile=profile,
+                    scope_files=scope_files if gate["diff_scoped"] else None,
+                    tracked_tree=tracked_tree,
+                    known_severities=known_severities,
+                )
+            results.append(result)
+    finally:
+        for d in cleanup_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+    return ProfileResult(profile, results)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -673,12 +1254,19 @@ def cmd_commit_msg(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    print(
-        "checks.py run: gate execution lands in T7 (findings gates), "
-        "T8 (pre-commit exit_status via the hook chain) and T12 (full wiring)",
-        file=sys.stderr,
-    )
-    return 2
+    config = load_gate_config()
+    stdin_text = sys.stdin.read() if args.stdin_refs else None
+    try:
+        result = run_profile(
+            args.profile, config, REPO_ROOT, since=args.since, stdin_refs=stdin_text
+        )
+    except (GateRunError, EmptyScopeError) as exc:
+        print(f"checks.py run --profile {args.profile}: {exc}", file=sys.stderr)
+        return 2
+    for gate_result in result.gate_results:
+        status = "FAIL" if gate_result.blocked else "PASS"
+        print(f"[{status}] {gate_result.name}: {gate_result.message}")
+    return 1 if result.blocked else 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:

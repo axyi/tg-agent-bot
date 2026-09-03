@@ -1,0 +1,24 @@
+[extend]
+useDefault = true
+
+# Repository-local rule that makes the allowlist below falsifiable
+# (REQ-V15-SCAN-02): default rules do not detect the bare synthetic-canary
+# value (measured 2026-09-03), so an allowlist experiment against the
+# default rule set alone would prove nothing.
+[[rules]]
+id = "synthetic-canary-test"
+description = "repository-local; makes REQ-V15-SCAN-02 falsifiable"
+regex = '''SYNTHETIC-[A-Z0-9-]*CANARY[A-Za-z0-9-]*'''
+
+# Measured against gitleaks 8.30.1 (T7): the plural [[allowlists]] form is
+# honoured here (a sibling lab project found it silently ignored on
+# 8.24.3 -- version-specific, not a fixed fact). Scoped to exactly the
+# synthetic-canary-test rule via targetRules, never to paths alone, so it
+# cannot mask an unrelated real finding under tests/ or docs/.
+[[allowlists]]
+description = "synthetic test canaries used by the test suite and specs"
+targetRules = ["synthetic-canary-test"]
+paths = [
+  '''^tests/.*''',
+  '''^docs/.*''',
+]
