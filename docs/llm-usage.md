@@ -40,6 +40,9 @@
 | **Σ** (rows 30–31, one `go` run) | | claude-opus-5 | unknown | unknown |
 | 32 | v1.3 verify-run docs fixes (prompt 30): trimmed `docs/reports/tg-post-v1.3.md` under the 1500-char limit, added the `Model reason` bullet required by `standards/reporting.md` to all 21 v1.3 prompt files (`09-go-spec-v1.3.md`–`29-v13-TD2-tg-post.md`), and this row | claude-sonnet-5 | unknown | unknown |
 | 33 | spec-v1.4 authoring — design in the lab session after `/verify-run` of v1.3, one fact-finding subagent over the v1.3 reports and bench files, one writer subagent for the draft, two markers resolved in the lab session (OpenRouter `reasoning` field, LM Studio model-level fallback), then four rounds of Codex cross-review (`gpt-5.6-sol`, 31 findings, all accepted; Appendix C of the spec) each applied by one clean-context subagent; executor of the spec is `claude-sonnet-5`, not yet run | claude-fable-5 (lab session; fact-finding on `claude-sonnet-5`, writer and the four fix passes on `claude-opus-5`; challenger OpenAI `gpt-5.6-sol`) | ≈1.11M subagent aggregate (≈120k fact-finding, ≈300k writer, ≈690k across the four fix passes; harness-reported, in/out split not exposed) + a main-session share that is not isolatable from the lab session transcript; Codex: 4 requests × ≈25k prompt tokens, output ≤ 16k each | — (flat-rate session; Codex API metered, amount not captured) |
+| 34 | spec-v1.4 implementation run — the whole `go docs/spec/spec-v1.4.md` run, prompts 31–41, across T0–T10: preconditions, S01 root-cause repair (H1), bench harness readiness (BEN-03/04/05), the `baseline-v1.4` two-tree measurement, the RSN spike (all five candidates tried, RSN-06 STOP — no honored+shippable reasoning mechanism), REL-01's timeout/budget consistency check, default-selection documentation (STOP branch), mutation coverage for BEN-03/REL-01, the code review's two fixes, Appendix-B acceptance (E5/E8/E10 + D1/D3 regression), and this report/errata/post/table | claude-sonnet-5 (background session) | unknown — this harness does not expose a local session transcript to this session for re-measurement, unlike row 25's run; reconciled later via `tools/session-usage.py` outside this repository, the same way row 27 and rows 30–32 were left for the maintainer | unknown (estimate to follow the same after-the-fact reconciliation, at public API prices, once measured; actual billing: flat-rate subscription) |
+| 35 | spec-v1.4 T9 code-review subagent (`code-reviewer`, clean context, prompt `docs/prompts/40-v14-t9-review.md`) | claude-sonnet-5 (subagent default) | 153,558 total (harness-reported aggregate over 62 tool uses; in/out/cache split not exposed to the parent session — same async task-output constraint rows 26/28 hit) | not computed — the split needed for the cache-aware formula is unavailable, as for rows 26/28 |
+| **Σ** (rows 34–35, one `go` run) | | claude-sonnet-5 | unknown (row 34) + 153,558 aggregate (row 35) | unknown + unknown (row 35) |
 
 Notes: rows 1–2 are the authoring cost of the specification, recorded per
 the lab reporting standard; runtime data and secrets are never logged here.
@@ -146,3 +149,23 @@ reference-priced ESTIMATES over free local LM Studio inference
 (REQ-V13-PRC-03), and the only real money spent was the OpenRouter smoke's
 $0.000212 on `google/gemini-2.5-flash-lite` — one S02 run, capped at
 `--max-cost-usd 0.50`.
+
+Row 34 is the spec-v1.4 implementation run (`go docs/spec/spec-v1.4.md`,
+prompt `docs/prompts/31-go-spec-v1.4.md`), covering the whole patch end to
+end across 9 commits (`30c7a16`, `f6e634d`, `51ac747`, `818bbde`, `485fcc5`,
+`e5fc230`, `718e4eb`, `3fe860a`, `9a32cda`, plus this report/errata/post/
+ledger commit): as in rows 27/30–32, this harness exposed no per-request
+usage or cost line to the executor, so every cell stays `unknown` rather
+than an invented estimate — reconciled later by the maintainer from the
+lab's own session tooling, outside this repository, per RPT-05's
+disposition (this run's own T0 deviation 4: `economics.md` sits outside
+the repository root, so this run's contribution to it is recorded here
+and left for hand reconciliation, never written by the executor). Row 35
+is the one subagent this run spawned, the T9 `code-reviewer` review: the
+harness reported its 153,558-token aggregate in the task-completion
+notification (same shape as rows 26/28), with no in/out/cache split
+exposed. Inference the *bot* itself spent during Appendix-B (E5, E10, and
+the D1/D3 unchanged-code regression check) is zero: E5 drove
+`config.load_config` directly with no LLM call in the path; E10 was a
+static file scan; D1/D3 relied on the existing, unchanged automated test
+and mutation suites rather than a fresh live drive.

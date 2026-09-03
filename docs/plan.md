@@ -19,6 +19,7 @@ implementation is produced by an AI agent from it.
 | `docs/spec/spec-v1.2.md` + implementation | done — closes two independent post-v1.1 audits (an adversarial security probe and an 83-mutation compliance review): minted tool-call ids, tri-state sandbox quota scanning, three-layer SSRF-resistant fetch allowlist, hardened resolv-file creation, ownership-aware container reap, audit-hook redaction, plus `devtools/mutation_check.py` as a standing gate; six gates green, 326 tests, 31/31 mutations killed, 0 repair cycles consumed |
 | Live run against Telegram + LM Studio / OpenRouter | done as of v1's `--selftest-live` and the Appendix-B/C/D acceptance drivers; a real Telegram conversation with a live operator account has not been exercised — every acceptance run to date has been driven by a script standing in for the operator's messages (declared as a deviation in each run's report) |
 | `docs/spec/spec-v1.3.md` + implementation | done — token economy (assignment 5): observability layer, benchmark harness and dashboard, the baseline token audit, six optimizations O1–O6. Four commits, six gates green at C1 and C3, 719 tests, 65/65 mutations killed, two clean-context reviews. **Benchmark verdict: FAIL** — cost per successful task $0.002687 → $0.002492 (−7.3 %, target −30 %), success rate 100.0 % → 94.4 % (−5.6 pp, budget −2 pp). Prompt tokens −18.1 %, tool output −31.3 %, median latency −36.7 %. See `docs/reports/report-v1.3.md` |
+| `docs/spec/spec-v1.4.md` + implementation | done — patch release: a bounded spike (RSN-01…06) tried all five candidate reasoning-off mechanisms LM Studio might honor, live, in strict order. **None both honored and shippable — verdict FAIL, cause: no honored reasoning mechanism (RSN-06 STOP).** `a` (`chat_template_kwargs.enable_thinking`) and `d` (Qwen3 `/no_think`) not honored; `b` (`reasoning.effort`) unsupported (LM Studio never documents a disable value); `c` (empty `<think>` prefill) honored 3/3 but rejected — breaks the byte-stable cached-prefix invariant (POL-05); `e` (an LM Studio GUI/`lms` CLI default) has no documented control for the running version at all. Per RSN-06/GATE-02, sections 6–7 (policy + observability) and candidate benchmarking are declared not-executed. Still delivered: the S01 check repair (H1 — the check measured phrasing, not capability), a fresh `baseline-v1.4` ($0.003009/success), REL-01 (the `LLM_TIMEOUT_S`/`LLM_MAX_TOKENS` consistency check, default 120→240), mutation coverage for the shipped code (68/68 killed), and a code review with two real, fixed findings. 9 commits, six gates green throughout, 728 tests (+9 over v1.3). Numbers come from `baseline-v1.4.json`/`docs/reports/report-v1.4.md` — `docs/reports/bench-v1.4.md` does not exist on this branch (it is `report --gate --candidate`'s output, and no candidate was ever produced). See `docs/reports/report-v1.4.md` |
 
 ## How the implementation run works
 
@@ -144,14 +145,46 @@ reads ≈$33.11:**
   figure, ≈$33.11, from a local transcript.
 - Assorted plan/report wording fixes.
 
-## v1.4 (next) — candidates, none applied
+## v1.4 (done) — spec: `docs/spec/spec-v1.4.md`, report: `docs/reports/report-v1.4.md`
 
-Two groups. The first is the plan's standing list; the second is what the v1.3
-run itself discovered, ranked in `docs/reports/report-v1.3.md` by expected
-effect on the optimized run's estimated cost ($0.084729 over 34 successes).
-Every one of them changes either the measured treatment or the scenario set,
-so each costs a fresh baseline before any comparison with v1.3's files is
-meaningful.
+A bounded spike (lever 1 of v1.3's discovered list, below): does any
+per-request mechanism exist that makes LM Studio actually honor a
+"stop thinking" request, and can it ship without breaking the cached
+prefix invariant? All five candidates the spec named were tried, live,
+in strict order (RSN-01…06):
+
+| candidate | mechanism | outcome |
+|---|---|---|
+| a | `chat_template_kwargs.enable_thinking=false` | not honored (2/2 live pairs) |
+| b | vendor-documented `reasoning`/`reasoning_effort` disable value | unsupported — LM Studio documents only `low\|medium\|high`, never a disable value, never for a Qwen3-class model |
+| c | assistant prefill of an empty `<think>` block | honored (3/3), but rejected — always breaks the byte-stable cached-prefix invariant |
+| d | Qwen3's `/no_think` soft switch | not honored (2/2 live pairs) |
+| e | an LM Studio GUI/`lms` CLI model-level default | no documented control exists for the running version at all |
+
+**Verdict: FAIL, cause: no honored reasoning mechanism (RSN-06 STOP).**
+No optimization commit ships; the policy/observability sections and any
+candidate benchmark run are declared not-executed by the spec's own
+STOP-branch rule (GATE-02). Lever 1 (below) is **tried and closed**, not
+untried — reopening it needs either a different LM Studio version or a
+different model, not a different mechanism at this one.
+
+**What still shipped on this branch:** the S01 benchmark check's false
+negative repaired (H1 — the check matched literal tokens, not
+capability); a fresh `baseline-v1.4` measured via a temporary `git
+worktree` against the pre-v1.4 code ($0.003009/success); lever 5 (below)
+fixed — `LLM_TIMEOUT_S`/`LLM_MAX_TOKENS` can no longer silently disagree
+(default 120→240); mutation coverage for everything actually shipped
+(68/68 killed); one code review with two real, fixed findings. 9
+commits, six gates green throughout, 728 tests. Full detail:
+`docs/reports/report-v1.4.md`.
+
+## v1.5 (next) — candidates, none applied
+
+Two groups. The first is the plan's standing list; the second is what the
+v1.3 run discovered, minus the two levers v1.4 closed (lever 1: tried,
+FAIL — see above; lever 5: fixed, REL-01). Every one of them changes
+either the measured treatment or the scenario set, so each costs a fresh
+baseline before any comparison with v1.3's or v1.4's files is meaningful.
 
 **Standing candidates (from the v1.3 spec's deliverables list):**
 
@@ -165,36 +198,27 @@ meaningful.
 - **Semantic cache** — only if a dependency is ever allowed; today the
   dependency list forbids it, and it stays a NON-GOAL.
 
-**Discovered by the v1.3 run, ranked by expected effect:**
+**Discovered by the v1.3 run, ranked by expected effect (levers 1 and 5
+removed — closed by v1.4, above):**
 
-1. **A reasoning switch LM Studio actually honours** (a provider parameter, a
-   runtime that passes `chat_template_kwargs`, or a model whose thinking can be
-   disabled) — **−31.6 % … −35.2 %** of the optimized run's estimated cost
-   (10 516 tool-exposed / 11 680 total reasoning tokens at $2.55/Mtok). O5's
-   ~29 % remains available: the optimization is implemented-and-removed, not
-   disproven. On the report's counterfactual this alone clears the cost gate,
-   though S01 would still fail the quality gate.
-2. **Enable O6 routing** (summaries to a cheap or non-reasoning model) —
+1. **Enable O6 routing** (summaries to a cheap or non-reasoning model) —
    ceiling **−4.6 %** ($0.003904 on 762 prompt + 1 404 completion tokens), and
    it also cuts the slowest call type (summary median 49 179 ms vs 17 536 ms
    for agent calls). Needs a second model.
-3. **`CONTEXT_WINDOW_MESSAGES` 30 → 20** — upper bound −4.7 %, realistically
+2. **`CONTEXT_WINDOW_MESSAGES` 30 → 20** — upper bound −4.7 %, realistically
    ~0 on the current scenario set: the longest conversation (S09) never
    reaches 20 messages, so the cut binds on nothing. Needs a
    longer-conversation scenario, and carries a direct quality risk.
-4. **`EXEC_OUTPUT_DEFAULT_CHARS` 1500 → 1000** — upper bound −1.1 % (`exec` is
+3. **`EXEC_OUTPUT_DEFAULT_CHARS` 1500 → 1000** — upper bound −1.1 % (`exec` is
    76 % of tool output; a third narrower window removes at most a third of it).
    Trades against the quality gate that already failed.
-5. **Fix the `LLM_TIMEOUT_S` / `LLM_MAX_TOKENS` mismatch** — no token saving,
-   but it removes a failure class: at `21.1 s + 0.093 s/token` a 120 s timeout
-   admits ~1 063 completion tokens while `LLM_MAX_TOKENS` is 2 048, so a long
-   completion times out and is retried with identical parameters. This aborted
-   the first baseline attempt (spec Appendix E.5).
-6. **`SUMMARY_MAX_TOKENS` consumable entirely by reasoning** — the summary
-   path has the highest reasoning share of any call group (0.77–0.83), so a
-   summary call can spend its whole budget thinking and return empty content
-   with `finish_reason=length`. Observed intermittently (2/2 empty in the
-   aborted baseline, 3/3 fine in the complete one) — a fragility, not a
-   universal breakage.
-7. **`FETCH_INLINE_DEFAULT_CHARS` 5000 → 3000** — ≈0 on the current scenario
+4. **`FETCH_INLINE_DEFAULT_CHARS` 5000 → 3000** — ≈0 on the current scenario
    set: S08's fetch output already sits under the 5 000-char window.
+
+(Lever 6, the reasoning-starved-summary fragility, is not listed as
+untried here: v1.4 specified its fix in full — REL-02, the
+`FINISH-LENGTH:` assertion — but it never shipped, released on the
+RSN-06 STOP branch, since it only matters for a candidate run under a
+policy, and no policy exists to run one under. It is listed among
+`docs/reports/report-v1.4.md`'s released requirements, not carried here
+as a performance candidate.)

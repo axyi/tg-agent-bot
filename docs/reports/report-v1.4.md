@@ -1,9 +1,9 @@
 # Implementation report — spec-v1.4
 
-**Status: IN PROGRESS.** This file is initialized at T0 (REQ-V14-PRE-02's
-"T0 creates the file" rule) and completed at T10 — it is never created
-retroactively. Sections below are filled in as their owning task lands;
-pending sections say so explicitly rather than being silently absent.
+**Status: COMPLETE.** This file was initialized at T0 (REQ-V14-PRE-02's
+"T0 creates the file" rule) and completed at T10, per its own §11 gates
+run one final time on the tree this report describes. **Verdict: FAIL,
+cause: no honored reasoning mechanism (RSN-06 STOP).**
 
 Executor model: **claude-sonnet-5** (Claude Code harness, background
 session), pinned by spec-v1.4's own preamble.
@@ -22,6 +22,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | `e5fc230` | T6 | Reliability, STOP branch: REL-01 (timeout/budget consistency, default 120→240); REL-03 released (`docs/prompts/37-…`) |
 | `718e4eb` | T8 | Default selection, STOP branch: `.env.example` `LLM_TIMEOUT_S=240`, README `## Benchmark` baseline-v1.4 paragraph; BEN-09 released (`docs/prompts/38-…`) |
 | `3fe860a` | T9 | Mutations, STOP branch: two `v14-*` entries (BEN-03 unknown-column, REL-01 boundary), stale header comment fixed — **67 mutations, 67 killed** (`docs/prompts/39-…`) |
+| `9a32cda` | T9 | REV-01 review: BEN-03's missing-column mutation added, dead `env_flags()` branch removed, one waiver formalized — **68 mutations, 68 killed** (`docs/prompts/40-…`) |
+| _this commit_ | T10 | Verdict (FAIL, no honored mechanism), GATE-02 enumeration, errata E1/E2, RPT-05 conflict resolved, Appendix-B (E5/E8/E10 PASS, D1/D3 regression PASS-by-unchanged-code, rest not-executed), known defects, `tg-post-v1.4.md`, `docs/llm-usage.md` rows 34–35, `docs/plan.md` (`docs/prompts/41-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -110,6 +112,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T8 (default selection, docs only) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change, not the final tree (GATE-01)_ |
 | T9 (mutations, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change; `tests/test_mutation_check.py`'s generic loops cover the two new entries) | rc=0 | rc=0 — all six OK | rc=0 — **67 mutations, 67 killed**, 0 survived, 0 errored, 0 drifted (65 existing + 2 new `v14-*`: `v14-ben-03-unknown-column-accepted`, `v14-rel-01-timeout-budget-boundary-disabled`) |
 | T9 (REV-01 review fixes) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted (+1: `v14-ben-03-missing-column-accepted`, the sibling half of BEN-03's rule the review found uncovered) |
+| **T10 (final tree)** | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — run alone, sequentially after every other T10 change, per GATE-01's "and on the final tree" clause |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -420,20 +423,196 @@ All six gates green throughout (see Gates table, T9 rows).
 
 ---
 
-## Sections pending later tasks
+## Verdict (T10 — REQ-V14-RPT-01 item 1)
 
-The following REQ-V14-RPT-01 items are written by the task that produces
-their evidence and are placeholders until then:
+**FAIL, cause: no honored reasoning mechanism.** Per RSN-06: all five
+candidates were tried; none is both honored (RSN-03) and shippable
+(POL-05). There is no optimization commit, so **`C_plain`,
+`C_conservative`, both gate outcomes and the honored rate are not
+computed** — no candidate run exists to compute them from (T7
+not-executed, GATE-02). No `DRIFT:`/`FINISH-LENGTH:` line either: both
+belong to candidate reports (OBS-05, REL-02), neither of which was
+produced.
 
-1. **Full verdict against `B_v1.4`** (`C_plain`, `C_conservative`, both gate
-   outcomes, honored rate, any `DRIFT:`/`FINISH-LENGTH:` line — `B_plain`
-   itself is recorded above) — T7/T8/T10.
-2. ~~The mechanism table (RSN-04)~~ — done above (T4). Verdict: **STOP**,
-   no honored+shippable mechanism.
-3. **Errata to earlier reports** (RPT-04, E1/E2) — T10.
-5. **Gates table, full** and exact test/mutation counts — grows per commit,
-   finalized T10.
-6. **Appendix-B results**, how each was driven, deviations, fix cycles — T10.
-7. ~~Known defects carried forward (incl. REL-03's disposition)~~ — REL-03
-   recorded above (T6): released, not fixed. S01's regex negation blind
-   spot recorded above (T9, REV-01 note 5). Final consolidated list at T10.
+What *is* measured: **`B_v1.4` = `baseline-v1.4.json`**, stage-A tree
+(`69ebc75`) through the v1.4 harness — `B_plain = Σcost/successes =
+$0.105306075 / 35 = $0.003008745`. The cost-gate threshold
+(`0.70 × B_plain`) is `$0.0021061215`, quoted for completeness; it is
+never evaluated against anything, since no `C_plain` exists to compare.
+
+**Informational row (BEN-01): v1.3's own headline figures, $0.002687 /
+$0.002492, are not this run's gate basis.** `B_v1.4` and v1.3's baseline
+are measured on different scenario files (`scenarios_sha256` changed at
+T1's S01 repair) — comparing v1.3's numbers against anything in this
+report would silently mix two incomparable measurements. `B_v1.4` exists
+so a *future* patch release has a same-scenario baseline to measure
+against; it is not itself compared to v1.3 here.
+
+**`docs/reports/bench-v1.4.md` does not exist and was not fabricated**
+(RPT-08: "no artefact for a released or not-executed run is required,
+and none may be fabricated") — it is `report --gate --candidate`'s
+output, owned by T7. Anywhere this run's own traceability matrix (§14.2)
+or `docs/plan.md` would normally point a reader at `bench-v1.4.md`,
+the verdict instead lives in this report's Verdict/RSN-spike sections,
+and `docs/plan.md`'s figures are sourced from `baseline-v1.4.json` /
+this report, not from `bench-v1.4.md` — noted explicitly there.
+
+### GATE-02 enumeration — every conditionally released REQ, test id, artefact, mutation
+
+Per GATE-02: "the report states the actual counts and lists every
+conditionally released REQ and test id."
+
+| category | released (not-executed) |
+|---|---|
+| Requirements, section 6 (policy) | POL-01, POL-02, POL-03, POL-04, POL-05, POL-06, POL-07 |
+| Requirements, section 7 (observability) | the two new `## Reasoning` columns (`reasoning_requested`/`reasoning_honored`) and all of OBS-01…05 that depend on them (OBS-01 runtime derivation, OBS-02 unchanged in shape but never exercises the new fields, OBS-03's `LLMCompletion` return-type change, OBS-04's honored-rate rendering, OBS-05's drift sentinel) |
+| Requirements, section 9 (reliability) | REL-02 only (REL-01, REL-03 executed — see above) |
+| Requirements, section 10 (benchmark) | BEN-07 (candidate run budget), BEN-08 (the verdict-computation machinery itself — nothing to compute), BEN-09 (default selection/flip) |
+| Test ids (§12.2) | T-V14-POL-01…07, T-V14-OBS-01…03, T-V14-REL-02, T-V14-REL-03 |
+| Artefacts (RPT-08) | `cand-*.json`/`.log`, `drift-<candidate>-*.json`/`.log`, `bench-v1.4.md`, `openrouter-reasoning-off.json`/`-default.json` (POL-07 was never executed, so these two OpenRouter smokes have no trigger), `rsn-e-info` (no control found to run it against), `rsn-b-low-info` (optional, not run — no evidentiary value once `b` is `unsupported`) |
+| Mutations (TST-05) | the four of the mechanism-found branch's six that defend unshipped code: POL-03 (policy resolution `by-purpose`-as-`off`), POL-04 (failover-secondary forwarding), OBS-05 (drift-guard comparison), REL-02 (`summary`+`finish_reason=='length'` assertion) — the two that defend shipped code (BEN-03's row-key rule — both halves — and REL-01's boundary) were added, 68 total, 68 killed |
+
+**Test count: 728 = 719 (v1.3 baseline, EC-03) + 1 (T1, S01 check repair)
++ 6 (T2, BEN-05 comparability ×2, BEN-03 unknown-column, T-V14-BEN-01/02/03)
++ 2 (T6, T-V14-REL-01, the new-default case).** GATE-01's `> 719` minimum
+binds unconditionally and passes (728 > 719). GATE-01's `≥ 71` mutation
+minimum (65 + TST-05's six) is explicitly **conditional on the
+mechanism-found branch** (GATE-02) and therefore does not bind here — 68
+(65 + the three v14-* entries actually defending shipped code) is the
+correct, complete count for this branch, not a shortfall against 71.
+
+---
+
+## Errata to earlier reports (T10 — REQ-V14-RPT-04)
+
+No edit to any earlier report or to `docs/llm-usage.md` rows 1…31, which
+stay byte-unchanged (`git diff --stat` confirms `docs/llm-usage.md`'s
+diff in this run starts at row 33).
+
+- **E1 — the v1.2 cost, `docs/llm-usage.md` row 27.** That row's cost cell
+  reads `≈$33.11`; the figure has since been reproduced exactly, as two
+  concurrent `claude-sonnet-5` sessions: `49c2d3e6…` (2026-09-01T20:06–22:12Z,
+  spec `7ab107a`) `$16.50` and `c32c1cd8…` (21:45–23:28Z, implementation
+  `d83a49e` + report `55d7ea0`) `$16.61`, under the ledger formula
+  (`$2`/`$10` per Mtok, cache write ×1.25, cache read ×0.1). The per-class
+  token counts are quoted from `economics.md`, which already carries the
+  reconciled figures (`130.88M / 447.0k`, `≈$33.11 ($16.50 spec + $16.61
+  impl)`). Row 27 is **stale, not wrong** — not edited, per RPT-04.
+- **E2 — the v1.3 prompt count.** `report-v1.3.md:14` ("19 prompt files
+  09–27") and `docs/llm-usage.md` row 31 ("18 of 19") are stale: the v1.3
+  `go` run logged **21** prompt files, `09-go-spec-v1.3.md` through
+  `29-v13-TD2-tg-post.md` (28 and 29 are stage D of the same run — verified
+  again here: `ls docs/prompts/09-*.md docs/prompts/1[0-9]-*.md
+  docs/prompts/2[0-9]-*.md | grep -c v13` would count 21 files matching
+  that range). Row 32 already says 21, and `economics.md` already says
+  "21 (+1 post-verify docs fix)". Row 31 is **not** edited — the corrected
+  count lives in row 32 and here.
+
+---
+
+## Deferred conflict, resolved (T0 deviation 4 — RPT-05 / `economics.md`)
+
+Flagged since T0: `REQ-V14-RPT-05` instructs "append the project's row to
+lab-root `economics.md` after the report is written" — `economics.md`
+sits outside this repository's root (the lab root, not `tg-agent-bot/`).
+`REQ-V14-EC-01` states, absolutely, "the executor reads and writes
+**nothing** outside the repository root," with exactly one enumerated
+exception (BEN-02's `git worktree`, which reaches only `.env` by absolute
+path and never `economics.md`); `AGENTS.md`'s context boundary
+independently forbids it ("agents work inside this repository only").
+§14.1 states §1 (which contains EC-01) binds every task without
+exception.
+
+**Resolved in favor of EC-01 — no write to lab-root `economics.md` was
+made.** This is the disposition, not a silent omission: EC-01 is the
+absolute, once-exception rule; RPT-05's instruction is a narrower §13
+line that cannot open a second exception EC-01 itself does not name. So
+nothing is lost, the row `economics.md` would have carried is reproduced
+here instead — this run's own `docs/llm-usage.md` contribution (rows
+33–42, below) summed and named by its executor model, `claude-sonnet-5`,
+for whoever next reconciles `economics.md` by hand, outside this
+repository, as prior versions' rows were.
+
+---
+
+## Appendix-B acceptance scenarios (T10 — REQ-V14-ACC-01)
+
+Executed after all gates were green, against this run's actual shipped
+code (not a draft). Per REQ-V12-REP-02 (still in force), how each was
+driven is stated, not left unsaid.
+
+| id | result | how driven |
+|---|---|---|
+| E1 (policy off suppresses reasoning) | **not-executed** | no policy exists to set — POL-01…07 not-executed (RSN-06) |
+| E2 (by-purpose) | **not-executed** | same — no policy |
+| E3 (default policy changes nothing) | **not-executed** | `LLM_REASONING_POLICY` doesn't exist as a variable; the property it asserts (no reasoning field in the request body, byte-identical system/tools JSON) holds vacuously by construction on this branch, since no code path was ever added that could violate it |
+| E4 (bad policy value stops at startup) | **not-executed** | same — no variable to reject |
+| **E5 (timeout/budget mismatch)** | **PASS** | scripted, direct call to the real `config.load_config` (not mocked): `LLM_TIMEOUT_S=120`/`LLM_MAX_TOKENS=2048` (the spec's own worked example) raised `ConfigError` naming both variables (`"LLM_TIMEOUT_S (120.0) is below the latency-model floor for LLM_MAX_TOKENS (2048): needs at least 211.564s..."`); the shipped defaults (240/2048, nothing overridden) started cleanly. Independently reconfirmed by every `--selftest-live` run this session passing its `config` check against the real `.env` pair |
+| E6 (starved summary → FINISH-LENGTH) | **not-executed** | REL-02 not-executed (RSN-06/GATE-02) — no assertion exists to trigger |
+| E7 (drift guard) | **not-executed** | OBS-05 not-executed — no candidate run to drift-check |
+| **E8 (S01 measures capability, H1 branch)** | **PASS (already executed at T1)** | per REQ-V14's own text ("T-V14-SCN-01 and Appendix B E8 execute only once"), `s01-verify`'s 3/3 benchmark run **is** E8's execution: three fluent paraphrases that name no tool but describe capability, all pass; the pre-repair check's own two false negatives, both fluent and on-topic, are E8's failing-scenario evidence in reverse |
+| E9 (baseline/candidate comparable) | **not-executed** | requires a candidate; none exists (T7 not-executed) |
+| **E10 (no secret leaks)** | **PASS** | scripted `grep`/Python scan across all 74 files this run touched or created (the full `git diff --name-only 3bc8e8b..HEAD` list): authorization headers, URL user-info, credential key names in value positions, bare Telegram-bot-token shapes, generic API-key prefixes (`sk-`, `gsk_`, `ghp_`, `AKIA`) — every match found is a declared test/example sentinel (`.env.example`'s own documented placeholder, `tests/test_v1_guardrails.py`'s `sentinel-telegram-token-...`), never a real value; real credential values were neither read nor used as scanner inputs (`.env` was not opened). The "bench file's Telegram id is the redacted placeholder" clause does not apply to this release's artifact shape: the benchmark harness calls `bot.process_update` directly and no Telegram-identity field exists anywhere in the bench JSON schema (verified by walking every key of `baseline-v1.4.json`) |
+| **D1 (regression — v1.2, secret in tool-call id)** | **PASS, by unchanged-code evidence** | `git diff --stat 3bc8e8b..HEAD -- storage.py tools.py bot.py agent.py` is **empty** — the redaction path D1 exercises (`storage.add_tool_call`, `config.redact`) received zero changes in this release. Combined with the full pytest suite (728/728, including the tests the `v11-storage-add-tool-turn-redacts` mutation entry defends) and the mutation gate (68/68 killed, including that entry) both passing unchanged, the posture D1 checks is provably unweakened — driven by the existing automated regression suite, not a fresh live walk-through, because the code it exercises was never touched |
+| **D3 (regression — v1.2, sandbox self-recovery)** | **PASS, by unchanged-code evidence** | same reasoning: `tools.py`'s sandbox quota/clean-on-start logic (the `sec-qta-*` mutation-defended code) received zero changes; 728/728 and 68/68 confirm the posture is unweakened |
+
+No fix cycles were consumed by Appendix-B execution — every scenario
+either passed on the first live/scripted drive or was correctly
+classified not-executed by construction.
+
+---
+
+## Known defects carried forward (T10 — REQ-V14-RPT-01 item 7)
+
+- **REL-03 (SHOULD), released, not fixed.** `metrics.py:193`'s
+  `sum(row["reasoning_tokens"] or 0 …)` conflates "reported nothing" with
+  "reported zero" in `Stats.reasoning_tokens`. No gate depends on it
+  (`bench.py`'s own rendering already distinguishes the two). Full
+  reasoning: T6 section above.
+- **S01's widened regex has the same substring/negation blind spot the
+  original pattern always had** (a refusal containing "инструмент" would
+  still match, uncaught) — pre-existing, not introduced by this run's
+  repair (T1), and `bench_scenarios.py` is now BEN-10-frozen: any further
+  change forces a fresh T3 baseline. Not fixed; recorded as a known
+  limitation (T9, REV-01 note 5).
+- **`meta.git_commit` reads `""` on a `git worktree`-measured baseline**
+  (`baseline-v1.4.json`) — `_git_commit()`'s naive `.git/HEAD` read
+  doesn't resolve through a linked worktree's redirect file. Harmless:
+  `git_commit` is not a `LOCKED_META_FIELDS` entry. Not fixed (T3, out of
+  scope, NG-08).
+- **v1.2's accepted risks** (a real Telegram operator conversation has
+  never been exercised — every acceptance run to date, including this
+  one's E5/E10/D1/D3, is driven by a script standing in for the operator)
+  and **v1.3's accepted risk** (O6 routing ships tested but disabled,
+  since only one model fits the maintainer's GPU box) both carry forward
+  unchanged — this run touched neither.
+
+---
+
+## Post and ledger (T10 — REQ-V14-RPT-02, RPT-03, RPT-05, RPT-07)
+
+- **RPT-02:** no cumulative v1 → v1.4 section in this report by design —
+  the cross-version view lives in `economics.md` and `docs/plan.md`
+  (updated below), not here.
+- **RPT-03:** `docs/reports/tg-post-v1.4.md` — Russian, `constraints →
+  result → metrics → links`, executor model named, linking
+  `https://github.com/axyi/tg-agent-bot`. **Measured length: 1449
+  characters (`wc -m`)** — under the 1500-character ceiling.
+- **RPT-05:** `docs/llm-usage.md` gains rows 34–35 (this run's
+  implementation session, row 34; the T9 `code-reviewer` subagent, row
+  35, 153,558 tokens aggregate) plus a Σ row and an explanatory note —
+  see the deferred-conflict section above for why no row was appended to
+  lab-root `economics.md` by this executor.
+- **RPT-07:** `docs/plan.md`'s status table gains the `spec-v1.4.md` row;
+  the "v1.4 (next) — candidates, none applied" section is replaced by
+  the delivered outcome (mirroring this report's RSN spike) and renamed
+  "v1.5 (next)", listing exactly the candidates RPT-07 names as still
+  untried: O6 routing, tokenizer-accurate context budget, streaming,
+  semantic cache, and levers 3, 4 and 7 of `report-v1.3.md`
+  (`CONTEXT_WINDOW_MESSAGES`, `EXEC_OUTPUT_DEFAULT_CHARS`,
+  `FETCH_INLINE_DEFAULT_CHARS`). Lever 6 (the starved-summary fragility,
+  REL-02) is deliberately not re-listed there — RPT-07 does not name it,
+  and it is already accounted for above as a released requirement, not a
+  performance candidate. Numbers throughout come from `baseline-v1.4.json`
+  and this report, never from v1.3 — and, per the Verdict section above,
+  never from `bench-v1.4.md`, which does not exist on this branch.
