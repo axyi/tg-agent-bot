@@ -33,7 +33,9 @@
       "LLM_REASONING": "auto",
       "LLM_SUMMARY_MODEL": "",
       "LLM_FAILOVER": "off",
-      "LLM_MAX_TOKENS": 2048
+      "LLM_MAX_TOKENS": 2048,
+      "LLM_REASONING_POLICY": null,
+      "LLM_REASONING_ON_PURPOSES": null
     },
     "config_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "constants": {

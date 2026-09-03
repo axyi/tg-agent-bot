@@ -101,9 +101,13 @@ ABORT_COST_CAP = "cost_cap"
 
 REDACTED_TG_ID = "[tg-id]"
 
-# The seven keys of `meta.env_flags`, in the order of the 7.4 schema, mapped to
-# the `config.Config` field that carries each. A field absent at this commit is
-# recorded as `null` (REQ-V13-BEN-10) — never guessed, never omitted.
+# The nine keys of `meta.env_flags`, in the order of the 7.4/REQ-V14-POL-01
+# schema, mapped to the `config.Config` field that carries each. A field
+# absent at this commit is recorded as `null` (REQ-V13-BEN-10) — never
+# guessed, never omitted. The last two are REQ-V14-BEN-05: added ahead of the
+# `Config` fields themselves (REQ-V14-POL-01, landing in a later task) —
+# `env_flags()`'s existing absent-field fallback already resolves them to
+# `null` with no further code change until then.
 ENV_FLAG_FIELDS = {
     "HISTORY_TOOL_STUB": "history_tool_stub",
     "EXEC_OUTPUT_DEFAULT_CHARS": "exec_output_default_chars",
@@ -112,6 +116,8 @@ ENV_FLAG_FIELDS = {
     "LLM_SUMMARY_MODEL": "llm_summary_model",
     "LLM_FAILOVER": "llm_failover",
     "LLM_MAX_TOKENS": "llm_max_tokens",
+    "LLM_REASONING_POLICY": "llm_reasoning_policy",
+    "LLM_REASONING_ON_PURPOSES": "llm_reasoning_on_purposes",
 }
 ENV_FLAG_KEYS = tuple(ENV_FLAG_FIELDS)
 # The stage-C treatment (REQ-V13-PRE-04): `null` on a C1 baseline, the PRE-04
@@ -159,6 +165,22 @@ PRICING_BASES_WITH_MODEL = ("openrouter-list", "openrouter-list-stale")
 LLM_ROW_KEYS = frozenset(storage.LLM_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"}
 TOOL_ROW_KEYS = frozenset(storage.TOOL_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"}
 
+# REQ-V14-BEN-03: a literal frozen tuple spelling out the v1.3 `llm_calls` row
+# shape — deliberately NOT derived from `storage`, which would drift forward
+# with every schema change and guard nothing. A row loaded from an older tree
+# (e.g. `baseline-v1.4`'s stage-A worktree, `69ebc75`) carries exactly this
+# set; a row from the running tree may carry more (REQ-V14-OBS-01's two new
+# columns) without being rejected. `TOOL_ROW_KEYS` needs no separate REQUIRED
+# constant: that schema is unchanged by this spec, so REQUIRED == current and
+# the same variable serves as both bounds below.
+REQUIRED_LLM_ROW_KEYS = frozenset({
+    "id", "conv_seq", "turn_id", "purpose", "round", "attempt", "ts",
+    "provider", "model", "prompt_tokens", "completion_tokens", "total_tokens",
+    "cached_tokens", "reasoning_tokens", "reasoning_chars", "prompt_chars",
+    "prompt_chars_by_role", "messages_n", "tools_exposed", "latency_ms",
+    "finish_reason", "tool_calls_n", "error_kind", "cost_usd", "cost_basis",
+})
+
 FLOAT_REL_TOL = 1e-9
 FLOAT_ABS_TOL = 1e-12
 
@@ -180,12 +202,19 @@ def scenarios_sha256() -> str:
 
 
 def env_flags(cfg: Config) -> dict:
-    """Exactly the seven keys of the 7.4 schema, at every commit."""
+    """Exactly the nine keys of the 7.4/REQ-V14-POL-01 schema, at every commit."""
     present = {item.name for item in dataclasses.fields(Config)}
-    return {
+    flags = {
         key: (getattr(cfg, field_name) if field_name in present else None)
         for key, field_name in ENV_FLAG_FIELDS.items()
     }
+    # REQ-V14-BEN-05: `LLM_REASONING_ON_PURPOSES` is a `frozenset[str]` on
+    # `Config` (once REQ-V14-POL-01 lands) — serialized as a sorted,
+    # comma-joined string so the JSON stays stable across runs.
+    purposes = flags.get("LLM_REASONING_ON_PURPOSES")
+    if isinstance(purposes, (frozenset, set)):
+        flags["LLM_REASONING_ON_PURPOSES"] = ",".join(sorted(purposes))
+    return flags
 
 
 def config_sha256(cfg: Config) -> str:
@@ -1029,7 +1058,7 @@ def _validate_meta(meta: dict) -> None:
           "meta.only must be null or a non-empty array of strings")
     flags = meta.get("env_flags")
     _need(isinstance(flags, dict) and set(flags) == set(ENV_FLAG_KEYS),
-          "meta.env_flags must hold exactly the seven documented keys")
+          f"meta.env_flags must hold exactly the {len(ENV_FLAG_KEYS)} documented keys")
     constants_meta = meta.get("constants")
     _need(isinstance(constants_meta, dict), "meta.constants must be an object")
     _need(isinstance(constants_meta.get("REQUEST_DEFAULTS"), dict),
@@ -1084,12 +1113,25 @@ def _validate_run(run: Any) -> None:
     _need(not run["success"] or all(check["ok"] for check in checks),
           "a successful run cannot carry a failing check")
 
-    for name, keys in (("llm_calls", LLM_ROW_KEYS), ("tool_calls", TOOL_ROW_KEYS)):
+    # REQ-V14-BEN-03: `REQUIRED ⊆ set(row) ⊆ allowed`, not `==`. A row from an
+    # older tree (fewer columns than `allowed`) is accepted as long as it
+    # carries every required one; a row with a key neither set expects is
+    # still rejected, named.
+    for name, required, allowed in (
+        ("llm_calls", REQUIRED_LLM_ROW_KEYS, LLM_ROW_KEYS),
+        ("tool_calls", TOOL_ROW_KEYS, TOOL_ROW_KEYS),
+    ):
         rows = run.get(name)
         _need(isinstance(rows, list), f"runs[].{name} must be an array")
         for row in rows:
-            _need(isinstance(row, dict) and set(row) == set(keys),
-                  f"runs[].{name}[] must carry exactly the row columns plus conv_seq")
+            _need(isinstance(row, dict), f"runs[].{name}[] must be an object")
+            row_keys = set(row)
+            missing = required - row_keys
+            _need(not missing,
+                  f"runs[].{name}[] is missing required column(s): {', '.join(sorted(missing))}")
+            unknown = row_keys - allowed
+            _need(not unknown,
+                  f"runs[].{name}[] carries unknown column(s): {', '.join(sorted(unknown))}")
             _need(_is_int(row.get("conv_seq")) and row["conv_seq"] >= 1,
                   f"runs[].{name}[].conv_seq must be a positive int")
     for row in run["llm_calls"]:

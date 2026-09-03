@@ -15,7 +15,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | commit | task | contents |
 |---|---|---|
 | `30c7a16` | T0 | preconditions, this report's skeleton (`docs/prompts/31-…`, `32-…`) |
-| _pending_ | T1 | S01 root cause: H1 classified, check repaired, `s01-repro`/`s01-verify` (`docs/prompts/33-…`) |
+| `f6e634d` | T1 | S01 root cause: H1 classified, check repaired, `s01-repro`/`s01-verify` (`docs/prompts/33-…`) |
+| _pending_ | T2 | harness readiness: BEN-03 row-key rule, BEN-04 guards, BEN-05 nine `env_flags` keys, BEN-02 item 5 dry run (`docs/prompts/34-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -78,6 +79,14 @@ own PRE-03 text; no drift found.
    repository root; `AGENTS.md` says stop and ask when the spec and it
    disagree. Not yet a blocker — T0…T9 are unaffected, and RPT-04's E1
    already quotes `economics.md`'s existing figures without writing to it.
+5. **T2: `tests/fixtures/bench/baseline.json`/`candidate.json` patched**,
+   outside TREE-01's/§12.1's exhaustive change lists. Forced by BEN-05's two
+   MUSTs (env_flags key set → nine; validation stays strict equality)
+   colliding with the fixtures' 7-key shape — an `AGENTS.md`-style "unlisted
+   test fails" trip-wire (`tests/test_dashboard.py`), resolved by patching
+   the **data** (two `null` keys added, arithmetic untouched, `git diff`
+   confirmed 4 lines) rather than the test's assertion, which stays
+   untouched. Full reasoning: `docs/prompts/34-v14-t2-harness-readiness.md`.
 
 ## Gates
 
@@ -89,6 +98,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 |---|---|---|---|---|---|---|
 | T0 (pre-change) | rc=0 | rc=0, all checks passed | rc=0 — **719 passed** | rc=0 | rc=0 — `config`/`db`/`docker (29.7.2)`/`telegram`/`lmstudio`/`openrouter` all OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
 | T1 (S01 repair) | rc=0 | rc=0, all checks passed | rc=0 — **720 passed** (+1: `tests/test_v14_patch.py::test_t_v14_scn_01_s01_check_accepts_capability_paraphrase`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
+| T2 (harness readiness) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (+6: BEN-05 comparability × 2, BEN-03 unknown-column, T-V14-BEN-01/02/03) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production

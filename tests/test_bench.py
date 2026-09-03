@@ -32,10 +32,15 @@ BASELINE_FLAGS = {
     "LLM_SUMMARY_MODEL": "",
     "LLM_FAILOVER": "off",
     "LLM_MAX_TOKENS": 2048,
+    # REQ-V14-BEN-05: two more keys, both null on the baseline side — neither
+    # joins STAGE_C_KEYS, so comparability() has no rule for them.
+    "LLM_REASONING_POLICY": None,
+    "LLM_REASONING_ON_PURPOSES": None,
 }
 CANDIDATE_FLAGS = {**BASELINE_FLAGS, "HISTORY_TOOL_STUB": "on",
                    "EXEC_OUTPUT_DEFAULT_CHARS": 1500,
-                   "FETCH_INLINE_DEFAULT_CHARS": 5000, "LLM_REASONING": "auto"}
+                   "FETCH_INLINE_DEFAULT_CHARS": 5000, "LLM_REASONING": "auto",
+                   "LLM_REASONING_POLICY": "off", "LLM_REASONING_ON_PURPOSES": ""}
 PRICING = {
     "basis": "reference:some/model",
     "model": "some/model",
@@ -628,16 +633,21 @@ def test_a_pinned_lmstudio_provider_overrides_an_openrouter_env(tmp_path, monkey
 # meta (REQ-V13-BEN-03, REQ-V13-BEN-10)
 # --------------------------------------------------------------------------
 
-def test_env_flags_are_exactly_the_seven_keys_with_null_for_absent_fields(tmp_path):
+def test_env_flags_are_exactly_the_nine_keys_with_null_for_absent_fields(tmp_path):
     flags = bench.env_flags(make_config(tmp_path))
     assert set(flags) == set(bench.ENV_FLAG_KEYS)
-    assert len(flags) == 7
+    assert len(flags) == 9
     present = {item.name for item in dataclasses.fields(config.Config)}
     for key, field_name in bench.ENV_FLAG_FIELDS.items():
         if field_name not in present:
             assert flags[key] is None, key
     assert flags["LLM_FAILOVER"] == "off"
     assert flags["LLM_MAX_TOKENS"] == 2048
+    # REQ-V14-BEN-05: at this commit neither Config field exists yet, so both
+    # new keys resolve to null with no code change (env_flags()'s existing
+    # absent-field fallback).
+    assert flags["LLM_REASONING_POLICY"] is None
+    assert flags["LLM_REASONING_ON_PURPOSES"] is None
 
 
 def test_config_sha256_ignores_secrets_and_identifiers_but_not_the_treatment(tmp_path):
@@ -1053,12 +1063,22 @@ def test_conv_seq_resets_the_resent_arithmetic_at_a_new_conversation():
     assert bench.check_document(document)[0] == 1
 
 
-def test_check_rejects_a_row_missing_a_column():
+def test_check_rejects_a_row_missing_a_required_column():
+    # REQ-V14-BEN-03: the subset/superset rule still rejects a row missing a
+    # required column, and now names it.
     document = fake_doc()
     document["runs"][0]["llm_calls"][0].pop("cost_basis")
     code, reason = bench.check_document(document)
     assert code == 1
-    assert "row columns" in reason
+    assert "cost_basis" in reason
+
+
+def test_check_rejects_a_row_with_an_unknown_column():
+    document = fake_doc()
+    document["runs"][0]["llm_calls"][0]["not_a_real_column"] = 1
+    code, reason = bench.check_document(document)
+    assert code == 1
+    assert "not_a_real_column" in reason
 
 
 # --------------------------------------------------------------------------
@@ -1262,6 +1282,34 @@ def test_a_correct_pair_is_comparable():
     baseline, candidate = _pair()
     assert bench.comparability(baseline, candidate) is None
     assert bench.verdict(baseline, candidate).passed is True
+
+
+def test_ben_05_both_allowed_reasoning_policy_pairs_are_comparable():
+    """REQ-V14-BEN-05: `env_flags` is not a `LOCKED_META_FIELDS` entry and
+    `comparability()` has no rule for the two new keys, so a baseline (both
+    null) beside either allowed candidate value is comparable by construction
+    — no key-by-key comparison is introduced. Both allowed pairs, fixed by
+    literal here rather than derived from `comparability()`'s own code."""
+    baseline, off_candidate = _pair()
+    assert baseline["meta"]["env_flags"]["LLM_REASONING_POLICY"] is None
+    assert baseline["meta"]["env_flags"]["LLM_REASONING_ON_PURPOSES"] is None
+    assert off_candidate["meta"]["env_flags"]["LLM_REASONING_POLICY"] == "off"
+    assert bench.comparability(baseline, off_candidate) is None
+
+    by_purpose_flags = {**CANDIDATE_FLAGS, "LLM_REASONING_POLICY": "by-purpose",
+                        "LLM_REASONING_ON_PURPOSES": "tool-round"}
+    by_purpose_candidate = fake_doc(off_candidate["runs"], flags=by_purpose_flags,
+                                    tag="optimized")
+    assert bench.comparability(baseline, by_purpose_candidate) is None
+
+
+def test_ben_05_an_unrelated_env_flags_difference_still_blocks_the_gate():
+    """The new keys don't grant a general exemption: `LLM_MAX_TOKENS` still
+    makes two files incomparable regardless of the reasoning-policy flags."""
+    baseline, candidate = _pair()
+    candidate["meta"]["env_flags"]["LLM_MAX_TOKENS"] = 4096
+    reason = bench.comparability(baseline, candidate)
+    assert reason is not None and "LLM_MAX_TOKENS" in reason
 
 
 def test_the_gate_prices_both_sides_with_the_baseline_snapshot():
