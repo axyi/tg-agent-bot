@@ -507,7 +507,62 @@ repository.
 
 ## Prompt format and lint-docs (T11 — REQ-V15-PRM-*)
 
-(pending)
+**`docs/prompts/TEMPLATE.md` (REQ-V15-PRM-03).** New: the seven-bullet
+header plus the four blocks, one line of guidance each, its own
+`## Acceptance` line holding a real repository-relative path so the
+template is itself valid lint input — verified directly:
+`_lint_prompt_file(TEMPLATE.md, exempt=False)` returns `[]`.
+
+**`checks.py lint-docs` (REQ-V15-PRM-04, REQ-V15-RPT-01/03).** Three
+checks per prompt file (header bullets present/ordered/non-empty; the
+four blocks present/ordered/non-empty, `exempt_files`-gated; `##
+Acceptance` contains a backtick command, a `test_`-prefixed id, or a
+repository-relative path), plus one check on the report itself (a
+"Ledger row" section with a fenced block whose row has the same
+`|`-cell count as `lint-docs.ledger_header`). All policy values
+(the glob, the exemption list, the report path, the ledger header) are
+read from `config["gates"]["lint-docs"]`, not literals (REQ-V15-GATE-02,
+carried over). `exempt_files` membership is a literal filename
+comparison, not a numeric one — `T-V15-PRM-04` proves a file merely
+*named* `43-...` that isn't the literal exempt entry is still linted.
+
+**The header check is a subsequence match, not exact-list equality —
+a bug found via a file that turned out not to be broken.** See
+Deviations item 4 for the full account: the first draft's
+`names != _PRM_HEADER_FIELDS` comparison rejected any file carrying an
+extra bullet alongside the required seven, which flagged
+`40-v14-t9-review.md` (a legitimate review prompt with a `Reviewer:`
+bullet) as non-compliant. REQ-V15-PRM-04 requires the seven "present,
+in order" — not a closed set — so the check now walks the found
+bullets left to right, locating each required field strictly after the
+previous one, tolerating anything else interspersed. `40` passes with
+the fix and no edit.
+
+**29 historical prompt files backfilled, header only (REQ-V15-PRM-04's
+"historical ones included," and T18's own "`lint-docs` green"
+requirement).** Deviations item 4 has the full account: every value
+sourced from the file's own text or `git log --diff-filter=A` for
+`Date`; `not recorded` written honestly, never fabricated, where a
+field isn't in the file and isn't derivable from it. Delegated to a
+general-purpose subagent per this task's own reading-map instruction;
+verified independently afterward rather than trusted on the agent's
+own report — re-ran the check-1 sweep directly (0 of 54 files fail),
+the full suite (837 passed), and diffed two of the 29 edits by hand to
+confirm only the header block changed.
+
+**Tests.** `T-V15-PRM-01` through `-04` and `T-V15-RPT-01` — 10 tests
+(`-02` covers all four named negative cases as separate test functions;
+`-01` includes a missing-section case and a matching-cell-count case
+alongside the cell-count-mismatch case) — on top of T10's 99, for 109
+`test_v15_standards.py` tests total. Full suite: 837 tests, all green.
+`uv run --locked ruff check .` green.
+
+**What `checks.py lint-docs` reports against the real repository right
+now:** still one failure — the report's own ledger-row section, a
+placeholder until T18. Every prompt file passes both halves of the
+lint; `docs/prompts/TEMPLATE.md` passes; `43`–`54` pass (T11's own
+acceptance scope); `01`–`29` now pass check 1 (not exempt from it,
+per REQ-V15-PRM-04, and no longer failing it).
 
 ## Profile wiring, wall-clock and mutation coverage (T12 — REQ-V15-HOOK-04, TST-01)
 
@@ -545,6 +600,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T8 | yes (a single read of §7:600-730, 130 lines, for REQ-V15-GATE-05) | no — see Deviations | content already in the main context from the session-start full-spec read; §6 (HOOK) itself is under threshold, no delegation needed there |
 | T9 | no (its own reading map: §7's `tools:`/GATE-03 paragraph ≈30 lines, REQ-V15-RTK-03 ≈15 lines — both under threshold) | no | content already in the main context from the session-start full-spec read |
 | T10 | no (its own reading map: §9 in full, ≈35 lines — under threshold) | no | content already in the main context from the session-start full-spec read; the copied block was already in this session's own inherited config context, not read from outside the repository |
+| T11 | yes — its own reading map explicitly calls for it ("the lint sweeps 46 files — delegate the sweep, summary only") | **yes** | a general-purpose subagent backfilled headers on the 29 historical prompt files found failing; briefed with hard rules (header only, never fabricate, source from file text or `git log`, verify each file, report per-file sourcing); its own report was then independently re-verified (not merely trusted) — a fresh check-1 sweep and the full test suite run directly, two edited files diffed by hand |
 
 (rest of the table fills in as each task lands)
 
@@ -597,6 +653,46 @@ evidence lands in the T19 evidence-only commit)
    sanctioned network step" (`.semgrep/SOURCES.md`) is contradicted by
    this — T4 precedes T7, so semgrep's pull is still the last one
    chronologically, sanctioned or not.
+4. **`checks.py lint-docs` is not yet green on the real repository —
+   one half fixed in T11, one half deferred to T18 on purpose.**
+   REQ-V15-PRM-04 states check 1 (the seven-bullet header) "applies to
+   all prompt files, historical ones included," with no exemption
+   mechanism for it (unlike checks 2/3, which consult the literal
+   `exempt_files` list) — and T18's own acceptance bullet requires
+   `checks.py lint-docs` green. Measured at first pass: of 54 prompt
+   files, 29 failed check 1 (files `01`–`29`, spec-v0 through v1.3
+   era — `01-go-spec-v0.md` used plain `Agent:`/`Date:` lines, no
+   bullets at all; v1.3-era files used a different bulleted shape,
+   `Sent to:`/`Scope:` instead of the current field names). One
+   apparent 30th failure, `40-v14-t9-review.md`, turned out to be a
+   **lint bug, not a file defect**: check 1 originally compared the
+   found bullet names against the required list by exact equality,
+   which rejects a file carrying all seven required bullets *plus* an
+   extra one (`40` has `Reviewer:` between `Model reason` and
+   `Harness`) — REQ-V15-PRM-04 requires the seven "present, in order,"
+   not a closed set. Fixed `_lint_prompt_header` to a subsequence
+   match (each required field found in order, extra bullets tolerated
+   between them); `40` now passes with zero edits, confirming the fix
+   rather than the file was wrong.
+
+   The remaining 29 were backfilled — header only, every value sourced
+   from the file's own text or `git log --diff-filter=A --format=%as`
+   for `Date`, `not recorded` written honestly where a field genuinely
+   isn't in the file or derivable from it (e.g. `01`–`08`'s `Model
+   reason`/`Stage`/`Owner of`), never fabricated. Delegated to a
+   general-purpose subagent per T11's own reading-map instruction
+   ("the lint sweeps 46 files — delegate the sweep, summary only");
+   verified independently afterward — re-ran the check-1 sweep myself
+   (0 failures across all 54 files) and the full suite (837 passed)
+   before trusting the agent's own report, and diffed two edited files
+   directly to confirm only the header block changed, never body
+   content. `checks.py lint-docs` still fails on the real repository
+   today for one remaining, independent, and *expected* reason: the
+   report's own "Ledger row" section is still a `(T18/T19 —
+   pending…)` placeholder with no fenced row at all (REQ-V15-RPT-01)
+   until T18 fills it in. That is not a regression when `full` first
+   goes green at T19 — it is the sequencing REQ-V15-RPT-01 itself
+   describes (the operator pastes the row; T18 fills the report first).
 
 ## Ledger row (paste into `economics.md`)
 

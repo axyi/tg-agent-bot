@@ -8,9 +8,13 @@ in `docs/reports/report-v1.md`'s Review section, in the shape of
 sent to the `code-reviewer` subagent for the spec-v1 run — no verbatim record
 exists.**
 
-Agent: `code-reviewer` subagent (`.claude/agents/code-reviewer.md`), clean
-context, read-only tools.
-Date: 2026-08-31 (reconstructed; the run that produced `c1f27c3`)
+- **Date:** 2026-08-31 (reconstructed; the run that produced `c1f27c3`)
+- **Executor model:** not recorded
+- **Model reason:** not recorded
+- **Harness:** not recorded
+- **Stage:** not recorded
+- **Owner of:** review only — no owned paths (`code-reviewer` subagent, clean context, read-only tools)
+- **REQ ids:** REQ-EC-10, REQ-V1-DK-01, REQ-V1-DK-03, REQ-V1-INJ-02, REQ-V1-AUD-01, REQ-V1-AUD-02, REQ-V1-SEC-01, REQ-V1-SEC-02, REQ-V1-SEC-06, REQ-V1-FO, REQ-V1-MEM, REQ-V1-TB, REQ-V1-ERR-01
 
 ## Prompt as reconstructed
 

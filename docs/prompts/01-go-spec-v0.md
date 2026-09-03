@@ -1,7 +1,12 @@
 # Prompt 01 — implement spec-v0
 
-Agent: implementation agent (Claude Opus 5, Claude Code harness)
-Date: 2026-08-28
+- **Date:** 2026-08-28
+- **Executor model:** Claude Opus 5
+- **Model reason:** not recorded
+- **Harness:** Claude Code
+- **Stage:** not recorded
+- **Owner of:** not recorded
+- **REQ ids:** REQ-EC-10
 
 ## Prompt as sent
 

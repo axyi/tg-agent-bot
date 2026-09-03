@@ -1,7 +1,10 @@
 # Prompt 11 — v1.3 TA2: observability core (stage A)
 
-- **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Date:** 2026-09-02
+- **Executor model:** claude-opus-5
 - **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
+- **Harness:** Claude Code (`general-purpose` subagent, clean context)
+- **Stage:** TA2
 - **Owner of:** `llm/base.py`, `llm/lmstudio.py`, `llm/openrouter.py`,
   `llm/failover.py` (`describe()` + usage/reasoning parsing + `REQUEST_DEFAULTS`),
   `storage.py` (schema v3), `agent.py` (call recording only), `metrics.py` (new),

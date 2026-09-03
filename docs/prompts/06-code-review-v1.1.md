@@ -1,8 +1,12 @@
 # Prompt 06 — code review of the spec-v1.1 implementation
 
-Agent: `code-reviewer` subagent (`.claude/agents/code-reviewer.md`), clean
-context, read-only tools.
-Date: 2026-09-01
+- **Date:** 2026-09-01
+- **Executor model:** not recorded
+- **Model reason:** not recorded
+- **Harness:** not recorded
+- **Stage:** not recorded
+- **Owner of:** review only — no owned paths (`code-reviewer` subagent, clean context, read-only tools)
+- **REQ ids:** REQ-EC-10, REQ-V11-EC-04, REQ-V11-RED-01, REQ-V11-RED-02, REQ-V11-TRN-01, REQ-V11-TRN-02, REQ-V11-ORP-01, REQ-V11-ORP-02, REQ-V11-ORP-03, REQ-V11-ORP-04, REQ-V11-WIR-01, REQ-V11-QTA-01, REQ-V11-QTA-02, REQ-V11-QTA-03, REQ-V11-QTA-05, REQ-V11-CFV-01, REQ-V11-CFV-02
 
 ## Prompt as sent
 

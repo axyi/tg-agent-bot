@@ -1372,6 +1372,136 @@ def _run_doctor(
     return GateResult(name, ran=True, blocked=gate["blocking"] and bool(problems), message=message)
 
 
+_PRM_HEADER_FIELDS = [
+    "Date",
+    "Executor model",
+    "Model reason",
+    "Harness",
+    "Stage",
+    "Owner of",
+    "REQ ids",
+]
+_PRM_BLOCKS = ["Goal", "Constraints", "Acceptance", "Stop"]
+_PRM_BULLET_RE = re.compile(r"^-\s+\*\*([^*]+):\*\*\s?(.*)$")
+_PRM_HEADING_RE = re.compile(r"^## (.+)$")
+_PRM_ACCEPTANCE_COMMAND_RE = re.compile(r"`[^`\n]*\s[^`\n]*`")
+_PRM_ACCEPTANCE_TEST_ID_RE = re.compile(r"\btest_[A-Za-z0-9_]+\b")
+_PRM_ACCEPTANCE_PATH_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)+\.[A-Za-z0-9]+")
+
+
+def _lint_prompt_header(text: str) -> list[str]:
+    """The seven required bullets must be present and in relative order --
+    an extra bullet interspersed (e.g. a review prompt's `Reviewer:`) is not
+    itself a violation, REQ-V15-PRM-04 requires presence and order, not an
+    exact, closed set."""
+    header_lines = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            break
+        header_lines.append(line)
+    found = []
+    for line in header_lines:
+        m = _PRM_BULLET_RE.match(line.strip())
+        if m:
+            found.append((m.group(1).strip(), m.group(2).strip()))
+
+    positions: dict[str, int] = {}
+    search_from = 0
+    for field_name in _PRM_HEADER_FIELDS:
+        idx = next((i for i in range(search_from, len(found)) if found[i][0] == field_name), None)
+        if idx is None:
+            return [f"header is missing {field_name!r} in the required order"]
+        positions[field_name] = idx
+        search_from = idx + 1
+
+    return [
+        f"header bullet {field_name!r} is empty"
+        for field_name in _PRM_HEADER_FIELDS
+        if not found[positions[field_name]][1]
+    ]
+
+
+def _lint_prompt_blocks(text: str) -> list[str]:
+    lines = text.splitlines()
+    headings = [
+        (i, m.group(1).strip())
+        for i, line in enumerate(lines)
+        if (m := _PRM_HEADING_RE.match(line))
+    ]
+    relevant = [(i, h) for i, h in headings if h in _PRM_BLOCKS]
+    relevant_names = [h for _, h in relevant]
+    if relevant_names != _PRM_BLOCKS:
+        return [f"blocks {relevant_names} do not match the required order {_PRM_BLOCKS}"]
+
+    start = headings.index(relevant[0])
+    end = headings.index(relevant[-1])
+    between = [h for _, h in headings[start : end + 1]]
+    if between != _PRM_BLOCKS:
+        return [f"unexpected heading(s) between ## Goal and ## Stop: {between}"]
+
+    problems = []
+    for idx, (line_no, name) in enumerate(relevant):
+        content_start = line_no + 1
+        content_end = relevant[idx + 1][0] if idx + 1 < len(relevant) else len(lines)
+        body = "\n".join(lines[content_start:content_end]).strip()
+        if not body:
+            problems.append(f"## {name} is empty")
+        elif name == "Acceptance" and not (
+            _PRM_ACCEPTANCE_COMMAND_RE.search(body)
+            or _PRM_ACCEPTANCE_TEST_ID_RE.search(body)
+            or _PRM_ACCEPTANCE_PATH_RE.search(body)
+        ):
+            problems.append(
+                "## Acceptance contains no backtick-quoted command, "
+                "test_-prefixed identifier, or repository-relative path"
+            )
+    return problems
+
+
+def _lint_prompt_file(path: Path, *, exempt: bool) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    problems = [f"{path.name}: {p}" for p in _lint_prompt_header(text)]
+    if not exempt:
+        problems += [f"{path.name}: {p}" for p in _lint_prompt_blocks(text)]
+    return problems
+
+
+_LEDGER_MARKER = "Ledger row (paste into"
+_LEDGER_FENCE_RE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
+
+
+def _lint_report_ledger(report_path: Path, ledger_header: str) -> list[str]:
+    if not report_path.exists():
+        return [f"{report_path.name}: report file does not exist"]
+    text = report_path.read_text(encoding="utf-8")
+    idx = text.find(_LEDGER_MARKER)
+    if idx == -1:
+        return [f"{report_path.name}: no 'Ledger row (paste into ...)' section found"]
+    fence_match = _LEDGER_FENCE_RE.search(text, idx)
+    if not fence_match:
+        return [f"{report_path.name}: ledger-row section has no fenced code block"]
+    rows = [line for line in fence_match.group(1).splitlines() if line.strip().startswith("|")]
+    if not rows:
+        return [f"{report_path.name}: ledger-row fenced block contains no table row"]
+    header_cells = ledger_header.count("|")
+    row_cells = rows[0].count("|")
+    if row_cells != header_cells:
+        return [
+            f"{report_path.name}: ledger row has {row_cells} '|' but the header has {header_cells}"
+        ]
+    return []
+
+
+def _run_lint_docs(name: str, gate: dict[str, Any], repo_root: Path) -> GateResult:
+    exempt = set(gate["exempt_files"])
+    problems: list[str] = []
+    for path in sorted(repo_root.glob(gate["prompt_glob"])):
+        problems.extend(_lint_prompt_file(path, exempt=path.name in exempt))
+    problems.extend(_lint_report_ledger(repo_root / gate["report_path"], gate["ledger_header"]))
+    message = "; ".join(problems) if problems else "all prompts and the report ledger row pass"
+    return GateResult(name, ran=True, blocked=gate["blocking"] and bool(problems), message=message)
+
+
 def execute_builtin_gate(
     name: str, gate: dict[str, Any], *, config: dict[str, Any], repo_root: Path, profile: str
 ) -> GateResult:
@@ -1386,7 +1516,7 @@ def execute_builtin_gate(
     if handler == "doctor":
         return _run_doctor(name, gate, config, repo_root)
     if handler == "lint_docs":
-        return GateResult(name, ran=False, blocked=True, message="lint-docs: lands in T11")
+        return _run_lint_docs(name, gate, repo_root)
     raise GateConfigError(f"gates.{name}: unknown handler {handler!r}")
 
 
@@ -1497,8 +1627,17 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def cmd_lint_docs(args: argparse.Namespace) -> int:
-    print("checks.py lint-docs: lands in T11", file=sys.stderr)
-    return 2
+    config = load_gate_config()
+    result = execute_builtin_gate(
+        "lint-docs",
+        config["gates"]["lint-docs"],
+        config=config,
+        repo_root=REPO_ROOT,
+        profile="lint-docs",
+    )
+    status = "FAIL" if result.blocked else "PASS"
+    print(f"[{status}] {result.name}: {result.message}")
+    return 1 if result.blocked else 0
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -1,7 +1,10 @@
 # Prompt 19 — v1.3 TC1: O1 token-aware tool output (stage C)
 
-- **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Date:** 2026-09-02
+- **Executor model:** claude-opus-5
 - **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
+- **Harness:** Claude Code (`general-purpose` subagent, clean context)
+- **Stage:** TC1
 - **Owner of:** `tools.py`, `config.py` (the two window vars), `.env.example`,
   `tests/test_tool_output.py` (new)
 - **REQ ids:** REQ-V13-TOO-01 … TOO-10 (TOO-03 was reassigned to TC2, whose

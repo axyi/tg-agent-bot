@@ -1,7 +1,10 @@
 # Prompt 12 — v1.3 TA3: pricing and cost basis (stage A)
 
-- **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Date:** 2026-09-02
+- **Executor model:** claude-opus-5
 - **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
+- **Harness:** Claude Code (`general-purpose` subagent, clean context)
+- **Stage:** TA3
 - **Owner of:** `llm/pricing.py` (new), `config.py` (the three pricing variables
   only), `bot.py` (pricing wiring only), `tests/test_pricing.py` (new),
   `.env.example`

@@ -1,7 +1,10 @@
 # Prompt 21 — v1.3 TC3: O3 byte-stable prefix + O4 prefix compression (stage C)
 
-- **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Date:** 2026-09-02
+- **Executor model:** claude-opus-5
 - **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
+- **Harness:** Claude Code (`general-purpose` subagent, clean context)
+- **Stage:** TC3
 - **Owner of:** `agent.py` (prompt/prefix), `tools.py` `tool_specs`
   descriptions, `llm/openrouter.py`, `tests/test_prefix.py` (new), amended
   existing tests

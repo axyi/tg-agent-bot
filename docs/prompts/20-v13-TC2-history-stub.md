@@ -1,7 +1,10 @@
 # Prompt 20 — v1.3 TC2: O2 stale-tool-result stubbing + TOO-03 (stage C)
 
-- **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Date:** 2026-09-02
+- **Executor model:** claude-opus-5
 - **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
+- **Harness:** Claude Code (`general-purpose` subagent, clean context)
+- **Stage:** TC2
 - **Owner of:** `agent.py` `_assemble_context`, `storage.py` loader hook,
   `config.py` (`HISTORY_TOOL_STUB`), `tests/test_history_stub.py` (new)
 - **REQ ids:** REQ-V13-HST-01 … HST-05, REQ-V13-TOO-03

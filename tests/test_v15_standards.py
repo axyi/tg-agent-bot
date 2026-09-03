@@ -1368,3 +1368,152 @@ def test_v15_gate_doctor_real_config_against_the_real_repository():
     config = checks.load_gate_config()
     result = checks._run_doctor("doctor", config["gates"]["doctor"], config, checks.REPO_ROOT)
     assert not result.blocked, result.message
+
+
+# ---------------------------------------------------------------------------
+# T-V15-PRM-01 .. T-V15-PRM-04, T-V15-RPT-01 (REQ-V15-PRM-*, REQ-V15-RPT-01/03)
+# ---------------------------------------------------------------------------
+
+_FIXTURE_PROMPT_HEADER = """# Prompt NN -- fixture
+
+- **Date:** 2026-09-04
+- **Executor model:** claude-sonnet-5
+- **Model reason:** fixture
+- **Harness:** Claude Code
+- **Stage:** T11
+- **Owner of:** `tests/test_v15_standards.py`
+- **REQ ids:** REQ-V15-PRM-01
+"""
+
+_FIXTURE_PROMPT_BODY = """
+## Goal
+
+Fixture goal paragraph.
+
+## Constraints
+
+Fixture constraints.
+
+## Acceptance
+
+Run `uv run --locked pytest` and expect exit 0.
+
+## Stop
+
+Stop if the fixture breaks.
+"""
+
+
+def test_v15_prm_01_lint_accepts_a_well_formed_fixture(tmp_path: Path):
+    p = tmp_path / "44-fixture.md"
+    p.write_text(_FIXTURE_PROMPT_HEADER + _FIXTURE_PROMPT_BODY)
+    assert checks._lint_prompt_file(p, exempt=False) == []
+
+
+def test_v15_prm_02_lint_rejects_missing_model_reason(tmp_path: Path):
+    header = _FIXTURE_PROMPT_HEADER.replace("- **Model reason:** fixture\n", "")
+    p = tmp_path / "44-fixture.md"
+    p.write_text(header + _FIXTURE_PROMPT_BODY)
+    assert checks._lint_prompt_file(p, exempt=False) != []
+
+
+def test_v15_prm_02_lint_rejects_missing_stop_block(tmp_path: Path):
+    body = _FIXTURE_PROMPT_BODY.split("## Stop")[0]
+    p = tmp_path / "44-fixture.md"
+    p.write_text(_FIXTURE_PROMPT_HEADER + body)
+    problems = checks._lint_prompt_file(p, exempt=False)
+    assert problems
+    assert any("Stop" in pr or "blocks" in pr for pr in problems)
+
+
+def test_v15_prm_02_lint_rejects_blocks_out_of_order(tmp_path: Path):
+    body = """
+## Constraints
+
+Fixture constraints.
+
+## Goal
+
+Fixture goal.
+
+## Acceptance
+
+Run `uv run --locked pytest`.
+
+## Stop
+
+Stop condition.
+"""
+    p = tmp_path / "44-fixture.md"
+    p.write_text(_FIXTURE_PROMPT_HEADER + body)
+    problems = checks._lint_prompt_file(p, exempt=False)
+    assert problems
+    assert any("order" in pr for pr in problems)
+
+
+def test_v15_prm_02_lint_rejects_acceptance_with_only_prose(tmp_path: Path):
+    body = """
+## Goal
+
+Fixture goal.
+
+## Constraints
+
+Fixture constraints.
+
+## Acceptance
+
+It works correctly and everyone is happy with the result.
+
+## Stop
+
+Stop condition.
+"""
+    p = tmp_path / "44-fixture.md"
+    p.write_text(_FIXTURE_PROMPT_HEADER + body)
+    problems = checks._lint_prompt_file(p, exempt=False)
+    assert problems
+    assert any("Acceptance" in pr for pr in problems)
+
+
+def test_v15_prm_03_template_md_passes_the_lint():
+    template = checks.REPO_ROOT / "docs" / "prompts" / "TEMPLATE.md"
+    assert checks._lint_prompt_file(template, exempt=False) == []
+
+
+def test_v15_prm_04_exemption_is_a_literal_filename_not_a_numeric_comparison(tmp_path: Path):
+    exempt_files = {"43-v14-verify-run-fixes.md"}
+    p = tmp_path / "43-a-new-different-file.md"
+    p.write_text(_FIXTURE_PROMPT_HEADER)
+    is_exempt = p.name in exempt_files
+    assert not is_exempt
+    problems = checks._lint_prompt_file(p, exempt=is_exempt)
+    assert problems
+
+
+_LEDGER_HEADER = (
+    "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | "
+    "Tokens ↑/↓ | Cost | Model | Harness |"
+)
+
+
+def test_v15_rpt_01_lint_rejects_missing_ledger_section(tmp_path: Path):
+    report = tmp_path / "report-v1.5.md"
+    report.write_text("# Report\n\nNo ledger section here.\n")
+    assert checks._lint_report_ledger(report, _LEDGER_HEADER) != []
+
+
+def test_v15_rpt_01_lint_rejects_cell_count_mismatch(tmp_path: Path):
+    report = tmp_path / "report-v1.5.md"
+    short_row = "| tg-agent-bot | v1.5 | 2026-09-04 | ~5k | 11 | yes | 0 | 1k/2k |"
+    report.write_text(f"## Ledger row (paste into `economics.md`)\n\n```\n{short_row}\n```\n")
+    assert checks._lint_report_ledger(report, _LEDGER_HEADER) != []
+
+
+def test_v15_rpt_01_lint_accepts_matching_cell_count(tmp_path: Path):
+    report = tmp_path / "report-v1.5.md"
+    row = (
+        "| tg-agent-bot | v1.5 | 2026-09-04 | ~5k/6k | 11 | yes | 0 | 1k/2k | $0.01 | sonnet | CC |"
+    )
+    report.write_text(f"## Ledger row (paste into `economics.md`)\n\n```\n{row}\n```\n")
+    assert checks._lint_report_ledger(report, _LEDGER_HEADER) == []

@@ -4,6 +4,9 @@
 - **Executor model:** claude-opus-5 (Claude Code, background session)
 - **Model reason:** spec-v1.3 pins claude-opus-5 for this run (spec-v1.3.md, "Executor model for this run"): judgment calls — reading what the audit numbers mean, keeping four commits honest, driving subagents on minimal context — need a larger model.
 - **Harness:** Claude Code CLI, working directory `projects/tg-agent-bot`
+- **Stage:** not recorded (orchestrates all stages A–D of spec-v1.3 via the per-task briefs of prompts 10–29)
+- **Owner of:** orchestration only — delegates ownership to the per-task briefs logged as `docs/prompts/10-*.md` … `docs/prompts/29-*.md` (REQ-V13-EC-13)
+- **REQ ids:** REQ-V13-PRE-04, REQ-V13-EC-13, REQ-V13-EC-04
 - **Standing instruction:** AGENTS.md § "go protocol"
 
 ## Prompt as sent

@@ -1,7 +1,10 @@
 # Prompt 28 — v1.3 TD1: the run report (stage D)
 
-- **Sent to:** `general-purpose` subagent (clean context), Claude Code
+- **Date:** 2026-09-03
+- **Executor model:** claude-opus-5
 - **Model reason:** inherits spec-v1.3's claude-opus-5 pin for this run (docs/llm-usage.md row 31); same judgment rationale as prompt 09, applied to this task.
+- **Harness:** Claude Code (`general-purpose` subagent, clean context)
+- **Stage:** TD1
 - **Owner of:** `docs/reports/report-v1.3.md` (new), `docs/plan.md`,
   `docs/llm-usage.md` — explicitly never `README.md`
 - **REQ ids:** REQ-V13-RPT-01, RPT-05, RPT-06, RPT-07, section 13.4

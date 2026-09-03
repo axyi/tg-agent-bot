@@ -1,7 +1,11 @@
 # Prompt 16 — v1.3 TA7: clean-context review of stage A
 
-- **Sent to:** `code-reviewer` subagent (own clean context, AGENTS.md § Review)
+- **Date:** 2026-09-02
+- **Executor model:** claude-opus-5
 - **Model reason:** `code-reviewer` subagent, own clean context (AGENTS.md § Review — never self-review in the writing context); ran on claude-opus-5, this run's pin (docs/llm-usage.md row 31).
+- **Harness:** Claude Code (`code-reviewer` subagent, own clean context, AGENTS.md § Review)
+- **Stage:** TA7
+- **Owner of:** review only — no owned paths (`code-reviewer` subagent, AGENTS.md § Review)
 - **Scope:** the whole stage-A diff (C1 tree, before commit), i.e. carry-over,
   observability layer, pricing, benchmark harness, dashboard, A-mutations
 - **REQ ids:** section 13.5 of spec-v1.3 ("after stage A, before B1")
