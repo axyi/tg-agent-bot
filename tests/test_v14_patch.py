@@ -8,8 +8,12 @@ every LLM interaction is faked.
 import json
 import re
 
+import pytest
+
+from config import ConfigError, load_config
 from devtools import bench, bench_scenarios
 from tests.test_bench import fake_doc, fake_run, make_config
+from tests.test_config import base_env
 
 
 def _s01_answer_regex_pattern() -> str:
@@ -93,6 +97,36 @@ def test_t_v14_ben_03_constants_and_summarize_are_policy_independent():
     assert summary["successes"] == 1
     assert summary["totals"]["prompt_tokens"] == 100
     assert summary["totals"]["completion_tokens"] == 20
+
+
+def test_t_v14_rel_01_timeout_max_tokens_boundary():
+    """T-V14-REL-01 (REL-01): `load_config` rejects an `LLM_TIMEOUT_S` /
+    `LLM_MAX_TOKENS` pair under the latency-model floor
+    (21.1 + 0.093 * max_tokens, report-v1.3.md:340) — the old v1.3
+    default (120, 2048) itself now fails, naming both variables in the
+    error text; so does a max_tokens too large for a fixed timeout. The
+    shipped default (240, 2048) and the spec's own ceiling example
+    (600, 6224) both load cleanly."""
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(LLM_TIMEOUT_S="120"), load_env_file=False)
+    message = str(exc.value)
+    assert "LLM_TIMEOUT_S" in message and "LLM_MAX_TOKENS" in message
+
+    with pytest.raises(ConfigError) as exc:
+        load_config(
+            env=base_env(LLM_TIMEOUT_S="240", LLM_MAX_TOKENS="8192"),
+            load_env_file=False,
+        )
+    message = str(exc.value)
+    assert "LLM_TIMEOUT_S" in message and "LLM_MAX_TOKENS" in message
+
+    cfg = load_config(
+        env=base_env(LLM_TIMEOUT_S="600", LLM_MAX_TOKENS="6224"), load_env_file=False
+    )
+    assert cfg.llm_timeout_s == 600.0 and cfg.llm_max_tokens == 6224
+
+    cfg = load_config(env=base_env(), load_env_file=False)
+    assert cfg.llm_timeout_s == 240.0 and cfg.llm_max_tokens == 2048
 
 
 def test_t_v14_scn_01_s01_check_accepts_capability_paraphrase():

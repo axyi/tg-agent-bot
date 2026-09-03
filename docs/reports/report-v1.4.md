@@ -18,7 +18,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | `f6e634d` | T1 | S01 root cause: H1 classified, check repaired, `s01-repro`/`s01-verify` (`docs/prompts/33-…`) |
 | `51ac747` | T2 | harness readiness: BEN-03 row-key rule, BEN-04 guards, BEN-05 nine `env_flags` keys, BEN-02 item 5 dry run (`docs/prompts/34-…`) |
 | `818bbde` | T3 | `baseline-v1.4`: 35/36 successes, `B_plain = $0.003008745` (`docs/prompts/35-…`) |
-| _pending_ | T4 | RSN spike: a/c/d probed live, b `unsupported`, e no control found — **STOP, no honored+shippable mechanism** (`docs/prompts/36-…`) |
+| `485fcc5` | T4 | RSN spike: a/c/d probed live, b `unsupported`, e no control found — **STOP, no honored+shippable mechanism** (`docs/prompts/36-…`) |
+| _pending_ | T6 | Reliability, STOP branch: REL-01 (timeout/budget consistency, default 120→240); REL-03 released (`docs/prompts/37-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -103,6 +104,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T2 (harness readiness) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (+6: BEN-05 comparability × 2, BEN-03 unknown-column, T-V14-BEN-01/02/03) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
 | T3 (baseline-v1.4) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change (GATE-01)_ |
 | T4 (RSN spike, STOP) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change; scratch patches to `llm/base.py`/`llm/lmstudio.py`/`agent.py` reverted before commit) | rc=0 | rc=0 — all six OK | _not run — same reason, and not the final tree_ |
+| T6 (REL-01, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (+2: `T-V14-REL-01`, `test_t_cfg_06_timeout_default_is_240_rel_01`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted (unchanged count — no new `v14-*` entries authored yet; TST-05's STOP-narrowed minimum `{BEN-03, REL-01}` lands at T9) |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -286,6 +288,60 @@ policy); BEN-09 is released (GATE-02).
 
 ---
 
+## Reliability (T6 — REQ-V14-REL-01, REL-03; STOP branch: REL-01/REL-03 only)
+
+Full trial log and both deviations: `docs/prompts/37-v14-t6-reliability.md`.
+
+**REL-01 — the timeout/budget mismatch, fixed.** v1.3's measured latency
+model (`report-v1.3.md:340`, `21.1 s + 0.093 s/token`) means the old
+`LLM_TIMEOUT_S` default (`120`) admits only ~1063 completion tokens — well
+under `LLM_MAX_TOKENS`'s default (`2048`), so a long completion timed out
+and was retried with identical parameters, re-sending the whole prompt
+(this aborted v1.3's first baseline attempt). `load_config` now raises
+`ConfigError` when `llm_timeout_s < 21.1 + 0.093 × llm_max_tokens`, naming
+both variables. The default `LLM_TIMEOUT_S` becomes **`240`**
+(`21.1 + 0.093 × 2048 = 211.564 s` — the old `120`/`2048` pair would itself
+now fail the check); `LLM_MAX_TOKENS` stays `2048`. Supersedes EC-05 for
+`llm_timeout_s` only, per the spec's own AMEND-01 entry.
+Test-first (`T-V14-REL-01`, `tests/test_v14_patch.py`): both failure
+directions plus the shipped default (240/2048) and the spec's own cited
+ceiling pair (600/6224) load cleanly.
+
+**Deviation — `tests/test_v1_guardrails.py` (not in section 12.1's
+list).** `test_new_config_variables_are_validated` paired
+`LLM_MAX_TOKENS="8192"` with no timeout override, expecting success.
+Under REL-01 this pair can never be valid at any `LLM_TIMEOUT_S`
+(`21.1 + 0.093 × 8192 = 782.956 s`, above even the `LLM_TIMEOUT_S` ceiling
+of `600`) — REL-01's own text states this consequence directly ("ceiling
+600, so `LLM_MAX_TOKENS ≤ 6224`"), so this is inherent to the requirement,
+not an implementation choice. `advisor()` was attempted twice (unavailable,
+overloaded both times); resolved on REL-01's own textual evidence. Fixed
+by swapping in the spec's own cited maximum pair (`6224` / `600`) in place
+of `8192`, updating only that one literal and its assertion — 8 lines
+changed, nothing else in the test touched. Flagged here per this run's
+standing practice for `AGENTS.md`/spec tensions (as for T2's fixture
+patch and the RPT-05/`economics.md` conflict).
+
+**REL-03 — released, not fixed (SHOULD).** `metrics.py:193`'s
+`sum(row["reasoning_tokens"] or 0 …)` conflates "reported nothing" with
+"reported zero" in `Stats.reasoning_tokens`, contradicting the `Stats`
+class's own docstring. `bench.py`'s `## Reasoning` rendering already
+distinguishes the two correctly, so no gate depends on it. A
+`metrics.py`+`tests/`-only fix is possible in principle, but the only
+fixture exercising this field
+(`tests/test_observability.py::test_obs08_stats_aggregate_rows`, not
+listed in 12.1) asserts the pre-fix value; unlike the REL-01 collision
+above, nothing in the spec text acknowledges this specific test becoming
+obsolete, and REL-03 is a SHOULD with its own explicit safe default
+("released otherwise"). Given the genuine ambiguity, this executor did not
+edit a second unlisted test on inferred authority. **Known defect, carried
+forward, not fixed this run.**
+
+**`.env.example` not touched at T6** — REL-01's `LLM_TIMEOUT_S=240` line
+there is T8's job (GATE-02), not T6's; T6's own file scope never names it.
+
+---
+
 ## Sections pending later tasks
 
 The following REQ-V14-RPT-01 items are written by the task that produces
@@ -300,4 +356,5 @@ their evidence and are placeholders until then:
 5. **Gates table, full** and exact test/mutation counts — grows per commit,
    finalized T10.
 6. **Appendix-B results**, how each was driven, deviations, fix cycles — T10.
-7. **Known defects carried forward** (incl. REL-03's disposition) — T6/T10.
+7. ~~Known defects carried forward (incl. REL-03's disposition)~~ — REL-03
+   recorded above (T6): released, not fixed. Final consolidated list at T10.

@@ -41,6 +41,13 @@ DEFAULT_FETCH_INLINE_CHARS = 5000
 MIN_FETCH_INLINE_CHARS = 500
 MAX_FETCH_INLINE_CHARS = 20000
 
+# v1.4 addition (REQ-V14-REL-01): v1.3's measured latency model
+# (report-v1.3.md:340, `21.1 s + 0.093 s/token`) — a completion budget larger
+# than what the timeout can outlast times out and is retried with identical
+# parameters, re-sending the whole prompt.
+LATENCY_INTERCEPT_S = 21.1
+LATENCY_PER_TOKEN_S = 0.093
+
 # v1.2 addition (REQ-V12-SSR-02): scopes `address_scope` can name, and the
 # backstop the six is_* flags alone would miss (finding W-6).
 FORBIDDEN_SCOPES = ("loopback", "private", "link-local", "multicast",
@@ -257,6 +264,10 @@ def load_config(
     audit_log_path = _resolve(_value(source, "AUDIT_LOG_PATH") or "./exec_audit.jsonl")
     _check_sandbox_placement(exec_workdir, db_path, audit_log_path)
 
+    llm_timeout_s = _parse_timeout(_value(source, "LLM_TIMEOUT_S"))
+    llm_max_tokens = _parse_int(source, "LLM_MAX_TOKENS", 2048, 1, 8192)
+    _check_timeout_budget(llm_timeout_s, llm_max_tokens)
+
     return Config(
         telegram_bot_token=token,
         allowed_tg_ids=allowed_tg_ids,
@@ -265,10 +276,10 @@ def load_config(
         lmstudio_model=lmstudio_model,
         openrouter_api_key=openrouter_api_key,
         openrouter_model=openrouter_model,
-        llm_timeout_s=_parse_timeout(_value(source, "LLM_TIMEOUT_S")),
+        llm_timeout_s=llm_timeout_s,
         exec_workdir=_prepare_workdir(exec_workdir),
         db_path=_prepare_db_path(db_path),
-        llm_max_tokens=_parse_int(source, "LLM_MAX_TOKENS", 2048, 1, 8192),
+        llm_max_tokens=llm_max_tokens,
         lmstudio_context_length=_parse_int(
             source, "LMSTUDIO_CONTEXT_LENGTH", 42496, 2048, 2_000_000
         ),
@@ -329,7 +340,9 @@ def _parse_allowed_ids(raw: str) -> frozenset[int]:
 
 def _parse_timeout(raw: str) -> float:
     if not raw:
-        return 120.0
+        # REQ-V14-REL-01: 120 no longer clears the latency-model floor at the
+        # default LLM_MAX_TOKENS (2048) — supersedes EC-05 for this field only.
+        return 240.0
     try:
         timeout = float(raw)
     except ValueError:
@@ -337,6 +350,20 @@ def _parse_timeout(raw: str) -> float:
     if not 0 < timeout <= 600:
         raise ConfigError(f"LLM_TIMEOUT_S must be greater than 0 and at most 600, got: {raw}")
     return timeout
+
+
+def _check_timeout_budget(llm_timeout_s: float, llm_max_tokens: int) -> None:
+    """REQ-V14-REL-01: a completion budget the timeout cannot outlast times
+    out and is retried with identical parameters, re-sending the whole
+    prompt. Raise before that pair ever reaches a live request."""
+    floor = LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * llm_max_tokens
+    if llm_timeout_s < floor:
+        raise ConfigError(
+            f"LLM_TIMEOUT_S ({llm_timeout_s}) is below the latency-model floor "
+            f"for LLM_MAX_TOKENS ({llm_max_tokens}): needs at least {floor:.3f}s "
+            f"({LATENCY_INTERCEPT_S} + {LATENCY_PER_TOKEN_S} * llm_max_tokens). "
+            "Raise LLM_TIMEOUT_S or lower LLM_MAX_TOKENS."
+        )
 
 
 def _resolve(value: str) -> Path:

@@ -379,7 +379,12 @@ def test_new_config_variables_are_validated(tmp_path):
         env=env(FETCH_ALLOWED_DOMAINS=" WTTR.in , example.com ,, ",
                 TELEGRAM_BOT_NAME=" MyBot ", LLM_FAILOVER="OFF",
                 RATE_LIMIT_CAPACITY="1", RATE_LIMIT_REFILL_S="0.5",
-                LLM_MAX_TOKENS="8192", EXEC_DOCKER_IMAGE=" python:3.13-slim "),
+                # REQ-V14-REL-01: 8192 (the field's own per-value ceiling) no
+                # longer clears the latency-model floor at any LLM_TIMEOUT_S
+                # up to its own 600s ceiling (21.1 + 0.093*8192 = 782.956s) —
+                # 6224 / 600 is the spec's own cited maximum valid pair.
+                LLM_MAX_TOKENS="6224", LLM_TIMEOUT_S="600",
+                EXEC_DOCKER_IMAGE=" python:3.13-slim "),
         load_env_file=False,
     )
     assert cfg.fetch_allowed_domains == frozenset({"wttr.in", "example.com"})
@@ -387,7 +392,7 @@ def test_new_config_variables_are_validated(tmp_path):
     assert cfg.llm_failover == "off"
     assert cfg.rate_limit_capacity == 1
     assert cfg.rate_limit_refill_s == 0.5
-    assert cfg.llm_max_tokens == 8192
+    assert cfg.llm_max_tokens == 6224
 
     for bad in (
         {"LLM_MAX_TOKENS": "0"}, {"LLM_MAX_TOKENS": "8193"}, {"LLM_MAX_TOKENS": "x"},
