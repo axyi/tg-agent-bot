@@ -118,6 +118,7 @@ Install provenance (REQ-V15-DEP-03):
 | gitleaks 8.30.1 (T2) | GitHub release asset + checksum | `gitleaks_8.30.1_linux_x64.tar.gz` | `551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb` (matched `gitleaks_8.30.1_checksums.txt`, `sha256sum -c` OK) |
 | semgrep 1.176.0 (T3) | `uv tool install semgrep==1.176.0` (PyPI) | — | — (uv-tool channel, no standalone binary checksum applies) |
 | trivy 0.74.0 (T4) | GitHub release asset + checksum | `trivy_0.74.0_Linux-64bit.tar.gz` | `2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a` (matched `trivy_0.74.0_checksums.txt`, `sha256sum -c` OK) |
+| skylos 4.35.0 (T5) | `uv tool install skylos==4.35.0` (PyPI) | — | — (uv-tool channel) |
 
 **T2 — gitleaks 8.30.1.** Installed to `~/.local/bin/gitleaks` (already on
 `PATH`, replacing 8.24.3; the old binary kept as a local backup outside the
@@ -158,6 +159,29 @@ with the cache warm reused it with no network activity (`INFO
 test. This keeps every later `trivy` gate run offline within this run's
 timeframe (the DB's default freshness window is well beyond this run's
 duration); a stale cache on a later run is v1.6's concern, not this one's.
+
+**T5 — skylos 4.35.0.** `[[VERIFY]]` marker resolved: `skylos --help`
+shows a much larger surface than the spec's illustrative `[skylos,
+"{target}"]`. `skylos --version` prints `skylos 4.35.0`
+(`last_token` → `4.35.0`). Exit-code semantics measured directly against
+this repository (13 `unused_parameters` + 3 `unused_variables` findings,
+all severity LOW): **bare mode always exits 0 regardless of findings** —
+it is a report-only mode, not a gate; **`--gate` alone also stayed 0** on
+this repo (its default threshold does not trip on LOW-only findings);
+**`--gate --strict` exits 1 whenever any finding exists, 0 on a clean
+scan** (confirmed both ways) — the only combination that gives the
+"0 = clean / 1 = findings" contract every other findings gate has. The
+config's argv is therefore `[skylos, "{target}", --gate, --strict,
+--format, json, --output, "{artefact}"]`: `success_exit_codes: [0]`,
+`findings_exit_codes: [1]`. `--secrets`/`--danger`/`--quality`/`-a` were
+deliberately **not** added — they are off by default and outside the
+spec's own illustrative argv; default (dead-code) mode is what this
+release wires. Output is a categorised JSON object (`unused_functions`,
+`unused_imports`, `unused_variables`, `unused_parameters`,
+`unused_classes`, `unused_files`, plus a `grade`/`analysis_summary`
+rollup carrying per-directory `severities` counts) rather than a flat
+findings list like gitleaks/trivy/semgrep — `skylos_json` (T7) will need
+its own flattening logic, not a shared shape.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 

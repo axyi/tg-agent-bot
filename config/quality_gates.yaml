@@ -27,6 +27,8 @@ tools:
               version_argv: [rtk, --version] }
   trivy:    { version: "0.74.0", via: binary, version_parser: last_token,
               version_argv: [trivy, --version] }
+  skylos:   { version: "4.35.0", via: uv-tool, version_parser: last_token,
+              version_argv: [skylos, --version] }
 
 gates:
   ruff-check:
@@ -179,12 +181,15 @@ gates:
     severity: [ERROR]
     timeout_seconds: 180
 
-  # skylos 4.35.0 not installed until T5; argv is a placeholder,
-  # [[VERIFY]] against `skylos --help` at the pin before it ever executes.
+  # Confirmed against skylos --help at 4.35.0 (T5): bare mode always exits 0
+  # regardless of findings, so --gate --strict is added for exit-code
+  # semantics ("0 if clean" / "1 if any finding") consistent with every
+  # other findings gate; measured empirically on this repository.
   skylos:
     kind: command
     result_mode: findings
-    argv: [skylos, "{target}"]
+    argv: [skylos, "{target}", --gate, --strict, --format, json, --output,
+           "{artefact}"]
     placeholders: { target: "." }
     output_format: json
     parser: skylos_json
