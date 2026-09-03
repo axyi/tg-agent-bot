@@ -1,0 +1,237 @@
+{
+  "bench_schema": 1,
+  "meta": {
+    "tag": "rsn-a-1-default",
+    "started_at": "2026-09-03T12:10:29Z",
+    "finished_at": "2026-09-03T12:12:57Z",
+    "git_commit": "818bbdea1121d42f7d6f0edfc0c1470a23b385c7",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.8-27b",
+    "context_length": 42496,
+    "repeats": 1,
+    "only": [
+      "S05"
+    ],
+    "timeout_s": 600,
+    "prefix_tokens": 842,
+    "scenarios_sha256": "d0d9e3f658d1ad6b36d1048b98d39f3a180468c484e9c549163b8bcb4ac0aeae",
+    "pricing": {
+      "basis": "reference:qwen/qwen3.8-27b",
+      "model": "qwen/qwen3.8-27b",
+      "input_usd_per_mtok": 0.425,
+      "output_usd_per_mtok": 2.5500000000000003,
+      "cached_input_usd_per_mtok": 0.08499999999999999,
+      "fetched_at": "2026-09-03T12:10:29Z"
+    },
+    "skipped_scenarios": [],
+    "env_flags": {
+      "HISTORY_TOOL_STUB": "on",
+      "EXEC_OUTPUT_DEFAULT_CHARS": 1500,
+      "FETCH_INLINE_DEFAULT_CHARS": 5000,
+      "LLM_REASONING": null,
+      "LLM_SUMMARY_MODEL": "",
+      "LLM_FAILOVER": "off",
+      "LLM_MAX_TOKENS": 2048,
+      "LLM_REASONING_POLICY": null,
+      "LLM_REASONING_ON_PURPOSES": null
+    },
+    "config_sha256": "8a9cf9040f2df068fe4f7dd27d205fc1dc3174897ecfce901e7ec14b94caa5a9",
+    "constants": {
+      "CONTEXT_WINDOW_MESSAGES": 30,
+      "EXEC_MAX_STREAM_BYTES": 4096,
+      "FETCH_MAX_BYTES": 65536,
+      "ROUND_LIMIT": 8,
+      "TOOL_ROUND_LIMIT": 7,
+      "TOOL_EXECUTION_LIMIT": 12,
+      "HTTP_ATTEMPT_LIMIT": 9,
+      "REQUEST_DEFAULTS": {
+        "temperature": 0,
+        "stream": false,
+        "tool_choice": "auto"
+      }
+    }
+  },
+  "runs": [
+    {
+      "scenario": "S05",
+      "repeat": 1,
+      "success": true,
+      "failure": null,
+      "checks": [
+        {
+          "kind": "tool_used",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "answer_regex",
+          "ok": true,
+          "detail": "ok"
+        }
+      ],
+      "answers": [
+        "\n\nПервое напечатанное число: 332."
+      ],
+      "llm_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-03T12:10:32Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 917,
+          "completion_tokens": 412,
+          "total_tokens": 1329,
+          "cached_tokens": null,
+          "reasoning_tokens": 329,
+          "reasoning_chars": 1102,
+          "prompt_chars": 2566,
+          "prompt_chars_by_role": "{\"assistant\": 0, \"system\": 946, \"tool\": 0, \"tools\": 1388, \"user\": 232}",
+          "messages_n": 2,
+          "tools_exposed": 3,
+          "latency_ms": 43031,
+          "finish_reason": "tool_calls",
+          "tool_calls_n": 1,
+          "error_kind": null,
+          "cost_usd": 0.0014403250000000001,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "conv_seq": 1
+        },
+        {
+          "id": 2,
+          "turn_id": 3,
+          "purpose": "agent",
+          "round": 2,
+          "attempt": 2,
+          "ts": "2026-09-03T12:11:16Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 5182,
+          "completion_tokens": 32,
+          "total_tokens": 5214,
+          "cached_tokens": null,
+          "reasoning_tokens": 16,
+          "reasoning_chars": 60,
+          "prompt_chars": 9371,
+          "prompt_chars_by_role": "{\"assistant\": 289, \"system\": 946, \"tool\": 6516, \"tools\": 1388, \"user\": 232}",
+          "messages_n": 4,
+          "tools_exposed": 3,
+          "latency_ms": 100947,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.00228395,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "conv_seq": 1
+        }
+      ],
+      "tool_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "tool_call_id": "call_2_0",
+          "tool": "exec",
+          "ts": "2026-09-03T12:11:16Z",
+          "input_chars": 136,
+          "raw_output_chars": 4096,
+          "output_chars": 4096,
+          "output_tokens_est": 1792,
+          "duration_ms": 420,
+          "outcome": "ok",
+          "conv_seq": 1
+        }
+      ],
+      "totals": {
+        "calls": 2,
+        "failed_calls": 0,
+        "prompt_tokens": 6099,
+        "completion_tokens": 444,
+        "cached_tokens": 0,
+        "reasoning_tokens": 345,
+        "tool_calls": 1,
+        "tool_output_tokens_est": 1792,
+        "latency_ms": 143978,
+        "cost_usd": 0.003724275,
+        "resent_tokens": 917,
+        "new_tokens": 5182,
+        "wall_ms": 144811
+      }
+    }
+  ],
+  "summary": {
+    "runs": 1,
+    "skipped": 0,
+    "successes": 1,
+    "success_rate": 1.0,
+    "per_scenario": {
+      "S05": {
+        "success": 1,
+        "of": 1,
+        "median": {
+          "calls": 2,
+          "failed_calls": 0,
+          "prompt_tokens": 6099,
+          "completion_tokens": 444,
+          "cached_tokens": 0,
+          "reasoning_tokens": 345,
+          "tool_calls": 1,
+          "tool_output_tokens_est": 1792,
+          "latency_ms": 143978,
+          "cost_usd": 0.003724275,
+          "resent_tokens": 917,
+          "new_tokens": 5182,
+          "wall_ms": 144811
+        }
+      }
+    },
+    "totals": {
+      "calls": 2,
+      "failed_calls": 0,
+      "prompt_tokens": 6099,
+      "completion_tokens": 444,
+      "cached_tokens": 0,
+      "reasoning_tokens": 345,
+      "tool_calls": 1,
+      "tool_output_tokens_est": 1792,
+      "latency_ms": 143978,
+      "cost_usd": 0.003724275,
+      "resent_tokens": 917,
+      "new_tokens": 5182,
+      "wall_ms": 144811
+    },
+    "avg_per_task": {
+      "tokens": 6543.0,
+      "rounds": 2.0,
+      "tool_calls": 1.0,
+      "latency_ms": 143978.0
+    },
+    "cost_per_success": 0.003724275,
+    "tokens_per_success": 6543.0,
+    "resent_share": 0.1503525168060338,
+    "cache_hit_rate": null,
+    "top_tools": [
+      {
+        "name": "exec",
+        "calls": 1,
+        "output_tokens_est": 1792
+      }
+    ],
+    "top_turn": {
+      "scenario": "S05",
+      "repeat": 1,
+      "turn": 3,
+      "round": 2,
+      "prompt_tokens": 5182
+    },
+    "context_growth": {
+      "system": 0.0,
+      "tools": 0.0,
+      "user": 0.0,
+      "assistant": 289.0,
+      "tool": 6516.0
+    }
+  }
+}

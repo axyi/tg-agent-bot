@@ -17,7 +17,8 @@ Commits on `main` (grows per task; ORD-01 order):
 | `30c7a16` | T0 | preconditions, this report's skeleton (`docs/prompts/31-…`, `32-…`) |
 | `f6e634d` | T1 | S01 root cause: H1 classified, check repaired, `s01-repro`/`s01-verify` (`docs/prompts/33-…`) |
 | `51ac747` | T2 | harness readiness: BEN-03 row-key rule, BEN-04 guards, BEN-05 nine `env_flags` keys, BEN-02 item 5 dry run (`docs/prompts/34-…`) |
-| _pending_ | T3 | `baseline-v1.4`: 35/36 successes, `B_plain = $0.003008745` (`docs/prompts/35-…`) |
+| `818bbde` | T3 | `baseline-v1.4`: 35/36 successes, `B_plain = $0.003008745` (`docs/prompts/35-…`) |
+| _pending_ | T4 | RSN spike: a/c/d probed live, b `unsupported`, e no control found — **STOP, no honored+shippable mechanism** (`docs/prompts/36-…`) |
 
 ## Preconditions (T0 — REQ-V14-PRE-01…05)
 
@@ -100,6 +101,8 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T0 (pre-change) | rc=0 | rc=0, all checks passed | rc=0 — **719 passed** | rc=0 | rc=0 — `config`/`db`/`docker (29.7.2)`/`telegram`/`lmstudio`/`openrouter` all OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
 | T1 (S01 repair) | rc=0 | rc=0, all checks passed | rc=0 — **720 passed** (+1: `tests/test_v14_patch.py::test_t_v14_scn_01_s01_check_accepts_capability_paraphrase`) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
 | T2 (harness readiness) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (+6: BEN-05 comparability × 2, BEN-03 unknown-column, T-V14-BEN-01/02/03) | rc=0 | rc=0 — all six OK | rc=0 — **65 mutations, 65 killed**, 0 survived, 0 errored, 0 drifted |
+| T3 (baseline-v1.4) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change) | rc=0 | rc=0 — all six OK | _not run — no production/test/mutation-relevant change (GATE-01)_ |
+| T4 (RSN spike, STOP) | rc=0 | rc=0, all checks passed | rc=0 — **726 passed** (no test change; scratch patches to `llm/base.py`/`llm/lmstudio.py`/`agent.py` reverted before commit) | rc=0 | rc=0 — all six OK | _not run — same reason, and not the final tree_ |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -193,6 +196,96 @@ lands in T7/T8 once a candidate exists.
 
 ---
 
+## RSN spike (T4 — REQ-V14-RSN-01…06)
+
+All five RSN-02 candidates tried, in order. **None both honored and
+shippable — RSN-06 STOP: there is no optimization commit.** Full trial
+log, per-pair evidence and the candidate-e documentation search:
+`docs/prompts/36-v14-t4-rsn-spike.md`.
+
+Every `a`/`c`/`d` probe used a temporary, uncommitted patch to
+`llm/base.py` / `llm/lmstudio.py` / `agent.py`, driven by a one-off
+in-process script that calls `bench.main([...])` twice per pair (RSN-01's
+pair contract: sequential, one Python process, no subprocess, no new CLI
+flag or env var). `git diff` confirmed empty before each next candidate;
+the tree carries no production change at this commit — only the
+`rsn-*.json`/`.log`/`.md` artefacts.
+
+**Mechanism table (RSN-04), one row per pair member, LM Studio `0.4.23`,
+every HTTP exchange `200`/no error (`error_kind` null, `finish_reason` ∈
+{`stop`,`tool_calls`} on all 28 probe calls):**
+
+| letter | ord. | member | mechanism | Σreasoning_tokens | max reasoning_chars | reasoning share | S05 | verdict (on `off` row) |
+|---|---|---|---|---|---|---|---|---|
+| a | 1 | default | `chat_template_kwargs.enable_thinking=false` | 345 | 1102 | 77.7% | 1/1 | |
+| a | 1 | off | (same) | 345 | 1103 | 77.2% | 1/1 | **not honored** — off unchanged from default |
+| a | 2 | default | (same) | 299 | 938 | 74.6% | 1/1 | |
+| a | 2 | off | (same) | 463 | 1585 | 81.9% | 1/1 | **not honored** — off *higher* than default |
+| c | 1 | default | assistant prefill `<think>\n\n</think>\n\n` (last message) | 345 | 1102 | 77.2% | 1/1 | |
+| c | 1 | off | (same) | 0 | 0 | 0.0% | 1/1 | **honored but unshippable** (POL-05 item 4 — breaks CCH-02(a)) |
+| c | 2 | default | (same) | 349 | 1132 | 77.9% | 1/1 | |
+| c | 2 | off | (same) | 0 | 0 | 0.0% | 1/1 | **honored but unshippable** |
+| c | 3 | default | (same) | 345 | 1102 | 77.7% | 1/1 | |
+| c | 3 | off | (same) | 0 | 0 | 0.0% | 1/1 | **honored but unshippable** |
+| d | 1 | default | Qwen3 `/no_think` appended to the `(now: …)` line of the last user message | 345 | 1100 | 77.2% | 1/1 | |
+| d | 1 | off | (same) | 273 | 911 | 73.6% | 1/1 | **not honored** — reduced, not zero |
+| d | 2 | default | (same) | 338 | 1083 | 77.5% | 1/1 | |
+| d | 2 | off | (same) | 634 | 2149 | 86.6% | 1/1 | **not honored** — off *higher* than default, no reliable effect |
+| b | — | — | vendor-documented disable value of `reasoning`/`reasoning_effort` | — | — | — | — | **unsupported** — PRE-03 (2026-09-03): LM Studio's changelog documents `reasoning.effort ∈ {low,medium,high}` for `openai/gpt-oss-20b` only (added 0.3.29), never a disable value, never for a Qwen3-class model, through the running `0.4.23`. No probe pair consumed (RSN-05). `rsn-b-low-info` (optional, `effort:"low"` informational pair) **not run** — adds no evidence toward a winning mechanism since `b` is already conclusively `unsupported`, and every RSN-06 STOP deliverable is met without it. |
+| e | — | — | model-level default set in LM Studio (GUI or `lms` CLI) | — | — | — | — | **no control found** — `https://lmstudio.ai/docs/cli/load` (2026-09-03): `lms load`'s only flags are `[path]`, `--ttl`, `--gpu`, `--context-length`, `--identifier`, `--estimate-only`, `--host` — nothing reasoning/thinking-related. `https://lmstudio.ai/docs/typescript/llm-prediction/parameters` (2026-09-03): the documented Inference Parameters (`temperature`, `maxTokens`, `topP`, structured output) and Load Parameters (context length, GPU offload) carry no reasoning/thinking/chat-template field. A GitHub issue against LM Studio (as of v0.4.16) confirms no GUI slider/toggle exists for reasoning effort even for `gpt-oss` models, the one class that has *any* documented per-request reasoning field. Per RSN-02 ("name it… and do not guess"): this **is** the named finding — no version-appropriate control exists for `0.4.23`, so `rsn-e-info` **cannot be run** (there is nothing to toggle). e is categorically excluded from authorizing T5/T7 regardless (RSN-02: "cannot pass RSN-03 and cannot authorize T5 or T7"). |
+
+**Candidate a analysis.** Both pairs show the `off` member at or above the
+`default` member's reasoning volume (345→345, 299→463) — the undocumented
+top-level `chat_template_kwargs` key has no observable effect on this LM
+Studio build; the server does not forward it to the chat template, or the
+template ignores it. Not honored, 0/2.
+
+**Candidate c analysis.** All three pairs: `off` reads exactly `0`/`0` on
+both `reasoning_tokens` and `reasoning_chars`, `default` stays in the
+usual ~300–350-token band, S05's checks (`tool_used("exec")`,
+`answer_regex(r"\b332\b")`) pass on every one of the six runs. RSN-03
+items 1–3 all satisfied directly (no omitted-token fallback needed) — the
+only candidate that is genuinely `honored`. Rejected at POL-05 item 4
+regardless: the prefill is appended as the message array's last element,
+so it cannot survive as a fixed byte-for-byte prefix while the array
+grows round over round — every policy (`always`/`by-purpose`) that would
+ship it breaks REQ-V13-CCH-02(a)'s prefix-extension invariant.
+
+**Candidate d analysis.** Pair 1 shows a partial reduction (345→273, 21%
+down but nonzero — fails RSN-03 item 1's exact-zero requirement outright,
+so the 20% omitted-token fallback in item 3 is moot: `reasoning_tokens`
+was never omitted on either member). Pair 2 shows an *increase*
+(338→634). `/no_think` on the `(now: …)` line has no consistent
+suppressive effect on this model/server combination — not honored, 0/2.
+
+**Why the README is not touched at T4.** RSN-02's "name it in the README
+note" instruction for candidate e is part of the policy documentation
+T5/T8 write (`README.md` is not in T4's declared file scope, ORD-01's
+table row 1261). Since RSN-06 routes this run to the STOP branch, T5 is
+declared not-executed (below) and no `README.md` policy section is ever
+created for e — or any candidate — to be named in. The finding is
+recorded here and in `docs/prompts/36-…` instead, which satisfies "name
+it… and do not guess" without inventing a README section for a policy
+that does not ship.
+
+**RSN-06 STOP — verdict.** No candidate is both honored (RSN-03) and
+shippable (POL-05): `a` not honored, `b` unsupported, `c` honored but
+unshippable, `d` not honored, `e` no control found (and categorically
+disqualified regardless). **There is no optimization commit.** Per
+RSN-06, this run still delivers in full: the S01 repair (above),
+`baseline-v1.4` (above), both errata (RPT-04, T10), REL-01 (T6), this
+mechanism table, and a final verdict of **FAIL, cause: no honored
+reasoning mechanism**. Section 6 (POL-01…07 implementation), the two new
+`## Reasoning` columns of section 7 (`reasoning_requested` /
+`reasoning_honored`) and section 10's candidate benchmark runs (T7) are
+**not-executed**. T5 and T7 are not executed; REL-02 (with its tests and
+mutation) is released; T8 reduces to the mechanism-independent
+documentation of RPT-06's final paragraph (REL-01's `.env.example`
+`LLM_TIMEOUT_S=240` pair and the README lines that do not describe a
+policy); BEN-09 is released (GATE-02).
+
+---
+
 ## Sections pending later tasks
 
 The following REQ-V14-RPT-01 items are written by the task that produces
@@ -201,7 +294,8 @@ their evidence and are placeholders until then:
 1. **Full verdict against `B_v1.4`** (`C_plain`, `C_conservative`, both gate
    outcomes, honored rate, any `DRIFT:`/`FINISH-LENGTH:` line — `B_plain`
    itself is recorded above) — T7/T8/T10.
-2. **The mechanism table** (RSN-04) — T4.
+2. ~~The mechanism table (RSN-04)~~ — done above (T4). Verdict: **STOP**,
+   no honored+shippable mechanism.
 3. **Errata to earlier reports** (RPT-04, E1/E2) — T10.
 5. **Gates table, full** and exact test/mutation counts — grows per commit,
    finalized T10.
