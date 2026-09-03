@@ -2,6 +2,11 @@
 
 - **Date:** 2026-09-03
 - **Executor model:** claude-sonnet-5 (Claude Code, background session)
+- **Model reason:** continues the run's pinned model (prompt 31); the
+  executor's own work is dispatching the review, applying its findings,
+  and recording dispositions — the review's judgment itself belongs to
+  the clean-context `code-reviewer` subagent below, not a model swap for
+  this session.
 - **Reviewer:** `code-reviewer` subagent, clean context (no access to this
   session's writing context, per REV-01's own requirement)
 - **Harness:** Claude Code CLI

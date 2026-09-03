@@ -116,7 +116,7 @@ were run — the gates that PRE-01 item 2 requires before touching anything).
 | T9 (mutations, STOP branch) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change; `tests/test_mutation_check.py`'s generic loops cover the two new entries) | rc=0 | rc=0 — all six OK | rc=0 — **67 mutations, 67 killed**, 0 survived, 0 errored, 0 drifted (65 existing + 2 new `v14-*`: `v14-ben-03-unknown-column-accepted`, `v14-rel-01-timeout-budget-boundary-disabled`) |
 | T9 (REV-01 review fixes) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted (+1: `v14-ben-03-missing-column-accepted`, the sibling half of BEN-03's rule the review found uncovered) |
 | T10 (report/post/errata/ledger) | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — run alone, sequentially after every other T10 change, per GATE-01's "and on the final tree" clause |
-| **T10 (advisor follow-up — final tree)** | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — docs-only fix commit (Fix cycles section, E1/E2 verification executed, RPT-05 forward-pointer, 9→10 commit count in `plan.md`/`llm-usage.md`); run alone, sequentially, per the same clause |
+| **T10 (advisor follow-up — final tree)** | rc=0 | rc=0, all checks passed | rc=0 — **728 passed** (no test change) | rc=0 | rc=0 — all six OK | rc=0 — **68 mutations, 68 killed**, 0 survived, 0 errored, 0 drifted — docs-only fix commit (Fix cycles section, E1/E2 verification executed, RPT-05 forward-pointer, 9→11 commit count in `plan.md`/`llm-usage.md`); run alone, sequentially, per the same clause |
 
 _(Further rows land as each task's commit completes — GATE-01's per-commit
 rule: gates 1–5 always, gate 6 additionally at commits touching production
@@ -535,9 +535,19 @@ absolute, once-exception rule; RPT-05's instruction is a narrower §13
 line that cannot open a second exception EC-01 itself does not name. So
 nothing is lost, the row `economics.md` would have carried is reproduced
 here instead — this run's own `docs/llm-usage.md` contribution (rows
-33–42, below) summed and named by its executor model, `claude-sonnet-5`,
+34–35, below) summed and named by its executor model, `claude-sonnet-5`,
 for whoever next reconciles `economics.md` by hand, outside this
 repository, as prior versions' rows were.
+
+The row, exactly as it belongs in the lab-root ledger:
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.4 | 2026-09-03 | ~25 000 (101 719 B) | 12 | ❌ no — RSN-06 STOP: honored+shippable reasoning-механизма нет (2/5 repair-циклов) | 2 found / 2 fixed | unknown (main) + 153.6k (review-сабагент) | unknown | claude-sonnet-5 | Claude Code |
+```
+
+The lab has since applied this row as commit `3c12cc9` outside this
+repository; future run reports MUST carry this row (or its equivalent)
+inline, per this same disposition, until EC-01's boundary changes.
 
 ---
 
