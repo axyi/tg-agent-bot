@@ -20,7 +20,7 @@ implementation is produced by an AI agent from it.
 | Live run against Telegram + LM Studio / OpenRouter | done as of v1's `--selftest-live` and the Appendix-B/C/D acceptance drivers; a real Telegram conversation with a live operator account has not been exercised — every acceptance run to date has been driven by a script standing in for the operator's messages (declared as a deviation in each run's report) |
 | `docs/spec/spec-v1.3.md` + implementation | done — token economy (assignment 5): observability layer, benchmark harness and dashboard, the baseline token audit, six optimizations O1–O6. Four commits, six gates green at C1 and C3, 719 tests, 65/65 mutations killed, two clean-context reviews. **Benchmark verdict: FAIL** — cost per successful task $0.002687 → $0.002492 (−7.3 %, target −30 %), success rate 100.0 % → 94.4 % (−5.6 pp, budget −2 pp). Prompt tokens −18.1 %, tool output −31.3 %, median latency −36.7 %. See `docs/reports/report-v1.3.md` |
 | `docs/spec/spec-v1.4.md` + implementation | done — patch release: a bounded spike (RSN-01…06) tried all five candidate reasoning-off mechanisms LM Studio might honor, live, in strict order. **None both honored and shippable — verdict FAIL, cause: no honored reasoning mechanism (RSN-06 STOP).** `a` (`chat_template_kwargs.enable_thinking`) and `d` (Qwen3 `/no_think`) not honored; `b` (`reasoning.effort`) unsupported (LM Studio never documents a disable value); `c` (empty `<think>` prefill) honored 3/3 but rejected — breaks the byte-stable cached-prefix invariant (POL-05); `e` (an LM Studio GUI/`lms` CLI default) has no documented control for the running version at all. Per RSN-06/GATE-02, sections 6–7 (policy + observability) and candidate benchmarking are declared not-executed. Still delivered: the S01 check repair (H1 — the check measured phrasing, not capability), a fresh `baseline-v1.4` ($0.003009/success), REL-01 (the `LLM_TIMEOUT_S`/`LLM_MAX_TOKENS` consistency check, default 120→240), mutation coverage for the shipped code (68/68 killed), and a code review with two real, fixed findings. 11 commits, six gates green at every commit (2 of 5 repair cycles consumed — T6, T9), 728 tests (+9 over v1.3). Numbers come from `baseline-v1.4.json`/`docs/reports/report-v1.4.md` — `docs/reports/bench-v1.4.md` does not exist on this branch (it is `report --gate --candidate`'s output, and no candidate was ever produced). See `docs/reports/report-v1.4.md` |
-| `docs/spec/spec-v1.5.md` + implementation | **in progress** (T16 of 20 landed as of this commit) — patch release, not a token-economy iteration despite the version number: local engineering standards and quality gates. A versioned `.githooks/` chain (`commit-msg`/`pre-commit`/`pre-push`) live from T8 on; a config-driven runner (`devtools/checks.py` + `config/quality_gates.yaml`, which is the sole authority for gate membership, severity thresholds and tool pins — never a literal in the code) adding `doctor` (pinned-tool drift, fails closed on a newer version too), `lint-docs` (prompt format, the report's ledger row) and `replay` (re-verifies historical commits from git objects only); gitleaks upgraded to 8.30.1 and three new scanners — semgrep (vendored ruleset), trivy, skylos (shadow) — plus four `v15-*` mutation entries and `--select`; Python 3.13 → 3.14 and the sandbox image pinned by digest (byte-compared exec smoke: identical, not benchmark-affecting). 842 tests as of this commit (+114 over v1.4); no repair cycles consumed yet. See `docs/reports/report-v1.5.md` (provisional until T18/T19) |
+| `docs/spec/spec-v1.5.md` + implementation | **complete** (all 20 tasks landed) — patch release, not a token-economy iteration despite the version number: local engineering standards and quality gates. A versioned `.githooks/` chain (`commit-msg`/`pre-commit`/`pre-push`) live from T8 on; a config-driven runner (`devtools/checks.py` + `config/quality_gates.yaml`, which is the sole authority for gate membership, severity thresholds and tool pins — never a literal in the code) adding `doctor` (pinned-tool drift, fails closed on a newer version too), `lint-docs` (prompt format, the report's ledger row) and `replay` (re-verifies historical commits from git objects only); gitleaks upgraded to 8.30.1 and three new scanners — semgrep (vendored ruleset), trivy, skylos (shadow) — plus four `v15-*` mutation entries and `--select`; Python 3.13 → 3.14 and the sandbox image pinned by digest (byte-compared exec smoke: identical, not benchmark-affecting). 842 tests (+114 over v1.4); 0 of 5 repair cycles consumed across the whole run. See `docs/reports/report-v1.5.md` |
 
 ## How the implementation run works
 
@@ -182,7 +182,7 @@ commits, six gates green at every commit (2 of the 5-cycle repair
 budget consumed — T6, T9; see report's Fix cycles), 728 tests. Full
 detail: `docs/reports/report-v1.4.md`.
 
-## v1.5 (in progress) — spec: `docs/spec/spec-v1.5.md`, report: `docs/reports/report-v1.5.md`
+## v1.5 (complete) — spec: `docs/spec/spec-v1.5.md`, report: `docs/reports/report-v1.5.md`
 
 Not a token-economy iteration — the version number continues the patch
 sequence, but the content is unrelated to the token-optimization
@@ -202,9 +202,12 @@ skylos (shadow) — all diff-scoped except gitleaks; four `v15-*`
 mutation entries and `mutation_check.py --select`; ruff 0.16.6, Python
 3.13 → 3.14, and the sandbox image pinned by digest (a byte-compared
 exec smoke proved the bump not benchmark-affecting: identical output,
-both scenarios). As of this commit (T16 of 20): 842 tests (+114 over
-v1.4), no repair cycles consumed. Full detail, once final:
-`docs/reports/report-v1.5.md`.
+both scenarios). All 20 tasks landed: 842 tests (+114 over v1.4), 0 of
+5 repair cycles consumed across the whole run, a clean-context review
+(3 fixed, 2 waived), and a final acceptance run (six gates, `full`
+15/15, all 12 Appendix-B scenarios, `replay` 17/19 with the 2
+exceptions diagnosed and confined to pre-hook-activation commits). Full
+detail: `docs/reports/report-v1.5.md`.
 
 ## Token-economy candidates (unscheduled)
 

@@ -1,17 +1,16 @@
 # Implementation report — spec-v1.5
 
-**Status: provisional (T18) — REQ-V15-RPT-02's elements are filled in
-except item 4's `<implementation-tip>` SHA and every T19 artefact,
-which land in T19's evidence-only commit per REQ-V15-ACC-04.** This
-line, and the `(T19 — pending)` markers below, are removed once T19
-lands.
+**Status: complete (T19).** T0–T19 all landed; the six `AGENTS.md`
+gates, the `full` profile and Appendix B are green on the final tree;
+`checks.py replay` evidence is quoted in full (17 PASS, 2 FAIL, both
+explained, both confined to commits predating hook activation). The
+freeze of REQ-V15-ACC-03 begins at this commit.
 
 - **Spec:** `docs/spec/spec-v1.5.md`
 - **Executor:** claude-sonnet-5 (Claude Code)
 - **`<base>`** (HEAD before this run's first commit): `9ad3047d981b30005f81e15e09d2f02444b8009a`
-- **`<implementation-tip>`:** this commit cannot contain its own SHA
-  (REQ-V15-ACC-04) — recorded by T19's evidence-only commit, which is
-  this exact content's own hash once it lands
+- **`<implementation-tip>`** (REQ-V15-ACC-04, T18's own commit — a
+  commit cannot contain its own SHA): `752400064d7d8c34a45b5d3232b68366f997f92d`
 
 ## Operator inputs
 
@@ -1043,6 +1042,131 @@ hardcode `blocked=True` unconditionally, `.semgrep/*` hashes match
 image-string occurrences, `.claude/settings.json`/`CLAUDE.md`'s RTK block
 match the spec verbatim).
 
+## Final acceptance (T19 — REQ-V15-ACC-01..04)
+
+Run against the final tree, `<implementation-tip>` =
+`752400064d7d8c34a45b5d3232b68366f997f92d` (T18's own commit — a commit
+cannot contain its own SHA, REQ-V15-ACC-04). No source, test or config
+file changes in this section; T19's own commit is evidence-only.
+
+**The six verbatim `AGENTS.md` gates, run fresh on the final tree:**
+
+| # | gate | exit |
+|---|---|---|
+| 1 | `uv sync --locked` | 0 |
+| 2 | `uv run --locked ruff check .` | 0 |
+| 3 | `uv run --locked pytest` | 0 (842 collected, all pass) |
+| 4 | `uv run --locked python bot.py --selftest` | 0 |
+| 5 | `uv run --locked python bot.py --selftest-live` | 0 — `config`, `db`, `docker (29.7.2)`, `telegram`, `lmstudio`, `openrouter` all OK |
+| 6 | `uv run --locked python devtools/mutation_check.py` | 0 — 72 mutations, 72 killed, 0 survived, 0 errored, 0 drifted |
+
+**`checks.py run --profile full --since <base>`:** all 15 members PASS
+(`uv-sync`, `ruff-check-all`, `ruff-format`, `branch-name`, `pytest`,
+`selftest`, `selftest-live`, `mutation-all`, `gitleaks-tree`, `trivy`,
+`semgrep`, `skylos`, `hooks-installed`, `doctor`, `lint-docs`) —
+`lint-docs` green for the first time this run, now that the ledger row
+is filled (T18).
+
+**`checks.py replay --range <base>..<implementation-tip>` (19
+commits):** **17 PASS, 2 FAIL, exit 1** — quoted here in full per
+REQ-V15-EC-09 ("the report quotes its output"):
+
+```
+[PASS] 69fcfcd8f75a: clean
+[FAIL] b4c4e1350079: ruff format devtools/checks.py: would reformat; ruff format tests/test_v15_standards.py: would reformat
+[PASS] fd61944e5689: clean
+[PASS] 01c301419bbf: clean
+[PASS] 77a0466ce682: clean
+[PASS] 12f0ffd49de6: clean
+[PASS] eb166513f3ed: clean
+[FAIL] 2276b2028c03: gitleaks: tests/test_v15_standards.py: UNKNOWN (x5)
+[PASS] 534e7fe095dd: clean
+[PASS] c5a93cd2273b: clean
+[PASS] 11934104b5dd: clean
+[PASS] bc3651aead1f: clean
+[PASS] da8dbc391150: clean
+[PASS] 57fec177a2ed: clean
+[PASS] cdbaa67bec6e: clean
+[PASS] c64ce4d8ba09: clean
+[PASS] 51ec54a14085: clean
+[PASS] cd88b352460f: clean
+[PASS] 752400064d7d: clean
+```
+
+`checks.py replay` is a historical audit, not a member of any profile in
+`config/quality_gates.yaml` and not one of the six `AGENTS.md` gates —
+REQ-V15-ACC-03's "every gate green on the tree that ships" is satisfied
+by the six gates and the 15/15 `full` run above, both against the
+current tree; replay additionally walks 19 historical commits under
+*today's* policy, which the spec itself flags as a stricter, retroactive
+standard ("uses today's policy rather than the hook in force at each
+commit (hooks land at T8)"). Both failures are diagnosed, not
+hand-waved:
+
+- **`b4c4e13` (T1's commit) — genuine pre-hook formatting debt, not a
+  ruff-version artefact.** Hypothesis-tested directly rather than
+  assumed: `git show b4c4e13:devtools/checks.py | ruff format --diff`
+  shows real, substantive reformatting (e.g. a three-line function
+  signature ruff collapses to one) — the blob was never in canonical
+  style, at any ruff version. `--force-exclude` is confirmed a no-op
+  here (`pyproject.toml` has no `extend-exclude` touching `devtools/`).
+  T1 predates T8's hook activation by seven commits; no pre-commit hook
+  existed yet to catch it, and the blob was never revisited.
+- **`2276b20` (T7's commit) — the AWS-key fixture, already fixed the
+  very next commit.** This is the same fixture value T8's own report
+  section documents as "bug 2": a contiguous fake-AWS-key literal in
+  `tests/test_v15_standards.py`, appearing 5 times, flagged `UNKNOWN`
+  severity by gitleaks's default rule (no explicit severity on that
+  rule). T8 (`534e7fe`, the *next* commit) splits it into
+  `_FAKE_AWS_KEY = "AKIAQWERTY" + "UIOPASDFGH"` specifically because
+  hook activation was about to make this exact pattern self-poisoning.
+  T7 also predates T8's hook activation.
+- **Every commit from `534e7fe` (T8) through `752400064d7d` (the tip) —
+  twelve commits, the entire span during which the hook chain was
+  actually live — is PASS.** No bypass was possible or needed once
+  hooks existed: they caught everything from their own activation point
+  forward. Both failures are confined to the two commits that predate
+  hook existence, where "bypass" has no meaning (nothing was live to
+  bypass).
+
+**Regression check (REQ-V15-ACC-02).** Spec-v1.2's D1/D2 (secret
+redaction in tool-call storage; sandbox usage hidden by an unreadable
+subtree) and spec-v1.4's S01 (`T-V14-SCN-01`, the repaired `greet`
+check) are exercised by tests inside the 842-test suite this run keeps
+green throughout — none of `storage.py`, `tools.py`'s redaction path or
+`bench_scenarios.py`'s S01 check were touched by v1.5 (only
+`config.py`'s `DEFAULT_DOCKER_IMAGE` and the Python/ruff pins moved).
+T15's REQ-V15-IMG-03 byte comparison is the specific evidence for the
+sandbox-behaviour half of D1/D2: S02-shaped and S03-shaped `exec` calls
+produced byte-identical output on `python:3.13-slim` and the
+digest-pinned `python:3.14-slim`, so nothing about D1/D2's exercised
+behaviour could have moved. No earlier posture weakened.
+
+**Appendix B — acceptance scenarios.** Per REQ-V12-REP-02, how each was
+driven:
+
+| id | result | how driven |
+|---|---|---|
+| E1 (bad commit message refused) | PASS | `test_n1_bad_header_rejected_by_the_real_hook` — real `git commit` subprocess against the real `.githooks/commit-msg`, in the 842-suite |
+| E2 (no prompt reference refused) | PASS | `test_n2_missing_prompt_reference_rejected_by_the_real_hook` — same mechanism |
+| E3 (merge commit passes untouched) | PASS | `test_v15_cc_06_bypass_prefixes_skip_every_check` |
+| E4 (allowlist load-bearing, not overreaching) | PASS | `test_n4_gitleaks_allowlist_control_suppression_escape` — real `gitleaks git --staged` subprocess, control→suppression→escape, all three exit codes asserted |
+| E5 (failing test blocks the push) | PASS | `test_n6_pre_push_refused_when_pytest_fails` — real `pytest` failure in a `git_worktree` fixture, real `pre-push` profile run |
+| E6 (missing scanner fails the gate) | PASS | driven live this session: `trivy` binary renamed off `PATH`, `execute_command_gate` invoked on the real `trivy` gate config — `ran=False, blocked=True, message="gate trivy could not run: binary not found: ... 'trivy'"`; binary restored and re-confirmed functional (`trivy --version` → `0.74.0`) immediately after |
+| E7 (shadow gate reports, doesn't block; `blocking: true` flips it) | PASS | driven live this session against the real repository: `skylos` gate with `blocking: false` → `ran=True, blocked=False`, 3 in-scope findings reported; the identical gate with `blocking: true` → `ran=True, blocked=True`, same 3 findings |
+| E8 (diff scope never silently empty on main) | PASS | `test_v15_scan_06_full_on_main_without_since_refused` (the `--since`-less refusal) + `test_v15_scan_06_empty_scope_trap_on_main` (the empty-scope-on-`main` failure) |
+| E9 (installer is idempotent) | PASS | `test_v15_hook_02_second_run_is_idempotent_and_byte_identical`, `test_v15_hook_04_check_passes_on_correctly_installed_repo` |
+| E10 (image bump doesn't change tool output) | PASS | T15's own byte-compared exec smoke (S02/S03-shaped commands via the tool layer, SHA-256 identical both images) — see that section above |
+| E11 (report carries a paste-ready ledger row) | PASS | `checks.py lint-docs` (this run, T18): "all prompts and the report ledger row pass" |
+| E12 (prompt without Model reason refused) | PASS | `test_v15_prm_02_lint_rejects_missing_model_reason` |
+
+12 of 12 scenarios PASS. E1/E2/E3/E5/E8/E9/E12 (7) run against a
+throwaway git repository per the scenario file's own note; E4 likewise
+(a fixture repo, real subprocesses); E6/E7 (2) were driven live against
+this repository this session, as recorded above; E10 (1) ran against
+this repository at T15; E11 (1) is `lint-docs` against this repository
+at T18.
+
 ## Benchmark-affecting changes (REQ-V15-EC-06)
 
 None discovered so far. Updated if T14 or T15 discovers one; the default
@@ -1066,17 +1190,40 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T15 | no (its own reading map: `config.py:27,555-563`, `bench_scenarios.py:150-185`, `tests/test_v1_guardrails.py:371`, `.env.example`, `README.md` — all mapped, all targeted) | no | — |
 | T16 | no by the size threshold (`AGENTS.md` 6.9 KB, `docs/plan.md` under it too) — **delegated anyway per the task's own explicit instruction** | **yes** | a general-purpose subagent independently checked the AGENTS.md/docs/plan.md diff against the real repository; found three real prose-consistency bugs the executor's own mechanical self-check (re-run after the agent exceeded its time budget) could not have caught — see the section above |
 | T17 | yes by design (REQ-V15-REV-01 mandates review in a clean context regardless of size) | **yes** | the `code-reviewer` subagent, dispatched against the full T0-T16 diff (71 files, +33769/-169) in its own clean context — its own independent tool use (50 calls, ~12.8 min), not the writing context; 5 findings returned, 4 fixed and re-verified, 2 waived with recorded reasons — see the Review section above |
-
-(rest of the table fills in as each task lands)
+| T18 | no (its own reading map: this run's own artefacts — the report skeleton, `config/quality_gates.yaml`, `docs/spec/spec-v1.5.md`'s RPT-02 list — all targeted, no exploration beyond it) | no | — |
+| T19 | no (its own reading map: this run's own artefacts — the final tree's gate/replay/Appendix-B evidence, gathered by running commands directly, not by open-ended reading) | no | — |
 
 ## `--no-verify` attestation (REQ-V15-EC-09)
 
-(T19 — pending; `checks.py replay --range <base>..<implementation-tip>`
-evidence lands in the T19 evidence-only commit)
+**No commit or push in this run used `--no-verify` or any other hook
+bypass.** This is a process attestation about this session's own
+actions (verified directly: no `git commit --no-verify`, `git push
+--no-verify`, `-n`, environment switch, temporary `core.hooksPath`
+change, or hook delete/restore was ever issued — every commit from T8
+on shows its hook's `[PASS]` lines printing before the commit
+succeeded, visible in this session's own tool history), not conditioned
+on replay's exit code (the spec's own words: "the no-bypass statement
+therefore stays a **process attestation** with replay as consistency
+evidence").
+
+`checks.py replay --range <base>..<implementation-tip>` output is
+quoted in full in the Final acceptance (T19) section above: **17 PASS,
+2 FAIL**, both failures confined to the two commits (T1, T7) that
+predate T8's hook activation — where "bypass" has no meaning, since
+nothing was live yet to bypass — and diagnosed there (T1: genuine
+pre-hook formatting debt; T7: the AWS-key fixture fixed the very next
+commit). Every commit made once the hook chain was actually live (T8
+through the tip, 12 commits) passes replay cleanly.
 
 ## Fix cycles
 
-(running total; 0 used of the 5-cycle budget so far)
+**0 of 5 used, final.** T19's final acceptance run (the six gates, the
+`full` profile, `replay`, Appendix B) needed no repair iteration —
+every gate passed on its first invocation against the final tree.
+`replay`'s two historical failures are not a T19 acceptance-run failure
+to fix (they're outside the six gates and the `full` profile, and
+concern immutable past commits, not the tree that ships — see Final
+acceptance above); nothing was rerun because of them.
 
 ## Deviations
 
@@ -1230,9 +1377,18 @@ low-risk notes, not defects).
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5 | 2026-09-04 | ~28 750 (114 997 B) | 19 (T0–T18; T19 adds one more) | ✅ yes (T0–T18, 0/5 repair cycles used) — T19's confirmatory acceptance run pending | 12 found / 12 fixed | unknown (main session) + 231,051 (T17 review subagent) | unknown | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5 | 2026-09-04 | ~28 750 (114 997 B) | 20 (T0–T19) | ✅ yes — 0/5 repair cycles used across the whole run | 12 found / 12 fixed | unknown (main session) + 231,051 (T17 review subagent) | unknown | claude-sonnet-5 | Claude Code |
 ```
 
 ## Verdict
 
-(T19 — pending)
+**PASS.** All 20 tasks (T0–T19) landed; the six `AGENTS.md` gates, the
+`full` profile (15/15) and all 12 Appendix-B scenarios are green on the
+final tree `752400064d7d8c34a45b5d3232b68366f997f92d`. 0 of 5 repair
+cycles used. 12 real defects found via testing/review, all 12 fixed;
+none left open. `checks.py replay`'s 2 historical exceptions (both
+pre-hook-activation, both diagnosed, neither a bypass) are recorded
+above rather than hidden. No benchmark-affecting change this release
+(REQ-V15-EC-06); `baseline-v1.4.json` stays the live baseline. The
+freeze of REQ-V15-ACC-03 begins at this commit: no further source, test
+or config change without voiding this run.
