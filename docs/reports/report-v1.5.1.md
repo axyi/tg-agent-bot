@@ -231,7 +231,7 @@ patch.
 | 2 | `uv run --locked ruff check .` | PASS — all checks passed |
 | 3 | `uv run --locked pytest` | PASS — 843 passed in 49.54s |
 | 4 | `uv run --locked python bot.py --selftest` | PASS — `selftest: OK` |
-| 5 | `uv run --locked python bot.py --selftest-live` | **FAIL** — see below (blocks per `AGENTS.md`, not merely noted) |
+| 5 | `uv run --locked python bot.py --selftest-live` | **PASS** — see the resolution note below; initially FAIL (`lmstudio` unreachable), re-run green once the operator supplied a reachable server |
 | 6 | `uv run --locked python devtools/mutation_check.py` | PASS — 72/72 killed, real 20m50.566s |
 
 **Gate 5 detail — recorded prominently, not skipped:**
@@ -275,9 +275,11 @@ precondition outside this patch's scope.
 real    22m29.533s
 ```
 
-14/15 members green; the sole failure is `selftest-live`, and it is the
-same, single `lmstudio` sub-check documented above — no other member is
-affected. `mutation-all` is **clean** within the new 2600s timeout (D2).
+14/15 members green at the time of that run; the sole failure was
+`selftest-live` — the same single `lmstudio` sub-check documented above.
+After the operator supplied a reachable LM Studio (see the resolution note
+below), the profile was re-run on the same tree: **15/15 PASS, exit 0**,
+`selftest-live` and `mutation-all` both clean. `mutation-all` is **clean** within the new 2600s timeout (D2).
 The 3 "legacy: would reformat" files are pre-existing ruff-format debt
 (shadow, non-blocking per REQ-V15-SCAN-05 — unrelated to this patch,
 unchanged from spec-v1.5's own T12 finding).
@@ -354,10 +356,10 @@ rather than inventing one to satisfy the letter of the instruction.
 **D1/D2/D3 fixed and verified; gate 5 blocks on `lmstudio` unreachable, not
 silently waived.** D1 (CRITICAL), D2 and D3 are all fixed, each with its
 own commit and evidence. Gates 1, 2, 3, 4 and 6 of `AGENTS.md`'s six are
-green; gate 5 fails on its `lmstudio` sub-check (LM Studio unreachable at
-`http://localhost:1234/v1` in this environment) — by `AGENTS.md`'s own
-rule ("an unreachable LM Studio is a blocked run, not a noted one") this
-is a **blocking** failure, not a cosmetic one, recorded here rather than
+green; gate 5 initially failed on its `lmstudio` sub-check (LM Studio
+unreachable at `http://localhost:1234/v1` in this environment) — by
+`AGENTS.md`'s own rule ("an unreachable LM Studio is a blocked run, not a
+noted one") that is a **blocking** failure, and it was recorded rather than
 minimised; every other live check (config, db, Docker, Telegram,
 OpenRouter) passes, and nothing in D1/D2/D3 touches LM Studio
 connectivity — it is an environment precondition this patch did not
@@ -368,3 +370,25 @@ within its new 2600s timeout. `checks.py replay` over the whole
 two pre-existing, already-diagnosed historical exceptions — no new
 failure, including on this patch's own four commits. Working tree clean,
 nothing pushed.
+
+## Resolution of the gate-5 block (2026-09-04, commissioning session)
+
+The block was environmental, not a defect in this patch. The operator
+supplied a reachable LM Studio at `http://172.16.50.233:1234/v1`, which
+serves the model this project pins (`qwen/qwen3.8-27b`). `LMSTUDIO_BASE_URL`
+in the untracked `.env` was repointed there by a single-line substitution
+(the file was never read or printed; the value is not a secret and is not
+recorded in any tracked file). Evidence on the same tree as this patch's
+final commit:
+
+- `uv run --locked python bot.py --selftest-live` → exit 0, all six live
+  checks OK (`config`, `db`, `docker 29.7.2`, `telegram`, `lmstudio`,
+  `openrouter`) — first with the URL supplied through the process
+  environment, then again from `.env` alone.
+- `python3 devtools/checks.py run --profile full --since 9ad3047` →
+  **15/15 PASS, exit 0**; `mutation-all` clean inside D2's new 2600 s
+  timeout, confirming the timeout fix against the real worst case.
+
+With this, every `AGENTS.md` gate and every `full` profile member is green
+on the tree that ships. The `checks.py replay` exceptions are unchanged:
+the two pre-existing, already-diagnosed historical failures only.
