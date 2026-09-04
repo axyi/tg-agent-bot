@@ -114,6 +114,40 @@ REQ-V160-EC-06.
 
 *(filled in per task as the run proceeds)*
 
+## Deviations (running log — compiled into the final §13 Deviations at T17)
+
+**T2 — two existing tests amended outside §15.1's list, both forced,
+mechanical consequences of `SCHEMA_VERSION` 3 → 4 that the list does not
+enumerate.** §15.1 names exactly one amendment to
+`tests/test_observability.py:431` (`SCHEMA_VERSION == 3` → `== 4`, `"spans"`
+added to the checked-table loop) and marks the list "exhaustive" —
+REQ-V160-EC-03: "a change making an unlisted test fail means the change is
+wrong — stop and reconsider, do not edit the test." Implementing T2 (the
+version bump REQ-V160-AMEND-01 itself mandates) also broke two further
+tests that were not anticipated:
+
+- `tests/test_observability.py::test_obs03_a_future_version_is_still_refused`
+  hardcoded `UPDATE schema_version SET version = 4` / `assert "4" in
+  str(raised.value)` to mean "one past the current max." With 4 now
+  supported, this stopped testing a future version at all.
+- `tests/test_summary.py::test_t_v1_sum_01_migration_from_version_one` had
+  the identical pattern (`version = 4` / `assert "4" in …`).
+
+Both were bumped to `5` — the only value that keeps either test asserting
+what its name says it asserts ("a future version is still refused"); there
+is no alternative reading under which the change is "wrong" and should be
+reconsidered, since REQ-V160-AMEND-01 mandates the version bump outright.
+Swept the full test tree afterward (`grep` for `SCHEMA_VERSION`/hardcoded
+`version = `) to confirm no third instance survived — none did; the other
+existing references (`tests/test_storage.py:44`, `tests/test_summary.py`
+:139/147/165) already compare against `storage.SCHEMA_VERSION` dynamically,
+matching §15.1's "Explicitly NOT amended" list.
+
+Recorded per REQ-V12-REP-02 process honesty. Worth feeding back: §15.1's
+exhaustiveness claim should be verified against the repository (as PRE-01
+items are) rather than asserted, at least for any requirement that changes
+a version constant multiple tests hardcode independently.
+
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
 *(recorded at T18, over the full run)*
