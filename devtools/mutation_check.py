@@ -48,11 +48,7 @@ MUTATIONS = [
     {
         "id": "cov-01-live-docker-sandbox-max-bytes",
         "path": "bot.py",
-        "find": (
-            "docker_ok=True,\n"
-            "        sandbox_max_bytes=cfg.exec_sandbox_max_bytes,\n"
-            "    )"
-        ),
+        "find": ("docker_ok=True,\n        sandbox_max_bytes=cfg.exec_sandbox_max_bytes,\n    )"),
         "replace": (
             "docker_ok=True,\n"
             "        sandbox_max_bytes=config.DEFAULT_EXEC_SANDBOX_MAX_BYTES,\n"
@@ -71,13 +67,13 @@ MUTATIONS = [
         "id": "cov-03-post-run-quota-on-timeout",
         "path": "tools.py",
         "find": (
-            "        envelope[\"notice\"] = UNTRUSTED_NOTICE\n"
+            '        envelope["notice"] = UNTRUSTED_NOTICE\n'
             "        _record_sandbox_quota(envelope, workdir, sandbox_max_bytes)\n"
-            "        return envelope\n\n    exit_code = envelope[\"exit_code\"]"
+            '        return envelope\n\n    exit_code = envelope["exit_code"]'
         ),
         "replace": (
-            "        envelope[\"notice\"] = UNTRUSTED_NOTICE\n"
-            "        return envelope\n\n    exit_code = envelope[\"exit_code\"]"
+            '        envelope["notice"] = UNTRUSTED_NOTICE\n'
+            '        return envelope\n\n    exit_code = envelope["exit_code"]'
         ),
         "why": "TST-02 #3: the timeout branch must still record the post-run quota fact",
     },
@@ -85,14 +81,14 @@ MUTATIONS = [
         "id": "cov-04-post-run-quota-on-docker-exit",
         "path": "tools.py",
         "find": (
-            "        failure = {\"error\": f\"exec failed (docker exit {exit_code}): "
-            "{excerpt}\"}\n"
+            '        failure = {"error": f"exec failed (docker exit {exit_code}): '
+            '{excerpt}"}\n'
             "        _record_sandbox_quota(failure, workdir, sandbox_max_bytes)\n"
             "        return failure"
         ),
         "replace": (
-            "        failure = {\"error\": f\"exec failed (docker exit {exit_code}): "
-            "{excerpt}\"}\n"
+            '        failure = {"error": f"exec failed (docker exit {exit_code}): '
+            '{excerpt}"}\n'
             "        return failure"
         ),
         "why": "TST-02 #4: the docker-exit 125/126/127 branch must record post-run quota",
@@ -101,12 +97,12 @@ MUTATIONS = [
         "id": "cov-05-pop-before-envelope",
         "path": "tools.py",
         "find": (
-            "    record[\"sandbox_over_quota\"] = payload.pop(\"sandbox_over_quota\", False)\n"
-            "    record[\"sandbox_scan\"] = payload.pop(\"sandbox_scan\", SCAN_OK)\n"
+            '    record["sandbox_over_quota"] = payload.pop("sandbox_over_quota", False)\n'
+            '    record["sandbox_scan"] = payload.pop("sandbox_scan", SCAN_OK)\n'
         ),
         "replace": (
-            "    record[\"sandbox_over_quota\"] = payload.get(\"sandbox_over_quota\", False)\n"
-            "    record[\"sandbox_scan\"] = payload.get(\"sandbox_scan\", SCAN_OK)\n"
+            '    record["sandbox_over_quota"] = payload.get("sandbox_over_quota", False)\n'
+            '    record["sandbox_scan"] = payload.get("sandbox_scan", SCAN_OK)\n'
         ),
         "why": "TST-02 #5: the internal keys must be popped, not merely read, before the envelope",
     },
@@ -128,8 +124,7 @@ MUTATIONS = [
         "id": "cov-08-summarize-redacts",
         "path": "agent.py",
         "find": (
-            "    return config.redact(json.dumps(_normalise_summary(parsed), "
-            "ensure_ascii=False))"
+            "    return config.redact(json.dumps(_normalise_summary(parsed), ensure_ascii=False))"
         ),
         "replace": "    return json.dumps(_normalise_summary(parsed), ensure_ascii=False)",
         "why": "TST-02 #8: summarize_conversation must redact before any caller sees it",
@@ -171,8 +166,7 @@ MUTATIONS = [
         "id": "sec-id-01-minted-id",
         "path": "agent.py",
         "find": (
-            'ToolCall(id=f"call_{turn_id}_{index}", name=raw.name.strip(), '
-            "arguments=raw.arguments)"
+            'ToolCall(id=f"call_{turn_id}_{index}", name=raw.name.strip(), arguments=raw.arguments)'
         ),
         "replace": (
             'ToolCall(id=raw.id.strip() or f"call_{turn_id}_{index}", '
@@ -240,10 +234,7 @@ MUTATIONS = [
     {
         "id": "sec-orp-01-start-ticks-parse",
         "path": "tools.py",
-        "find": (
-            '    remainder = line.rsplit(")", 1)[1]\n'
-            "    return int(remainder.split()[19])"
-        ),
+        "find": ('    remainder = line.rsplit(")", 1)[1]\n    return int(remainder.split()[19])'),
         "replace": "    return int(line.split()[21])",
         "why": "REQ-V12-ORP-01: a foreign process's comm field may contain spaces/parens",
     },
@@ -258,8 +249,7 @@ MUTATIONS = [
         "id": "sec-aud-01-hook-redaction",
         "path": "tools.py",
         "find": (
-            "        record = json.loads(config.redact(json.dumps(record, "
-            "ensure_ascii=False)))\n"
+            "        record = json.loads(config.redact(json.dumps(record, ensure_ascii=False)))\n"
         ),
         "replace": "",
         "why": "REQ-V12-AUD-01: the audit hook must receive an already-redacted record",
@@ -296,8 +286,8 @@ MUTATIONS = [
     {
         "id": "v11-status-line-redacts",
         "path": "bot.py",
-        "find": "    return redact(f\"⚙️ {tool}: {first_argument}…\")[:STATUS_MAX_CHARS]",
-        "replace": "    return f\"⚙️ {tool}: {first_argument}…\"[:STATUS_MAX_CHARS]",
+        "find": '    return redact(f"⚙️ {tool}: {first_argument}…")[:STATUS_MAX_CHARS]',
+        "replace": '    return f"⚙️ {tool}: {first_argument}…"[:STATUS_MAX_CHARS]',
         "why": "REQ-V1-VIS-01: the status line must redact before truncating",
     },
     {
@@ -322,20 +312,19 @@ MUTATIONS = [
         "id": "trn-03-strip-secret-fragment",
         "path": "tools.py",
         "find": (
-            "        text = text.encode(\"utf-8\")[:max_bytes]"
-            ".decode(\"utf-8\", errors=\"replace\")\n"
+            '        text = text.encode("utf-8")[:max_bytes]'
+            '.decode("utf-8", errors="replace")\n'
             "        text = config.strip_secret_fragment(text)\n"
         ),
         "replace": (
-            "        text = text.encode(\"utf-8\")[:max_bytes]"
-            ".decode(\"utf-8\", errors=\"replace\")\n"
+            '        text = text.encode("utf-8")[:max_bytes].decode("utf-8", errors="replace")\n'
         ),
         "why": "REQ-V13-TOO-09: fetch_url must strip a surviving fragment after the byte cut",
     },
     {
         "id": "ssr-is-global-backstop",
         "path": "config.py",
-        "find": "    if not ip.is_global:\n        return \"non-global\"\n",
+        "find": '    if not ip.is_global:\n        return "non-global"\n',
         "replace": "",
         "why": "REQ-V12-SSR-02: carrier-grade NAT must be caught by the is_global backstop",
     },
@@ -397,8 +386,7 @@ MUTATIONS = [
         "id": "v13-cost-drops-output",
         "path": "llm/pricing.py",
         "find": (
-            "        + cached * cached_rate\n"
-            "        + completion * price.output_usd_per_mtok\n"
+            "        + cached * cached_rate\n        + completion * price.output_usd_per_mtok\n"
         ),
         "replace": "        + cached * cached_rate\n",
         "why": "REQ-V13-PRC-01: the cost formula must charge the completion tokens",
@@ -406,14 +394,8 @@ MUTATIONS = [
     {
         "id": "v13-cost-none-as-zero",
         "path": "llm/pricing.py",
-        "find": (
-            "    if prompt is None or completion is None:\n"
-            "        return None\n"
-        ),
-        "replace": (
-            "    if prompt is None or completion is None:\n"
-            "        return 0.0\n"
-        ),
+        "find": ("    if prompt is None or completion is None:\n        return None\n"),
+        "replace": ("    if prompt is None or completion is None:\n        return 0.0\n"),
         "why": "REQ-V13-PRC-01: a partially reported usage stores NULL, never a cost of 0.0",
     },
     {
@@ -481,8 +463,7 @@ MUTATIONS = [
             "if turn == LAST_TURN else turn - 1\n"
         ),
         "replace": (
-            "        return len(non_command_turns(self.turns)) - 1 "
-            "if turn == LAST_TURN else turn\n"
+            "        return len(non_command_turns(self.turns)) - 1 if turn == LAST_TURN else turn\n"
         ),
         "why": "REQ-V13-BEN-08: a positive turn is one-based over the non-command turns",
     },
@@ -496,10 +477,7 @@ MUTATIONS = [
             "    if aborted is not None:\n"
             '        meta["aborted"] = aborted\n'
         ),
-        "replace": (
-            "    if aborted is not None:\n"
-            '        meta["aborted"] = aborted\n'
-        ),
+        "replace": ('    if aborted is not None:\n        meta["aborted"] = aborted\n'),
         "why": "REQ-V13-BEN-05: a timeout aborts the run; no later scenario is started",
     },
     {
@@ -519,18 +497,13 @@ MUTATIONS = [
             '        row["error_kind"] is None\n'
             '        and (row["prompt_tokens"] is None or row["completion_tokens"] is None)\n'
         ),
-        "replace": (
-            '        (row["prompt_tokens"] is None or row["completion_tokens"] is None)\n'
-        ),
+        "replace": ('        (row["prompt_tokens"] is None or row["completion_tokens"] is None)\n'),
         "why": "REQ-V13-BEN-01: a failed call's NULL token columns are not usage_missing",
     },
     {
         "id": "v13-openrouter-cap-ignored",
         "path": "devtools/bench.py",
-        "find": (
-            '    if cfg.llm_provider == "openrouter" '
-            "and arguments.max_cost_usd is None:\n"
-        ),
+        "find": ('    if cfg.llm_provider == "openrouter" and arguments.max_cost_usd is None:\n'),
         "replace": (
             '    if False and cfg.llm_provider == "openrouter" '
             "and arguments.max_cost_usd is None:\n"
@@ -540,10 +513,7 @@ MUTATIONS = [
     {
         "id": "v13-symlink-chmod",
         "path": "bot.py",
-        "find": (
-            "            if os.path.islink(path):\n"
-            "                continue\n"
-        ),
+        "find": ("            if os.path.islink(path):\n                continue\n"),
         "replace": "",
         "why": "REQ-V13-CO-01: the recovery chmod must skip a symlink, never its target",
     },
@@ -576,8 +546,7 @@ MUTATIONS = [
         "id": "v13-fragment-after-cut",
         "path": "tools.py",
         "find": (
-            "    return config.strip_secret_fragment("
-            "head_part + marker + text[-tail_budget:])"
+            "    return config.strip_secret_fragment(head_part + marker + text[-tail_budget:])"
         ),
         "replace": "    return head_part + marker + text[-tail_budget:]",
         "why": "REQ-V13-TOO-01: the single-line fallback strips a fragment after the cut",
@@ -600,8 +569,7 @@ MUTATIONS = [
         "id": "v13-fetch-save-path",
         "path": "tools.py",
         "find": (
-            '    name = hashlib.sha256(url.encode("utf-8")).hexdigest()'
-            '[:FETCH_HASH_CHARS] + ".txt"'
+            '    name = hashlib.sha256(url.encode("utf-8")).hexdigest()[:FETCH_HASH_CHARS] + ".txt"'
         ),
         "replace": '    name = url.rstrip("/").rsplit("/", 1)[-1] + ".txt"',
         "why": "REQ-V13-TOO-06: the saved name is the URL hash, never a model-chosen path",
@@ -652,10 +620,7 @@ MUTATIONS = [
     {
         "id": "v13-stub-current-turn",
         "path": "agent.py",
-        "find": (
-            "        if expose_tools:\n"
-            "            request_messages = messages\n"
-        ),
+        "find": ("        if expose_tools:\n            request_messages = messages\n"),
         "replace": (
             "        if expose_tools:\n"
             "            request_messages = _stub_stale_tool_results(messages)\n"
@@ -674,8 +639,7 @@ MUTATIONS = [
         "path": "agent.py",
         "find": "    prompt = SYSTEM_PROMPT.format(skill_lines=skill_lines)\n",
         "replace": (
-            "    prompt = SYSTEM_PROMPT.format(skill_lines=skill_lines)"
-            ' + f" current date: {now}"\n'
+            '    prompt = SYSTEM_PROMPT.format(skill_lines=skill_lines) + f" current date: {now}"\n'
         ),
         "why": "REQ-V13-CCH-01: the clock stays out of the cacheable prefix",
     },
@@ -693,8 +657,8 @@ MUTATIONS = [
         "find": "            unknown = row_keys - allowed\n",
         "replace": "            unknown = set()\n",
         "why": "REQ-V14-BEN-03: a row carrying a key neither REQUIRED nor ALLOWED "
-               "expects must be rejected, naming it — this mutation accepts any "
-               "unknown column silently",
+        "expects must be rejected, naming it — this mutation accepts any "
+        "unknown column silently",
     },
     {
         "id": "v14-ben-03-missing-column-accepted",
@@ -702,7 +666,7 @@ MUTATIONS = [
         "find": "            missing = required - row_keys\n",
         "replace": "            missing = set()\n",
         "why": "REQ-V14-BEN-03: a row missing a REQUIRED column must be rejected, "
-               "naming it — this mutation silently accepts a row lacking one",
+        "naming it — this mutation silently accepts a row lacking one",
     },
     {
         "id": "v14-rel-01-timeout-budget-boundary-disabled",
@@ -710,8 +674,56 @@ MUTATIONS = [
         "find": "    if llm_timeout_s < floor:\n",
         "replace": "    if False and llm_timeout_s < floor:\n",
         "why": "REQ-V14-REL-01: an LLM_TIMEOUT_S/LLM_MAX_TOKENS pair under the "
-               "latency-model floor must be refused before it ever reaches a live "
-               "request, not silently accepted",
+        "latency-model floor must be refused before it ever reaches a live "
+        "request, not silently accepted",
+    },
+    # -- spec-v1.5 section 15.4: mutate the gates themselves (REQ-V15-TST-01) --
+    {
+        "id": "v15-severity-comparison-inverted",
+        "path": "devtools/checks.py",
+        "find": (
+            '    blocking_findings = [f for f in in_scope if f["severity"] in gate["severity"]]\n'
+        ),
+        "replace": (
+            "    blocking_findings = [f for f in in_scope "
+            'if f["severity"] not in gate["severity"]]\n'
+        ),
+        "why": "REQ-V15-GATE-12: a configured severity must block, an unconfigured "
+        "one must not -- inverting the membership test makes a blocking "
+        "gate ignore exactly the severities it is configured to catch",
+    },
+    {
+        "id": "v15-fail-closed-becomes-fail-open",
+        "path": "devtools/checks.py",
+        "find": (
+            "            name, ran=False, blocked=True, "
+            'message=f"gate {name} could not run: {cmd.error}"\n'
+        ),
+        "replace": (
+            "            name, ran=False, blocked=False, "
+            'message=f"gate {name} could not run: {cmd.error}"\n'
+        ),
+        "why": "REQ-V15-GATE-06: a gate that cannot run (missing binary, timeout) "
+        "must fail closed, never silently pass",
+    },
+    {
+        "id": "v15-shadow-flag-ignored",
+        "path": "devtools/checks.py",
+        "find": '    blocked = gate["blocking"] and bool(blocking_findings)\n',
+        "replace": "    blocked = bool(blocking_findings)\n",
+        "why": "REQ-V15-GATE-06: blocking: false must withhold findings from "
+        "blocking the profile -- discarding the flag makes every gate "
+        "with a finding block regardless of shadow status",
+    },
+    {
+        "id": "v15-diff-scope-filter-dropped",
+        "path": "devtools/checks.py",
+        "find": "        if not diff_scoped or scope_files is None or norm in scope_files:\n",
+        "replace": "        if True:\n",
+        "why": "REQ-V15-GATE-07: a diff-scoped gate must block only on the "
+        'in-scope partition -- replacing the filter with "all files" '
+        "makes every finding in-scope, including ones the change never "
+        "touched",
     },
 ]
 
@@ -771,6 +783,7 @@ def _install_signal_handlers(restorer: _Restorer) -> tuple:
     """Installs restore-and-exit handlers, returning the previous ones so the
     caller can put them back — this module may run more than once in the same
     process (its own test suite does exactly that)."""
+
     def _handler(_signum, _frame):
         restorer.restore_all()
         sys.exit(1)
@@ -787,9 +800,7 @@ def _restore_signal_handlers(previous: tuple) -> None:
     signal.signal(signal.SIGTERM, previous[1])
 
 
-def run_one(
-    mutation: dict, *, runner, root: Path, restorer: _Restorer
-) -> tuple[str, int | None]:
+def run_one(mutation: dict, *, runner, root: Path, restorer: _Restorer) -> tuple[str, int | None]:
     """Returns (outcome, exit_code). `exit_code` is meaningful only for
     `ERRORED` (it is what the operator needs to fix the entry)."""
     path = root / mutation["path"]
@@ -858,7 +869,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="print the table, run nothing")
     parser.add_argument("--only", help="run a single mutation id")
+    parser.add_argument("--select", help="run every mutation whose id starts with this prefix")
     args = parser.parse_args(argv)
+
+    if args.only is not None and args.select is not None:
+        parser.error("--only and --select are mutually exclusive")
 
     if args.list:
         for mutation in MUTATIONS:
@@ -870,6 +885,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.only is not None and all(m["id"] != args.only for m in MUTATIONS):
         print(f"unknown mutation id: {args.only}", file=sys.stderr)
         return 1
+
+    # REQ-V15-GATE-04: a prefix matching zero mutations is the same fail-loud
+    # hole as an unknown --only id -- a selector that silently selects nothing
+    # must not report a clean gate over an empty set.
+    if args.select is not None and all(not m["id"].startswith(args.select) for m in MUTATIONS):
+        print(f"no mutation id matches prefix: {args.select}", file=sys.stderr)
+        return 1
+
+    if args.select is not None:
+        selected = [m for m in MUTATIONS if m["id"].startswith(args.select)]
+        return run_all(selected, only=None)
 
     return run_all(MUTATIONS, only=args.only)
 

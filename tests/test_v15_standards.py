@@ -1517,3 +1517,167 @@ def test_v15_rpt_01_lint_accepts_matching_cell_count(tmp_path: Path):
     )
     report.write_text(f"## Ledger row (paste into `economics.md`)\n\n```\n{row}\n```\n")
     assert checks._lint_report_ledger(report, _LEDGER_HEADER) == []
+
+
+# ---------------------------------------------------------------------------
+# T-V15-GATE-04, T-V15-GATE-05 (REQ-V15-GATE-11, REQ-V15-GATE-04)
+# ---------------------------------------------------------------------------
+
+_GATE_MATRIX_LABEL_TO_NAME = {
+    "`ruff check` (staged)": "ruff-check",
+    "`ruff check .` (tree)": "ruff-check-all",
+    "`ruff format --check`": "ruff-format",
+    "branch-name check": "branch-name",
+    # "commit-msg checks" is not a `profiles:` gate -- own hook / via `replay`.
+    "`gitleaks git --staged`": "gitleaks-staged",
+    "`gitleaks dir` (tree)": "gitleaks-tree",
+    "`uv sync --locked`": "uv-sync",
+    "`pytest`": "pytest",
+    "`bot.py --selftest`": "selftest",
+    "`bot.py --selftest-live`": "selftest-live",
+    "`mutation_check.py --select v15-`": "mutation-v15",
+    "`mutation_check.py` (all)": "mutation-all",
+    "`trivy fs`": "trivy",
+    "`semgrep scan`": "semgrep",
+    "`skylos`": "skylos",
+    "`install_hooks.py --check`": "hooks-installed",
+    "`checks.py doctor`": "doctor",
+    "`checks.py lint-docs`": "lint-docs",
+}
+
+
+def _parse_gate_matrix(spec_text: str) -> dict[str, dict[str, bool]]:
+    lines = spec_text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("| gate | pre-commit"))
+    matrix: dict[str, dict[str, bool]] = {}
+    for line in lines[start + 2 :]:
+        if not line.startswith("|"):
+            break
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        label, pc, pp, full = cells[0], cells[1], cells[2], cells[3]
+        matrix[label] = {
+            "pre-commit": pc == "yes",
+            "pre-push": pp == "yes",
+            "full": full == "yes",
+        }
+    return matrix
+
+
+def test_v15_gate_04_profile_matrix_agrees_with_the_spec_table():
+    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.5.md").read_text(encoding="utf-8")
+    matrix = _parse_gate_matrix(spec_text)
+    config = checks.load_gate_config()
+
+    for label in _GATE_MATRIX_LABEL_TO_NAME:
+        assert label in matrix, f"spec table row not found: {label!r}"
+
+    for profile in ("pre-commit", "pre-push", "full"):
+        expected = {
+            _GATE_MATRIX_LABEL_TO_NAME[label]
+            for label, cells in matrix.items()
+            if label in _GATE_MATRIX_LABEL_TO_NAME and cells[profile]
+        }
+        assert expected == set(config["profiles"][profile]), profile
+
+
+def _load_mutation_check_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "mutation_check_under_test", checks.REPO_ROOT / "devtools" / "mutation_check.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_v15_gate_05_select_matches_exactly_the_four_v15_entries():
+    mc = _load_mutation_check_module()
+    selected = [m["id"] for m in mc.MUTATIONS if m["id"].startswith("v15-")]
+    assert selected == [
+        "v15-severity-comparison-inverted",
+        "v15-fail-closed-becomes-fail-open",
+        "v15-shadow-flag-ignored",
+        "v15-diff-scope-filter-dropped",
+    ]
+
+
+def test_v15_gate_05_select_unmatched_prefix_fails_loud():
+    result = subprocess.run(
+        [sys.executable, "devtools/mutation_check.py", "--select", "nope-"],
+        cwd=checks.REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "nope-" in result.stderr
+
+
+def test_v15_gate_05_select_and_only_are_mutually_exclusive():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "devtools/mutation_check.py",
+            "--only",
+            "v15-severity-comparison-inverted",
+            "--select",
+            "v15-",
+        ],
+        cwd=checks.REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "mutually exclusive" in result.stderr
+
+
+def test_v15_gate_execute_command_gate_normalises_against_tracked_tree(tmp_path: Path):
+    """A gate whose argv references {tracked_tree} (gitleaks-tree in the real
+    config) reports finding paths relative to that materialised copy, not
+    repo_root -- normalisation must use whichever root the gate actually
+    scanned. Caught live: a real `checks.py run --profile pre-push` against
+    this repository crashed gitleaks-tree with "path could not be
+    normalised" before this fix."""
+    repo = _init_repo(tmp_path)
+    (repo / "secret.py").write_text("x = 1\n")
+    _commit_all(repo, "c1")
+
+    tree_dir = tmp_path / "materialized"
+    tree_dir.mkdir()
+    checks.materialize_tracked_tree(checks.list_tree_entries("HEAD", repo), tree_dir, repo)
+
+    script = (
+        "import json, sys\n"
+        "finding = dict(File=sys.argv[2] + '/secret.py', RuleID='stub')\n"
+        "json.dump([finding], open(sys.argv[1], 'w'))\n"
+        "sys.exit(1)\n"
+    )
+    gate = {
+        "kind": "command",
+        "result_mode": "findings",
+        "argv": [sys.executable, "-c", script, "{artefact}", "{tracked_tree}"],
+        "placeholders": {},
+        "output_format": "json",
+        "parser": "gitleaks_json",
+        "success_exit_codes": [0],
+        "findings_exit_codes": [1],
+        "artefact": ".bench/checks/{profile}/stub.json",
+        "blocking": True,
+        "diff_scoped": False,
+        "severity": sorted(_ALL_SEVERITIES),
+        "timeout_seconds": 10,
+    }
+
+    result = checks.execute_command_gate(
+        "stub",
+        gate,
+        repo_root=repo,
+        profile="full",
+        scope_files=None,
+        tracked_tree=tree_dir,
+        known_severities=set(_ALL_SEVERITIES),
+    )
+
+    assert result.ran
+    assert result.blocked
+    assert [f["path"] for f in result.findings_in_scope] == ["secret.py"]

@@ -1278,8 +1278,15 @@ def execute_command_gate(
             message=f"gate {name}: unexpected exit code {cmd.returncode}",
         )
 
+    # gitleaks-tree scans {tracked_tree} (a materialised copy under a temp
+    # dir), never repo_root -- its findings' paths are relative to *that*
+    # root, so normalisation must use whichever root the gate actually
+    # scanned, not always repo_root.
+    scan_root = (
+        tracked_tree if tracked_tree is not None and "{tracked_tree}" in gate["argv"] else repo_root
+    )
     in_scope, out_of_scope, bad_path = _partition_findings(
-        raw_findings, repo_root, scope_files, gate["diff_scoped"]
+        raw_findings, scan_root, scope_files, gate["diff_scoped"]
     )
     if bad_path is not None:
         return GateResult(

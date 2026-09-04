@@ -566,7 +566,96 @@ per REQ-V15-PRM-04, and no longer failing it).
 
 ## Profile wiring, wall-clock and mutation coverage (T12 — REQ-V15-HOOK-04, TST-01)
 
-(pending)
+**Four `v15-*` mutations (§15.4, REQ-V15-TST-01), each mutates gate logic
+in `devtools/checks.py`, never the bot.** `v15-severity-comparison-
+inverted` flips `in gate["severity"]` to `not in`; `v15-fail-closed-
+becomes-fail-open` flips a could-not-run branch's `blocked=True` to
+`False`; `v15-shadow-flag-ignored` drops `gate["blocking"] and` from the
+findings-blocking expression; `v15-diff-scope-filter-dropped` replaces
+the scope-membership condition with `if True:`. Every `find` string
+verified to match its target exactly once (REQ-V15-TST-02) before
+wiring in. `--select v15-` (new, REQ-V15-GATE-04) added as a mutually-
+exclusive sibling of `--only`, added as a *separate* branch immediately
+after the pre-existing `args.only` guard — that guard's own line
+(`args.only is not None and all(...)`, now at line 885, drifted from
+the spec's stale `551-555` anchor but otherwise byte-identical) was
+never touched. Ran for real: `--select v15-` → all four `killed`, `0
+survived, 0 errored, 0 drifted`; `checks.py`'s bytes verified
+unchanged afterward (`git diff --stat` empty); `--select nope-` → `no
+mutation id matches prefix: nope-`, exit 1; `--only X --select v15-` →
+`--only and --select are mutually exclusive`, exit 2. 72 mutations
+total (68 + 4).
+
+**`T-V15-GATE-04`: the profile matrix parsed from both sides.** A test
+helper parses §14's `| gate | pre-commit | pre-push | full | note |`
+table directly out of `docs/spec/spec-v1.5.md`, maps each of its 18
+gate-labelled rows to the corresponding `quality_gates.yaml` gate name
+(the 19th row, "commit-msg checks", is excluded — it is the commit-msg
+hook itself, not a `profiles:` member) and asserts, per profile, that
+the spec table's "yes" cells equal `config["profiles"][profile]`
+exactly. Green against the real files on both sides.
+
+**Two real bugs, both found only by actually running `checks.py run
+--profile pre-push` against the live repository — no earlier test
+exercised this combination.**
+
+1. `execute_command_gate` always normalised findings' paths against
+   `repo_root`, but `gitleaks-tree`'s argv targets `{tracked_tree}` (the
+   materialised temp-directory copy), not the repository. Every one of
+   its findings crashed the gate: `gate gitleaks-tree: finding path
+   could not be normalised: '/tmp/checks-tracked-tree-XXXX/docs/
+   prompts/07-go-spec-v1.2.md'`. T7's own tests never caught this
+   because they exercised gitleaks-tree's tree-materialisation
+   mechanism directly (subprocess, no config) or `execute_command_gate`
+   with `{target: "."}`-style stub gates — never the two combined.
+   Fixed: `execute_command_gate` now computes `scan_root` per gate —
+   `tracked_tree` when `"{tracked_tree}"` appears in its `argv`, else
+   `repo_root` — and normalises against that. Regression test added:
+   a real materialised tree, a stub gate whose argv references
+   `{tracked_tree}`, asserting the reported path normalises to the
+   repo-relative form, not a crash.
+2. With bug 1 fixed, `gitleaks-tree` ran cleanly but reported **34**
+   `synthetic-canary-test` findings — every occurrence of that fixture
+   value anywhere under `tests/`/`docs/` across the whole tracked tree,
+   which the T7 allowlist was supposed to suppress. Root cause:
+   `.gitleaks.toml`'s `paths` patterns were anchored (`^tests/.*`,
+   `^docs/.*`), which only ever matched `gitleaks git`'s repo-relative
+   reporting (`gitleaks-staged`'s scan of `.`) — never `gitleaks dir`'s
+   reporting for `{tracked_tree}`, which is rooted at an *absolute* temp
+   path (`/tmp/checks-tracked-tree-XXXX/docs/...`) that a `^`-anchored
+   pattern can never match. N4 (T7) never caught this because it
+   exercised `gitleaks git`, not `gitleaks dir`, against the allowlist.
+   Fixed: unanchored the patterns to `(^|/)tests/.*` and `(^|/)docs/.*`
+   — matches a path segment at the start of a relative path or after
+   any `/` in an absolute one. Re-verified: `N4` still green (all three
+   assertions); a fresh `gitleaks dir` scan of a freshly materialised
+   tracked tree with the fixed config: `no leaks found`, 0 findings.
+
+**Wall-clock (REQ-V15-HOOK-04, observational, no gate demotion).**
+`checks.py run --profile pre-push --stdin-refs` against this
+repository's own real range (`<base>..HEAD` via `origin/main`'s
+recorded SHA), three consecutive runs, all twelve gates green on every
+run:
+
+| run | real | user | sys |
+|---|---|---|---|
+| 1 | 2m37.472s | 1m23.478s | 0m18.965s |
+| 2 | 2m38.288s | 1m26.284s | 0m19.773s |
+| 3 | 2m40.805s | 1m28.793s | 0m20.163s |
+
+**Median: 2m38.288s (158.288s)** — well inside the 180 s budget. The
+profile matrix is unchanged (`T-V15-GATE-04` above proves it); nothing
+was demoted or removed to hit this number. Measured on a shared
+development machine with other concurrent processes (load average
+~2–3.7 during the runs); the spread across the three runs (157.5s–
+160.8s, ~3s) is consistent with ordinary system contention, not gate
+instability.
+
+**Tests.** `T-V15-GATE-04`, `T-V15-GATE-05` (three cases: exact
+selection, unmatched-prefix fail-loud, `--only`/`--select` mutual
+exclusion), plus the tracked-tree normalisation regression — 5 new
+tests, 114 `test_v15_standards.py` tests total. Full suite: 842 tests,
+all green. `uv run --locked ruff check .` green.
 
 ## Python 3.14 bump (T14 — REQ-V15-DEP-01)
 
@@ -601,6 +690,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T9 | no (its own reading map: §7's `tools:`/GATE-03 paragraph ≈30 lines, REQ-V15-RTK-03 ≈15 lines — both under threshold) | no | content already in the main context from the session-start full-spec read |
 | T10 | no (its own reading map: §9 in full, ≈35 lines — under threshold) | no | content already in the main context from the session-start full-spec read; the copied block was already in this session's own inherited config context, not read from outside the repository |
 | T11 | yes — its own reading map explicitly calls for it ("the lint sweeps 46 files — delegate the sweep, summary only") | **yes** | a general-purpose subagent backfilled headers on the 29 historical prompt files found failing; briefed with hard rules (header only, never fabricate, source from file text or `git log`, verify each file, report per-file sourcing); its own report was then independently re-verified (not merely trusted) — a fresh check-1 sweep and the full test suite run directly, two edited files diffed by hand |
+| T12 | no — its own reading map names §14 and §15.4, both read in full via targeted, bounded reads (~140 lines combined); `devtools/mutation_check.py`'s 34 KB was never read in full, only its `MUTATIONS` tail and `main()`, located via `grep` first | no | targeted reads of known line ranges, not the whole file — the task table's "delegate" concern (an unbounded 34 KB read) never arose |
 
 (rest of the table fills in as each task lands)
 

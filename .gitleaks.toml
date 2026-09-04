@@ -15,10 +15,20 @@ regex = '''SYNTHETIC-[A-Z0-9-]*CANARY[A-Za-z0-9-]*'''
 # 8.24.3 -- version-specific, not a fixed fact). Scoped to exactly the
 # synthetic-canary-test rule via targetRules, never to paths alone, so it
 # cannot mask an unrelated real finding under tests/ or docs/.
+#
+# Unanchored on purpose (T12): `gitleaks git --staged`/`gitleaks git` scan
+# "." and report repo-relative paths ("tests/foo.py"), but `gitleaks dir`
+# against the materialised {tracked_tree} reports paths rooted at that
+# absolute temp directory ("/tmp/checks-tracked-tree-XXXX/tests/foo.py") --
+# a `^tests/.*` anchor never matches the second form. `(^|/)tests/` matches
+# both: at the start of a relative path, or after any "/" in an absolute
+# one. Measured directly against a real `checks.py run --profile pre-push`:
+# 34 false-positive `synthetic-canary-test` findings across the tracked
+# tree with the anchored form, 0 with this one (re-verified by N4 below).
 [[allowlists]]
 description = "synthetic test canaries used by the test suite and specs"
 targetRules = ["synthetic-canary-test"]
 paths = [
-  '''^tests/.*''',
-  '''^docs/.*''',
+  '''(^|/)tests/.*''',
+  '''(^|/)docs/.*''',
 ]
