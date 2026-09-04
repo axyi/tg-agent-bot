@@ -542,7 +542,7 @@ def test_obs04_a_failed_invocation_is_recorded_and_retried(conn):
     rows = llm_rows(conn)
     assert [r["attempt"] for r in rows] == [1, 2]
     assert rows[0]["error_kind"] == "http"
-    assert rows[0]["turn_id"] is None
+    assert rows[0]["turn_id"] == rows[1]["turn_id"] is not None
     assert rows[0]["prompt_tokens"] is None
     assert rows[0]["completion_tokens"] is None
     assert rows[0]["total_tokens"] is None

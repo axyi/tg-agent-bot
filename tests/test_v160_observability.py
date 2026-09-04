@@ -16,9 +16,13 @@ import sqlite3
 
 import pytest
 
+import agent
 import config
 import storage
 import tracing
+from llm.base import LLMError, LLMResponse
+from tests.fakes import FakeLLM, RecordingRunner
+from tests.test_observability import NOW, USER_ID, llm_rows, make_cfg, run, tool_call, tool_rows
 
 CANARY = "SYNTHETIC-CANARY-TRC-NEVER-A-LIVE-VALUE"
 
@@ -652,3 +656,268 @@ def test_recent_traces_respects_limit_and_conv_id(conn):
 
     capped = storage.recent_traces(conn, limit=1)
     assert len(capped) == 1
+
+
+# ============================================================================
+# T3 -- agent.py span wiring (REQ-V160-TRC-04, -07, -08, -09, -10, -14)
+# ============================================================================
+
+
+def _trace_id_of(conn) -> str:
+    traces = storage.recent_traces(conn, limit=10)
+    assert len(traces) == 1, "expected exactly one trace"
+    return traces[0]["trace_id"]
+
+
+# --- T-V160-TRC-03: the span tree ------------------------------------------
+
+
+def test_t_v160_trc_03_span_tree_for_a_two_round_tool_turn(conn):
+    script = [
+        LLMResponse("", [tool_call()], "tool_calls"),
+        LLMResponse("done", [], "stop"),
+    ]
+    reply, _, _ = run(conn, script)
+    assert reply == "done"
+
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    roots = [s for s in spans if s["parent_span_id"] is None]
+    assert len(roots) == 1
+    root = roots[0]
+    assert root["name"] == "invoke_agent tg-agent-bot"
+    assert root["kind"] == "INTERNAL"
+
+    children = [s for s in spans if s["parent_span_id"] == root["span_id"]]
+    chat_children = [s for s in children if s["name"].startswith("chat ")]
+    tool_children = [s for s in children if s["name"].startswith("execute_tool ")]
+    assert len(chat_children) == 2
+    assert len(tool_children) == 1
+    assert all(s["kind"] == "CLIENT" for s in chat_children)
+    assert all(s["kind"] == "INTERNAL" for s in tool_children)
+    assert len(spans) == 1 + len(chat_children) + len(tool_children)
+
+
+# --- T-V160-TRC-04: chat span / llm_calls bijection, rollback --------------
+
+
+def test_t_v160_trc_04_a_non_retried_failure_gets_one_error_chat_span(conn):
+    script = [LLMError("boom", retryable=False)]
+    run(conn, script)
+    rows = llm_rows(conn)
+    assert len(rows) == 1
+
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    chat_spans = [s for s in spans if s["name"].startswith("chat")]
+    assert len(chat_spans) == 1
+    assert chat_spans[0]["status"] == "error"
+    assert chat_spans[0]["span_id"] == rows[0]["span_id"]
+    assert chat_spans[0]["trace_id"] == rows[0]["trace_id"]
+    assert rows[0]["turn_id"] is not None
+
+
+def test_t_v160_trc_04_bijection_holds_across_a_retried_failure(conn):
+    script = [LLMError("boom", retryable=True), LLMResponse("done", [], "stop")]
+    run(conn, script)
+    rows = llm_rows(conn)
+    assert len(rows) == 2
+
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    chat_span_ids = {s["span_id"] for s in spans if s["name"].startswith("chat")}
+    row_span_ids = {r["span_id"] for r in rows}
+    assert chat_span_ids == row_span_ids
+    assert len(chat_span_ids) == 2
+    # every row's own trace_id/span_id resolves to a distinct spans row
+    for row in rows:
+        matching = [s for s in spans if s["span_id"] == row["span_id"]]
+        assert len(matching) == 1
+
+
+def test_t_v160_trc_04_add_span_failure_rolls_back_the_llm_call_row(conn, monkeypatch):
+    def failing_add_span(c, **kwargs):
+        raise sqlite3.OperationalError("boom")
+
+    monkeypatch.setattr(storage, "add_span", failing_add_span)
+    script = [LLMError("http fail", retryable=False)]
+    with pytest.raises(sqlite3.OperationalError):
+        run(conn, script)
+    assert llm_rows(conn) == []
+    assert conn.execute("SELECT COUNT(*) FROM spans").fetchone()[0] == 0
+
+
+# --- T-V160-TRC-05: execute_tool span / tool_calls bijection, rollback -----
+
+
+def test_t_v160_trc_05_execute_tool_spans_bijection_with_tool_calls(conn):
+    script = [
+        LLMResponse("", [tool_call()], "tool_calls"),
+        LLMResponse("done", [], "stop"),
+    ]
+    run(conn, script)
+    rows = tool_rows(conn)
+    assert len(rows) == 1
+
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    tool_spans = [s for s in spans if s["name"].startswith("execute_tool")]
+    assert len(tool_spans) == 1
+    assert tool_spans[0]["span_id"] == rows[0]["span_id"]
+    assert tool_spans[0]["kind"] == "INTERNAL"
+
+
+def test_t_v160_trc_05_budget_and_rejected_outcomes_get_their_own_spans(conn):
+    # MAX_TOOL_CALLS_PER_RESPONSE is 3: five offered calls means two land in
+    # `excess`, executed=0, outcome="rejected" for each.
+    calls = [tool_call(index=i) for i in range(1, 6)]
+    script = [LLMResponse("", calls, "tool_calls"), LLMResponse("done", [], "stop")]
+    run(conn, script)
+    rows = tool_rows(conn)
+    assert len(rows) == 5
+    assert sum(1 for r in rows if r["outcome"] == "rejected") == 2
+
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    tool_spans = [s for s in spans if s["name"].startswith("execute_tool")]
+    assert len(tool_spans) == len(rows)
+    assert {s["span_id"] for s in tool_spans} == {r["span_id"] for r in rows}
+
+
+def test_t_v160_trc_05_add_span_failure_rolls_back_only_the_tool_call_row(conn, monkeypatch):
+    real_add_span = storage.add_span
+
+    def selective_failing_add_span(c, **kwargs):
+        if kwargs.get("name", "").startswith("execute_tool"):
+            raise sqlite3.OperationalError("boom")
+        return real_add_span(c, **kwargs)
+
+    monkeypatch.setattr(storage, "add_span", selective_failing_add_span)
+    script = [LLMResponse("", [tool_call()], "tool_calls"), LLMResponse("done", [], "stop")]
+    with pytest.raises(sqlite3.OperationalError):
+        run(conn, script)
+    assert tool_rows(conn) == []
+    # round 1's chat span/row landed fine -- only the execute_tool insert failed
+    assert len(llm_rows(conn)) == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM spans WHERE name LIKE 'execute_tool%'"
+    ).fetchone()[0] == 0
+
+
+# --- T-V160-TRC-09/-10: content capture, real secret, redacted and bounded -
+
+
+def test_t_v160_trc_10_content_capture_off_by_default(conn, tmp_path):
+    cfg = make_cfg(tmp_path)
+    assert cfg.obs_capture_content is False
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    storage.add_user_message(conn, conv, "hello")
+    agent.run_agent(
+        conn=conn, conv_id=conv, llm=FakeLLM([LLMResponse("done", [], "stop")]),
+        skills={}, runner=RecordingRunner(), now=NOW, sleep=lambda _s: None, cfg=cfg,
+    )
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    chat_spans = [s for s in spans if s["name"].startswith("chat")]
+    attrs = json.loads(chat_spans[0]["attributes_json"])
+    assert not (tracing.CONTENT_ATTRIBUTE_KEYS & attrs.keys())
+
+
+def test_t_v160_trc_10_content_capture_on_redacts_and_bounds(conn, tmp_path):
+    config.register_secret(CANARY)
+    cfg = make_cfg(tmp_path, obs_capture_content=True)
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    storage.add_user_message(conn, conv, f"please remember {CANARY}")
+    agent.run_agent(
+        conn=conn, conv_id=conv, llm=FakeLLM([LLMResponse("done", [], "stop")]),
+        skills={}, runner=RecordingRunner(), now=NOW, sleep=lambda _s: None, cfg=cfg,
+    )
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    chat_spans = [s for s in spans if s["name"].startswith("chat")]
+    attrs = json.loads(chat_spans[0]["attributes_json"])
+    assert "gen_ai.input.messages" in attrs
+    captured = attrs["gen_ai.input.messages"]
+    assert CANARY not in captured
+    assert config.REDACTION in captured
+    assert len(captured) <= tracing.CONTENT_ATTRIBUTE_MAX_CHARS + 1  # + the "…" mark
+    # status_message never carries content -- it isn't a content attribute at all
+    assert "status_message" not in attrs
+
+
+# --- T-V160-TRC-14: persistence failure over operation failure, no bare ROLLBACK
+
+
+def test_t_v160_trc_14_persistence_failure_escapes_over_operation_failure(conn, monkeypatch):
+    def failing_add_span(c, **kwargs):
+        raise sqlite3.OperationalError("persistence boom")
+
+    monkeypatch.setattr(storage, "add_span", failing_add_span)
+    script = [LLMError("operation boom", retryable=True)]
+    with pytest.raises(sqlite3.OperationalError, match="persistence boom"):
+        run(conn, script)
+
+
+def test_t_v160_trc_14_a_failed_begin_immediate_is_never_followed_by_a_bare_rollback(tmp_path):
+    # A genuine lock, not a mock: `sqlite3.Connection` is a builtin type and
+    # cannot have `execute` monkeypatched on it. A second connection holding
+    # an EXCLUSIVE lock makes `BEGIN IMMEDIATE` fail for real. If the guarded
+    # `if conn.in_transaction: ROLLBACK` were missing or wrong, sqlite3 would
+    # raise its own "cannot rollback - no transaction is active" instead,
+    # *replacing* this message -- so matching on the original message is
+    # itself proof no bare ROLLBACK ran.
+    db_path = tmp_path / "locked.db"
+    blocker = storage.connect(db_path)
+    storage.init_schema(blocker)
+    blocker.execute("BEGIN EXCLUSIVE")
+    # A short timeout so the test fails fast rather than waiting out
+    # `storage.connect`'s 5s retry budget.
+    working_conn = sqlite3.connect(str(db_path), isolation_level=None, timeout=0.1)
+    working_conn.row_factory = sqlite3.Row
+    try:
+        script = [LLMResponse("done", [], "stop")]
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            run(working_conn, script)
+        assert working_conn.in_transaction is False
+    finally:
+        working_conn.close()
+        blocker.execute("ROLLBACK")
+        blocker.close()
+
+
+# --- root-span limit_hit mechanism (feeds T-V160-MET-09, full aggregate at T4)
+
+
+def test_root_span_records_tool_round_limit_hit(conn):
+    # TOOL_ROUND_LIMIT (7) < ROUND_LIMIT (8): a round that keeps offering
+    # tool calls always exits through the "tools discarded, not exposed"
+    # path at round 8, before the while loop can ever exhaust ROUND_LIMIT
+    # naturally -- matching the pre-existing "normally unreachable" comment
+    # on the loop's final `return`. This exercises the constant that
+    # genuinely fires in that situation.
+    script = [LLMResponse("", [tool_call(index=i)], "tool_calls") for i in range(1, 9)]
+    run(conn, script)
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    root = next(s for s in spans if s["parent_span_id"] is None)
+    attrs = json.loads(root["attributes_json"])
+    hits = set(attrs.get("tg_agent.limit_hit", "").split(","))
+    assert "TOOL_ROUND_LIMIT" in hits
+    # only real budget-constant names ever appear
+    assert hits <= {
+        "ROUND_LIMIT", "TOOL_ROUND_LIMIT", "HTTP_ATTEMPT_LIMIT", "TOOL_EXECUTION_LIMIT",
+        "MAX_TOOL_CALLS_PER_RESPONSE", "MALFORMED_RETRY_LIMIT", "EMPTY_REPAIR_LIMIT",
+    }
+    assert "MAX_TOOL_CALLS_ACCEPTED" not in hits
+
+
+def test_root_span_records_max_tool_calls_per_response_hit(conn):
+    calls = [tool_call(index=i) for i in range(1, 6)]  # > MAX_TOOL_CALLS_PER_RESPONSE
+    script = [LLMResponse("", calls, "tool_calls"), LLMResponse("done", [], "stop")]
+    run(conn, script)
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    root = next(s for s in spans if s["parent_span_id"] is None)
+    attrs = json.loads(root["attributes_json"])
+    hits = set(attrs.get("tg_agent.limit_hit", "").split(","))
+    assert "MAX_TOOL_CALLS_PER_RESPONSE" in hits

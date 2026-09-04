@@ -363,17 +363,27 @@ MUTATIONS = [
     {
         "id": "v13-llm-call-not-recorded-on-error",
         "path": "agent.py",
+        # REQ-V160-TRC-08 (spec-v1.6.0 T3) merged the once-separate success
+        # and failure recording calls into one unconditional call after the
+        # `chat` span's try/except -- the failed-invocation row now carries
+        # its round's real turn_id instead of None, so this find string is
+        # updated to match; same id, same underlying property (every LLM
+        # invocation, failed or not, gets its own row).
         "find": (
             "            _record_llm_call(\n"
-            "                conn, conv_id, llm, resolve_cost,\n"
+            "                conn, conv_id, llm, resolve_cost, span=span,\n"
             '                purpose="agent", round_no=round_no, attempt=attempts, ts=ts,\n'
-            "                latency_ms=_elapsed_ms(started), turn_id=None,\n"
+            "                latency_ms=_elapsed_ms(started), turn_id=turn_id,\n"
             "                messages=request_messages, tools=request_tools,\n"
-            '                response=None, error_kind=getattr(exc, "kind", "http"),\n'
+            "                response=response,\n"
+            "                error_kind=None if failure is None else "
+            'getattr(failure, "kind", "http"),\n'
+            "                capture_content=cfg is not None and cfg.obs_capture_content,\n"
             "            )\n"
         ),
         "replace": "",
-        "why": "REQ-V13-OBS-04: a failed invocation is an invocation and gets its own row",
+        "why": "REQ-V13-OBS-04 / REQ-V160-TRC-08: every LLM invocation, "
+               "failed or not, is an invocation and gets its own row and chat span",
     },
     {
         "id": "v13-resent-formula",

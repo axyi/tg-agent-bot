@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 import config
 import storage
+import tracing
 from config import Config
 from llm.base import CostResolver, LLMClient, LLMError, LLMResponse, ToolCall, describe_client
 from tools import (
@@ -210,11 +211,60 @@ def run_agent(
     on_tool: Callable[[str, str], None] | None = None,
     resolve_cost: CostResolver | None = None,
 ) -> str:
+    sink = tracing.SqliteSpanSink(conn)
+    with tracing.start_span(
+        "invoke_agent tg-agent-bot", tracing.KIND_INTERNAL, sink=sink, conv_id=conv_id,
+        attributes={
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.agent.name": "tg-agent-bot",
+            "gen_ai.conversation.id": conv_id,
+        },
+    ) as root_span:
+        return _run_agent_turn(
+            root_span,
+            conn=conn, conv_id=conv_id, llm=llm, skills=skills, runner=runner, now=now,
+            sink=sink, sleep=sleep, cfg=cfg, fetcher=fetcher, audit=audit,
+            recent_goals=recent_goals, should_stop=should_stop, on_tool=on_tool,
+            resolve_cost=resolve_cost,
+        )
+
+
+def _run_agent_turn(
+    root_span: tracing.MutableSpan,
+    *,
+    conn: sqlite3.Connection,
+    conv_id: int,
+    llm: LLMClient,
+    skills: dict[str, Skill],
+    runner: CommandRunner,
+    now: str,
+    sink: tracing.SpanSink,
+    sleep: Callable[[float], None],
+    cfg: Config | None,
+    fetcher: Fetcher | None,
+    audit: AuditHook | None,
+    recent_goals: list[str] | None,
+    should_stop: Callable[[], bool],
+    on_tool: Callable[[str, str], None] | None,
+    resolve_cost: CostResolver | None,
+) -> str:
     def finish(text: str) -> str:
         # Defence in depth: model output and user input can quote a secret that
         # never travelled through a tool envelope (REQ-V1-SEC-06).
         text = config.redact(text)
-        storage.add_assistant_message(conn, conv_id, text)
+        # REQ-V160-TRC-07: the root span's row insert is this turn's final
+        # message -- both land in one transaction, or neither does. A failed
+        # `BEGIN IMMEDIATE` itself leaves no transaction open, so the guarded
+        # `ROLLBACK` below is a no-op rather than a second, masking error.
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            root_span.finish()
+            storage.add_assistant_message(conn, conv_id, text)
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         return text
 
     max_tokens = cfg.llm_max_tokens if cfg is not None else None
@@ -233,12 +283,20 @@ def run_agent(
     tools_used = 0
     malformed_retries = 0
     empty_repairs = 0
+    # REQ-V160-TRC-08: minted once per round, before its attempt loop, and
+    # reused by every attempt of that round -- failed ones included -- and by
+    # every tool call the round executes. `next_turn_id` is a pure read that
+    # stays valid until something actually writes a row with it, which is why
+    # it is safe to hold across retries within the same round.
+    turn_id = storage.next_turn_id(conn, conv_id)
 
     while round_no <= ROUND_LIMIT:
         if should_stop():
             return finish(FALLBACK_INTERRUPTED)
 
         expose_tools = round_no <= TOOL_ROUND_LIMIT and tools_used < TOOL_EXECUTION_LIMIT
+        if round_no > TOOL_ROUND_LIMIT:
+            root_span.add_limit_hit("TOOL_ROUND_LIMIT")
         if expose_tools:
             request_messages = messages
             request_tools = tool_specs()
@@ -248,19 +306,33 @@ def run_agent(
 
         ts = storage.utc_now_iso()
         started = time.monotonic()
-        try:
-            attempts += 1
-            response = llm.complete(request_messages, request_tools, max_tokens=max_tokens)
-        except LLMError as exc:
-            # Recorded first, before any of the three exits below is taken: a
+        failure: LLMError | None = None
+        response: LLMResponse | None = None
+        # REQ-V160-TRC-04: one `chat` span per LLM invocation -- every retry
+        # and failover attempt is its own sibling span, not a shared one.
+        with tracing.start_span(
+            "chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id, turn_id=turn_id,
+        ) as span:
+            try:
+                attempts += 1
+                response = llm.complete(request_messages, request_tools, max_tokens=max_tokens)
+            except LLMError as exc:
+                span.set_error(exc)
+                failure = exc
+            # Recorded either way, before any retry/exit decision below: a
             # failed invocation is an invocation (REQ-V13-OBS-04).
             _record_llm_call(
-                conn, conv_id, llm, resolve_cost,
+                conn, conv_id, llm, resolve_cost, span=span,
                 purpose="agent", round_no=round_no, attempt=attempts, ts=ts,
-                latency_ms=_elapsed_ms(started), turn_id=None,
+                latency_ms=_elapsed_ms(started), turn_id=turn_id,
                 messages=request_messages, tools=request_tools,
-                response=None, error_kind=getattr(exc, "kind", "http"),
+                response=response,
+                error_kind=None if failure is None else getattr(failure, "kind", "http"),
+                capture_content=cfg is not None and cfg.obs_capture_content,
             )
+
+        if failure is not None:
+            exc = failure
             if exc.retryable and attempts < HTTP_ATTEMPT_LIMIT:
                 sleep(RETRY_SLEEP_S)
                 continue                      # same round, same tool policy
@@ -274,19 +346,13 @@ def run_agent(
                 malformed_retries += 1
                 sleep(RETRY_SLEEP_S)
                 continue
+            if attempts >= HTTP_ATTEMPT_LIMIT:
+                root_span.add_limit_hit("HTTP_ATTEMPT_LIMIT")
+            if getattr(exc, "kind", "http") == "malformed" and (
+                malformed_retries >= MALFORMED_RETRY_LIMIT
+            ):
+                root_span.add_limit_hit("MALFORMED_RETRY_LIMIT")
             return finish(FALLBACK_LLM_ERROR.format(reason=str(exc)))
-
-        # REQ-V12-ID-01 item 3 and REQ-V13-OBS-04 read the same value: nothing is
-        # inserted into `messages` between here and `add_tool_turn` /
-        # `add_assistant_message`, so this is the turn this call will produce.
-        turn_id = storage.next_turn_id(conn, conv_id)
-        _record_llm_call(
-            conn, conv_id, llm, resolve_cost,
-            purpose="agent", round_no=round_no, attempt=attempts, ts=ts,
-            latency_ms=_elapsed_ms(started), turn_id=turn_id,
-            messages=request_messages, tools=request_tools,
-            response=response, error_kind=None,
-        )
 
         has_content = bool(response.content.strip())
         if not response.tool_calls:
@@ -299,6 +365,7 @@ def run_agent(
                 messages.append({"role": "system", "content": EMPTY_REPAIR_INSTRUCTION})
                 empty_repairs += 1
                 continue
+            root_span.add_limit_hit("EMPTY_REPAIR_LIMIT")
             return finish(FALLBACK_EMPTY)
         if not expose_tools:
             # Tool calls are discarded unexecuted and never stored.
@@ -328,7 +395,9 @@ def run_agent(
         for call_id, result in results:
             messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
         round_no += 1
+        turn_id = storage.next_turn_id(conn, conv_id)
 
+    root_span.add_limit_hit("ROUND_LIMIT")
     return finish(FALLBACK_NO_ANSWER)         # defensive; normally unreachable
 
 
@@ -537,7 +606,14 @@ def _execute_tool_calls(
 ) -> tuple[list[tuple[str, str]], int]:
     executable = normalized[:MAX_TOOL_CALLS_PER_RESPONSE]
     excess = normalized[MAX_TOOL_CALLS_PER_RESPONSE:]
+    # REQ-V160-TRC-10: limit hits are recorded on the root span; at this call
+    # depth (between rounds, no `chat` span active) `current_span()` is that
+    # root -- `None` only in a direct-call test with no active span.
+    root = tracing.current_span()
+    if excess and root is not None:
+        root.add_limit_hit("MAX_TOOL_CALLS_PER_RESPONSE")
     results: list[tuple[str, str]] = []
+    sink = tracing.SqliteSpanSink(conn)
     for call in executable:
         started = time.monotonic()
         # REQ-V13-TOO-03: the tool reports its own measurement; only it knows
@@ -558,15 +634,27 @@ def _execute_tool_calls(
             # never saw an answer is the harness, not the tool.
             result = BUDGET_EXHAUSTED_RESULT
             outcome = "budget"
-        _record_tool_call(
-            conn, conv_id, turn_id, call, result, outcome, _elapsed_ms(started),
-            measured[-1] if measured else None,
-        )
+            if root is not None:
+                root.add_limit_hit("TOOL_EXECUTION_LIMIT")
+        # REQ-V160-TRC-04: one `execute_tool` span per recorded tool call,
+        # `budget`/`rejected` outcomes included.
+        with tracing.start_span(
+            "execute_tool", tracing.KIND_INTERNAL, sink=sink, conv_id=conv_id, turn_id=turn_id,
+        ) as span:
+            _record_tool_call(
+                conn, conv_id, turn_id, call, result, outcome, _elapsed_ms(started),
+                measured[-1] if measured else None, span=span,
+            )
         results.append((call.id, result))
     for call in excess:
         # Never executed, still recorded: REQ-V13-OBS-05 counts what the model
         # asked for, not only what the harness allowed.
-        _record_tool_call(conn, conv_id, turn_id, call, EXCESS_CALL_RESULT, "rejected", 0, None)
+        with tracing.start_span(
+            "execute_tool", tracing.KIND_INTERNAL, sink=sink, conv_id=conv_id, turn_id=turn_id,
+        ) as span:
+            _record_tool_call(
+                conn, conv_id, turn_id, call, EXCESS_CALL_RESULT, "rejected", 0, None, span=span,
+            )
         results.append((call.id, EXCESS_CALL_RESULT))
     return results, tools_used
 
@@ -590,31 +678,56 @@ def _record_tool_call(
     outcome: str,
     duration_ms: int,
     size: OutputSize | None,
+    *,
+    span: tracing.MutableSpan,
 ) -> None:
+    """One row per tool call the agent decided on, plus the `execute_tool`
+    span that owns it (REQ-V160-TRC-04, -07): both land in one transaction,
+    or a rollback leaves neither -- this function is the sole caller of
+    `span.finish()` for an `execute_tool` span. The span's own status stays
+    "ok": an `outcome` of "error" is the tool's *result envelope* reporting a
+    problem, a normal and fully-recorded outcome, not a tracing-layer
+    failure (`_tool_outcome`'s docstring: a non-zero exit is not an error of
+    the tool)."""
     # REQ-V13-TOO-03: where a tool produced no stream text — an error envelope, a
     # refusal, a call the harness never ran — the envelope is the whole of what
     # the model is shown, so it is the honest measure of both columns.
     measured = size if size is not None else OutputSize(len(result), len(result))
-    storage.add_tool_call(
-        conn,
-        conv_id=conv_id,
-        turn_id=turn_id,
-        tool_call_id=call.id,
-        # The wire name, never the model's raw string: the column must not become
-        # a channel for attacker-chosen text (REQ-V12-ID-01 item 4).
-        tool=_wire_name(call),
-        ts=storage.utc_now_iso(),
-        input_chars=len(call.arguments),
-        raw_output_chars=measured.raw_chars,
-        output_chars=measured.chars,
-        # Deliberately still the envelope: `output_tokens_est` is the O1 metric
-        # (`tool_output_tokens_est`), the stage-A baseline was measured on the
-        # text actually sent, and re-basing it would make before and after
-        # incomparable. The two columns above are the stream-text measure.
-        output_tokens_est=estimate_tokens(result),
-        duration_ms=duration_ms,
-        outcome=outcome,
-    )
+    tool_name = _wire_name(call)
+    span.name = f"execute_tool {tool_name}"
+    span.set_attribute("gen_ai.operation.name", "execute_tool")
+    span.set_attribute("gen_ai.tool.name", tool_name)
+    span.set_attribute("tg_agent.tool.outcome", outcome)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        span.finish()
+        storage.add_tool_call(
+            conn,
+            conv_id=conv_id,
+            turn_id=turn_id,
+            tool_call_id=call.id,
+            # The wire name, never the model's raw string: the column must not become
+            # a channel for attacker-chosen text (REQ-V12-ID-01 item 4).
+            tool=tool_name,
+            ts=storage.utc_now_iso(),
+            input_chars=len(call.arguments),
+            raw_output_chars=measured.raw_chars,
+            output_chars=measured.chars,
+            # Deliberately still the envelope: `output_tokens_est` is the O1 metric
+            # (`tool_output_tokens_est`), the stage-A baseline was measured on the
+            # text actually sent, and re-basing it would make before and after
+            # incomparable. The two columns above are the stream-text measure.
+            output_tokens_est=estimate_tokens(result),
+            duration_ms=duration_ms,
+            outcome=outcome,
+            trace_id=span.trace_id,
+            span_id=span.span_id,
+        )
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
 
 
 def _elapsed_ms(started: float) -> int:
@@ -647,6 +760,7 @@ def _record_llm_call(
     llm: LLMClient,
     resolve_cost: CostResolver | None,
     *,
+    span: tracing.MutableSpan,
     purpose: str,
     round_no: int,
     attempt: int,
@@ -657,8 +771,12 @@ def _record_llm_call(
     tools: list[dict] | None,
     response: LLMResponse | None,
     error_kind: str | None,
+    capture_content: bool = False,
 ) -> None:
-    """One row per `llm.complete` invocation (REQ-V13-OBS-04).
+    """One row per `llm.complete` invocation (REQ-V13-OBS-04), plus the `chat`
+    span that owns it (REQ-V160-TRC-04, -07): both land in one transaction, or
+    a rollback leaves neither -- this function is the sole caller of
+    `span.finish()` for a `chat` span.
 
     `describe()` is read *after* the invocation, so a failover performed inside
     it names the client that actually served the call. The price is whatever
@@ -666,38 +784,109 @@ def _record_llm_call(
     `bot_state` or computes a price of its own.
     """
     provider, model = describe_client(llm)
+    span.name = f"chat {model}"
+    span.set_attribute("gen_ai.operation.name", "chat")
+    span.set_attribute("gen_ai.provider.name", provider)
+    span.set_attribute("gen_ai.request.model", model)
+    span.set_attribute("tg_agent.purpose", purpose)
+    span.set_attribute("tg_agent.round", round_no)
+    span.set_attribute("tg_agent.attempt", attempt)
     usage = response.usage if response is not None else None
     cost_usd, cost_basis = (None, None)
     if resolve_cost is not None:
         cost_usd, cost_basis = resolve_cost(provider, model, usage)
     prompt_chars, by_role = _prompt_chars_by_role(messages, tools)
-    storage.add_llm_call(
-        conn,
-        conv_id=conv_id,
-        turn_id=turn_id,
-        purpose=purpose,
-        round_no=round_no,
-        attempt=attempt,
-        ts=ts,
-        provider=provider,
-        model=model,
-        prompt_chars=prompt_chars,
-        prompt_chars_by_role=by_role,
-        messages_n=len(messages),
-        tools_exposed=len(tools) if tools else 0,
-        latency_ms=latency_ms,
-        prompt_tokens=None if usage is None else usage.prompt_tokens,
-        completion_tokens=None if usage is None else usage.completion_tokens,
-        total_tokens=None if usage is None else usage.total_tokens,
-        cached_tokens=None if usage is None else usage.cached_tokens,
-        reasoning_tokens=None if usage is None else usage.reasoning_tokens,
-        reasoning_chars=0 if response is None else response.reasoning_chars,
-        finish_reason=None if response is None else (response.finish_reason or None),
-        tool_calls_n=0 if response is None else len(response.tool_calls),
-        error_kind=error_kind,
-        cost_usd=cost_usd,
-        cost_basis=cost_basis,
+    finish_reason = None if response is None else (response.finish_reason or None)
+    if response is not None:
+        span.set_attribute("gen_ai.response.model", model)
+        span.set_attribute(
+            "gen_ai.response.finish_reasons", [finish_reason] if finish_reason else []
+        )
+    if usage is not None:
+        if usage.prompt_tokens is not None:
+            span.set_attribute("gen_ai.usage.input_tokens", usage.prompt_tokens)
+        if usage.completion_tokens is not None:
+            span.set_attribute("gen_ai.usage.output_tokens", usage.completion_tokens)
+        if usage.cached_tokens is not None:
+            span.set_attribute("gen_ai.usage.cache_read.input_tokens", usage.cached_tokens)
+        if usage.reasoning_tokens is not None:
+            span.set_attribute("gen_ai.usage.reasoning.output_tokens", usage.reasoning_tokens)
+    if error_kind is not None:
+        span.set_attribute("tg_agent.error_kind", error_kind)
+    if cost_usd is not None:
+        span.set_attribute("tg_agent.cost_usd", cost_usd)
+    if cost_basis is not None:
+        span.set_attribute("tg_agent.cost_basis", cost_basis)
+    # REQ-V160-TRC-09: opt-in only, gated by `capture_content`
+    # (`cfg.obs_capture_content` at the call site) -- `set_content_attribute`
+    # itself no-ops when `capture` is false, so this is unconditional here.
+    system_instructions = next(
+        (str(m.get("content", "")) for m in messages if m.get("role") == "system"), ""
     )
+    tracing.set_content_attribute(
+        span, "gen_ai.system_instructions", system_instructions, capture=capture_content
+    )
+    tracing.set_content_attribute(
+        span, "gen_ai.input.messages",
+        json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str),
+        capture=capture_content,
+    )
+    if tools:
+        tracing.set_content_attribute(
+            span, "gen_ai.tool.definitions",
+            json.dumps(tools, ensure_ascii=False, sort_keys=True, default=str),
+            capture=capture_content,
+        )
+    if response is not None:
+        output = {
+            "content": response.content,
+            "tool_calls": [
+                {"id": c.id, "name": c.name, "arguments": c.arguments}
+                for c in response.tool_calls
+            ],
+        }
+        tracing.set_content_attribute(
+            span, "gen_ai.output.messages",
+            json.dumps(output, ensure_ascii=False, sort_keys=True, default=str),
+            capture=capture_content,
+        )
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        span.finish()
+        storage.add_llm_call(
+            conn,
+            conv_id=conv_id,
+            turn_id=turn_id,
+            purpose=purpose,
+            round_no=round_no,
+            attempt=attempt,
+            ts=ts,
+            provider=provider,
+            model=model,
+            prompt_chars=prompt_chars,
+            prompt_chars_by_role=by_role,
+            messages_n=len(messages),
+            tools_exposed=len(tools) if tools else 0,
+            latency_ms=latency_ms,
+            prompt_tokens=None if usage is None else usage.prompt_tokens,
+            completion_tokens=None if usage is None else usage.completion_tokens,
+            total_tokens=None if usage is None else usage.total_tokens,
+            cached_tokens=None if usage is None else usage.cached_tokens,
+            reasoning_tokens=None if usage is None else usage.reasoning_tokens,
+            reasoning_chars=0 if response is None else response.reasoning_chars,
+            finish_reason=finish_reason,
+            tool_calls_n=0 if response is None else len(response.tool_calls),
+            error_kind=error_kind,
+            cost_usd=cost_usd,
+            cost_basis=cost_basis,
+            trace_id=span.trace_id,
+            span_id=span.span_id,
+        )
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
 
 
 def _first_argument(call: ToolCall) -> str:
@@ -767,13 +956,14 @@ def summarize_conversation(
 ) -> str | None:
     """At most two calls: one ask, one repair. Returns normalised JSON or `None`.
 
-    `cfg` is part of the pinned signature; the summarizer's own caps are fixed.
+    `cfg` is part of the pinned signature; the summarizer's own caps are
+    fixed -- only `obs_capture_content` (REQ-V160-TRC-09) is read from it.
     """
-    del cfg
     base = storage.load_context_messages(conn, conv_id, CONTEXT_WINDOW_MESSAGES)
     messages = base + [{"role": "user", "content": SUMMARY_PROMPT}]
 
-    record = (conn, conv_id, resolve_cost)
+    capture_content = cfg is not None and cfg.obs_capture_content
+    record = (conn, conv_id, resolve_cost, capture_content)
     parsed, reason = _ask_for_summary(llm, messages, record)
     if parsed is None and reason is not None:
         repair = messages + [{
@@ -792,28 +982,35 @@ def summarize_conversation(
 def _ask_for_summary(
     llm: LLMClient, messages: list[dict], record: tuple
 ) -> tuple[dict | None, str | None]:
-    conn, conv_id, resolve_cost = record
+    conn, conv_id, resolve_cost, capture_content = record
     ts = storage.utc_now_iso()
     started = time.monotonic()
     # REQ-V13-OBS-04 pins the summary purpose to round 0 and attempt 1; the
     # repair call is a second row, not a second attempt.
     common = {
         "purpose": "summary", "round_no": 0, "attempt": 1, "ts": ts, "turn_id": None,
-        "messages": messages, "tools": None,
+        "messages": messages, "tools": None, "capture_content": capture_content,
     }
-    try:
-        response = llm.complete(messages, None, max_tokens=SUMMARY_MAX_TOKENS)
-    except LLMError as exc:
+    sink = tracing.SqliteSpanSink(conn)
+    # REQ-V160-TRC-04 item 4: nests under the active root when one exists
+    # (the normal, mid-turn case); otherwise becomes its own root with a
+    # fresh trace_id (`/new`, or a direct call from a test with no active
+    # span) -- `start_span` already resolves this from `current_span()`.
+    with tracing.start_span("chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id) as span:
+        try:
+            response = llm.complete(messages, None, max_tokens=SUMMARY_MAX_TOKENS)
+        except LLMError as exc:
+            span.set_error(exc)
+            _record_llm_call(
+                conn, conv_id, llm, resolve_cost, span=span, latency_ms=_elapsed_ms(started),
+                response=None, error_kind=getattr(exc, "kind", "http"), **common,
+            )
+            log.warning("summarization failed: %s", config.redact(str(exc)))
+            return None, None
         _record_llm_call(
-            conn, conv_id, llm, resolve_cost, latency_ms=_elapsed_ms(started),
-            response=None, error_kind=getattr(exc, "kind", "http"), **common,
+            conn, conv_id, llm, resolve_cost, span=span, latency_ms=_elapsed_ms(started),
+            response=response, error_kind=None, **common,
         )
-        log.warning("summarization failed: %s", config.redact(str(exc)))
-        return None, None
-    _record_llm_call(
-        conn, conv_id, llm, resolve_cost, latency_ms=_elapsed_ms(started),
-        response=response, error_kind=None, **common,
-    )
     return _parse_summary(response.content)
 
 
