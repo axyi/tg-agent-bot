@@ -17,7 +17,7 @@ profiles:
 # trivy and skylos are not installed yet and stay absent from this block
 # until T4/T5 -- doctor iterates only what's here.
 tools:
-  ruff:     { version: "0.16.5", via: uv, version_parser: last_token,
+  ruff:     { version: "0.16.6", via: uv, version_parser: last_token,
               version_argv: [uv, run, --locked, ruff, --version] }
   gitleaks: { version: "8.30.1", via: binary, version_parser: bare,
               version_argv: [gitleaks, version] }

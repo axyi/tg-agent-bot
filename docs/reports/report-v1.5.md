@@ -120,6 +120,7 @@ Install provenance (REQ-V15-DEP-03):
 | trivy 0.74.0 (T4) | GitHub release asset + checksum | `trivy_0.74.0_Linux-64bit.tar.gz` | `2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a` (matched `trivy_0.74.0_checksums.txt`, `sha256sum -c` OK) |
 | skylos 4.35.0 (T5) | `uv tool install skylos==4.35.0` (PyPI) | — | — (uv-tool channel) |
 | rtk 0.47.0 (T6) | GitHub release asset + checksum | `rtk-x86_64-unknown-linux-musl.tar.gz` | `7c0175d867f96c4f8f788479af82ca8f0990ea944226268834d224a525186fb7` (matched `checksums.txt`, `sha256sum -c` OK) |
+| ruff 0.16.5 → 0.16.6 (T13) | `uv lock` (PyPI, via `pyproject.toml`'s pin) | — | — (uv-managed dev dependency, resolved and verified through `uv.lock`'s own hashes, no separate release-asset checksum applies) |
 
 **T2 — gitleaks 8.30.1.** Installed to `~/.local/bin/gitleaks` (already on
 `PATH`, replacing 8.24.3; the old binary kept as a local backup outside the
@@ -195,6 +196,19 @@ pin moved; `doctor.warn_only_tools: [rtk]` was already in place from T1
 All five external tools (§11) are now installed at their T15-DEP-02
 targets: gitleaks 8.30.1, semgrep 1.176.0, trivy 0.74.0, skylos 4.35.0,
 rtk 0.47.0.
+
+**T13 — ruff 0.16.5 → 0.16.6, both pins, one commit.** Verified 0.16.6
+is a real, installable published version (`uv tool run --from
+ruff==0.16.6 ruff --version` → `ruff 0.16.6`) before pinning it.
+Updated `pyproject.toml`'s dev-dependency pin and
+`config/quality_gates.yaml`'s `tools.ruff.version` together
+(REQ-V15-GATE-03: "any ruff-pin change edits both in the same commit");
+regenerated `uv.lock` (`uv lock` → `Updated ruff v0.16.5 -> v0.16.6`),
+`uv sync --locked` installs it cleanly. `checks.py doctor` confirms:
+`all tools at pin, hooks installed`. `T-V15-GATE-03` (the drift test)
+green; `uv run --locked ruff check .` green against the new version
+with no rule-set changes needed; full suite green; `bot.py --selftest`
+→ `OK`.
 
 ## Scanners (T7 — REQ-V15-SCAN-*)
 
@@ -691,6 +705,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T10 | no (its own reading map: §9 in full, ≈35 lines — under threshold) | no | content already in the main context from the session-start full-spec read; the copied block was already in this session's own inherited config context, not read from outside the repository |
 | T11 | yes — its own reading map explicitly calls for it ("the lint sweeps 46 files — delegate the sweep, summary only") | **yes** | a general-purpose subagent backfilled headers on the 29 historical prompt files found failing; briefed with hard rules (header only, never fabricate, source from file text or `git log`, verify each file, report per-file sourcing); its own report was then independently re-verified (not merely trusted) — a fresh check-1 sweep and the full test suite run directly, two edited files diffed by hand |
 | T12 | no — its own reading map names §14 and §15.4, both read in full via targeted, bounded reads (~140 lines combined); `devtools/mutation_check.py`'s 34 KB was never read in full, only its `MUTATIONS` tail and `main()`, located via `grep` first | no | targeted reads of known line ranges, not the whole file — the task table's "delegate" concern (an unbounded 34 KB read) never arose |
+| T13 | no (its own reading map: `pyproject.toml`'s dev group + `config/quality_gates.yaml`'s ruff entry — both small, mapped, targeted) | no | — |
 
 (rest of the table fills in as each task lands)
 
