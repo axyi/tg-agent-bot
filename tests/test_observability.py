@@ -428,9 +428,9 @@ def test_describe_on_failover_reports_the_client_that_served_the_call():
 # --------------------------------------------------------------------------
 
 def test_obs03_fresh_database_is_v3(conn):
-    assert storage.SCHEMA_VERSION == 3
-    assert storage.schema_version(conn) == 3
-    for table in ("llm_calls", "tool_calls"):
+    assert storage.SCHEMA_VERSION == 4
+    assert storage.schema_version(conn) == 4
+    for table in ("llm_calls", "tool_calls", "spans"):
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
         ).fetchone() is not None
@@ -449,24 +449,25 @@ def test_obs03_migration_from_v2_is_additive_and_idempotent(tmp_path):
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 3
+    assert storage.schema_version(conn) == 4
     assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
     assert conn.execute("SELECT content FROM messages").fetchone()[0] == "hi"
     add_call(conn, 1)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 3
+    assert storage.schema_version(conn) == 4
     assert len(llm_rows(conn)) == 1
     conn.close()
 
 
 def test_obs03_a_future_version_is_still_refused(tmp_path):
+    # 4 is the current SCHEMA_VERSION from spec-v1.6.0 T2; 5 is the future boundary.
     path = tmp_path / "future.db"
     conn = storage.connect(path)
     storage.init_schema(conn)
-    conn.execute("UPDATE schema_version SET version = 4 WHERE id = 1")
+    conn.execute("UPDATE schema_version SET version = 5 WHERE id = 1")
     with pytest.raises(RuntimeError) as raised:
         storage.init_schema(conn)
-    assert "4" in str(raised.value)
+    assert "5" in str(raised.value)
     conn.close()
 
 

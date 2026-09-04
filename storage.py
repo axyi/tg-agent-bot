@@ -15,7 +15,7 @@ from pathlib import Path
 import config
 
 WINDOW_TURNS = 40
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 RECENT_GOAL_CHARS = 200
 
 log = logging.getLogger("storage")
@@ -28,10 +28,19 @@ LLM_CALL_COLUMNS = (
     "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens",
     "reasoning_chars", "prompt_chars", "prompt_chars_by_role", "messages_n", "tools_exposed",
     "latency_ms", "finish_reason", "tool_calls_n", "error_kind", "cost_usd", "cost_basis",
+    "trace_id", "span_id",
 )
 TOOL_CALL_COLUMNS = (
     "id", "conv_id", "turn_id", "tool_call_id", "tool", "ts", "input_chars",
     "raw_output_chars", "output_chars", "output_tokens_est", "duration_ms", "outcome",
+    "trace_id", "span_id",
+)
+# REQ-V160-TRC-05: mirrors the `spans` table's own column list exactly, in the
+# same order as the DDL, so `T-V160-TRC-06` can assert it against
+# `PRAGMA table_info(spans)` directly.
+SPAN_COLUMNS = (
+    "id", "trace_id", "span_id", "parent_span_id", "conv_id", "turn_id", "name", "kind",
+    "ts", "start_ns", "duration_ms", "status", "status_message", "attributes_json",
 )
 
 _SUMMARIES_DDL = """
@@ -72,7 +81,9 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     tool_calls_n         INTEGER NOT NULL DEFAULT 0,
     error_kind           TEXT,
     cost_usd             REAL,
-    cost_basis           TEXT
+    cost_basis           TEXT,
+    trace_id             TEXT,
+    span_id              TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_calls_conv ON llm_calls (conv_id, id);
@@ -89,10 +100,35 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     output_chars      INTEGER NOT NULL,
     output_tokens_est INTEGER NOT NULL,
     duration_ms       INTEGER NOT NULL,
-    outcome           TEXT    NOT NULL
+    outcome           TEXT    NOT NULL,
+    trace_id          TEXT,
+    span_id           TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_calls_conv ON tool_calls (conv_id, id);
+"""
+
+# REQ-V160-TRC-05: the span table. Appended to `_SCHEMA` so a fresh database is
+# born at schema 4, and reused verbatim by `_MIGRATION_3_TO_4`.
+_SPANS_DDL = """
+CREATE TABLE IF NOT EXISTS spans (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id        TEXT NOT NULL,
+    span_id         TEXT NOT NULL UNIQUE,
+    parent_span_id  TEXT,
+    conv_id         INTEGER REFERENCES conversations(id),
+    turn_id         INTEGER,
+    name            TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('INTERNAL', 'CLIENT')),
+    ts              TEXT NOT NULL,
+    start_ns        INTEGER NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+    status_message  TEXT,
+    attributes_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans (trace_id, id);
+CREATE INDEX IF NOT EXISTS idx_spans_conv  ON spans (conv_id, id);
 """
 
 _SCHEMA = """
@@ -101,7 +137,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 
-INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 3);
+INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 4);
 
 CREATE TABLE IF NOT EXISTS conversations (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,10 +173,11 @@ CREATE TABLE IF NOT EXISTS bot_state (
     value TEXT NOT NULL
 );
 
-""" + _SUMMARIES_DDL + _OBSERVABILITY_DDL
+""" + _SUMMARIES_DDL + _OBSERVABILITY_DDL + _SPANS_DDL
 
-# Both migrations are additive: a database keeps every row it had (REQ-V1-MEM-01,
-# REQ-V13-OBS-03). They chain, so a version-1 database reaches 3 in one call.
+# All three migrations are additive: a database keeps every row it had
+# (REQ-V1-MEM-01, REQ-V13-OBS-03). They chain, so a version-1 database reaches
+# 4 in one `init_schema` call.
 _MIGRATION_1_TO_2 = """
 BEGIN IMMEDIATE;
 """ + _SUMMARIES_DDL + """
@@ -148,10 +185,43 @@ UPDATE schema_version SET version = 2 WHERE id = 1;
 COMMIT;
 """
 
+# Retained but no longer reached by `init_schema`'s chain: `_OBSERVABILITY_DDL`
+# is now the v4 shape (it already carries `trace_id`/`span_id`), so a database
+# chaining through version 2 must not stop and commit `version = 3` over
+# already-v4-shaped tables -- that would be a version row lying about the
+# table shape it just wrote. `_MIGRATION_2_TO_4` below is the real chain step;
+# this constant stays only because deleting it is an unlisted edit the
+# amendment table doesn't call for.
 _MIGRATION_2_TO_3 = """
 BEGIN IMMEDIATE;
 """ + _OBSERVABILITY_DDL + """
 UPDATE schema_version SET version = 3 WHERE id = 1;
+COMMIT;
+"""
+
+# The real 2 -> 4 chain step: builds the (already v4-shaped) observability
+# tables and the spans table in one transaction, straight to version 4, with
+# no intermediate version = 3 commit.
+_MIGRATION_2_TO_4 = """
+BEGIN IMMEDIATE;
+""" + _OBSERVABILITY_DDL + _SPANS_DDL + """
+UPDATE schema_version SET version = 4 WHERE id = 1;
+COMMIT;
+"""
+
+# REQ-V160-TRC-05: the `ALTER TABLE ... ADD COLUMN` statements exist only
+# here, never in `_OBSERVABILITY_DDL`'s fresh-database path, which already has
+# the columns from the start. This runs only against a genuine on-disk
+# version-3 database (built by pre-v1.6.0 code), which is exactly the shape
+# these ALTERs were written for.
+_MIGRATION_3_TO_4 = """
+BEGIN IMMEDIATE;
+""" + _SPANS_DDL + """
+ALTER TABLE llm_calls ADD COLUMN trace_id TEXT;
+ALTER TABLE llm_calls ADD COLUMN span_id TEXT;
+ALTER TABLE tool_calls ADD COLUMN trace_id TEXT;
+ALTER TABLE tool_calls ADD COLUMN span_id TEXT;
+UPDATE schema_version SET version = 4 WHERE id = 1;
 COMMIT;
 """
 
@@ -182,6 +252,20 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(db_path: Path) -> sqlite3.Connection:
+    """REQ-V160-TRC-12 / -SRV-06: the dashboard's read-only handle. It changes
+    no file, so it skips `_restrict_permissions`; a read-only connection also
+    cannot set `journal_mode`. A missing database file raises
+    `sqlite3.OperationalError` from the `mode=ro` URI itself rather than being
+    silently created."""
+    conn = sqlite3.connect(
+        f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0
+    )
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only = ON")
+    return conn
+
+
 def _restrict_permissions(db_path: Path) -> None:
     """REQ-V1-SEC-04: the conversation store is readable by its owner only."""
     os.chmod(db_path, 0o600)
@@ -202,13 +286,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # is refused untouched and the 1 -> 2 migration is the transaction the spec
     # describes rather than a no-op after the fact.
     existing = _existing_version(conn)
-    if existing is not None and existing not in (1, 2, SCHEMA_VERSION):
+    if existing is not None and existing not in (1, 2, 3, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported database schema version: {existing}")
     if existing == 1:
         conn.executescript(_MIGRATION_1_TO_2)
         existing = 2
     if existing == 2:
-        conn.executescript(_MIGRATION_2_TO_3)
+        conn.executescript(_MIGRATION_2_TO_4)
+    elif existing == 3:
+        conn.executescript(_MIGRATION_3_TO_4)
     conn.executescript(_SCHEMA)
     version = schema_version(conn)
     if version != SCHEMA_VERSION:
@@ -271,13 +357,17 @@ def add_assistant_message(conn: sqlite3.Connection, conv_id: int, content: str) 
     return _add_single_row(conn, conv_id, "assistant", config.redact(content))
 
 
-def add_tool_turn(
+def _add_tool_turn_body(
     conn: sqlite3.Connection,
     conv_id: int,
     content: str,
     tool_calls: list[dict],
     results: list[tuple[str, str]],
 ) -> int:
+    """The transaction **body** of `add_tool_turn`, without the
+    `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK` triple (REQ-V160-TRC-07): a future
+    root-span sequence reuses this inside its own transaction, so no
+    `BEGIN IMMEDIATE` is ever nested inside another."""
     # REQ-V11-RED-01: a last-line guard so no write path can bypass redaction,
     # even one that reaches this function directly. `config.redact` is
     # idempotent, so double redaction (agent.py already redacts once) is
@@ -288,17 +378,28 @@ def add_tool_turn(
     redacted_results = [
         (tool_call_id, config.redact(result)) for tool_call_id, result in results
     ]
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    conn.execute(
+        _INSERT_MESSAGE,
+        (conv_id, turn_id, "assistant", redacted_content, payload, None, utc_now_iso()),
+    )
+    for tool_call_id, result in redacted_results:
         conn.execute(
             _INSERT_MESSAGE,
-            (conv_id, turn_id, "assistant", redacted_content, payload, None, utc_now_iso()),
+            (conv_id, turn_id, "tool", result, None, tool_call_id, utc_now_iso()),
         )
-        for tool_call_id, result in redacted_results:
-            conn.execute(
-                _INSERT_MESSAGE,
-                (conv_id, turn_id, "tool", result, None, tool_call_id, utc_now_iso()),
-            )
+    return turn_id
+
+
+def add_tool_turn(
+    conn: sqlite3.Connection,
+    conv_id: int,
+    content: str,
+    tool_calls: list[dict],
+    results: list[tuple[str, str]],
+) -> int:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        turn_id = _add_tool_turn_body(conn, conv_id, content, tool_calls, results)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -432,9 +533,13 @@ def add_llm_call(
     error_kind: str | None = None,
     cost_usd: float | None = None,
     cost_basis: str | None = None,
+    trace_id: str | None = None,
+    span_id: str | None = None,
 ) -> int:
     """One row per `llm.complete` invocation (REQ-V13-OBS-04). Sizes, counts and
-    timings only — never a fragment of the prompt itself."""
+    timings only — never a fragment of the prompt itself. `trace_id`/`span_id`
+    default to `None` (REQ-V160-EC-05): the agent.py wiring that always
+    supplies them is T3's, not this function's, concern."""
     row = {
         "conv_id": conv_id,
         "turn_id": turn_id,
@@ -460,6 +565,8 @@ def add_llm_call(
         "error_kind": error_kind,
         "cost_usd": cost_usd,
         "cost_basis": cost_basis,
+        "trace_id": trace_id,
+        "span_id": span_id,
     }
     row_id = _insert_row(conn, "llm_calls", row)
     _log_row("llm_call", LLM_CALL_COLUMNS, row_id, row,
@@ -481,9 +588,13 @@ def add_tool_call(
     output_tokens_est: int,
     duration_ms: int,
     outcome: str,
+    trace_id: str | None = None,
+    span_id: str | None = None,
 ) -> int:
     """One row per tool call the agent decided on — executed, rejected or
-    refused for budget (REQ-V13-OBS-05)."""
+    refused for budget (REQ-V13-OBS-05). `trace_id`/`span_id` default to
+    `None` (REQ-V160-EC-05): the agent.py wiring that always supplies them is
+    T3's, not this function's, concern."""
     row = {
         "conv_id": conv_id,
         "turn_id": turn_id,
@@ -496,10 +607,89 @@ def add_tool_call(
         "output_tokens_est": output_tokens_est,
         "duration_ms": duration_ms,
         "outcome": outcome,
+        "trace_id": trace_id,
+        "span_id": span_id,
     }
     row_id = _insert_row(conn, "tool_calls", row)
     _log_row("tool_call", TOOL_CALL_COLUMNS, row_id, row, {})
     return row_id
+
+
+def add_span(
+    conn: sqlite3.Connection,
+    *,
+    trace_id: str,
+    span_id: str,
+    parent_span_id: str | None,
+    conv_id: int | None,
+    turn_id: int | None,
+    name: str,
+    kind: str,
+    ts: str,
+    start_ns: int,
+    duration_ms: int,
+    status: str,
+    status_message: str | None,
+    attributes_json: str,
+) -> int:
+    """One row per finished span (REQ-V160-TRC-05, -07). A plain, parameterised
+    INSERT with no transaction of its own — the caller (`SqliteSpanSink`, via
+    the sequence of REQ-V160-TRC-07) wraps this and the call-row insert it
+    belongs to in one `BEGIN IMMEDIATE` … `COMMIT`."""
+    row = {
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "parent_span_id": parent_span_id,
+        "conv_id": conv_id,
+        "turn_id": turn_id,
+        "name": name,
+        "kind": kind,
+        "ts": ts,
+        "start_ns": start_ns,
+        "duration_ms": duration_ms,
+        "status": status,
+        "status_message": status_message,
+        "attributes_json": attributes_json,
+    }
+    row_id = _insert_row(conn, "spans", row)
+    _log_row("span", SPAN_COLUMNS, row_id, row, {})
+    return row_id
+
+
+def spans_for_trace(conn: sqlite3.Connection, trace_id: str) -> list[sqlite3.Row]:
+    """Every span of one trace, ordered by insertion (`id`)."""
+    return conn.execute(
+        "SELECT * FROM spans WHERE trace_id = ? ORDER BY id", (trace_id,)
+    ).fetchall()
+
+
+def recent_traces(
+    conn: sqlite3.Connection, *, limit: int, conv_id: int | None = None
+) -> list[sqlite3.Row]:
+    """One row per `trace_id` — the root span's `ts`, `name` and `status`, the
+    trace's `conv_id`, its span count and total duration — newest first,
+    bounded by `limit`. "Root span" is the span of that trace whose
+    `parent_span_id IS NULL`."""
+    query = (
+        "SELECT root.trace_id AS trace_id, root.ts AS ts, root.name AS name, "
+        "       root.status AS status, root.conv_id AS conv_id, "
+        "       COUNT(all_spans.id) AS span_count, "
+        "       SUM(all_spans.duration_ms) AS total_duration_ms "
+        "FROM spans AS root "
+        "JOIN spans AS all_spans ON all_spans.trace_id = root.trace_id "
+        "WHERE root.parent_span_id IS NULL "
+    )
+    params: list[object] = []
+    if conv_id is not None:
+        query += "  AND root.conv_id = ? "
+        params.append(conv_id)
+    query += (
+        "GROUP BY root.id, root.trace_id, root.ts, root.name, root.status, root.conv_id "
+        "ORDER BY root.ts DESC, root.id DESC "
+        "LIMIT ?"
+    )
+    params.append(limit)
+    return conn.execute(query, params).fetchall()
 
 
 def fetch_llm_calls(

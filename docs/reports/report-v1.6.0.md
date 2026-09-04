@@ -110,6 +110,7 @@ REQ-V160-EC-06.
 |---|---|---|
 | T0 | no | — |
 | T1 | no | — (reading stayed within `config.py:118-135`, `:455-540` plus the new files) |
+| T2 | yes | general-purpose subagent, full task (schema migration + storage helpers) |
 
 *(filled in per task as the run proceeds)*
 
