@@ -23,7 +23,9 @@ changes behaviour without touching `docs/spec/` is incomplete.
 - Frameworks/libs: `httpx` (Telegram Bot API and LLM HTTP calls),
   `python-dotenv` (config from `.env`); standard library for everything else —
   no bot framework, no agent framework
-- Tooling: uv (lockfile-pinned), pytest, ruff
+- Tooling: uv (lockfile-pinned), pytest, ruff; local quality gates add
+  gitleaks, semgrep, trivy, skylos (shadow) and rtk (operator
+  convenience, not a gate) — see "Local quality gates" below
 - Platform: Linux
 - NEVER add dependencies beyond the allowed list without asking.
 
@@ -54,19 +56,29 @@ sandbox described in the spec, NEVER against the host working tree.
 
 ## Commit format
 
-- Conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`.
+- Conventional commits: `feat:`, `fix:`, `docs:`, `style:`, `refactor:`,
+  `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`. Header ≤ 72
+  Unicode characters, no trailing period.
 - **One prompt → one commit.** Reference the prompt file in the body:
   `(prompt: docs/prompts/NN-<slug>.md)`.
 - NEVER mix results of different prompts in one commit or MR.
+- Enforced automatically by the `commit-msg` hook
+  (`.githooks/commit-msg` → `devtools/checks.py commit-msg`) from
+  spec-v1.5 T8 on; `Merge`/`Revert`/`fixup!`/`squash!` subjects bypass
+  every check above.
 <!-- SYNC: canonical text lives in standards/workflow.md §6 (lab repo); this copy is intentionally self-contained -->
 
 ## Branch strategy
 
-- One task → one branch: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`.
+- One task → one branch: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`,
+  `test/<slug>` or `chore/<slug>`.
 - Exception: a single-agent run implementing a whole spec end-to-end may
   commit directly to `main`; branches are for parallel or partial work.
 - Parallel agent work: **one git worktree per agent**, merge via MR; NEVER two
   agents in one working tree.
+- Enforced automatically by the `pre-commit`/`pre-push` branch-name
+  check from spec-v1.5 T8 on; `main` and a detached HEAD warn rather
+  than fail (a solo end-to-end run is permitted).
 
 ## Gates — run before reporting success
 
@@ -88,8 +100,30 @@ Telegram message. **Gate 5 must be fully green at every commit, including its
 `lmstudio` check** — the v1.2 "record the failure and proceed" exception is
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
-(`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns the
-test suite once per mutation).
+(`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
+the test suite once per mutation) — 72 entries as of spec-v1.5;
+`--select <prefix>` runs a named subset (mutually exclusive with
+`--only`).
+
+## Local quality gates (spec-v1.5)
+
+`devtools/checks.py` is the single entry point for every check this
+release adds — hooks call it, gates call it. `core.hooksPath` points at
+the versioned `.githooks/` (committed, never `.git/hooks/`):
+`commit-msg` and `pre-commit` run on every local commit, `pre-push` on
+every push. `config/quality_gates.yaml` is the sole authority for gate
+membership, severity thresholds and tool pins — never a literal inside
+`checks.py`. Beyond the six gates above: `checks.py doctor` (every
+pinned tool at its exact version, fails closed on a newer one too),
+`checks.py lint-docs` (prompt header/block format, the report's ledger
+row), `checks.py replay --range <rev>..<rev>` (re-verifies historical
+commits by reading git objects only, never touching the working tree),
+plus four scanners: gitleaks (secrets, committed content only, blocks
+at any severity anywhere — not diff-scoped) and semgrep, trivy, skylos
+(shadow — findings reported, never blocking), which are diff-scoped.
+`checks.py run --profile pre-commit|pre-push|full` wires them
+into three profiles; `install_hooks.py [--check]` installs/verifies the
+chain itself. `--no-verify` and any other hook bypass are forbidden.
 
 ## Benchmark
 
@@ -136,7 +170,10 @@ self-review in the writing context.
 ## Reporting
 
 Every prompt sent to an LLM is logged in `docs/prompts/` (one file per
-prompt), tokens/cost in `docs/llm-usage.md`, run results in `docs/reports/`.
+prompt — `docs/prompts/TEMPLATE.md`'s header-plus-four-block shape from
+spec-v1.5 on, enforced by `checks.py lint-docs`), tokens/cost in
+`docs/llm-usage.md`, run results in `docs/reports/` (the report's own
+"Ledger row" section is lint-checked too, from spec-v1.5 on).
 
 After each run report, generate `docs/reports/tg-post-vN.md` — a
 ready-to-paste Telegram post, written in **Russian**: constraints → result →

@@ -789,7 +789,87 @@ with the new default live. `uv run --locked ruff check .` green.
 
 ## `AGENTS.md` / `docs/plan.md` sync (T16 — REQ-V15-RPT-05)
 
-(pending)
+**`AGENTS.md`.** Stack: Python line already correct (T14); Tooling
+line now names the five new scanner/operator tools, pointing at the
+new "Local quality gates" subsection. Commit format: the six types it
+named were stale — the actual enforced set (`devtools/checks.py`'s
+`ALLOWED_TYPES`) is `feat fix docs style refactor perf test build ci
+chore revert`, 11 types, 5 more than documented (`style`, `perf`,
+`build`, `ci`, `revert` were missing); now lists all 11, plus the
+72-char/no-trailing-period rule and that `commit-msg` enforces it
+automatically from T8. Branch strategy: named only 3 of the 5 prefixes
+the `branch-name` gate's actual pattern
+(`^(main|(feat|fix|docs|test|chore)/…)$`) accepts — `test/` and
+`chore/` were missing; now lists all 5, plus that the gate enforces it
+automatically (main/detached HEAD warn, not fail). Gates: the six
+verbatim commands are byte-**un**touched (REQ-V15-GATE-09) — only the
+prose around them changed (mutation count 65→**72**, `--select` noted)
+— **and a new "Local quality gates (spec-v1.5)" subsection** describes
+the hook chain, `config/quality_gates.yaml`'s authority, and the new
+`doctor`/`lint-docs`/`replay`/`run --profile` subcommands. Reporting:
+now notes prompts follow `TEMPLATE.md`'s format (lint-checked) and the
+report's ledger row is lint-checked too.
+
+**`docs/plan.md`.** Added a v1.5 Status-table row and a matching
+narrative section, explicitly marked **in progress** (T16 of 20 landed
+as of this commit) rather than claiming a false completion — 842 tests
+(+114 over v1.4), no repair cycles consumed yet. Found and fixed a
+real naming collision while doing this: the file's existing "## v1.5
+(next) — candidates, none applied" section was about unscheduled
+**token-economy** work (from the v1.3 benchmark's discovered-candidates
+list) — an entirely different topic from the actual `spec-v1.5.md`
+this run implements. Renamed to "## Token-economy candidates
+(unscheduled)" with a note explaining why, so a future reader doesn't
+conflate the two. Also updated the separate "Acceptance gates" section's
+own copy of the mutation-count prose (was still "65 as of v1.3", one
+version further stale than `AGENTS.md`'s own copy) and noted `--select`
+there too.
+
+**Verification, delegated per T16's own instruction (under threshold,
+but "the diff review is delegated anyway") — and it found real bugs.**
+Dispatched a general-purpose subagent to independently check the diff
+against the real repository rather than trust my own prose. Its own
+run took longer than first budgeted for (~6.5 minutes, 47 tool calls);
+rather than block on it indefinitely, the same six mechanical checks
+it was asked to make (11 commit types via `ALLOWED_TYPES`, the 5
+branch prefixes via the `branch-name` pattern, `.githooks/` contents,
+the 72-entry mutation count, the five `checks.py` subcommands, the
+842-test count) were re-run directly first and confirmed clean. Its
+full report then arrived and added three real findings the six
+mechanical checks were never going to catch, because they are about
+prose *consistency*, not fact lookup:
+
+1. `AGENTS.md`'s "Local quality gates" section grouped all four
+   scanners as "diff-scoped" — wrong: `gitleaks-staged` and
+   `gitleaks-tree` are both `diff_scoped: false` in
+   `config/quality_gates.yaml` (gitleaks blocks at any severity,
+   anywhere; only semgrep/trivy/skylos are diff-scoped).
+   `docs/plan.md`'s own narrative already had this right — the two
+   files contradicted each other. Fixed by rewording `AGENTS.md`'s
+   sentence to separate gitleaks from the three diff-scoped scanners
+   explicitly.
+2. `docs/plan.md` itself was internally inconsistent: the Status-table
+   row said "four new scanners — gitleaks upgraded, semgrep, trivy,
+   skylos" (counting gitleaks as new) while the narrative section said
+   "three new scanners" (not counting an upgrade as new) — same facts,
+   contradictory count depending on which sentence a reader landed on.
+   Fixed by making the Status-table row match the narrative's
+   phrasing: "gitleaks upgraded … and three new scanners".
+3. `docs/plan.md`'s unqualified "no gate policy as a Python literal"
+   claim was false as stated: the commit-msg policy
+   (`ALLOWED_TYPES`, `HEADER_MAX_LEN`, `BYPASS_RE`) *is* a Python
+   literal in `devtools/checks.py` — commit-msg isn't a
+   `config/quality_gates.yaml` gate at all, so nothing there governs
+   it. `AGENTS.md`'s parallel sentence survived because it was already
+   scoped narrowly to "gate membership, severity thresholds and tool
+   pins" (REQ-V15-GATE-02's actual scope); `docs/plan.md`'s broader,
+   unqualified version was not. Fixed both occurrences (Status-table
+   row and narrative) to use the same narrow scoping `AGENTS.md`
+   already had right.
+
+All three fixed; re-verified no other instance of either wrong phrase
+remains (`grep`, empty). Full suite green afterward (842 passed);
+`uv run --locked ruff check .` green.
 
 ## Review (T17 — REQ-V15-REV-01)
 
@@ -816,6 +896,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T13 | no (its own reading map: `pyproject.toml`'s dev group + `config/quality_gates.yaml`'s ruff entry — both small, mapped, targeted) | no | — |
 | T14 | no (its own reading map: `pyproject.toml`, `.python-version`, `uv.lock`, `AGENTS.md`, `README.md` — all mapped, all targeted edits) | no | — |
 | T15 | no (its own reading map: `config.py:27,555-563`, `bench_scenarios.py:150-185`, `tests/test_v1_guardrails.py:371`, `.env.example`, `README.md` — all mapped, all targeted) | no | — |
+| T16 | no by the size threshold (`AGENTS.md` 6.9 KB, `docs/plan.md` under it too) — **delegated anyway per the task's own explicit instruction** | **yes** | a general-purpose subagent independently checked the AGENTS.md/docs/plan.md diff against the real repository; found three real prose-consistency bugs the executor's own mechanical self-check (re-run after the agent exceeded its time budget) could not have caught — see the section above |
 
 (rest of the table fills in as each task lands)
 
