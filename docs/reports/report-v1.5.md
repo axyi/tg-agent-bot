@@ -942,10 +942,19 @@ sight; each `v15-*` mutation targets a real, unique line; no
 `.githooks/*` file holds logic beyond one runner call), and told to
 independently sample `tests/test_v15_standards.py`'s highest-risk
 assertions rather than trust the implementation. It ran 50 tool uses over
-~12.8 minutes and returned **request changes**, 5 findings (3 🟡, 2 🟢),
+~12.8 minutes and returned **request changes**, **6 findings (4 🟡, 2 🟢)**,
 plus an independently-run `ruff check .` and full 842-test `pytest` both
 green, matching this report's own claims — read directly rather than
 trusted from the report.
+
+**Errata (found post-freeze via `advisor()`):** this section originally
+said "5 findings (3 🟡, 2 🟢)" against its own six enumerated items
+below — the reviewer's own closing line ("all five findings above are
+fixable...") miscounted its own six-item output, and that number was
+inherited here rather than counted directly from the enumeration.
+Commits `cd88b35` and `6fde12f`, already made, say "five" in their
+messages; not amended, corrected here instead
+(`docs/prompts/65-v15-post-freeze-review-count.md`).
 
 1. 🟡 **`_replay_one_commit` reconstructed gitleaks/ruff argv positionally
    instead of deriving it from config** (`devtools/checks.py:890-894,
@@ -1189,7 +1198,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T14 | no (its own reading map: `pyproject.toml`, `.python-version`, `uv.lock`, `AGENTS.md`, `README.md` — all mapped, all targeted edits) | no | — |
 | T15 | no (its own reading map: `config.py:27,555-563`, `bench_scenarios.py:150-185`, `tests/test_v1_guardrails.py:371`, `.env.example`, `README.md` — all mapped, all targeted) | no | — |
 | T16 | no by the size threshold (`AGENTS.md` 6.9 KB, `docs/plan.md` under it too) — **delegated anyway per the task's own explicit instruction** | **yes** | a general-purpose subagent independently checked the AGENTS.md/docs/plan.md diff against the real repository; found three real prose-consistency bugs the executor's own mechanical self-check (re-run after the agent exceeded its time budget) could not have caught — see the section above |
-| T17 | yes by design (REQ-V15-REV-01 mandates review in a clean context regardless of size) | **yes** | the `code-reviewer` subagent, dispatched against the full T0-T16 diff (71 files, +33769/-169) in its own clean context — its own independent tool use (50 calls, ~12.8 min), not the writing context; 5 findings returned, 4 fixed and re-verified, 2 waived with recorded reasons — see the Review section above |
+| T17 | yes by design (REQ-V15-REV-01 mandates review in a clean context regardless of size) | **yes** | the `code-reviewer` subagent, dispatched against the full T0-T16 diff (71 files, +33769/-169) in its own clean context — its own independent tool use (50 calls, ~12.8 min), not the writing context; 6 findings returned: 3 fixed and re-verified, 1 recorded as a Deviation (not fixed — the undisclosed `mutation_check.py` reformat), 2 waived with recorded reasons — see the Review section above |
 | T18 | no (its own reading map: this run's own artefacts — the report skeleton, `config/quality_gates.yaml`, `docs/spec/spec-v1.5.md`'s RPT-02 list — all targeted, no exploration beyond it) | no | — |
 | T19 | no (its own reading map: this run's own artefacts — the final tree's gate/replay/Appendix-B evidence, gathered by running commands directly, not by open-ended reading) | no | — |
 
@@ -1345,14 +1354,29 @@ acceptance above); nothing was rerun because of them.
    commit adds `docs/prompts/64-v15-post-freeze-post-fix.md` for
    itself and records the mismatch here rather than leaving it
    unrecorded.
+7. **A third post-freeze correction, found by `advisor()` in the same
+   pass as item 6's fix.** The Review (T17) section's own header said
+   "5 findings (3 🟡, 2 🟢)" against its own **six** enumerated items
+   (4 🟡, 2 🟢) directly below it — provenance traced, not just
+   corrected: the reviewer's own closing line ("all five findings above
+   are fixable...") miscounted its own six-item output, and this report
+   inherited that number instead of counting the enumeration directly.
+   The same undercount (finding 4, the undisclosed reformat, recorded
+   as a Deviation rather than fixed) propagated into the RLM table's
+   T17 row ("4 fixed" — wrong, only 3 were) and into `docs/plan.md`.
+   Commits `cd88b35` and `6fde12f` already say "five" in their
+   messages — not amended, corrected here as errata instead
+   (`docs/prompts/65-v15-post-freeze-review-count.md`).
 
 ## Bugs found and fixed, this run's own count (T18)
 
 The Ledger row's "Bugs" cell counts defects **found via testing or
 review, unplanned** — not every documentation gap a task was itself
 scoped to close (T16's own "bring `AGENTS.md`/`docs/plan.md` true" work,
-for instance, is the task's deliverable, not a bug it stumbled into),
-matching how v1.4's row counted its T9 review's 2 findings. By that
+for instance, is the task's deliverable, not a bug it stumbled into) —
+this run's own definition, not asserted as v1.4-consistent (v1.4's own
+post-freeze `43-v14-verify-run-fixes.md` work, the same class as items
+13–14 below, was not counted in that run's Bugs cell). By that
 definition, **14 found, 14 fixed**, none left open (12 during T0–T19,
 2 more post-freeze via `advisor()` — see items 13–14):
 
@@ -1404,7 +1428,7 @@ low-risk notes, not defects).
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5 | 2026-09-04 | ~28 750 (114 997 B) | 21 (44–64; Deviations item 6) | ✅ yes — 0/5 repair cycles used across the whole run | 14 found / 14 fixed | unknown (main session) + 231,051 (T17 review subagent) | unknown | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5 | 2026-09-04 | ~28 750 (114 997 B) | 22 (44–65; Deviations items 6–7) | ✅ yes — 0/5 repair cycles used across the whole run | 14 found / 14 fixed | unknown (main session) + 231,051 (T17 review subagent) | unknown | claude-sonnet-5 | Claude Code |
 ```
 
 ## Verdict

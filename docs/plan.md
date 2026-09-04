@@ -204,7 +204,8 @@ mutation entries and `mutation_check.py --select`; ruff 0.16.6, Python
 exec smoke proved the bump not benchmark-affecting: identical output,
 both scenarios). All 20 tasks landed: 842 tests (+114 over v1.4), 0 of
 5 repair cycles consumed across the whole run, a clean-context review
-(3 fixed, 2 waived), and a final acceptance run (six gates, `full`
+(6 findings: 3 fixed, 1 recorded as a deviation, 2 waived), and a final
+acceptance run (six gates, `full`
 15/15, all 12 Appendix-B scenarios, `replay` 17/19 with the 2
 exceptions diagnosed and confined to pre-hook-activation commits). Full
 detail: `docs/reports/report-v1.5.md`.
