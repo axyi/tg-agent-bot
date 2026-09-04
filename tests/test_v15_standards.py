@@ -712,6 +712,29 @@ def test_v15_scan_10_severity_membership(tmp_path: Path):
     reported_only = [f for f in result.findings_in_scope if f["severity"] not in gate["severity"]]
     assert {f["path"] for f in reported_only} == {"b.py"}
 
+    # A LOW-only fixture is the actual killer of v15-severity-comparison-inverted:
+    # the mixed HIGH+LOW fixture above stays `blocked=True` under both the
+    # correct `in` and a mutated `not in` comparison (a different finding
+    # satisfies each), so it cannot tell the two apart on its own.
+    lo_only_script = (
+        "import json, sys\n"
+        "lo = dict(path='c.py', extra=dict(severity='LOW'))\n"
+        "json.dump(dict(results=[lo]), open(sys.argv[1], 'w'))\n"
+        "sys.exit(1)\n"
+    )
+    lo_only_gate = dict(gate, argv=[sys.executable, "-c", lo_only_script, "{artefact}"])
+    lo_only_result = checks.execute_command_gate(
+        "sev",
+        lo_only_gate,
+        repo_root=repo,
+        profile="full",
+        scope_files=None,
+        tracked_tree=None,
+        known_severities={"CRITICAL", "HIGH", "LOW"},
+    )
+    assert lo_only_result.ran
+    assert not lo_only_result.blocked
+
 
 def test_v15_scan_10_unknown_severity_fails_closed(tmp_path: Path):
     repo = _init_repo(tmp_path)

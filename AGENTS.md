@@ -119,8 +119,10 @@ pinned tool at its exact version, fails closed on a newer one too),
 row), `checks.py replay --range <rev>..<rev>` (re-verifies historical
 commits by reading git objects only, never touching the working tree),
 plus four scanners: gitleaks (secrets, committed content only, blocks
-at any severity anywhere — not diff-scoped) and semgrep, trivy, skylos
-(shadow — findings reported, never blocking), which are diff-scoped.
+at any severity anywhere — not diff-scoped), semgrep and trivy (SAST
+and filesystem vuln/misconfig scanning, diff-scoped, blocking), and
+skylos (dead code, diff-scoped, shadow — findings reported, never
+blocking).
 `checks.py run --profile pre-commit|pre-push|full` wires them
 into three profiles; `install_hooks.py [--check]` installs/verifies the
 chain itself. `--no-verify` and any other hook bypass are forbidden.

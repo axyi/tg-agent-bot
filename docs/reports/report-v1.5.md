@@ -873,7 +873,115 @@ remains (`grep`, empty). Full suite green afterward (842 passed);
 
 ## Review (T17 — REQ-V15-REV-01)
 
-(pending)
+Dispatched the `code-reviewer` subagent in its own clean context against
+the full T0-T16 diff, `git diff 9ad3047d981b30005f81e15e09d2f02444b8009a..
+51ec54a1408515a4408cd6e9c3c849ee2555ff5d` (71 files, +33769/-169). Briefed
+with the spec as the contract (report as context only), the three
+REQ-V15-REV-01 checks spelled out explicitly (no gate-authority literal in
+`checks.py`, judged on `replay`'s own reasoning rather than flagged on
+sight; each `v15-*` mutation targets a real, unique line; no
+`.githooks/*` file holds logic beyond one runner call), and told to
+independently sample `tests/test_v15_standards.py`'s highest-risk
+assertions rather than trust the implementation. It ran 50 tool uses over
+~12.8 minutes and returned **request changes**, 5 findings (3 🟡, 2 🟢),
+plus an independently-run `ruff check .` and full 842-test `pytest` both
+green, matching this report's own claims — read directly rather than
+trusted from the report.
+
+1. 🟡 **`_replay_one_commit` reconstructed gitleaks/ruff argv positionally
+   instead of deriving it from config** (`devtools/checks.py:890-894,
+   927-941`) — a future edit to `gates.gitleaks-staged.argv` /
+   `ruff-check.argv` / `ruff-format.argv` (new flag, reordered tokens)
+   could silently corrupt the replay-only reconstruction while the live
+   `pre-commit` gate (which renders `argv` generically) kept working.
+   **Fixed:** `check_prefix`/`format_prefix` now filter the configured
+   `argv` by removing the `{target}` placeholder *by value*, not by a
+   fixed `[:-2]` slice, so every other configured flag (including
+   `--force-exclude`) survives automatically; the gitleaks argv is built
+   by filtering out `--staged` and `.format()`-substituting `{config}`/
+   `{artefact}` into the configured `argv` list, keeping only the two
+   genuinely replay-only, no-config-equivalent tokens (`--log-opts`, the
+   `--no-walk <sha>` value) as literals — exactly the narrow class
+   REQ-V15-GATE-02's own reasoning carves out. Side effect confirmed
+   correct, not just neutral: the old code silently omitted
+   `--force-exclude` from the format-replay invocation (a slicing
+   artefact, not a deliberate omission); the derived version now applies
+   it consistently with the configured gate, matching `ruff-format`'s
+   real policy. Verified by re-running `test_v15_gate_06_...` (still
+   green), a live `checks.py replay --range HEAD~1..HEAD` against the
+   real repository (`[PASS] 51ec54a14085: clean`), full `ruff check .`
+   and the 842-test suite.
+2. 🟡 **`test_v15_scan_10_severity_membership` did not actually kill
+   `v15-severity-comparison-inverted`**, contrary to its spec-credited
+   role — verified empirically both ways: applying the mutation
+   (`in` → `not in` at `devtools/checks.py:1305`) and running only this
+   test still passed, because the fixture's one HIGH + one LOW finding
+   keeps `blocked=True` under both the correct and inverted comparison
+   (a different finding satisfies each). **Fixed:** added a second,
+   LOW-only fixture to the same test asserting `blocked is False` —
+   confirmed it passes on healthy code and fails
+   (`assert not True`) under the manually-applied mutation, then
+   restored the source and re-confirmed green. The mutation gate's own
+   0-survived count was never wrong (three *other* SCAN tests already
+   caught this mutation via single-finding fixtures); the defect was
+   narrowly that SCAN-10 itself, credited by name in §15.4/Appendix A as
+   this mutation's killer, could not discriminate it on its own.
+3. 🟡 **`AGENTS.md:121-123` misstated which scanners are shadow**,
+   grouping semgrep, trivy and skylos together as "(shadow — findings
+   reported, never blocking)" — false for semgrep and trivy, both
+   `blocking: true` in `config/quality_gates.yaml` (only skylos is
+   `blocking: false`), and inconsistent with `AGENTS.md:27` and
+   `docs/plan.md` which both correctly scope "shadow" to skylos alone.
+   An operator reading only this paragraph could believe a semgrep or
+   trivy finding never blocks a push. **Fixed:** reworded to name
+   semgrep+trivy as diff-scoped and blocking (SAST / filesystem
+   vuln-misconfig scanning) and skylos alone as diff-scoped and shadow.
+4. 🟡 **T12's commit (`da8dbc3`) reformatted the whole of
+   `devtools/mutation_check.py` (105 insertions/79 deletions for a
+   change described as "adds `--select` and four `v15-*` entries"),
+   undisclosed** — confirmed the extra churn is `ruff format`-driven
+   cosmetic normalisation (quote-style, multi-line literal collapsing):
+   the pre-T12 blob fails `ruff format --check`, the post-T12 blob
+   passes it. REQ-V15-SCAN-05/NG-04 call whole-file reformatting of a
+   pre-existing file explicit debt precisely because it can shift a
+   byte-exact `find` string. Verified no target string moved: none of
+   the 11 files the mutation `find` strings search were touched (only
+   `mutation_check.py`'s own source syntax), and all four new plus the
+   pre-existing `v13-only-typo-exit0` anchor still match their targets
+   exactly once. No correctness defect — **waived as a fix, recorded
+   here** (Deviations item 5) per REQ-V12-REP-02 rather than reverting
+   the incidental hunks, since un-formatting the file again would only
+   reintroduce inconsistent style with no test or behaviour benefit.
+5. 🟢 **Builtin gates (`doctor`, `lint-docs`) don't get the same
+   unconditional fail-closed override `execute_command_gate` was fixed
+   to apply** — `_run_doctor`/`_run_lint_docs` gate on
+   `gate["blocking"] and bool(problems)`, so a hypothetical
+   `blocking: false` builtin gate would silently absorb a genuine
+   operational failure (missing tool binary, unparseable version
+   string, `install_hooks.py --check` itself failing to run) as a
+   non-blocking "problem" instead of force-failing, unlike the
+   command-gate path. **Waived**: inert under the shipped config
+   (`doctor`/`lint-docs`/`branch-name` are all `blocking: true`), no
+   acceptance scenario exercises `blocking: false` on a builtin gate,
+   and `config/quality_gates.yaml` is the sole authority for that
+   flag — retrofitting an operational-vs-finding split into two more
+   handlers for a state the current config cannot reach is scope
+   the reviewer itself flagged as a note, not a defect to fix now.
+6. 🟢 **`test_v15_gate_01_real_config_parses_and_is_bijective` partially
+   re-derives its assertions from the same rule set `_validate_command_gate`
+   already enforces on load** — the reviewer's own assessment: "low risk
+   … not worth a fix, just noting it." **Waived**, no action taken; the
+   bijection half is a genuine independent check and `T-V15-GATE-02`'s
+   synthetic-fixture tests cover schema-validator bugs directly.
+
+Everything the reviewer verified independently and reported clean is
+taken as confirmed without re-verification here (all four `v15-*` `find`
+strings unique, `.githooks/*` are pure shims, the 18-gate profile matrix
+has no orphans, GATE-06's fail-closed branches for `command` gates
+hardcode `blocked=True` unconditionally, `.semgrep/*` hashes match
+`SOURCES.md`, only `tests/test_v1_guardrails.py:371` changed among the 49
+image-string occurrences, `.claude/settings.json`/`CLAUDE.md`'s RTK block
+match the spec verbatim).
 
 ## Benchmark-affecting changes (REQ-V15-EC-06)
 
@@ -897,6 +1005,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T14 | no (its own reading map: `pyproject.toml`, `.python-version`, `uv.lock`, `AGENTS.md`, `README.md` — all mapped, all targeted edits) | no | — |
 | T15 | no (its own reading map: `config.py:27,555-563`, `bench_scenarios.py:150-185`, `tests/test_v1_guardrails.py:371`, `.env.example`, `README.md` — all mapped, all targeted) | no | — |
 | T16 | no by the size threshold (`AGENTS.md` 6.9 KB, `docs/plan.md` under it too) — **delegated anyway per the task's own explicit instruction** | **yes** | a general-purpose subagent independently checked the AGENTS.md/docs/plan.md diff against the real repository; found three real prose-consistency bugs the executor's own mechanical self-check (re-run after the agent exceeded its time budget) could not have caught — see the section above |
+| T17 | yes by design (REQ-V15-REV-01 mandates review in a clean context regardless of size) | **yes** | the `code-reviewer` subagent, dispatched against the full T0-T16 diff (71 files, +33769/-169) in its own clean context — its own independent tool use (50 calls, ~12.8 min), not the writing context; 5 findings returned, 4 fixed and re-verified, 2 waived with recorded reasons — see the Review section above |
 
 (rest of the table fills in as each task lands)
 
@@ -989,6 +1098,26 @@ evidence lands in the T19 evidence-only commit)
    until T18 fills it in. That is not a regression when `full` first
    goes green at T19 — it is the sequencing REQ-V15-RPT-01 itself
    describes (the operator pastes the row; T18 fills the report first).
+5. **T12's commit whole-file-reformatted `devtools/mutation_check.py`
+   without disclosing it (found by T17's review, not caught at T12
+   itself).** `git show da8dbc3 --stat -- devtools/mutation_check.py`
+   shows 105 insertions/79 deletions for a change the commit message
+   describes only as "adds `--select` and four `v15-*` entries" — the
+   extra churn is `ruff format` normalising the whole file (quote
+   style, multi-line literal collapsing): the pre-T12 blob fails
+   `ruff format --check`, the post-T12 blob passes it. REQ-V15-SCAN-05
+   states ruff-format is shadow for every pre-existing file precisely
+   so "nothing is reformatted," and REQ-V15-NG-04 calls a whole-tree
+   reformat out as debt for exactly this reason: it can shift a
+   byte-exact `find` string. No harm resulted here — confirmed
+   directly, not merely reasoned about: none of the 11 files the
+   mutation `find` strings search were touched (only
+   `mutation_check.py`'s own source syntax), and all four new `v15-*`
+   `find` strings plus the pre-existing `v13-only-typo-exit0` anchor
+   still match their targets exactly once. Recorded here rather than
+   reverted, since un-formatting the file again would reintroduce
+   inconsistent style with no test or behaviour benefit — see T17's
+   Review section, finding 4.
 
 ## Ledger row (paste into `economics.md`)
 

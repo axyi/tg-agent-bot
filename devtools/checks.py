@@ -890,8 +890,11 @@ def _replay_one_commit(sha: str, config: dict[str, Any], repo_root: Path) -> lis
     check_gate = config["gates"]["ruff-check"]
     format_gate = config["gates"]["ruff-format"]
     blocking_paths = set(format_gate["blocking_paths"])
-    check_prefix = check_gate["argv"][:-2]  # drop --force-exclude, {target}
-    format_prefix = format_gate["argv"][:-2]  # drop --force-exclude, {target}
+    # Drop only the {target} placeholder token by value, not by position, so
+    # every other configured flag (e.g. --force-exclude) survives untouched
+    # even if the gate's argv grows or reorders its trailing tokens.
+    check_prefix = [t for t in check_gate["argv"] if t != "{target}"]
+    format_prefix = [t for t in format_gate["argv"] if t != "{target}"]
 
     py_files = [p for p in commit_changed_files(sha, repo_root) if p.endswith(".py")]
     for path in py_files:
@@ -900,7 +903,7 @@ def _replay_one_commit(sha: str, config: dict[str, Any], repo_root: Path) -> lis
             continue  # the path existed in the diff but not at this blob (rare race) -- skip
 
         check = run_argv(
-            [*check_prefix, "--force-exclude", "--stdin-filename", path, "-"],
+            [*check_prefix, "--stdin-filename", path, "-"],
             repo_root,
             check_gate["timeout_seconds"],
             input_bytes=blob,
@@ -924,22 +927,16 @@ def _replay_one_commit(sha: str, config: dict[str, Any], repo_root: Path) -> lis
     gitleaks_gate = config["gates"]["gitleaks-staged"]
     artefact = repo_root / ".bench" / "checks" / "replay" / f"gitleaks-{sha}.json"
     artefact.parent.mkdir(parents=True, exist_ok=True)
-    tool, subcommand = gitleaks_gate["argv"][0], gitleaks_gate["argv"][1]
+    # Derive every flag from the configured argv rather than re-typing it:
+    # drop --staged (replay inspects one historical commit, not the index)
+    # and resolve the {config}/{artefact} placeholders. --log-opts is the
+    # one genuinely replay-only addition with no config equivalent.
     argv = [
-        tool,
-        subcommand,
-        "--no-banner",
-        "--redact",
-        "--config",
-        gitleaks_gate["placeholders"]["config"],
-        "--report-format",
-        "json",
-        "--report-path",
-        str(artefact),
-        "--log-opts",
-        f"--no-walk {sha}",
-        ".",
+        token.format(config=gitleaks_gate["placeholders"]["config"], artefact=str(artefact))
+        for token in gitleaks_gate["argv"]
+        if token != "--staged"
     ]
+    argv[-1:-1] = ["--log-opts", f"--no-walk {sha}"]
     result = run_argv(argv, repo_root, gitleaks_gate["timeout_seconds"])
     if not result.ok:
         problems.append(f"gitleaks: {result.error}")
