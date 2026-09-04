@@ -111,10 +111,13 @@ before and after. Two requirements here touch tool output:
 2. REQ-V160-TQ-04, the repeat-call refusal — it injects a tool result the model
    has never seen before.
 
-Both are declared **before** implementation; §11 discharges the obligation by
-recording a **fresh baseline** (`baseline-v1.6.0.json`) per REQ-V160-BEN-01
-and -02. A **cost or quality gate** against that baseline is **not** part of
-this release (REQ-V160-NG-02).
+Both are declared **before** implementation, and §11 records a **fresh baseline**
+(`baseline-v1.6.0.json`) per REQ-V160-BEN-01 and -02 — a **new post-change
+baseline**, not a comparable before/after measurement, the only "before" being
+non-comparable by construction. **The `AGENTS.md` before/after rule is
+explicitly superseded, for the changes this spec declares, by this requirement**,
+and the report MUST NOT claim it satisfied. A **cost or quality gate**
+against that baseline is **not** part of this release (REQ-V160-NG-02).
 
 If a *further* benchmark-affecting change is proposed or discovered at any
 point: (1) stop the task that proposed it; (2) record it and its trigger in the
@@ -280,10 +283,10 @@ and identification blocks.** PRE-03 resolves an *address*; T15 must also resolve
 
 | value | source | rule |
 |---|---|---|
-| served model id | `GET <LMSTUDIO_BASE_URL>/models`, OpenAI-compatible, field `data[].id` | exactly the read `_live_lmstudio` already performs (bot.py:1273-1283); the list MUST contain `cfg.lmstudio_model` |
-| LM Studio version | operator, the T0 skeleton's `## Operator inputs` | recorded verbatim as a string |
-| loaded context length | operator, the same section | recorded verbatim as an integer; it is **not** `meta.context_length`, which is `LMSTUDIO_CONTEXT_LENGTH` from `config.py` |
-| generation settings actually sent | `llm.base.build_payload` | REQ-V160-BEN-05 |
+| served model id | `GET <LMSTUDIO_BASE_URL>/models`, OpenAI-compatible, field `data[].id` | exactly the read `_live_lmstudio` already performs (bot.py:1273-1283); the list MUST contain `cfg.lmstudio_model`. **Not** operator input; populated at T15 |
+| LM Studio version | the text of the `go` request that starts the run | a non-empty string, copied verbatim into the T0 skeleton's `## Operator inputs` |
+| loaded context length | the same `go` request | a **positive integer**, copied verbatim into that section; it is **not** `meta.context_length`, which is `LMSTUDIO_CONTEXT_LENGTH` from `config.py` |
+| generation settings actually sent | `llm.base.build_payload` and the call sites REQ-V160-BEN-05 names | REQ-V160-BEN-05 |
 
 `[[VERIFY: an LM Studio Bionic 1.1 REST endpoint exposing the application
 version and the loaded context length — if the executor finds one at run time,
@@ -297,9 +300,12 @@ chat completion is issued against the resolved address with the resolved model,
 non-empty assistant message. That is the one condition a `/models` read cannot
 see — a model listed but not loaded.
 
-**What blocks.** A missing version, a missing context length, a served model id
-not containing `LMSTUDIO_MODEL`, or a failed preflight **stop the run before the
-baseline starts**, never after forty minutes of inference. All four values land
+**What blocks, and when.** The two operator values arrive in the `go` request's
+own text (the lab's `go` protocol) and T0 checks them first: a missing version,
+or a context length that is not a positive integer, **stops the executor at
+T0** — blocker template, no T1. A served model id not containing
+`LMSTUDIO_MODEL`, or a failed preflight, stops the run at T15, before the
+baseline and never after forty minutes of inference. All four values land
 in the report (REQ-V160-RPT-02.7) and in `meta` (REQ-V160-BEN-05). LM Studio is
 **Bionic 1.1.x** on the operator's host; this supersedes REQ-V15-DEP-06's "not
 inspected" escape.
@@ -595,10 +601,17 @@ with start_span(...) as span:            # sink = SqliteSpanSink(conn)
         add_llm_call(...) | add_tool_call(...)
         conn.execute("COMMIT")
     except BaseException:
-        conn.execute("ROLLBACK"); raise
-    finally:
-        if failure is not None: raise failure
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    if failure is not None:
+        raise failure
 ```
+
+`failure` is re-raised **after** the `try`, never in a `finally` — which would
+replace a `finish()`, insert, `COMMIT` or `ROLLBACK` failure with it and mask the
+persistence defect — and `ROLLBACK` is guarded, a failed `BEGIN IMMEDIATE`
+leaving none (`T-V160-TRC-14`).
 
 Both rows land or `ROLLBACK` leaves neither, on success and on failure alike, so
 REQ-V160-TRC-04's bijection holds by construction and a failing LLM call yields
@@ -760,7 +773,10 @@ context_pressure(conn, *, since=None) -> tuple[float, int]
 - `ErrorBreakdown` carries `by_finish_reason: dict[str, int]`,
   `by_error_kind: dict[str, int]`, `total: int`, `error_rate: float`. A `NULL`
   `finish_reason` is bucketed as `"(none)"`; a `NULL` `error_kind` is bucketed as
-  `"ok"`.
+  `"ok"`. Both keys are provider free text, so **each dictionary returns at most
+  100 named buckets plus `"(other)"`**, count descending then key ascending, the
+  omitted counts folded in; `total` and `error_rate` count **all** rows and the
+  fold leaves both unchanged (REQ-V160-MET-07).
 - `ToolHealthRow`: `tool`, `calls`, `ok`, `error`, `budget`, `rejected`,
   `refused_repeat`, `error_rate`, `p50_ms`, `p95_ms`, `max_consecutive_repeats`,
   `output_tokens_est`. `max_consecutive_repeats` is the longest run of
@@ -863,8 +879,10 @@ first attempt errored and whose retry succeeded adds one to `failed` and one to
 its only writer. `/tools` renders all five.
 
 **REQ-V160-MET-07 (MUST) — every aggregate is bounded.** No function of §6 may
-return an unbounded list. `usage_by` caps at **500** groups and reports a
-`"(other)"` row carrying the remainder; `tool_health` caps at **50** tools;
+return an unbounded list **or dictionary**. `usage_by` caps at **500** groups and
+reports a `"(other)"` row carrying the remainder; `error_breakdown` caps **each**
+dictionary at **100** named buckets plus its `"(other)"` fold
+(`T-V160-MET-11`); `tool_health` caps at **50** tools;
 `latency_histogram` and `token_histogram` cap at **20** histograms with the
 `"(other)"` fold of REQ-V160-MET-04; `recent_traces` is capped by its `limit`
 parameter, itself bounded by REQ-V160-API-03.
@@ -890,8 +908,15 @@ tool_health_section(rows, *, summary) -> str
 compare_section(baseline, candidate) -> str
 served_span(row_or_mapping) -> ServedSpan             # REQ-V160-DSH-09
 SERVED_SPAN_ATTRIBUTE_KEYS: frozenset[str]            # REQ-V160-DSH-09
+error_page(message) -> str                            # every HTML error body
+response_too_large_page() -> str                      # API-05
+invalid_host_page() -> str                            # SRV-11
 esc(value) -> str
 ```
+
+The last three keep the rule literal: `dashboard_server.py` takes **every** HTML
+body it sends — pages, 400, 404, 405, 500, 503 — from here and holds **no HTML
+literal of its own**; `error_page` wraps a fixed string.
 
 `dashboard_server.py` calls them for the live pages; `devtools/dashboard.py`
 calls them for the static bench report. `T-V160-DSH-02` asserts the two
@@ -1135,8 +1160,9 @@ empty 200.** `/api/traces/<trace_id>` and `/traces/<trace_id>` return 404 when
 caps and §8's `limit` ceiling bound the normal case; 2 MiB is enforced. Every
 body, JSON and HTML alike, is serialised **into memory first**; when
 `len(body) > 2 * 1024 * 1024` the server sends a fixed, content-free **500**
-instead — `{"error":"response too large"}` for `/api/*`, the line
-`<p>response too large</p>` for a page — and no fragment of the body, no size,
+instead — `{"error":"response too large"}` for `/api/*`, and for a page whatever
+`dashboard_render.response_too_large_page()` returns, the server writing no HTML
+of its own (REQ-V160-DSH-01) — and no fragment of the body, no size,
 path or parameter reaches the client or the log beyond one redacted `ERROR` line
 naming the route (`T-V160-API-03`). Nothing streams or paginates by cursor.
 
@@ -1329,7 +1355,7 @@ authenticates nothing inbound. Therefore:
 `<actual_port>` is `server.server_address[1]`, so a port-0 test compares against
 the assigned port. The check runs **before** routing: a bad `Host` on an
 unlisted path is 400, not 404. The body is the fixed `{"error": "invalid host"}`
-for `/api/*` and the fixed HTML error body elsewhere, both with the four headers
+for `/api/*` and `dashboard_render.invalid_host_page()` elsewhere, both with the four headers
 of REQ-V160-SRV-04, neither naming the value; `log_message` records the
 rejection as a route name only. `localhost:<port>` is rejected too —
 REQ-V160-SRV-09's startup line prints the `127.0.0.1` URL the operator must use.
@@ -1422,32 +1448,32 @@ landing in the database. `T-V160-TQ-03` covers all five, each also in `metrics.t
 **REQ-V160-TQ-04 (MUST) — the repeat-failure refusal.** The agent stops in code
 a model that repeats an identical failing call.
 
-**Fingerprint.** For a tool call that produced `outcome = "error"`:
+**Call key.** The refusal is decided **before** the call runs, so its key carries
+only pre-execution information:
 
 ```
-fingerprint = sha256(
-    tool_name + "\x00" + normalized_error_class + "\x00" + canonical_arguments
-).hexdigest()
+call_key = sha256(tool_name + "\x00" + canonical_arguments).hexdigest()
 ```
 
 - `tool_name` is `_wire_name(call)` — the vetted name already written to
   `tool_calls.tool`, never the model's raw string (REQ-V12-ID-01 item 4);
-- `normalized_error_class` is derived from the tool's JSON error envelope: the
-  value of its `"error"` key, lower-cased, with every run of non-alphanumeric
-  characters collapsed to a single `_`, stripped, and truncated to **64**
-  characters;
 - `canonical_arguments` is `json.dumps(parsed_arguments, sort_keys=True,
   separators=(",", ":"), ensure_ascii=False)` when the arguments parse as a JSON
-  object, and the raw argument string otherwise. Key order must not change the
-  fingerprint.
+  object, and the raw argument string otherwise. Key order must not change
+  `call_key`.
 
-**State.** A `dict[str, int]` scoped to **one user message**, created when the
-root span is created and discarded when it ends. It is never persisted, never
-shared between conversations, and never survives a restart.
+**State.** A `dict[tuple[str, str], int]` scoped to **one user message**, keyed
+by `(call_key, normalized_error_class)` and incremented per `outcome = "error"`
+call. `normalized_error_class` — that call's error-envelope `"error"` value,
+lower-cased, non-alphanumeric runs collapsed to `_`, stripped, truncated to
+**64** characters — is **diagnostic only**: the class of a call that has not run
+cannot be known. Created with the root span, discarded when it ends; never
+persisted, never shared between conversations, never surviving a restart.
 
-**The rule.** `TOOL_REPEAT_REFUSAL_THRESHOLD = 2`. When a call's fingerprint has
-already **failed twice** within the current user message, the third call with
-that fingerprint is **not executed**. Instead the agent injects a tool result
+**The rule.** `TOOL_REPEAT_REFUSAL_THRESHOLD = 2`. When one `call_key` has
+already **failed twice** within the current user message — summed over its error
+classes — the third call with that `call_key` is **not executed**. Instead the
+agent injects a tool result
 that is a fixed, deterministic envelope:
 
 ```json
@@ -1455,8 +1481,8 @@ that is a fixed, deterministic envelope:
 ```
 
 and records the attempt with `outcome = "refused_repeat"`, `duration_ms = 0`,
-and the span attribute `tg_agent.tool.fingerprint` set to the fingerprint's
-**first 16 hex characters**. The refusal counts toward
+and the span attribute `tg_agent.tool.fingerprint` set to the **first 16 hex
+characters of `call_key`**. The refusal counts toward
 `TOOL_EXECUTION_LIMIT` exactly as an execution would.
 
 `/tools` shows the `refused_repeat` count per tool (REQ-V160-DSH-03).
@@ -1731,15 +1757,15 @@ not as an embedded JSON string. Content attributes are absent unless
 locked.** A version string alone cannot tell two materially different
 instruments apart. `meta` (bench.py:671-685, extended by `_cmd_run` at
 :2131-2140) gains **six** keys; `LOCKED_META_FIELDS` (bench.py:147-155, ten
-entries today) gains **seven**:
+entries today) gains those same **six**:
 
 | key | value |
 |---|---|
-| `git_commit` | `git rev-parse HEAD` at run start — **already in `meta`**, never locked; locked now |
+| `git_commit` | `git rev-parse HEAD` at run start — **already in `meta`**, and provenance **outside** `LOCKED_META_FIELDS`: a candidate is always a later commit than its baseline, so locking it would exit `EXIT_NOT_COMPARABLE` on every pair |
 | `lmstudio_version` | PRE-04's operator string; `null` off `lmstudio` |
 | `served_model_id` | PRE-04's `data[].id`; `null` off `lmstudio` |
 | `lmstudio_context_length` | PRE-04's **loaded** length; `null` off `lmstudio`. Not the existing `context_length`, which is `LMSTUDIO_CONTEXT_LENGTH` off `Config` and is locked already |
-| `generation_settings` | what `llm.base.build_payload` (:112-129) sends: `{"temperature": 0, "max_tokens": <cfg.llm_max_tokens>, "stream": false, "tool_choice": "auto"}`; `top_p`, `seed` and `stop` are sent **nowhere here** and are recorded as `"unset": "provider defaults"` |
+| `generation_settings` | **purpose-specific**, off the payload paths: `build_payload` (llm/base.py:112-129) sends `tools`/`tool_choice` **only when `tools is not None`** (`agent.py:246` passes `None` on the final round), `_ask_for_summary` (:805) always passes `None` at `SUMMARY_MAX_TOKENS = 512` (agent.py:45). `{"agent":{"temperature":0,"max_tokens":<cfg.llm_max_tokens>,"stream":false,"tool_choice":"auto"},"summary_initial":{"temperature":0,"max_tokens":512,"stream":false},"summary_retry":{"temperature":0,"max_tokens":<cfg.llm_summary_max_tokens>,"stream":false},"provider_defaults":["seed","stop","top_p"]}` — the last names what is sent nowhere |
 | `prompt_tools_sha256` | `sha256` of the system prompt concatenated with `json.dumps(<exposed tool schema>, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` |
 | `obs_capture_content` | `cfg.obs_capture_content` (REQ-V160-TRC-09) |
 
@@ -1756,20 +1782,25 @@ differs: <name>"`, and `report --gate` exits `EXIT_NOT_COMPARABLE` (2).
 comparison is informational and never passes `--gate`.
 
 **REQ-V160-BEN-06 (MUST) — the static report is regenerated from the new
-baseline.** At T16, after the baseline lands:
+baseline, inside T16's one commit.** EC-10 gives T16 one commit and TREE-01 both
+artefacts in it, so the order is fixed: run the baseline into `.bench/`, copy it
+to `docs/assets/bench/baseline-v1.6.0.json`, render from **that copy**
 
 ```bash
 uv run --locked python devtools/dashboard.py \
   docs/assets/bench/baseline-v1.6.0.json --out docs/assets/dashboard-v1.6.0.html
 ```
 
-The output is committed.
+produce REQ-V160-BEN-02's informational S01–S12 comparison, then commit every
+T16 artefact together.
 
 **REQ-V160-BEN-07 (MUST) — the baseline is recorded last, over a frozen tree.**
 §17 puts the baseline **after** the mutation entries and the re-measured
 timeouts (T13), after the clean-context review and every fix it produces (T14),
-and after the full offline gates and the LM Studio preflight (T15). **T16** is
-the baseline task and the first task permitted to run inference.
+and after the full offline gates and the LM Studio preflight (T15). **T15 is the
+first task permitted to run inference, limited to the fixed preflight and
+`smoke-v160`; T16 is the first permitted to record a baseline.** What it records
+is a **post-change baseline**, not a before/after pair (EC-06).
 
 Three preconditions, all blocking. T16 does not start until (1) the catalogue
 validates — `_validate_catalog` imports cleanly and `bench.py check <path>`
@@ -1942,7 +1973,8 @@ the cell count (REQ-V15-RPT-03, unchanged).
    provisional report** (REQ-V160-ACC-03);
 5. per task, whether the RLM rule was applied and to what (REQ-V160-EC-07);
 6. **Benchmark-affecting changes**: the two declared in REQ-V160-EC-06, plus any
-   discovered, with the disposition of each;
+   discovered, with the disposition of each, and EC-06's statement that this is a
+   post-change baseline, not a before/after pair;
 7. the baseline: LM Studio **version** (exact string), served **model id**, the
    **loaded** context length, the generation settings actually sent,
    `prompt_tools_sha256`, the `OBS_CAPTURE_CONTENT` state and the repository
@@ -2167,6 +2199,7 @@ v15-` still selects exactly the four `v15-*` entries).
 | `T-V160-TRC-11` | `status_message` is redacted **then** truncated to 200 characters: a secret straddling the 200-character boundary does not survive |
 | `T-V160-TRC-12` | an exception inside a span sets `status = "error"` and **re-raises**; `start_span` called with no `sink` uses `NullSink`; a **non-sqlite** `SpanSink.write` that raises is swallowed, increments `tracing.dropped_spans`, is logged once, and does not mask the body's exception; a `SqliteSpanSink.write` that raises **propagates** |
 | `T-V160-TRC-13` | `SqliteSpanSink` writes exactly one row per span end, on the calling thread, on the agent's own connection, inside the same `BEGIN IMMEDIATE` … `COMMIT` as the call row it belongs to; a second `finish()` raises `RuntimeError`, exit never re-finishes, and with every statement recorded **no `BEGIN IMMEDIATE` opens inside another** on any path, the root turn included |
+| `T-V160-TRC-14` | with the operation raising **and** `add_span` raising another exception, the **persistence** one escapes; with `BEGIN IMMEDIATE` raising, no bare `ROLLBACK` follows |
 | `T-V160-MET-01` | no column of `llm_calls` or `tool_calls` is written and never read: every name from `PRAGMA table_info` appears in `metrics.py` |
 | `T-V160-MET-02` | `usage_by` for each of the four groupings over a seeded database, each row populating only its own dimension fields; one model id served by **two** providers yields two rows and `/api/usage?group=model` serialises `gen_ai.provider.name` and `gen_ai.request.model` separately; `group="nope"` raises `ValueError` naming it; `since` excludes older rows and includes the boundary day |
 | `T-V160-MET-03` | `cache_hit_share` and `reasoning_share` are `None` — not `0.0` — when no row carries the numerator, and correct when rows do; a mixed-basis group joins bases rather than picking one |
@@ -2177,7 +2210,8 @@ v15-` still selects exactly the four `v15-*` entries).
 | `T-V160-MET-08` | `/stats` and `/api/usage` report the **same** totals for the same database — the one-implementation rule of REQ-V160-MET-01 |
 | `T-V160-MET-09` | `limit_hits` counts each constant name at most once per turn and only for the seven of REQ-V160-TRC-10; `MAX_TOOL_CALLS_ACCEPTED` is absent |
 | `T-V160-MET-10` | `usage_by` caps at 500 groups with an `"(other)"` remainder row whose totals equal the omitted rows' |
-| `T-V160-DSH-01` | no top-level module imports `devtools`; `devtools/dashboard.py` imports `dashboard_render` |
+| `T-V160-MET-11` | seeded with 250 distinct `finish_reason` and 250 `error_kind` values, each `error_breakdown` dictionary holds exactly 101 keys — the 100 highest counts, count descending then key ascending — summing to `total`, `error_rate` unchanged |
+| `T-V160-DSH-01` | no top-level module imports `devtools`; `devtools/dashboard.py` imports `dashboard_render`; and no string literal in `dashboard_server.py` contains `<` followed by a letter or `/` — every HTML body comes from `dashboard_render` |
 | `T-V160-DSH-02` | the same fixture rendered through `dashboard_server` and through `devtools/dashboard.py` yields byte-identical `usage_section` fragments |
 | `T-V160-DSH-03` | every route's HTML has zero `script` elements, zero `on*` attributes, no external `href`/`src`, and parses cleanly |
 | `T-V160-DSH-04` | a tool name and a model name each containing `<script>`, `"` and `&` are escaped everywhere they appear, HTML and SVG alike. `status_message` is **not** rendered: a canary placed in a span's `status_message` and in a non-served attribute appears in no page and no API response |
@@ -2202,13 +2236,13 @@ v15-` still selects exactly the four `v15-*` entries).
 | `T-V160-TQ-01` | a summary response with `finish_reason == "length"` is rejected, recorded `error_kind = "truncated"` at `attempt = 1`, retried once at `attempt = 2`; a second truncation proceeds without a summary and lands in `summary_health.failed`, as does a row with `error_kind = "timeout"`, while a lone `attempt = 1` truncation does not |
 | `T-V160-TQ-02` | with `retry_max_tokens=1536` configured, attempt 1 still requests exactly `SUMMARY_MAX_TOKENS` (512) and only attempt 2 requests 1536; the default of both is unchanged behaviour; `_check_timeout_budget` uses the max of the two budgets and is unchanged at default configuration |
 | `T-V160-TQ-03` | each of the five `TOOL_OUTCOMES` is recorded and appears in `tool_health`; an unknown outcome raises before it reaches the database |
-| `T-V160-TQ-04` | three identical failing calls: the third is refused, records `outcome = "refused_repeat"` and `duration_ms = 0`, and the injected envelope matches the literal verbatim. Argument key order does not change the fingerprint; a different error class does not match; the state does not survive the user message |
+| `T-V160-TQ-04` | three identical failing calls: the third is refused, records `outcome = "refused_repeat"` and `duration_ms = 0`, and the injected envelope matches the literal verbatim. Argument key order does not change `call_key`; two failures under **different** error classes still refuse the third call, while the state counts the two `(call_key, class)` pairs apart; it does not survive the user message |
 | `T-V160-TQ-05` | `tool_calls_max(0)` raises; the kind is not in `ANSWER_KINDS`; a run with `max_calls + 1` tool rows fails the check and one with exactly `max_calls` passes; refusals count |
 | `T-V160-TQ-06` | `_validate_catalog` rejects a scenario whose `tool_calls_max` is below its own `tool_used` count; S13…S18 all import cleanly and ids are unique |
 | `T-V160-BEN-01` | `bench.py check` refuses a `bench_schema: 1` document; `report` without `--gate` accepts it and prints the informational banner to stderr; `report --gate` returns `EXIT_NOT_COMPARABLE` |
 | `T-V160-BEN-02` | a `scenarios_sha256` mismatch is fatal for `check` and for `report --gate`, and a stderr note for plain `report` |
 | `T-V160-BEN-03` | `runs[].spans` round-trips: `attributes` is a parsed object, `conv_id` is replaced by `conv_seq`, `SPAN_ROW_KEYS` equals the document's own key set and holds `attributes`, not `attributes_json` or `conv_id`, and `REQUIRED_SPAN_ROW_KEYS` is enforced only for schema 2 |
-| `T-V160-BEN-04` | the six new `meta` keys are present; `LOCKED_META_FIELDS` holds all seven of REQ-V160-BEN-05 alongside the ten it already held; `report --gate` exits `EXIT_NOT_COMPARABLE` when any one of the seven differs **and** when one side omits it; `run --tag baseline-x` exits `EXIT_ERROR` on a dirty tree and proceeds on a clean one, while `run --tag smoke-x` proceeds either way |
+| `T-V160-BEN-04` | the six new `meta` keys are present; `LOCKED_META_FIELDS` holds the **six** of REQ-V160-BEN-05 beside the ten it held and **not** `git_commit`; `report --gate` exits `EXIT_NOT_COMPARABLE` when any of the six differs **and** when one side omits it, and 0 on a pair differing only in `git_commit`; `run --tag baseline-x` exits `EXIT_ERROR` on a dirty tree and proceeds on a clean one, while `run --tag smoke-x` proceeds either way |
 | `T-V160-VER-01` | `bot.main(["--version"])` prints `tg-agent-bot <v>` where `<v>` equals an independent `tomllib` read of `pyproject.toml`, and returns 0 |
 | `T-V160-VER-02` | the CLI grammar table in full: every accepted form, every rejected combination, exit codes 0 and 2, and the exact usage string |
 
@@ -2318,23 +2352,23 @@ commit, with the reading map of §14.1 and the delegation rule of REQ-V160-EC-07
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preconditions (§3): `full` profile green, hooks installed, `doctor` green, test count re-measured, docker, port free. **Record `<base>` and the committed spec's `sha256`**, create `docs/prompts/72-go-spec-v1.6.0.md` and the `report-v1.6.0.md` skeleton with its `## Operator inputs` section (LM Studio version, served model id, port override). | every item recorded; `71` is the highest pre-existing prompt and the spec file is present and unchanged; `<base>` written before the first commit; a failure emits the blocker template |
+| **T0** | Preconditions (§3): `full` profile green, hooks installed, `doctor` green, test count re-measured, docker, port free. **Record `<base>` and the committed spec's `sha256`**, create `docs/prompts/72-go-spec-v1.6.0.md` and the `report-v1.6.0.md` skeleton with its `## Operator inputs` section (LM Studio version, loaded context length, port override) copied verbatim from the `go` request, the served model id excluded (REQ-V160-PRE-04). | every item recorded; `71` is the highest pre-existing prompt and the spec file is present and unchanged; `<base>` written before the first commit; **a version or positive-integer context length missing from the `go` request stops the run here**; any other failure emits the blocker template |
 | **T1** | `tracing.py`: `Span`, `SpanKind`, the contextvar tracer, `ATTRIBUTE_KEYS`, `SpanSink`, `NullSink`, `set_run_context`. Tests `T-V160-TRC-01`, `-02`, `-09`, `-11`, `-12`. | those tests green; `ruff check .` green; nothing else imports it yet |
 | **T2** | `storage.py`: `SCHEMA_VERSION = 4`, `_SPANS_DDL`, the two new columns, `_MIGRATION_3_TO_4`, the accepted-version tuple, `SPAN_COLUMNS`, `add_span`, `spans_for_trace`, `recent_traces`, `connect_readonly`, derived log payloads. Tests `T-V160-TRC-06`, `-07`, `-08`, `-13`, `T-V160-SRV-06`; amends `tests/test_observability.py:431`. | migration tests green from v1, v2 and v3 databases; `test_obs06` green **unamended** |
-| **T3** | `agent.py` wiring: the four span seams, `SqliteSpanSink`, `trace_id`/`span_id` on both row families, the `turn_id` repair, `tg_agent.limit_hit`. Tests `T-V160-TRC-03`, `-04`, `-05`, `-10`, `T-V160-MET-09`; amends `tests/test_observability.py:544`. | those tests green; the bijections hold; no other observability test changes |
-| **T4** | `metrics.py`: the eight aggregate functions, `Histogram`, `UsageRow`, `ToolHealthRow`, `SummaryHealth`, the caps; `/stats`'s two new lines. Tests `T-V160-MET-01…-08`, `-10`. | those tests green; `/stats`'s first eight lines byte-identical in shape |
+| **T3** | `agent.py` wiring: the four span seams, `SqliteSpanSink`, `trace_id`/`span_id` on both row families, the `turn_id` repair, `tg_agent.limit_hit`. Tests `T-V160-TRC-03`, `-04`, `-05`, `-10`, `-14`, `T-V160-MET-09`; amends `tests/test_observability.py:544`. | those tests green; the bijections hold; no other observability test changes |
+| **T4** | `metrics.py`: the eight aggregate functions, `Histogram`, `UsageRow`, `ToolHealthRow`, `SummaryHealth`, the caps; `/stats`'s two new lines. Tests `T-V160-MET-01…-08`, `-10`, `-11`. | those tests green; `/stats`'s first eight lines byte-identical in shape |
 | **T5** | `dashboard_render.py` and the `devtools/dashboard.py` refactor onto it; its CLI contract unchanged; `bench_schema ∈ {1,2}` accepted. Tests `T-V160-DSH-01`, `-02`, `-03`, `-04`, `-07`, `-09`; amends `tests/test_dashboard.py:136`, `:502`. | the 534-line dashboard suite green but for the two amended lines; the byte-identity test green |
 | **T6** | `dashboard_server.py`: routing, the allowlist, method handling, parameter validation, the security headers, the per-request read-only connection, the `Host` check, the JSON API, the error paths. Tests `T-V160-API-01`, `-02`, `-03`, `T-V160-SRV-05`, `-06`, `-08`, `-10`, `T-V160-DSH-05`, `-06`, `-08`, `N3…N7`. | those tests green; the canary sweep green |
 | **T7** | `config.py` (four new fields), `bot.py` (CLI grammar, `--version`, `--no-dashboard`, server start/stop, the `/status` line, `USAGE`), `conftest.py` bind guard, `.env.example`. Tests `T-V160-SRV-01`, `-02`, `-03`, `-04`, `-07`, `-09`, `T-V160-VER-01`, `-02`, `N1`, `N2`, `N9`, `N10`; amends `tests/test_v1_guardrails.py:1398`, `tests/conftest.py`. | those tests green; `bot.py --selftest` green with binding patched to raise |
 | **T8** | `agent.py` truncated-summary retry + `LLM_SUMMARY_MAX_TOKENS` + `_check_timeout_budget` extension + `TOOL_OUTCOMES`. Tests `T-V160-TQ-01`, `-02`, `-03`, `N8`. | those tests green; the timeout floor unchanged at default configuration |
-| **T9** | `agent.py` fingerprint refusal: fingerprint, per-message state, threshold, the verbatim envelope, `refused_repeat`. Test `T-V160-TQ-04`. | that test green; the envelope matches the literal |
+| **T9** | `agent.py` repeat refusal: `call_key`, per-message state, threshold, the verbatim envelope, `refused_repeat`. Test `T-V160-TQ-04`. | that test green; the envelope matches the literal |
 | **T10** | `bench_scenarios.py`: the `tool_calls_max` kind and factory, `max_calls`, the catalogue validation, S13…S18. Tests `T-V160-TQ-05`, `-06`. | those tests green; catalogue imports cleanly; **no existing scenario changed** |
 | **T11** | `bench.py`: `BENCH_SCHEMA = 2`, `runs[].spans`, `SPAN_ROW_KEYS`, `REQUIRED_SPAN_ROW_KEYS`, the `mode` parameter, the `check`/`report`/`report --gate` split, `meta.lmstudio_version`/`served_model_id`, the `tool_calls_max` evaluation. Tests `T-V160-BEN-01…-04`; amends `tests/test_bench.py:111`. | those tests green; `REQUIRED_LLM_ROW_KEYS` unchanged; `test_v14_patch` green unamended |
 | **T12** | Version and docs: `pyproject.toml` `1.6.0`, `README.md` (Dashboard, Versioning, four env rows, `--version`, `--no-dashboard`, `/status`), `AGENTS.md`, `docs/plan.md`. | `lint-docs` green; the version test green; docs match reality |
 | **T13** | `mutation_check.py`: the ten `v160-*` entries; `config/quality_gates.yaml`: the `mutation-v160` gate and both re-measured timeouts; `--list` recorded. | `--select v160-` green; `mutation-all` green inside its new timeout; the matrix test green |
 | **T14** | Review (REQ-V160-REV-01) in a clean context; fix or waive findings. **Every source, test and config fix of this run lands here or earlier** — never after T16. | findings closed or waived with reasons |
 | **T15** | **Offline gates and the live preflight (REQ-V160-PRE-04)**: gates 1–4 and 6 verbatim plus `checks.py run --profile full --since <base>` with its live member deferred; then resolve LM Studio (PRE-03), run gate 5 `bot.py --selftest-live` and the deferred live member, collect the instrument metadata, run the one-completion inference preflight, and execute the `smoke-v160` run of REQ-V160-BEN-07. | every offline gate green; served model id equals `LMSTUDIO_MODEL`; metadata complete; all six new scenarios executed once |
-| **T16** | **Baseline (§11)**: record `baseline-v1.6.0.json` with all 18 scenarios, commit it, render `dashboard-v1.6.0.html`, produce the informational S01–S12 comparison against `baseline-v1.4.json`. **The tree is frozen from here** (REQ-V160-BEN-07). | 3/3 on each new scenario, no skips — a shortfall voids the run (REQ-V160-TQ-05); LM Studio version and model id recorded; ≈ 40 min, $0 |
+| **T16** | **Baseline (§11)**: run all 18 scenarios into `.bench/`, copy to `docs/assets/bench/baseline-v1.6.0.json`, render `dashboard-v1.6.0.html` **from that copy**, produce the informational S01–S12 comparison against `baseline-v1.4.json`, then commit every artefact in the task's **one** commit (REQ-V160-BEN-06). **The tree is frozen from here** (REQ-V160-BEN-07). | 3/3 on each new scenario, no skips — a shortfall voids the run (REQ-V160-TQ-05); LM Studio version and model id recorded; ≈ 40 min, $0 |
 | **T17** | **Provisional** `report-v1.6.0.md` (RPT-02 minus item 4's tip SHA and T18 artefacts, ledger row included), `tg-post-v1.6.0.md` (RU, < 1500 chars), `docs/llm-usage.md` rows. | `lint-docs` green; `wc -m` recorded; no self-referential SHA claimed |
 | **T18** | **Final acceptance (REQ-V160-ACC-03)**: six verbatim gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the single evidence-only commit; then the annotated tag `v1.6.0` **on that commit**. | every gate green on the tree that ships; the tag recorded; the freeze begins |
 
@@ -2386,7 +2420,7 @@ test, a Gherkin scenario or a recorded artefact — never "by inspection".
 | PRE-01 preconditions | REQ-V15-PRE-01 | the T0 record; the blocker template on failure |
 | PRE-02 semconv read, nothing installed | semconv-genai, verified 2026-09-04 | the report's resolved VERIFY values; `uv.lock` unchanged |
 | PRE-03 LM Studio probe, `sed -i` only | operator's roaming IP; REQ-V160-EC-04 | the report's probe record; `E13` |
-| PRE-04 the instrument identified and preflighted before T16 | `bot.py:1273-1283`; user decision 8 | the T15 record: model-id match, metadata, preflight; `E13` |
+| PRE-04 the instrument identified and preflighted before T16 | `bot.py:1273-1283`; user decision 8 | the T0 operator-input block; the T15 record; `E13` |
 | TREE-01 new files | this spec | `git status` at T18; the report's tree listing |
 | TREE-02 changed files | this spec | the commit diffs; §15.1 |
 | TREE-03 module naming, import direction | REQ-V15-TREE-02's `config/` guard | `T-V160-TRC-01`, `T-V160-DSH-01` |
@@ -2396,7 +2430,7 @@ test, a Gherkin scenario or a recorded artefact — never "by inspection".
 | TRC-04 the span tree | semconv-genai span shapes | `T-V160-TRC-03`, `-04`, `-05`; `E1` |
 | TRC-05 schema 3 → 4 | `storage.py:144-216` | `T-V160-TRC-07`, `-08`; `E2` |
 | TRC-06 `trace_id`/`span_id` columns, derived payloads | `tests/test_observability.py:738-739` | `T-V160-TRC-06`; `test_obs06` unamended |
-| TRC-07 `SpanSink` seam, one transaction per span+row, OTLP as future | user decision 2(a); `storage.py:248-262`, `:291-305` | `T-V160-TRC-13`, `-04`, `-05`; REQ-V160-NG-01 |
+| TRC-07 `SpanSink` seam, one transaction per span+row, OTLP as future | user decision 2(a); `storage.py:248-262`, `:291-305` | `T-V160-TRC-13`, `-04`, `-05`, `-14`; REQ-V160-NG-01 |
 | TRC-08 recording seams, `turn_id` repair | `agent.py:255-263`, `storage.py:580-584` | `T-V160-TRC-04`; §15.1's `:544` amendment |
 | TRC-09 `OBS_CAPTURE_CONTENT` off, redacted, bounded | user decision 9 | `T-V160-TRC-09`, `-10` |
 | TRC-10 limit hits on the root span | `agent.py:29-37` | `T-V160-MET-09` |
@@ -2404,11 +2438,11 @@ test, a Gherkin scenario or a recorded artefact — never "by inspection".
 | TRC-12 storage helpers, bound parameters | `storage.py` style | `T-V160-SRV-08` |
 | MET-01 one module | `AGENTS.md` project layout | `T-V160-MET-08` |
 | MET-02 revive the dead columns | nine columns written, never read | `T-V160-MET-01` |
-| MET-03 the aggregate functions | this spec | `T-V160-MET-02`, `-03`, `-04`, `-07` |
+| MET-03 the aggregate functions | this spec | `T-V160-MET-02`, `-03`, `-04`, `-07`, `-11` |
 | MET-04 histogram names, units, boundaries, one per attribute tuple | semconv-genai metrics VERIFY ×2 | `T-V160-MET-05`, `-06`; the resolved markers |
 | MET-05 `/stats` grows compatibly | `bot.py:806-826` | `T-V160-MET-08`; the unamended `/stats` assertions |
 | MET-06 summary health, five SQL formulas over rows | REQ-V160-TQ-01; `agent.py:798-801` | `T-V160-TQ-01`; `N8` |
-| MET-07 every aggregate bounded | this spec | `T-V160-MET-10` |
+| MET-07 every aggregate bounded | this spec | `T-V160-MET-10`, `-11` |
 | DSH-01 one view layer, two callers | user decision 2(c); REQ-V11-NG-06 | `T-V160-DSH-01`, `-02` |
 | DSH-02 offline, no script, no CDN | user decision 1; `tests/test_dashboard.py:195` | `T-V160-DSH-03`; `E5` |
 | DSH-03 the three pages | user decision 11 | `T-V160-DSH-07`, `-08`; `E4`, `E9` |
@@ -2574,11 +2608,12 @@ Scenario: E10 — a starved summary is retried once and never accepted truncated
        and /stats reports one failed summary
 
 Scenario: E11 — the third identical failing call is refused, not executed
-  Given a tool call that fails with the same error class twice in one message
+  Given a tool call that fails twice in one message, under two different
+      error classes
   When the model issues the same call a third time
     Then the tool is not executed, the outcome is "refused_repeat", duration_ms
        is 0, and the injected result matches the literal envelope
-  And reordering the argument keys does not change the fingerprint
+  And reordering the argument keys does not change call_key
   And a fresh user message starts the count again
 
 Scenario: E12 — the report carries a paste-ready ledger row and valid prompts
@@ -2597,7 +2632,7 @@ Scenario: E13 — the baseline is recorded against a named, preflighted instrume
   And the wttr.in preflight succeeded before the smoke run and before the baseline
   When the served model id is read from GET <base>/models
   Then it contains LMSTUDIO_MODEL, and the version and loaded context length are
-      recorded from the operator inputs
+      the ones the go request supplied and T0 froze
   And the one-completion preflight returns a non-empty assistant message
   And bench.py run --tag smoke-v160 --only S13,S14,S15,S16,S17,S18 --repeats 1
       executes all six scenarios
@@ -2623,6 +2658,13 @@ Scenario: E14 — the tag is created last, on the evidence-only commit
 ```
 
 ## Appendix C — cross-review log
+
+**Rounds 1–3 of 3, termination: `round_limit`** — the lab's stop criterion (a
+round without Critical/High findings) was not reached within the round budget;
+challenger **OpenAI Codex `gpt-5.6-sol`**, called through the lab debate loop's
+cross-review seam with the plan passed by file (the loop wrapper's argv form
+cannot carry a plan above 128 KB). 30 findings, 30 accepted, 4 adapted where the
+repository or a user decision contradicted the premise.
 
 ### Round 1 of at most 3 — against spec-v1.6.0 as committed (9015835); all ten accepted, one adapted
 
@@ -2664,3 +2706,20 @@ Challenger: the lab's round-2 critique, ten findings, four `Crit` and six `High`
 
 **Round 2: 10 findings, 10 accepted (2 adapted); nothing refused.** No new
 requirement; one new test, `T-V160-API-03`.
+
+### Round 3 of 3 — against the round-2 spec (cdfb4a1); all ten accepted, one adapted
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R3-1 | Crit | TQ-04 | accepted | `call_key` is pre-execution; the error class only counts for diagnostics |
+| R3-2 | Crit | BEN-05 | accepted | `git_commit` stays provenance, not locked — six lock, not seven |
+| R3-3 | High | EC-06, BEN-07, RPT-02.6 | accepted | a post-change baseline, no before/after claim; the `AGENTS.md` rule superseded |
+| R3-4 | High | TRC-07, `T-V160-TRC-14` (new) | accepted | guarded `ROLLBACK`; the operation failure re-raised after the `try`, not in a masking `finally` |
+| R3-5 | High | BEN-05, PRE-04 | accepted | `generation_settings` per purpose — `agent`, `summary_initial` (512), `summary_retry`, `provider_defaults` |
+| R3-6 | High | BEN-07 | accepted | verbatim: T15 first runs inference (preflight, `smoke-v160`), T16 first records a baseline |
+| R3-7 | High | PRE-04, ORD-01 T0 | accepted, adapted | the operator values arrive in the **`go` request's own text** and block at T0; served model id is `/models` at T15 |
+| R3-8 | High | DSH-01, API-05, SRV-11 | accepted | three render functions take every HTML error body, the server none |
+| R3-9 | Med | MET-03/-07, `T-V160-MET-11` (new) | accepted | 100 named buckets plus `"(other)"` per dictionary, `total` and `error_rate` surviving the fold |
+| R3-10 | Med | BEN-06, ORD-01 T16 | accepted | run, copy, render from the copy, compare, one commit |
+
+**Round 3: 10 accepted (1 adapted); nothing refused, no new REQ.**
