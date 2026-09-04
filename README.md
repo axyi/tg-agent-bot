@@ -21,7 +21,7 @@ allowlist are served.
 - **Docker**, reachable by the bot user without `sudo`. The sandbox image must
   be pulled in advance — `exec` never pulls at request time:
   ```bash
-  docker pull python:3.13-slim
+  docker pull python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
   ```
   Without Docker the bot still starts and still answers; only `exec` refuses.
 - Optionally a running LM Studio server, if you use the local provider

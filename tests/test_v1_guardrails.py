@@ -368,7 +368,9 @@ def test_new_config_variables_are_validated(tmp_path):
     assert cfg.lmstudio_context_length == 42496
     assert cfg.openrouter_context_length == 131072
     assert cfg.llm_failover == "auto"
-    assert cfg.exec_docker_image == "python:3.13-slim"
+    assert cfg.exec_docker_image == (
+        "python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6"
+    )
     assert cfg.audit_log_path == tmp_path / "exec_audit.jsonl"
     assert cfg.rate_limit_capacity == 10
     assert cfg.rate_limit_refill_s == 6.0
