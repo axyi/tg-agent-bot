@@ -12,8 +12,10 @@ correction is explicitly permitted; a code/config-bearing one is not, and
 is why this is its own numbered patch rather than folded into report-v1.5.md
 as another post-freeze correction item). **The patch brief commissioning
 this work states the user authorised breaking the freeze explicitly, on
-2026-09-04; this executor did not observe that authorisation directly and
-records it here as relayed by the brief, not independently verified** —
+2026-09-04; this executor did not observe that authorisation directly and recorded it
+as relayed; the lab session that commissioned the patch has since confirmed
+it is genuine — the user chose "patch v1.5.1 now" over deferring to v1.6 in
+an explicit question, knowing it voids the freeze and requires re-acceptance** —
 the same standard D3 itself applies to the freeze-exception evidence for
 `6fde12f`/`85c5ad7`: say plainly what is and isn't established, rather
 than asserting an unverifiable claim as fact.
@@ -47,7 +49,7 @@ permits documentation-only post-freeze corrections (as report-v1.5.md's
 Deviations 6–7 already record) but not this: fixing D1/D2 requires
 touching `tests/` and `config/quality_gates.yaml`. Per the patch brief
 commissioning this work, the user authorised this explicitly on
-2026-09-04 (relayed, not independently observed by this executor — see
+2026-09-04 (relayed to the executor, since confirmed by the commissioning session — see
 the Summary's own caveat), so this patch proceeds as v1.5.1 rather than
 staying blocked.
 
