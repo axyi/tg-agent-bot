@@ -1325,6 +1325,26 @@ acceptance above); nothing was rerun because of them.
    reverted, since un-formatting the file again would reintroduce
    inconsistent style with no test or behaviour benefit — see T17's
    Review section, finding 4.
+6. **Two post-freeze corrections, found by `advisor()` after T19 was
+   believed done.** (a) `tg-post-v1.5.md` (landed at T18) still said
+   "18 промптов (T0–T17)" and predated T19's acceptance result
+   entirely — fixed in commit `346a67b`, a documentation-only
+   correction under REQ-V15-ACC-03's one permitted post-freeze
+   exception (no source/test/config touched; commit-msg, `pre-commit`,
+   `lint-docs` and `gitleaks-tree` re-verified against the final tree).
+   (b) `346a67b`'s own commit message then cited
+   `docs/prompts/63-v15-t19-acceptance.md` — T19's prompt, not one
+   describing `346a67b`'s actual work — violating `AGENTS.md`'s "one
+   prompt → one commit" (the `commit-msg` hook only checks *a*
+   reference exists, not that it matches the commit's content, so it
+   passed anyway). Not amended (`346a67b` is an already hook-verified
+   commit); fixed forward instead, matching this repository's own v1.4
+   precedent (`42-v14-t10-advisor-followup.md`,
+   `43-v14-verify-run-fixes.md` — each a post-freeze correction commit
+   with its own dedicated prompt, never reusing the prior one): this
+   commit adds `docs/prompts/64-v15-post-freeze-post-fix.md` for
+   itself and records the mismatch here rather than leaving it
+   unrecorded.
 
 ## Bugs found and fixed, this run's own count (T18)
 
@@ -1333,7 +1353,8 @@ review, unplanned** — not every documentation gap a task was itself
 scoped to close (T16's own "bring `AGENTS.md`/`docs/plan.md` true" work,
 for instance, is the task's deliverable, not a bug it stumbled into),
 matching how v1.4's row counted its T9 review's 2 findings. By that
-definition, **12 found, 12 fixed**, none left open:
+definition, **14 found, 14 fixed**, none left open (12 during T0–T19,
+2 more post-freeze via `advisor()` — see items 13–14):
 
 1. T7 — `execute_command_gate` treated every operational failure as
    respecting `blocking`, so a shadow gate's operational failure passed
@@ -1364,6 +1385,12 @@ definition, **12 found, 12 fixed**, none left open:
     inverted`.
 12. T17 review — `AGENTS.md` misstated semgrep and trivy as shadow
     scanners (both are blocking; only skylos is shadow).
+13. Post-freeze, found by `advisor()` — `tg-post-v1.5.md` was stale
+    ("18 промптов (T0–T17)") and predated T19's acceptance result
+    entirely.
+14. Post-freeze, found by `advisor()` — `346a67b`'s commit message
+    cited prompt 63 (T19's own) rather than a prompt describing its
+    own work, violating "one prompt → one commit."
 
 Not counted: T9's `install_hooks.py` git-config scoping (a risk
 identified and avoided during design, never shipped wrong); T16's own
@@ -1377,7 +1404,7 @@ low-risk notes, not defects).
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5 | 2026-09-04 | ~28 750 (114 997 B) | 20 (T0–T19) | ✅ yes — 0/5 repair cycles used across the whole run | 12 found / 12 fixed | unknown (main session) + 231,051 (T17 review subagent) | unknown | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5 | 2026-09-04 | ~28 750 (114 997 B) | 21 (44–64; Deviations item 6) | ✅ yes — 0/5 repair cycles used across the whole run | 14 found / 14 fixed | unknown (main session) + 231,051 (T17 review subagent) | unknown | claude-sonnet-5 | Claude Code |
 ```
 
 ## Verdict
@@ -1385,7 +1412,8 @@ low-risk notes, not defects).
 **PASS.** All 20 tasks (T0–T19) landed; the six `AGENTS.md` gates, the
 `full` profile (15/15) and all 12 Appendix-B scenarios are green on the
 final tree `752400064d7d8c34a45b5d3232b68366f997f92d`. 0 of 5 repair
-cycles used. 12 real defects found via testing/review, all 12 fixed;
+cycles used. 14 real defects found via testing/review (12 during
+T0–T19, 2 more post-freeze via `advisor()`), all 14 fixed;
 none left open. `checks.py replay`'s 2 historical exceptions (both
 pre-hook-activation, both diagnosed, neither a bypass) are recorded
 above rather than hidden. No benchmark-affecting change this release
