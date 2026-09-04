@@ -929,7 +929,7 @@ in `config/quality_gates.yaml`.]]
 **`ruff format` shares that shadow status, for a specific and serious reason.**
 `ruff format --check .` on the current tree reports **44 of 135 files would be
 reformatted**, among them **11 of the 12 files `devtools/mutation_check.py`
-targets**. Each of the 43 mutation entries locates its target by a **byte-exact
+targets**. Each of the 72 mutation entries locates its target by a **byte-exact
 `find` string**, so a tree-wide reformat would silently invalidate almost the
 whole mutation gate. Therefore:
 
@@ -1320,7 +1320,7 @@ these profiles. The table is the readable rendering of `quality_gates.yaml`'s
 | `bot.py --selftest` | — | yes | yes | gate 4, offline |
 | `bot.py --selftest-live` | — | — | yes | gate 5; needs `.env`, Docker, LM Studio |
 | `mutation_check.py --select v15-` | — | yes | — | 4 entries ≈ 92 s |
-| `mutation_check.py` (all) | — | — | yes | gate 6, 43 entries ≈ 16–17 min |
+| `mutation_check.py` (all) | — | — | yes | gate 6, 72 entries ≈ 16–17 min |
 | `trivy fs` | — | yes | yes | diff-scoped, HIGH/CRITICAL |
 | `semgrep scan` | — | yes | yes | diff-scoped, ERROR |
 | `skylos` | — | yes | yes | **shadow** |

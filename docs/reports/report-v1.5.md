@@ -1353,7 +1353,15 @@ acceptance above); nothing was rerun because of them.
    with its own dedicated prompt, never reusing the prior one): this
    commit adds `docs/prompts/64-v15-post-freeze-post-fix.md` for
    itself and records the mismatch here rather than leaving it
-   unrecorded.
+   unrecorded. Unlike `346a67b`, this report did not record an explicit
+   freeze-exception re-verification sentence for `6fde12f` at the time
+   it landed — not established either way whether one was run then;
+   said so plainly rather than assumed. Re-verified now, in the v1.5.1
+   patch (prompt `docs/prompts/68-v151-d3-freeze-evidence-and-errata.md`):
+   `checks.py replay --range 346a67b~1..6fde12f` reads `6fde12f` from
+   git objects only (commit-msg checks, `ruff-check`/`ruff-format` over
+   its changed `.py` files — none, it is docs-only — and `gitleaks`
+   over its historical content), reporting `[PASS] 6fde12f27c98: clean`.
 7. **A third post-freeze correction, found by `advisor()` in the same
    pass as item 6's fix.** The Review (T17) section's own header said
    "5 findings (3 🟡, 2 🟢)" against its own **six** enumerated items
@@ -1366,7 +1374,15 @@ acceptance above); nothing was rerun because of them.
    T17 row ("4 fixed" — wrong, only 3 were) and into `docs/plan.md`.
    Commits `cd88b35` and `6fde12f` already say "five" in their
    messages — not amended, corrected here as errata instead
-   (`docs/prompts/65-v15-post-freeze-review-count.md`).
+   (`docs/prompts/65-v15-post-freeze-review-count.md`, landing as
+   commit `85c5ad7`). As with item 6(b) above, no explicit
+   freeze-exception re-verification sentence was recorded for `85c5ad7`
+   at the time — not established either way whether one was run then.
+   Re-verified now, in the v1.5.1 patch (prompt `docs/prompts/
+   68-v151-d3-freeze-evidence-and-errata.md`): `checks.py replay --range
+   6fde12f..85c5ad7` reports `[PASS] 85c5ad7cac78: clean` (same three
+   checks as item 6(b): commit-msg, `ruff-check`/`ruff-format` — no `.py`
+   files changed — and `gitleaks` over the commit's historical content).
 
 ## Bugs found and fixed, this run's own count (T18)
 
