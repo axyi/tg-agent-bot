@@ -109,6 +109,7 @@ REQ-V160-EC-06.
 | T | delegated? | to what |
 |---|---|---|
 | T0 | no | — |
+| T1 | no | — (reading stayed within `config.py:118-135`, `:455-540` plus the new files) |
 
 *(filled in per task as the run proceeds)*
 

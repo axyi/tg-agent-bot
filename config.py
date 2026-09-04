@@ -117,6 +117,10 @@ class Config:
     # the summary purpose, normalised by `parse_summary_model`. Empty is the
     # default — the summary then runs on the main client, as it always has.
     llm_summary_model: str = ""
+    # v1.6.0 addition (REQ-V160-TRC-09): gates the four opt-in content
+    # attributes on spans. Off by default -- content never leaves the
+    # process unless an operator turns this on explicitly.
+    obs_capture_content: bool = False
 
 
 def register_secret(value: str) -> None:
@@ -315,6 +319,7 @@ def load_config(
         llm_price_input_usd_per_mtok=manual_input_price,
         llm_price_output_usd_per_mtok=manual_output_price,
         llm_summary_model=summary_model,
+        obs_capture_content=_parse_bool(source, "OBS_CAPTURE_CONTENT", False),
     )
 
 
