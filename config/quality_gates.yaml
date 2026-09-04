@@ -201,6 +201,14 @@ gates:
     severity: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
     timeout_seconds: 120
 
+  # D2 (v1.5.1): timeout_seconds for both mutation-* gates follows one rule
+  # -- timeout = 2x a measured direct run -- so a spurious timeout never
+  # blocks push/full for load, not correctness. Measured directly on
+  # 2026-09-04 (`time uv run --locked python devtools/mutation_check.py
+  # [--select v15-]`, this tree, 72/72 -- resp. 4/4 -- killed):
+  # mutation-v15 real=1m39.497s (~100s) -> 2x ~200s, rounded up to 220s;
+  # mutation-all real=21m12.932s (~1273s) -> 2x ~2546s, rounded up to 2600s.
+  # Re-measure and re-apply this same rule if either grows materially.
   mutation-v15:
     kind: command
     result_mode: exit_status
@@ -209,7 +217,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 180
+    timeout_seconds: 220
 
   mutation-all:
     kind: command
@@ -219,7 +227,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1200
+    timeout_seconds: 2600
 
   hooks-installed:
     kind: command
