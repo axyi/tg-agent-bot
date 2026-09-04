@@ -10,6 +10,7 @@ never the real one.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -30,16 +31,169 @@ _ALL_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"}
 _FAKE_AWS_KEY = "AKIAQWERTY" + "UIOPASDFGH"
 
 
+def _isolated_git_env(confine_to: Path) -> dict[str, str]:
+    """D1 (CRITICAL): an environment safe for a `git` subprocess that must
+    stay confined to `confine_to`.
+
+    A real git hook invocation sets GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE
+    (etc.) for its own child processes. This suite runs *as* a `pre-push`
+    gate (`checks.py` -> `uv run pytest`), and neither hop passes an
+    explicit `env=` to its subprocess call -- so those variables leak
+    straight through, unchanged, into every `git` call these fixtures
+    make. With GIT_DIR pointing at the real repository and no GIT_WORK_TREE
+    to correct it, `git` falls back to the current *cwd* as the work tree
+    while still reading/writing refs in the real repository's ref
+    database: `git init`/`git commit` silently commit fixture content onto
+    whatever branch is really checked out, and a later `git branch -M
+    main` force-renames that real branch onto `refs/heads/main` -- exactly
+    the incident this guards against. Stripping every GIT_* variable and
+    pinning GIT_CEILING_DIRECTORIES makes each call self-contained no
+    matter what the ambient process environment carries.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CEILING_DIRECTORIES"] = str(confine_to)
+    return env
+
+
+def _git(args: list[str], cwd: Path, *, check: bool = True, **kwargs):
+    """Every fixture `git` call goes through here -- see
+    `_isolated_git_env` for why an explicit, scrubbed `env=` is not
+    optional."""
+    return subprocess.run(
+        ["git", *args], cwd=cwd, env=_isolated_git_env(cwd), check=check, **kwargs
+    )
+
+
+def _assert_git_dir_confined(cwd: Path, expected_root: Path) -> None:
+    """Fails loud, before any write, if `git` (run from `cwd`) resolves a
+    git-dir outside `expected_root` -- the exact shape a leaked
+    GIT_DIR/GIT_WORK_TREE would produce."""
+    result = _git(["rev-parse", "--absolute-git-dir"], cwd, capture_output=True, text=True)
+    git_dir = Path(result.stdout.strip()).resolve()
+    if not git_dir.is_relative_to(expected_root.resolve()):
+        raise RuntimeError(
+            f"D1 escape: git-dir {git_dir} resolved outside {expected_root} "
+            f"for a fixture rooted at {cwd} -- refusing to proceed"
+        )
+
+
+def _git_common_dir(cwd: Path) -> Path:
+    result = _git(
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd,
+        capture_output=True,
+        text=True,
+    )
+    return Path(result.stdout.strip()).resolve()
+
+
+def _assert_shares_repo(cwd: Path, expected_repo_root: Path) -> None:
+    """D1: confirms a freshly `git worktree add`-ed directory is really
+    tied to `expected_repo_root`'s repository -- not to some other
+    repository a leaked GIT_DIR/GIT_WORK_TREE might have redirected the
+    `worktree add` call to. Compares the shared git-common-dir rather than
+    assuming `cwd` literally nests under `expected_repo_root` on disk,
+    since `expected_repo_root` may itself already be a linked worktree
+    (exactly the shape the real incident happened in)."""
+    expected = _git_common_dir(expected_repo_root)
+    actual = _git_common_dir(cwd)
+    if actual != expected:
+        raise RuntimeError(
+            f"D1 escape: {cwd} shares git-common-dir {actual}, expected "
+            f"{expected} (from {expected_repo_root}) -- refusing to proceed"
+        )
+
+
 def _init_repo(path: Path) -> Path:
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t.local"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+    _git(["init", "-q"], path)
+    _assert_git_dir_confined(path, path)
+    _git(["config", "user.email", "t@t.local"], path)
+    _git(["config", "user.name", "t"], path)
     return path
 
 
 def _commit_all(path: Path, message: str = "init") -> None:
-    subprocess.run(["git", "add", "-A"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", message], cwd=path, check=True)
+    _git(["add", "-A"], path)
+    _git(["commit", "-q", "--allow-empty", "-m", message], path)
+
+
+def test_d1_fixture_repo_never_touches_enclosing_repo_via_leaked_git_env(
+    tmp_path: Path, monkeypatch
+):
+    """D1 (CRITICAL) regression -- real incident: this suite runs as one of
+    the `pre-push` gate's own commands, so a real git hook invocation sets
+    GIT_DIR/GIT_WORK_TREE for its `checks.py` -> `pytest` child process
+    chain; before this fix, no fixture `git` call passed its own `env=`, so
+    those variables leaked straight through into `_init_repo`/`_commit_all`
+    and any subsequent `git branch -M <name>`. `git init` silently reused
+    the *real* repository's GIT_DIR, `git commit` landed a throwaway commit
+    on whatever branch was really checked out there, and `git branch -M
+    main` force-renamed that branch onto `refs/heads/main`, overwriting it
+    with the fixture's own throwaway commit -- exactly the reflog line
+    from the incident ("Branch: renamed refs/heads/test/pre-push-check to
+    refs/heads/main").
+
+    This reproduces that leak against a throwaway stand-in "enclosing"
+    repo (never the real one) and proves its refs/heads/main and reflog
+    come out byte-identical.
+    """
+    enclosing = tmp_path / "enclosing"
+    enclosing.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=enclosing, check=True)
+    subprocess.run(["git", "config", "user.email", "e@e.local"], cwd=enclosing, check=True)
+    subprocess.run(["git", "config", "user.name", "e"], cwd=enclosing, check=True)
+    (enclosing / "real.txt").write_text("real content\n")
+    subprocess.run(["git", "add", "-A"], cwd=enclosing, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "real base commit"], cwd=enclosing, check=True)
+    subprocess.run(
+        ["git", "checkout", "-q", "-b", "test/pre-push-check"], cwd=enclosing, check=True
+    )
+
+    def _main_state() -> tuple[str, str]:
+        sha = subprocess.run(
+            ["git", "rev-parse", "refs/heads/main"],
+            cwd=enclosing,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        reflog = subprocess.run(
+            ["git", "reflog", "show", "refs/heads/main"],
+            cwd=enclosing,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        return sha, reflog
+
+    before_sha, before_reflog = _main_state()
+
+    # Simulate exactly what a real git hook's child-process environment
+    # looks like -- GIT_DIR/GIT_WORK_TREE point at "enclosing" the way
+    # they would point at the real repository during an actual pre-push
+    # run this suite is itself gating.
+    monkeypatch.setenv("GIT_DIR", str(enclosing / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(enclosing))
+
+    fixture_dir = tmp_path / "fixture"
+    fixture_dir.mkdir()
+    repo = _init_repo(fixture_dir)
+    _commit_all(repo, "throwaway fixture commit")
+    _git(["branch", "-M", "main"], repo)  # the incident's exact last step
+
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+
+    after_sha, after_reflog = _main_state()
+    assert after_sha == before_sha, "enclosing repo's refs/heads/main must be untouched"
+    assert after_reflog == before_reflog, "no new reflog entry on the enclosing repo's main"
+    assert (enclosing / "real.txt").read_text() == "real content\n"
+
+    # And the fixture repo really is its own, separate, self-contained repo.
+    fixture_git_dir = _git(
+        ["rev-parse", "--absolute-git-dir"], repo, capture_output=True, text=True
+    ).stdout.strip()
+    assert Path(fixture_git_dir).resolve() == (fixture_dir / ".git").resolve()
 
 
 def _stub_gate(exit_code: int, *, blocking: bool, diff_scoped: bool = False, path: str = "x.py"):
@@ -540,13 +694,11 @@ def test_v15_scan_05_diff_scoping_blocks_new_reports_old(tmp_path: Path):
 
 def test_v15_scan_06_empty_scope_trap_on_main(tmp_path: Path):
     repo = _init_repo(tmp_path)
-    subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=repo, check=True)
+    _git(["checkout", "-q", "-b", "main"], repo)
     (repo / "a.py").write_text("x = 1\n")
     _commit_all(repo, "base")
-    base_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
-    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "empty"], cwd=repo, check=True)
+    base_sha = _git(["rev-parse", "HEAD"], repo, capture_output=True, text=True).stdout.strip()
+    _git(["commit", "-q", "--allow-empty", "-m", "empty"], repo)
 
     config = {"scope": {"base_branch": "main", "zero_sha": "0" * 40}}
     with pytest.raises(checks.EmptyScopeError):
@@ -555,7 +707,7 @@ def test_v15_scan_06_empty_scope_trap_on_main(tmp_path: Path):
 
 def test_v15_scan_06_full_on_main_without_since_refused(tmp_path: Path):
     repo = _init_repo(tmp_path)
-    subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=repo, check=True)
+    _git(["checkout", "-q", "-b", "main"], repo)
     (repo / "a.py").write_text("x = 1\n")
     _commit_all(repo, "base")
     config = {"scope": {"base_branch": "main", "zero_sha": "0" * 40}}
@@ -862,8 +1014,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
     real_path.write_text(real_config)
 
     (repo / "tests" / "canary.py").write_text("SYNTHETIC-CANARY-1\n")
-    subprocess.run(["git", "add", "tests/canary.py"], cwd=repo, check=True)
-
+    _git(["add", "tests/canary.py"], repo)
     control_report = tmp_path / "control-report.json"
     control_result = subprocess.run(
         [
@@ -881,6 +1032,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
             ".",
         ],
         cwd=repo,
+        env=_isolated_git_env(repo),
         capture_output=True,
         timeout=30,
     )
@@ -903,6 +1055,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
             ".",
         ],
         cwd=repo,
+        env=_isolated_git_env(repo),
         capture_output=True,
         timeout=30,
     )
@@ -910,7 +1063,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
     assert json.loads(suppress_report.read_text()) == []
 
     (repo / "src" / "leak.py").write_text("SYNTHETIC-CANARY-NOT-ALLOWLISTED-1\n")
-    subprocess.run(["git", "add", "src/leak.py"], cwd=repo, check=True)
+    _git(["add", "src/leak.py"], repo)
     escape_report = tmp_path / "escape-report.json"
     escape_result = subprocess.run(
         [
@@ -928,6 +1081,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
             ".",
         ],
         cwd=repo,
+        env=_isolated_git_env(repo),
         capture_output=True,
         timeout=30,
     )
@@ -1031,10 +1185,10 @@ def test_v15_hook_03_check_reports_each_problem_distinctly(tmp_path: Path, probl
     install_hooks.install(repo)
 
     if problem == "unset":
-        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=repo, check=True)
+        _git(["config", "--unset", "core.hooksPath"], repo)
         needle = "core.hooksPath is not set"
     elif problem == "wrong_path":
-        subprocess.run(["git", "config", "core.hooksPath", "elsewhere"], cwd=repo, check=True)
+        _git(["config", "core.hooksPath", "elsewhere"], repo)
         needle = "core.hooksPath is 'elsewhere'"
     elif problem == "missing_hook":
         (repo / ".githooks" / "pre-push").unlink()
@@ -1059,18 +1213,15 @@ def test_v15_hook_05_first_push_scope_covers_every_commit_not_just_head(tmp_path
     repo = _init_repo(tmp_path)
     (repo / "root.txt").write_text("1\n")
     _commit_all(repo, "root")
-    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
-    subprocess.run(["git", "checkout", "-q", "-b", "feature"], cwd=repo, check=True)
-
+    _git(["branch", "-M", "main"], repo)
+    _git(["checkout", "-q", "-b", "feature"], repo)
     (repo / "a.txt").write_text("1\n")
     _commit_all(repo, "c1")
     (repo / "b.txt").write_text("1\n")
     _commit_all(repo, "c2")  # second-to-last commit
     (repo / "c.txt").write_text("1\n")
     _commit_all(repo, "c3")
-    local_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    local_sha = _git(["rev-parse", "HEAD"], repo, capture_output=True, text=True).stdout.strip()
 
     zero_sha = "0" * 40
     stdin_text = f"refs/heads/feature {local_sha} refs/heads/feature {zero_sha}\n"
@@ -1104,15 +1255,13 @@ def _install_commit_msg_hook(repo: Path) -> None:
     dest_devtools.mkdir()
     (dest_devtools / "__init__.py").write_text("")
     shutil.copy(checks.REPO_ROOT / "devtools" / "checks.py", dest_devtools / "checks.py")
-    subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=repo, check=True)
+    _git(["config", "core.hooksPath", ".githooks"], repo)
 
 
 def _commit_via_real_hook(repo: Path, subject: str) -> subprocess.CompletedProcess[str]:
     (repo / "a.txt").write_text("x\n")
-    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True)
-    return subprocess.run(
-        ["git", "commit", "-m", subject], cwd=repo, capture_output=True, text=True
-    )
+    _git(["add", "a.txt"], repo)
+    return _git(["commit", "-m", subject], repo, check=False, capture_output=True, text=True)
 
 
 def test_n1_bad_header_rejected_by_the_real_hook(tmp_path: Path):
@@ -1150,29 +1299,24 @@ def git_worktree(tmp_path: Path):
     project to run against without ever touching the main working tree."""
     wt = tmp_path / "wt"
     branch = f"test/v15-{tmp_path.name}"
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(wt), "HEAD"],
-        cwd=checks.REPO_ROOT,
-        check=True,
-        capture_output=True,
-    )
+    _git(["worktree", "add", "--detach", str(wt), "HEAD"], checks.REPO_ROOT, capture_output=True)
+    # D1: this worktree is *deliberately* tied to the real repository -- but
+    # only via this explicit call, never via an ambient GIT_DIR/GIT_WORK_TREE.
+    # Confirm it landed exactly where intended before any further write.
+    _assert_shares_repo(wt, checks.REPO_ROOT)
     try:
-        subprocess.run(
-            ["git", "checkout", "-q", "-b", branch], cwd=wt, check=True, capture_output=True
-        )
-        subprocess.run(["git", "config", "user.email", "t@t.local"], cwd=wt, check=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=wt, check=True)
+        _git(["checkout", "-q", "-b", branch], wt, capture_output=True)
+        _git(["config", "user.email", "t@t.local"], wt)
+        _git(["config", "user.name", "t"], wt)
         yield wt
     finally:
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", str(wt)],
-            cwd=checks.REPO_ROOT,
+        _git(
+            ["worktree", "remove", "--force", str(wt)],
+            checks.REPO_ROOT,
             check=False,
             capture_output=True,
         )
-        subprocess.run(
-            ["git", "branch", "-D", branch], cwd=checks.REPO_ROOT, check=False, capture_output=True
-        )
+        _git(["branch", "-D", branch], checks.REPO_ROOT, check=False, capture_output=True)
 
 
 def test_v15_gate_06_replay_ruff_invocation_uses_repo_root_cwd_and_relative_path(
@@ -1188,10 +1332,9 @@ def test_v15_gate_06_replay_ruff_invocation_uses_repo_root_cwd_and_relative_path
     (repo / "pkg" / "x.py").write_text("x = 1\n")
     (repo / "docs" / "prompts").mkdir(parents=True)
     (repo / "docs" / "prompts" / "44-go-spec-v1.5.md").write_text("x")
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(
+    _git(["add", "-A"], repo)
+    _git(
         [
-            "git",
             "commit",
             "-q",
             "-m",
@@ -1199,12 +1342,9 @@ def test_v15_gate_06_replay_ruff_invocation_uses_repo_root_cwd_and_relative_path
             "-m",
             "(prompt: docs/prompts/44-go-spec-v1.5.md)",
         ],
-        cwd=repo,
-        check=True,
+        repo,
     )
-    sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    sha = _git(["rev-parse", "HEAD"], repo, capture_output=True, text=True).stdout.strip()
 
     calls: list[tuple[list[str], Path]] = []
 
@@ -1233,10 +1373,9 @@ def test_n6_pre_push_refused_when_pytest_fails(git_worktree: Path):
     (wt / "tests" / "test_v15_tmp_failing.py").write_text(
         "def test_deliberately_failing():\n    assert False\n"
     )
-    subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
-    subprocess.run(
+    _git(["add", "-A"], wt)
+    _git(
         [
-            "git",
             "commit",
             "-q",
             "-m",
@@ -1244,12 +1383,9 @@ def test_n6_pre_push_refused_when_pytest_fails(git_worktree: Path):
             "-m",
             "(prompt: docs/prompts/44-go-spec-v1.5.md)",
         ],
-        cwd=wt,
-        check=True,
+        wt,
     )
-    local_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=wt, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    local_sha = _git(["rev-parse", "HEAD"], wt, capture_output=True, text=True).stdout.strip()
 
     config = {
         "scope": {"base_branch": "main", "zero_sha": "0" * 40},
