@@ -1319,8 +1319,8 @@ these profiles. The table is the readable rendering of `quality_gates.yaml`'s
 | `pytest` | — | yes | yes | gate 3, 23 s |
 | `bot.py --selftest` | — | yes | yes | gate 4, offline |
 | `bot.py --selftest-live` | — | — | yes | gate 5; needs `.env`, Docker, LM Studio |
-| `mutation_check.py --select v15-` | — | yes | — | 4 entries ≈ 92 s |
-| `mutation_check.py` (all) | — | — | yes | gate 6, 72 entries ≈ 16–17 min |
+| `mutation_check.py --select v15-` | — | yes | — | 4 entries ≈ 100 s (v1.5.1 measurement; ≈ 92 s at spec-writing time) |
+| `mutation_check.py` (all) | — | — | yes | gate 6, 72 entries ≈ 21 min (v1.5.1 measurement; ≈ 16–17 min at spec-writing time, before the four `v15-*` entries) |
 | `trivy fs` | — | yes | yes | diff-scoped, HIGH/CRITICAL |
 | `semgrep scan` | — | yes | yes | diff-scoped, ERROR |
 | `skylos` | — | yes | yes | **shadow** |

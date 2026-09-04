@@ -10,8 +10,13 @@ that freeze and re-establishes acceptance on the corrected tree, exactly
 as REQ-V15-ACC-03's own exception clause anticipates (a documentation-only
 correction is explicitly permitted; a code/config-bearing one is not, and
 is why this is its own numbered patch rather than folded into report-v1.5.md
-as another post-freeze correction item). **The user authorised breaking
-the freeze explicitly, in-session, on 2026-09-04.**
+as another post-freeze correction item). **The patch brief commissioning
+this work states the user authorised breaking the freeze explicitly, on
+2026-09-04; this executor did not observe that authorisation directly and
+records it here as relayed by the brief, not independently verified** —
+the same standard D3 itself applies to the freeze-exception evidence for
+`6fde12f`/`85c5ad7`: say plainly what is and isn't established, rather
+than asserting an unverifiable claim as fact.
 
 Three defects fixed, one prompt/commit each:
 
@@ -40,9 +45,11 @@ a correctness one — leaving it in place risks the exact kind of false-red
 this lab's own reporting standard exists to prevent. REQ-V15-ACC-03
 permits documentation-only post-freeze corrections (as report-v1.5.md's
 Deviations 6–7 already record) but not this: fixing D1/D2 requires
-touching `tests/` and `config/quality_gates.yaml`. The user authorised
-this explicitly, in-session, on 2026-09-04, so this patch proceeds as
-v1.5.1 rather than staying blocked.
+touching `tests/` and `config/quality_gates.yaml`. Per the patch brief
+commissioning this work, the user authorised this explicitly on
+2026-09-04 (relayed, not independently observed by this executor — see
+the Summary's own caveat), so this patch proceeds as v1.5.1 rather than
+staying blocked.
 
 ## D1 — root cause and fix
 
@@ -118,6 +125,29 @@ tests/test_v15_standards.py::test_d1_fixture_repo_never_touches_enclosing_repo_v
 Full file: `uv run --locked pytest tests/test_v15_standards.py` — 116
 passed, both before format cleanup and after.
 
+**Scope check — is the fix isolated to one file, or does the vulnerability
+class reach further?** The root cause (a `git` subprocess call with no
+explicit `env=`) is not specific to `test_v15_standards.py`'s fixtures;
+any test file that shells out to `git` without scrubbing its environment
+would carry the same risk. Checked directly rather than assumed:
+
+```
+grep -rln '"git"' tests/*.py devtools/*.py | grep -v __pycache__
+devtools/install_hooks.py
+tests/test_v15_standards.py
+devtools/checks.py
+```
+
+`install_hooks.py`/`checks.py` are production code operating on a
+caller-specified `repo_root`, not throwaway fixtures — a different risk
+profile, out of D1's scope per this patch's own Stop condition (no
+production-code behaviour change). `test_v15_standards.py` is the only
+test file that invokes `git` at all; the rest of `tests/*.py` either
+shells out to `docker`/the sandbox CLI (offline, unrelated) or
+deliberately forbids `subprocess` entirely (`test_v1_guardrails.py`,
+`test_v11_patch.py`, `test_docker.py`). D1's fix is complete, not merely
+scoped to the two fixture names the defect report named.
+
 ## D2 — measured wall clock and new timeout
 
 Measured directly on this tree (2026-09-04, `time uv run --locked python
@@ -147,7 +177,12 @@ the same class of fragility).
 Verified against the new timeout: the standalone gate-6 run below and the
 `full`-profile run both report `mutation-all` as passed, not timed out,
 with a measured wall clock (20m50.566s, 22m29.533s including every other
-`full` member) comfortably inside the new 2600s budget.
+`full` member) comfortably inside the new 2600s budget. `mutation-all`'s
+own command was timed directly three separate times across this patch
+(1272.9s, 1250.6s, and the `full`-profile run's own internal timing) —
+all three cluster around ~21 min, so 2600s carries roughly 2×1273s worth
+of headroom even against the slowest of the three, not just the single
+first measurement.
 
 ## D3 — freeze evidence and errata
 
@@ -168,9 +203,25 @@ discussion, and the §14 gate table); the real, current count is 72
 (`grep -c '"id":' devtools/mutation_check.py`). Fixed both; every other
 "43" in the file is unrelated prompt-file-numbering text
 (`docs/prompts/43-v14-verify-run-fixes.md` and its lint exemption/rule)
-and was left untouched.
+and was left untouched. The same §14 row also carried the stale timing
+that came with the stale count — "43 entries ≈ 16–17 min" next to
+`--select v15-`'s "4 entries ≈ 92 s". Fixing the count and knowingly
+leaving an adjacent, now-contradicted timing in the same row would be the
+same defect D3 exists to remove, so both rows now carry this patch's own
+measured figures (D2's own § above) *alongside* the original ones, each
+labelled by when it was taken — "≈ 21 min (v1.5.1 measurement; ≈ 16–17 min
+at spec-writing time...)" — rather than silently overwriting a
+historically-accurate, explicitly time-stamped measurement.
 
-## Gates — `AGENTS.md`'s six, in order, on the final tree
+## Gates — `AGENTS.md`'s six, in order
+
+Gates 1–3 and `replay` (below) were re-run at this patch's true final
+HEAD, `475d243`; gates 4–6 and the `full`-profile run (below) ran at
+`a6ca13c`, one docs-only commit earlier (the report/ledger commit itself
+could not exist yet when they ran) — material difference: none, since
+`475d243` touches only `docs/`, and `475d243`'s own `checks.py replay`
+result below confirms it replays clean like every other commit in this
+patch.
 
 | # | gate | verdict |
 |---|---|---|
@@ -178,7 +229,7 @@ and was left untouched.
 | 2 | `uv run --locked ruff check .` | PASS — all checks passed |
 | 3 | `uv run --locked pytest` | PASS — 843 passed in 49.54s |
 | 4 | `uv run --locked python bot.py --selftest` | PASS — `selftest: OK` |
-| 5 | `uv run --locked python bot.py --selftest-live` | **FAIL** — see below |
+| 5 | `uv run --locked python bot.py --selftest-live` | **FAIL** — see below (blocks per `AGENTS.md`, not merely noted) |
 | 6 | `uv run --locked python devtools/mutation_check.py` | PASS — 72/72 killed, real 20m50.566s |
 
 **Gate 5 detail — recorded prominently, not skipped:**
@@ -229,7 +280,11 @@ The 3 "legacy: would reformat" files are pre-existing ruff-format debt
 (shadow, non-blocking per REQ-V15-SCAN-05 — unrelated to this patch,
 unchanged from spec-v1.5's own T12 finding).
 
-## `checks.py replay --range 9ad3047..a6ca13c47cb38b80cb40a88ddaab8ac8460e41f1`
+## `checks.py replay --range 9ad3047..475d24339943183c6f08f1dacc8d4cb444a8bf6b`
+
+(`475d243` is this patch's true final HEAD — the report/ledger commit
+itself. Re-run after that commit landed, so it is included, not
+excluded.)
 
 ```
 [PASS] 69fcfcd8f75a: clean
@@ -258,14 +313,15 @@ unchanged from spec-v1.5's own T12 finding).
 [PASS] 5cc390991e00: clean
 [PASS] efc2df3685f7: clean
 [PASS] a6ca13c47cb3: clean
+[PASS] 475d24339943: clean
 ```
 
 Exactly the two known historical exceptions already diagnosed in
 `docs/reports/report-v1.5.md` (`b4c4e13`'s pre-hook-activation formatting
 debt; `2276b20`'s pre-hook-activation gitleaks `UNKNOWN` on the AWS-key
 canary fixture, later suppressed by an allowlist added at T7) — **no new
-failure**. All three of this patch's own commits (`5cc3909`, `efc2df3`,
-`a6ca13c`) replay clean.
+failure**. All four of this patch's own commits (`5cc3909`, `efc2df3`,
+`a6ca13c`, `475d243`) replay clean.
 
 ## No Telegram post
 
@@ -282,24 +338,31 @@ rather than inventing one to satisfy the letter of the instruction.
 | `5cc3909` | `docs/prompts/66-v151-d1-fixture-git-env-isolation.md` | D1 fix + regression test |
 | `efc2df3` | `docs/prompts/67-v151-d2-mutation-timeout.md` | D2 fix (timeout values + rule comment) |
 | `a6ca13c` | `docs/prompts/68-v151-d3-freeze-evidence-and-errata.md` | D3 fix (report evidence + spec errata) |
-| (this commit) | `docs/prompts/69-v151-report-and-ledger.md` | this report, `llm-usage.md` rows, ledger row |
+| `475d243` | `docs/prompts/69-v151-report-and-ledger.md` | this report (first draft), `llm-usage.md` rows, ledger row |
+| (this commit) | `docs/prompts/70-v151-advisor-followup.md` | `advisor()` follow-up: softened the unverifiable "user authorised" claim to relayed-not-observed, confirmed D1's fix scope covers every test file, fixed the §14 gate-table timing left stale next to D3's count fix, re-ran `replay` to include `475d243` itself, softened the Verdict headline |
 
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5.1 | 2026-09-04 | — (patch, no new spec) | 4 (66–69) | yes — 0 repair cycles | 3 found / 3 fixed (D1 CRITICAL, D2, D3 docs) | unknown (harness does not expose per-request usage) | unknown | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.5.1 | 2026-09-04 | — (patch, no new spec) | 5 (66–70) | yes — 0 repair cycles | 3 found / 3 fixed (D1 CRITICAL, D2, D3 docs) + 1 advisor()-follow-up correction | unknown (harness does not expose per-request usage) | unknown | claude-sonnet-5 | Claude Code |
 ```
 
 ## Verdict
 
-**PASS, with one known, out-of-scope exception.** D1 (CRITICAL), D2 and D3
-are all fixed, each with its own commit and evidence. All six `AGENTS.md`
-gates ran in their listed order; gates 1, 2, 3, 4 and 6 are green, gate 5
-fails solely on its `lmstudio` sub-check (LM Studio unreachable at
-`http://localhost:1234/v1` in this environment) — recorded prominently,
-not silently skipped, and not caused by or fixable within this patch.
-`checks.py run --profile full` reproduces exactly the same single
-exception and is otherwise green, `mutation-all` clean within its new
-2600s timeout. `checks.py replay` over the whole `9ad3047..a6ca13c`
-range shows only the two pre-existing, already-diagnosed historical
-exceptions — no new failure. Working tree clean, nothing pushed.
+**D1/D2/D3 fixed and verified; gate 5 blocks on `lmstudio` unreachable, not
+silently waived.** D1 (CRITICAL), D2 and D3 are all fixed, each with its
+own commit and evidence. Gates 1, 2, 3, 4 and 6 of `AGENTS.md`'s six are
+green; gate 5 fails on its `lmstudio` sub-check (LM Studio unreachable at
+`http://localhost:1234/v1` in this environment) — by `AGENTS.md`'s own
+rule ("an unreachable LM Studio is a blocked run, not a noted one") this
+is a **blocking** failure, not a cosmetic one, recorded here rather than
+minimised; every other live check (config, db, Docker, Telegram,
+OpenRouter) passes, and nothing in D1/D2/D3 touches LM Studio
+connectivity — it is an environment precondition this patch did not
+create and cannot fix. `checks.py run --profile full` reproduces exactly
+the same single exception and is otherwise green, `mutation-all` clean
+within its new 2600s timeout. `checks.py replay` over the whole
+`9ad3047..475d243` range (this patch's true final HEAD) shows only the
+two pre-existing, already-diagnosed historical exceptions — no new
+failure, including on this patch's own four commits. Working tree clean,
+nothing pushed.
