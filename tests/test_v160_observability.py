@@ -799,9 +799,10 @@ def test_t_v160_trc_05_add_span_failure_rolls_back_only_the_tool_call_row(conn, 
     assert tool_rows(conn) == []
     # round 1's chat span/row landed fine -- only the execute_tool insert failed
     assert len(llm_rows(conn)) == 1
-    assert conn.execute(
-        "SELECT COUNT(*) FROM spans WHERE name LIKE 'execute_tool%'"
-    ).fetchone()[0] == 0
+    assert (
+        conn.execute("SELECT COUNT(*) FROM spans WHERE name LIKE 'execute_tool%'").fetchone()[0]
+        == 0
+    )
 
 
 # --- T-V160-TRC-09/-10: content capture, real secret, redacted and bounded -
@@ -813,8 +814,14 @@ def test_t_v160_trc_10_content_capture_off_by_default(conn, tmp_path):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hello")
     agent.run_agent(
-        conn=conn, conv_id=conv, llm=FakeLLM([LLMResponse("done", [], "stop")]),
-        skills={}, runner=RecordingRunner(), now=NOW, sleep=lambda _s: None, cfg=cfg,
+        conn=conn,
+        conv_id=conv,
+        llm=FakeLLM([LLMResponse("done", [], "stop")]),
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda _s: None,
+        cfg=cfg,
     )
     trace_id = _trace_id_of(conn)
     spans = storage.spans_for_trace(conn, trace_id)
@@ -829,8 +836,14 @@ def test_t_v160_trc_10_content_capture_on_redacts_and_bounds(conn, tmp_path):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, f"please remember {CANARY}")
     agent.run_agent(
-        conn=conn, conv_id=conv, llm=FakeLLM([LLMResponse("done", [], "stop")]),
-        skills={}, runner=RecordingRunner(), now=NOW, sleep=lambda _s: None, cfg=cfg,
+        conn=conn,
+        conv_id=conv,
+        llm=FakeLLM([LLMResponse("done", [], "stop")]),
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda _s: None,
+        cfg=cfg,
     )
     trace_id = _trace_id_of(conn)
     spans = storage.spans_for_trace(conn, trace_id)
@@ -905,8 +918,13 @@ def test_root_span_records_tool_round_limit_hit(conn):
     assert "TOOL_ROUND_LIMIT" in hits
     # only real budget-constant names ever appear
     assert hits <= {
-        "ROUND_LIMIT", "TOOL_ROUND_LIMIT", "HTTP_ATTEMPT_LIMIT", "TOOL_EXECUTION_LIMIT",
-        "MAX_TOOL_CALLS_PER_RESPONSE", "MALFORMED_RETRY_LIMIT", "EMPTY_REPAIR_LIMIT",
+        "ROUND_LIMIT",
+        "TOOL_ROUND_LIMIT",
+        "HTTP_ATTEMPT_LIMIT",
+        "TOOL_EXECUTION_LIMIT",
+        "MAX_TOOL_CALLS_PER_RESPONSE",
+        "MALFORMED_RETRY_LIMIT",
+        "EMPTY_REPAIR_LIMIT",
     }
     assert "MAX_TOOL_CALLS_ACCEPTED" not in hits
 
@@ -921,3 +939,244 @@ def test_root_span_records_max_tool_calls_per_response_hit(conn):
     attrs = json.loads(root["attributes_json"])
     hits = set(attrs.get("tg_agent.limit_hit", "").split(","))
     assert "MAX_TOOL_CALLS_PER_RESPONSE" in hits
+
+
+# ============================================================================
+# T4 -- metrics.py aggregates (REQ-V160-MET-01..07)
+# ============================================================================
+
+import metrics  # noqa: E402 -- appended block, module-level import style matches T1-T3
+
+
+def _seed_llm_call(conn, conv_id, **overrides):
+    fields = {
+        "conv_id": conv_id,
+        "turn_id": 1,
+        "purpose": "agent",
+        "round_no": 1,
+        "attempt": 1,
+        "ts": NOW,
+        "provider": "lmstudio",
+        "model": "m",
+        "prompt_chars": 10,
+        "prompt_chars_by_role": {"system": 10, "tools": 0, "user": 0, "assistant": 0, "tool": 0},
+        "messages_n": 2,
+        "tools_exposed": 0,
+        "latency_ms": 100,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "total_tokens": None,
+        "cached_tokens": None,
+        "reasoning_tokens": None,
+        "finish_reason": "stop",
+        "error_kind": None,
+        "cost_usd": None,
+        "cost_basis": None,
+    }
+    fields.update(overrides)
+    return storage.add_llm_call(conn, **fields)
+
+
+def test_t_v160_met_02_usage_by_model_groups_the_provider_model_pair(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, provider="lmstudio", model="same-name", prompt_tokens=10)
+    _seed_llm_call(conn, conv, provider="openrouter", model="same-name", prompt_tokens=20)
+    rows = metrics.usage_by(conn, group="model")
+    assert len(rows) == 2
+    keys = {r.key for r in rows}
+    assert keys == {"lmstudio/same-name", "openrouter/same-name"}
+    for row in rows:
+        assert row.purpose is None and row.day is None and row.scenario is None
+
+
+def test_t_v160_met_02_usage_by_rejects_unknown_group(conn):
+    with pytest.raises(ValueError, match="nope"):
+        metrics.usage_by(conn, group="nope")
+
+
+def test_t_v160_met_02_usage_by_since_excludes_older_rows_includes_boundary(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, ts="2026-09-01T00:00:00Z")
+    _seed_llm_call(conn, conv, ts="2026-09-04T00:00:00Z")
+    from datetime import date
+
+    rows = metrics.usage_by(conn, group="purpose", since=date(2026, 9, 4))
+    assert sum(r.calls for r in rows) == 1
+
+
+def test_t_v160_met_03_cache_hit_share_is_none_without_qualifying_rows(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, cached_tokens=None, prompt_tokens=100)
+    rows = metrics.usage_by(conn, group="purpose")
+    assert rows[0].cache_hit_share is None
+
+
+def test_t_v160_met_03_cache_hit_share_computed_over_qualifying_rows(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, cached_tokens=50, prompt_tokens=100)
+    _seed_llm_call(conn, conv, cached_tokens=10, prompt_tokens=100)
+    rows = metrics.usage_by(conn, group="purpose")
+    assert rows[0].cache_hit_share == pytest.approx(60 / 200)
+
+
+def test_t_v160_met_03_mixed_cost_basis_joins_rather_than_picks_one(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, cost_usd=0.01, cost_basis="live")
+    _seed_llm_call(conn, conv, cost_usd=0.02, cost_basis="reference")
+    rows = metrics.usage_by(conn, group="purpose")
+    assert rows[0].cost_basis == "live, reference"
+
+
+def test_t_v160_met_04_error_breakdown_buckets_nulls(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, finish_reason=None, error_kind=None)
+    _seed_llm_call(conn, conv, finish_reason="stop", error_kind="timeout")
+    breakdown = metrics.error_breakdown(conn)
+    assert breakdown.by_finish_reason["(none)"] == 1
+    assert breakdown.by_error_kind["ok"] == 1
+    assert breakdown.by_error_kind["timeout"] == 1
+    assert breakdown.total == 2
+    assert breakdown.error_rate == pytest.approx(0.5)
+
+
+def test_t_v160_met_11_error_breakdown_caps_at_100_plus_other(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    for i in range(250):
+        _seed_llm_call(conn, conv, finish_reason=f"fr{i:04d}", error_kind=f"ek{i:04d}")
+    breakdown = metrics.error_breakdown(conn)
+    assert len(breakdown.by_finish_reason) == 101
+    assert len(breakdown.by_error_kind) == 101
+    assert sum(breakdown.by_finish_reason.values()) == breakdown.total == 250
+    assert sum(breakdown.by_error_kind.values()) == breakdown.total == 250
+    assert breakdown.error_rate == pytest.approx(1.0)
+
+
+def test_t_v160_met_05_latency_histogram_boundary_and_overflow(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, latency_ms=1280)  # exactly the 1.28s boundary
+    _seed_llm_call(conn, conv, latency_ms=999999)  # overflow bucket
+    histograms = metrics.latency_histogram(conn)
+    assert len(histograms) == 1
+    hist = histograms[0]
+    assert len(hist.counts) == len(hist.boundaries) + 1
+    boundary_index = hist.boundaries.index(1.28)
+    assert hist.counts[boundary_index] == 1  # lands in the lower bucket, not the next
+    assert hist.counts[-1] == 1  # the overflow bucket
+    assert [k for k, _ in hist.attributes] == sorted(k for k, _ in hist.attributes)
+
+
+def test_t_v160_met_06_token_histogram_per_type_and_dimension(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, provider="a", model="m1", prompt_tokens=10, completion_tokens=5)
+    _seed_llm_call(conn, conv, provider="b", model="m2", prompt_tokens=20, completion_tokens=15)
+    histograms = metrics.token_histogram(conn, token_type="input")
+    assert len(histograms) == 2
+    for hist in histograms:
+        keys = [k for k, _ in hist.attributes]
+        assert "gen_ai.token.type" in keys
+        assert keys == sorted(keys)
+    with pytest.raises(ValueError, match="bogus"):
+        metrics.token_histogram(conn, token_type="bogus")
+
+
+def test_t_v160_met_07_tool_health_max_consecutive_repeats_within_one_turn(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+
+    def add_tool(turn_id, tool, tool_call_id):
+        storage.add_tool_call(
+            conn,
+            conv_id=conv,
+            turn_id=turn_id,
+            tool_call_id=tool_call_id,
+            tool=tool,
+            ts=NOW,
+            input_chars=1,
+            raw_output_chars=1,
+            output_chars=1,
+            output_tokens_est=1,
+            duration_ms=1,
+            outcome="ok",
+        )
+
+    # turn 1: exec, exec, fetch -- longest run for exec is 2
+    add_tool(1, "exec", "c1")
+    add_tool(1, "exec", "c2")
+    add_tool(1, "fetch", "c3")
+    # turn 2 (a different turn): exec alone -- must not extend turn 1's run
+    add_tool(2, "exec", "c4")
+
+    rows = {row.tool: row for row in metrics.tool_health(conn)}
+    assert rows["exec"].max_consecutive_repeats == 2
+    assert rows["fetch"].max_consecutive_repeats == 1
+
+
+def test_t_v160_met_09_limit_hits_only_reports_the_seven_real_names(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    storage.add_span(
+        conn,
+        trace_id="a" * 32,
+        span_id="1" * 16,
+        parent_span_id=None,
+        conv_id=conv,
+        turn_id=None,
+        name="invoke_agent tg-agent-bot",
+        kind="INTERNAL",
+        ts=NOW,
+        start_ns=0,
+        duration_ms=1,
+        status="ok",
+        status_message=None,
+        attributes_json=json.dumps(
+            {"tg_agent.limit_hit": "ROUND_LIMIT,TOOL_ROUND_LIMIT,ROUND_LIMIT"}
+        ),
+    )
+    hits = metrics.limit_hits(conn)
+    assert hits == {"ROUND_LIMIT": 1, "TOOL_ROUND_LIMIT": 1}
+    assert "MAX_TOOL_CALLS_ACCEPTED" not in hits
+
+
+def test_t_v160_met_10_usage_by_caps_at_500_with_other_remainder(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    for i in range(520):
+        _seed_llm_call(conn, conv, provider="p", model=f"m{i:04d}", prompt_tokens=1)
+    rows = metrics.usage_by(conn, group="model")
+    assert len(rows) == 501
+    other = next(r for r in rows if r.key == "(other)")
+    assert other.calls == 20
+    assert sum(r.calls for r in rows) == 520
+
+
+def test_t_v160_met_08_stats_and_metrics_report_the_same_totals(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, prompt_tokens=100, completion_tokens=50)
+    everywhere = metrics.global_stats(conn)
+    usage_total = sum(r.calls for r in metrics.usage_by(conn, group="purpose"))
+    assert everywhere.calls == usage_total == 1
+
+
+def test_summary_health_row_based_formulas(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    _seed_llm_call(conn, conv, purpose="summary", round_no=0, attempt=1, error_kind=None)
+    _seed_llm_call(conn, conv, purpose="summary", round_no=0, attempt=1, error_kind="truncated")
+    _seed_llm_call(conn, conv, purpose="summary", round_no=0, attempt=2, error_kind="truncated")
+    _seed_llm_call(conn, conv, purpose="summary", round_no=0, attempt=1, error_kind="timeout")
+    health = metrics.summary_health(conn)
+    assert health.attempts == 4
+    assert health.ok == 1
+    assert health.truncated == 2
+    assert health.retried == 1
+    # failed: the attempt=2 truncated row, plus the timeout row -- not the
+    # lone attempt=1 truncation, which TQ-01 still gets to retry
+    assert health.failed == 2
+
+
+def test_stats_gains_two_lines_appended(conn):
+    import bot
+
+    storage.get_or_create_active_conversation(conn, USER_ID)
+    lines = bot._render_stats(conn, USER_ID).splitlines()
+    assert lines[0] == "Stats (this conversation | all time)"
+    assert any(line.startswith("Errors: ") for line in lines)
+    assert any(line.startswith("Summaries: ") for line in lines)
+    assert lines[-2].startswith("Errors: ")
+    assert lines[-1].startswith("Summaries: ")

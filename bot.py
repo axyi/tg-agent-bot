@@ -823,7 +823,32 @@ def _render_stats(conn, from_id: int) -> str:
         f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}",
         f"Top tools by output tokens (all time): {_render_top_tools(conn)}",
         f"Last turn: {_render_last_turn(conn, conv_id)}",
+        _render_errors_line(conn),
+        _render_summaries_line(conn),
     ])
+
+
+def _render_counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in counts.items()) or "none"
+
+
+def _render_errors_line(conn) -> str:
+    # REQ-V160-MET-05: built from metrics.error_breakdown, never its own SQL.
+    breakdown = metrics.error_breakdown(conn)
+    error_count = breakdown.total - breakdown.by_error_kind.get("ok", 0)
+    return (
+        f"Errors: {error_count} "
+        f"(finish reasons: {_render_counts(breakdown.by_finish_reason)}; "
+        f"kinds: {_render_counts(breakdown.by_error_kind)})"
+    )
+
+
+def _render_summaries_line(conn) -> str:
+    # REQ-V160-MET-05: built from metrics.summary_health, never its own SQL.
+    # "truncated-retried" is `.retried`; `.failed` is REQ-V160-MET-06's
+    # terminal-failure count over rows.
+    health = metrics.summary_health(conn)
+    return f"Summaries: {health.ok} ok, {health.retried} truncated-retried, {health.failed} failed"
 
 
 def _fit(lines: list[str]) -> str:

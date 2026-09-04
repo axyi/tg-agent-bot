@@ -112,6 +112,7 @@ REQ-V160-EC-06.
 | T1 | no | — (reading stayed within `config.py:118-135`, `:455-540` plus the new files) |
 | T2 | yes | general-purpose subagent, full task (schema migration + storage helpers) |
 | T3 | no (deviation, justified in `docs/prompts/76-v160-t3-agent-span-wiring.md`) | reading stayed within the map's ranges; done directly rather than by a subagent because TRC-08's turn_id repair over the existing retry control flow is exactly the kind of high-risk mechanism this release requires mutation proof for, and the reading cost was already paid |
+| T4 | no | — (matches §14.1: whole-file reads of `metrics.py` and `bot.py:776-830` only) |
 
 *(filled in per task as the run proceeds)*
 
