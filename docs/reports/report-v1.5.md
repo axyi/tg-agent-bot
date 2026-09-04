@@ -673,7 +673,45 @@ all green. `uv run --locked ruff check .` green.
 
 ## Python 3.14 bump (T14 — REQ-V15-DEP-01)
 
-(pending)
+**The four lines, exactly.** `.python-version`: `3.13` → `3.14`.
+`pyproject.toml`'s `requires-python`: `">=3.12,<3.14"` →
+`">=3.13,<3.15"` (lower bound moves 3.12 → 3.13, one version back, per
+spec). `[tool.ruff] target-version`: `"py312"` → `"py313"`. `uv.lock`
+regenerated (`uv lock` → `Using CPython 3.14.7`, `Removed
+typing-extensions v4.16.0` — an automatic consequence of the narrowed
+range, not a manual edit: some transitive dependency's
+`typing_extensions; python_version < "X"` marker no longer applies once
+the minimum is 3.13). No ruff-pin change here — T13 owns it, untouched.
+`AGENTS.md`'s Stack line and `README.md`'s uv/Python line updated to
+say 3.14; `README.md`'s `docker pull python:3.13-slim` line and
+`config.py`'s `DEFAULT_DOCKER_IMAGE` are left alone — those are the
+sandbox image, T15's job, not the project's own runtime.
+
+**3.14.7 confirmed available and matching the host** before pinning it
+(`uv python list 3.14` → `cpython-3.14.7-linux-x86_64-gnu`, already
+installed via Homebrew and `/usr/bin/python3.14`). `uv sync --locked`
+→ `Removed virtual environment at: .venv` / `Creating virtual
+environment` / 13 packages installed; `python3 --version` and `uv run
+--locked python3 --version` both → `Python 3.14.7`.
+
+**Acceptance: the full gate set, on 3.14, against the real
+repository — not just the tests.**
+
+| gate | result |
+|---|---|
+| `uv sync --locked` | via `full` profile's `uv-sync` member: PASS |
+| `uv run --locked ruff check .` | PASS, no findings on the new interpreter |
+| `uv run --locked pytest` | PASS, **842** tests (> 728 required) |
+| `uv run --locked python bot.py --selftest` | PASS |
+| `uv run --locked python bot.py --selftest-live` | PASS — `config`, `db`, `docker (29.7.2)`, `telegram`, `lmstudio`, `openrouter` all `OK` |
+| `uv run --locked python devtools/mutation_check.py` (unselected, all 72) | PASS — `72 mutations, 72 killed, 0 survived, 0 errored, 0 drifted`, real 19m49.577s, tree restored byte-clean afterward (confirmed via `git diff --stat`, only this task's own 5 files show) |
+| `checks.py run --profile full --since <base>` | **14 of 15 gates PASS** — the one failure, `lint-docs`, is the report's own still-placeholder "Ledger row" section (no fenced block yet), exactly the sequencing REQ-V15-RPT-03 describes: this run exercises `lint-docs` for visibility, T19's run is the authoritative acceptance one |
+
+All six verbatim gates of REQ-V15-GATE-09 green on Python 3.14.
+Every new gate of REQ-V15-GATE-10 green except the one expected,
+sequencing-dependent placeholder. This commit is itself further live
+proof: produced through the now-active `commit-msg`/`pre-commit` chain
+running *under the Python 3.14 interpreter this same change installs*.
 
 ## Sandbox image digest pin and byte-compared exec smoke (T15 — REQ-V15-IMG-*)
 
@@ -706,6 +744,7 @@ this release ships is "no benchmark run", `baseline-v1.4.json` unchanged.
 | T11 | yes — its own reading map explicitly calls for it ("the lint sweeps 46 files — delegate the sweep, summary only") | **yes** | a general-purpose subagent backfilled headers on the 29 historical prompt files found failing; briefed with hard rules (header only, never fabricate, source from file text or `git log`, verify each file, report per-file sourcing); its own report was then independently re-verified (not merely trusted) — a fresh check-1 sweep and the full test suite run directly, two edited files diffed by hand |
 | T12 | no — its own reading map names §14 and §15.4, both read in full via targeted, bounded reads (~140 lines combined); `devtools/mutation_check.py`'s 34 KB was never read in full, only its `MUTATIONS` tail and `main()`, located via `grep` first | no | targeted reads of known line ranges, not the whole file — the task table's "delegate" concern (an unbounded 34 KB read) never arose |
 | T13 | no (its own reading map: `pyproject.toml`'s dev group + `config/quality_gates.yaml`'s ruff entry — both small, mapped, targeted) | no | — |
+| T14 | no (its own reading map: `pyproject.toml`, `.python-version`, `uv.lock`, `AGENTS.md`, `README.md` — all mapped, all targeted edits) | no | — |
 
 (rest of the table fills in as each task lands)
 

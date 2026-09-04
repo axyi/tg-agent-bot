@@ -17,7 +17,7 @@ changes behaviour without touching `docs/spec/` is incomplete.
 
 ## Stack
 
-- Language: Python 3.13 (pinned via .python-version; requires-python ">=3.12,<3.14"), environment managed by **uv**
+- Language: Python 3.14 (pinned via .python-version; requires-python ">=3.13,<3.15"), environment managed by **uv**
 - Runtime dependency of the host: the **`docker` CLI** — `exec` runs every
   command inside a disposable container and never falls back to the host
 - Frameworks/libs: `httpx` (Telegram Bot API and LLM HTTP calls),

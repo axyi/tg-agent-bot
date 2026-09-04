@@ -16,7 +16,7 @@ allowlist are served.
 ## Requirements
 
 - Linux (the runner uses POSIX process groups)
-- [uv](https://docs.astral.sh/uv/) — it installs Python 3.13 for you, pinned by
+- [uv](https://docs.astral.sh/uv/) — it installs Python 3.14 for you, pinned by
   `.python-version`
 - **Docker**, reachable by the bot user without `sudo`. The sandbox image must
   be pulled in advance — `exec` never pulls at request time:
