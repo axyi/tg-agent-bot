@@ -296,9 +296,29 @@ recorded]]`
 
 **The inference preflight.** Immediately before the eighteen-scenario run, one
 chat completion is issued against the resolved address with the resolved model,
-**no tools**, a fixed one-line prompt and `max_tokens = 16`; it MUST return a
-non-empty assistant message. That is the one condition a `/models` read cannot
-see — a model listed but not loaded.
+**no tools**, a fixed one-line prompt and `max_tokens = cfg.llm_max_tokens`
+(production's own completion budget — **not** a separate literal); it MUST
+return a non-empty assistant message. That is the one condition a `/models`
+read cannot see — a model listed but not loaded.
+
+`[[ERRATUM, disclosed post-T0: this clause originally read `max_tokens = 16`.
+Executed against the operator's live instrument (`qwen/qwen3.8-27b`, a
+reasoning-capable model), that literal failed its own MUST — the model spent
+its entire 16-token budget on hidden reasoning (`reasoning_tokens = 15`) and
+returned empty content (`finish_reason = "length"`), while the identical
+prompt at `cfg.llm_max_tokens` (2048) returned `finish_reason = "stop"` with
+non-empty content. v1.4's own RSN-06 STOP already established reasoning
+cannot be disabled on this model/LM Studio combination, so a fixed small
+`max_tokens` is unsafe for this preflight in general, not only at 16.
+Corrected in place, following REQ-V160-VER-02's own PATCH definition ("a
+fix with no new spec: a defect repaired... a document corrected") and the
+`v1.5.1` precedent (a disclosed, explicitly authorised in-place correction to
+an already-committed spec, rather than a new spec file). This changes the
+spec's own `sha256` after its T0 recording — REQ-V160-PRE-01.1's "unchanged
+at T18" is deliberately broken here, with the operator's explicit
+authorisation, exactly as `v1.5.1` broke REQ-V15-ACC-03's freeze; full
+disclosure, both `sha256` values and the authorisation are in
+`docs/reports/report-v1.6.0.md`'s "Live preflight" section.]]`
 
 **What blocks, and when.** The two operator values arrive in the `go` request's
 own text (the lab's `go` protocol) and T0 checks them first: a missing version,

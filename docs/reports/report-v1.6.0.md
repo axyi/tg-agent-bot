@@ -1,13 +1,11 @@
 # Implementation report — spec-v1.6.0
 
-**Status: STOP at T15 (REQ-V160-PRE-04), pending operator decision.** T0–T15
-are complete; the live inference preflight fails its own literal MUST
-against the operator's instrument (see "Live preflight and STOP" below).
-T16–T18 are **not executed** this run pending the operator's choice among
-the three options recorded there. This is not the provisional-skeleton
-status any more — T0's own placeholder text ("filled in task by task
-through T17, closed out by T18's evidence-only commit") assumed no T15
-blocker; update this line again once the operator's decision is acted on.
+**Status: in progress (T15, resolved).** T0–T15 are complete: the live
+inference preflight initially failed its own literal MUST against the
+operator's instrument, was resolved by an in-place, disclosed correction to
+this spec's own PRE-04 clause (operator-authorised, breaking
+REQ-V160-PRE-01.1's `sha256` lock — see "Live preflight and STOP" below,
+"Resolution" subsection), and now passes. T16–T18 remain to run.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -771,6 +769,67 @@ spec differently from what it says, not following it.
      preflight against it.
   3. Accept the STOP and end the v1.6.0 run at T15 — T16, T17 (as
      originally scoped) and T18 not executed this run.
+
+### Resolution — spec corrected in place, preflight now passes
+
+**Operator's decision, in two steps.** First: "Расширить порог preflight" —
+option 1 above. The mechanism first proposed for it (edit
+`docs/spec/spec-v1.6.0.md` directly) conflicts with REQ-V160-PRE-01.1's own
+"the spec's `sha256` is recorded at T0 and MUST NOT change during the run" —
+flagged before touching the file, `advisor()` consulted a second time,
+two mechanisms presented (a documented deviation leaving the spec bytes
+untouched, or stopping this run and issuing a new spec version). Operator
+chose the latter, "issue spec-v1.6.1." Before authoring a new file, a
+second check against this same spec's own REQ-V160-VER-02 ("**PATCH**: a
+fix with no new spec: a defect repaired... a document corrected") and the
+`v1.5.1` precedent (which corrected `spec-v1.5.md` itself in place, no new
+spec file, explicitly disclosing the broken freeze) showed a *third*,
+better-fitting mechanism neither prior answer covered: an in-place
+correction to `spec-v1.6.0.md`, matching the project's own PATCH
+definition and its only working precedent. Presented to the operator, who
+selected it: **"Править spec-v1.6.0.md на месте, как v1.5.1."**
+
+**What changed.** The preflight clause (§3, REQ-V160-PRE-04) now reads
+`max_tokens = cfg.llm_max_tokens` in place of the literal `max_tokens = 16`,
+with an inline `[[ERRATUM, disclosed post-T0: ...]]` block carrying the
+same reasoning, both measurements, the RSN-06 cross-reference and this
+report's own name — so a reader of the spec file alone, without the
+report, still sees the correction and its cause.
+
+**The sha256 break, disclosed per REQ-V160-PRE-01.1.**
+
+| | value |
+|---|---|
+| recorded at T0 | `1a2bcadaa1ce9ec703c2f8d82f8dcda93c63e925dca710d6ae12eb17fb4679ec` |
+| after this correction | `212136deafaf37a33aea3c9a2eceb97144048050290920d54a5e09a8f9289a1d` |
+
+REQ-V160-PRE-01.1 ("the committed spec's T0 `sha256`, unchanged at T18") is
+**deliberately broken here**, on the operator's own explicit, in-session
+authorisation ("Править spec-v1.6.0.md на месте, как v1.5.1" — chosen
+directly over "оставить sha256 нетронутым, обойти в отчёте" and over
+"остановить и выпустить новый файл спеки"), exactly as `v1.5.1` broke
+REQ-V15-ACC-03's acceptance freeze with the operator's authorisation
+recorded the same way. T18's own sha256 check (REQ-V160-PRE-01.1) must
+therefore compare against **this** section's second value, not T0's — noted
+here so T18 does not read the mismatch as an unexplained integrity
+failure.
+
+**Preflight re-run against the corrected clause, same instrument, same
+client construction as the STOP measurement above:**
+
+```
+max_tokens used: 2048
+finish_reason: stop
+content non-empty: True
+content: '\n\nready'
+usage: prompt_tokens=60, completion_tokens=27, reasoning_tokens=23, total_tokens=87
+```
+
+**PASS.** Non-empty content, `finish_reason="stop"` — identical figures to
+the `max_tokens=2048` diagnostic already recorded above (same prompt, same
+instrument, same client), now run as the spec's own official preflight
+rather than as a side diagnostic. T15 proceeds to `smoke-v160`
+(REQ-V160-BEN-07) below.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
