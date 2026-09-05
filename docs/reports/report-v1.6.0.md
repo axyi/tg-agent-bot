@@ -1,11 +1,16 @@
 # Implementation report — spec-v1.6.0
 
-**Status: in progress (T15, resolved).** T0–T15 are complete: the live
-inference preflight initially failed its own literal MUST against the
-operator's instrument, was resolved by an in-place, disclosed correction to
-this spec's own PRE-04 clause (operator-authorised, breaking
-REQ-V160-PRE-01.1's `sha256` lock — see "Live preflight and STOP" below,
-"Resolution" subsection), and now passes. T16–T18 remain to run.
+**Status: STOP at T15 (REQ-V160-BEN-07), pending operator decision.** The
+preflight itself (REQ-V160-PRE-04) is resolved and passes — see "Live
+preflight and STOP" below. `smoke-v160` (REQ-V160-BEN-07) surfaced two
+further, independent problems: `S13` deterministically exceeds
+`tool_calls_max(4)` (5/5/5 across repeats, always the correct answer), and
+`smoke-v160`'s own "all six scenarios, none skipped" precondition is
+currently unmet on the documentary record (the one run that satisfied it
+was lost to this session's own `.bench/`-wipe mistake). See "`smoke-v160`
+and the S13 blocker" below for the full record and the two decisions
+requested of the operator. T16–T18 **not executed** pending those
+decisions.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -753,6 +758,19 @@ session has no authority to widen `max_tokens` for the preflight call
 unilaterally and call that compliance — that would be implementing the
 spec differently from what it says, not following it.
 
+**Correction, disclosed post-`smoke-v160` (not silently edited above,
+per the same disclosure practice `v1.5.1`'s D3 used for a stale claim):**
+the sentence "the `max_tokens=2048` measurement shows the *instrument* is
+healthy... production and the eighteen scenarios' own formats... run at
+that real budget" **overgeneralises from one trivial prompt** and is false
+as stated. `smoke-v160` (below) shows `S15` burning the **entire**
+2048-token production budget on hidden reasoning — `reasoning_tokens=2047`
+of `completion_tokens=2047`, twice — and returning empty content
+(`agent.py:55`'s pre-existing `FALLBACK_EMPTY` path), on a real scenario,
+at production's real setting. `cfg.llm_max_tokens=2048` clears a one-line
+"reply ready" prompt; it does not clear every prompt this release ships.
+See "`smoke-v160`" below for the full finding and its resolution.
+
 ### Disposition
 
 - **`smoke-v160` not run. T16 (baseline recording) not started.**
@@ -830,6 +848,181 @@ the `max_tokens=2048` diagnostic already recorded above (same prompt, same
 instrument, same client), now run as the spec's own official preflight
 rather than as a side diagnostic. T15 proceeds to `smoke-v160`
 (REQ-V160-BEN-07) below.
+
+## `smoke-v160` and the S13 blocker (T15 — REQ-V160-BEN-07)
+
+**Disposition up front: T16 does not start.** Two independent, unrelated
+problems each block it on their own — S13's failure is deterministic and
+no further measurement changes that; `smoke-v160`'s own precondition (3)
+is separately unmet on the documentary record right now. Both need an
+operator decision; neither was resolved unilaterally by this session.
+
+### The original run (`LLM_MAX_TOKENS=2048`, the shipped default at the time)
+
+```bash
+uv run --locked python devtools/bench.py run --tag smoke-v160 \
+  --only S13,S14,S15,S16,S17,S18 --repeats 1 --out .bench/smoke-v160.json \
+  --lmstudio-version "Bionic v1.1.1" --served-model-id "qwen/qwen3.8-27b" \
+  --lmstudio-context-length 42496
+```
+
+```
+S13 multi-step-exec 0/1  prompt 7.9k  out 0.9k  cost $0.0060  wall 123s
+S14 error-recovery 1/1  prompt 2.1k  out 0.3k  cost $0.0018  wall 44s
+S15 big-output-answer 0/1  prompt 1.8k  out 4.1k  cost $0.0131  wall 389s
+S16 skill-then-exec 1/1  prompt 3.2k  out 0.1k  cost $0.0017  wall 29s
+S17 fetch-then-exec 1/1  prompt 4.6k  out 0.8k  cost $0.0044  wall 102s
+S18 multi-turn-summary 1/1  prompt 3.3k  out 2.1k  cost $0.0077  wall 215s
+totals: calls 22 (failed 1)  prompt 22.9k  completion 8.3k  tools 12  cost $0.0347  wall 902s
+success rate: 4/6 (66.7%), skipped: none
+```
+
+All six scenarios executed, none skipped — this run alone satisfies
+REQ-V160-BEN-07 precondition (3)'s literal text. Two failures, each a real
+finding, not noise:
+
+- **S13** (`tool_used`✓, `answer_regex(5050)`✓, `tool_calls_max(4)`✗ —
+  "5 tool call(s) > max 4"): 5 `exec` calls (create, then several
+  verification/inspection steps, then run), answer correct throughout.
+- **S15** (`tool_used`✗ "exec not called", `answer_regex(1000)`✗ "no answer
+  for turn -1"): `agent.py:55`'s pre-existing `FALLBACK_EMPTY` ("The model
+  returned an empty answer. Please rephrase your message.") — two LLM
+  calls, both `finish_reason="length"`, both `reasoning_tokens=2047` of
+  `completion_tokens=2047`: the model spent its **entire** production
+  budget (`cfg.llm_max_tokens=2048`) on hidden reasoning, twice, and never
+  emitted visible content.
+
+**This falsifies a claim already committed above.** The preflight
+section's "the `max_tokens=2048` measurement shows the *instrument* is
+healthy... production... run at that real budget" is false as a general
+statement — flagged and corrected there (see its own "Correction,
+disclosed post-`smoke-v160`" paragraph) at the same time this section was
+written, not later.
+
+### Evidence lost — disclosed, not hidden
+
+Investigating S15 required a second `bench.py run` invocation. `bench.py`
+wipes `.bench/` (`shutil.rmtree(BENCH_ROOT)`) at the start of **every**
+run, including the shared root the first run's own `--out
+.bench/smoke-v160.json` lived under. This session did not copy that file
+out first — **the original, complete, all-six-scenarios `smoke-v160.json`
+above no longer exists.** The console summary and the specific per-scenario
+`checks`/`llm_calls` fields quoted above were captured into this
+conversation *before* the second run started, which is the only reason
+this section can report them accurately; there is no raw JSON to
+independently re-verify them against. Every diagnostic artefact from this
+point on was copied out of `.bench/` immediately after its own run, before
+starting the next one.
+
+### S15 — probabilistic at a raised budget, not fixed
+
+Diagnostic sequence (all `--only S15 --repeats 1`, isolated from the other
+five scenarios): two early attempts failed on configuration/transport
+issues unrelated to the reasoning question itself —
+`LLM_TIMEOUT_S=4096`(sic, meant as a value, rejected: max is 600) then
+`LLM_TIMEOUT_S=450` too low for the 4096-token latency-model floor
+(≈402s, but the real generation ran longer), then a transport error at
+~135s whose cause is still not fully explained (possibly transient load
+on the operator's own box after this session's own preceding heavy
+traffic). A fourth attempt, after a 5-minute pause and with
+`LLM_MAX_TOKENS=4096`/`LLM_TIMEOUT_S=600` (the per-HTTP-call bound,
+maxed), succeeded: `finish_reason="tool_calls"` then `"stop"`,
+`reasoning_tokens=2880` of `completion_tokens=2919` on round 1, correct
+final answer — but only because `--timeout-s` (a **separate**,
+per-scenario wall-clock ceiling bench.py enforces around the whole
+scenario worker thread, `DEFAULT_TIMEOUT_S=600`, distinct from
+`LLM_TIMEOUT_S`) had been raised to 1800s; the discovery of this second,
+independent timeout explains why earlier attempts aborted even once the
+per-call budget and timeout were sufficient.
+
+**Reported to the operator as "S15 passes 1/1 at 4096 tokens" at this
+point — this claim did not hold up and needs correcting here.** The
+operator approved raising `.env`'s `LLM_MAX_TOKENS` (unset → `4096`) and
+`LLM_TIMEOUT_S` (unset, defaulting to `240.0` → `600`) on that basis — a
+live change to the production bot the operator actually runs, not just to
+the benchmark harness. Two further measurements, taken to re-verify
+`smoke-v160` under the new setting, changed the picture:
+
+| attempt | setting | round 1 latency | outcome |
+|---|---|---|---|
+| solo diagnostic (3rd) | 4096 tok, 1800s ceiling | 536s → 584s total | **PASS** (1/1) |
+| official 6-scenario rerun (1st) | 4096 tok, no `--timeout-s` (600s default) | — | ABORTED at S15 (600s ceiling too short — this session's own mistake, see below) |
+| official 6-scenario rerun (2nd) | 4096 tok, 1800s ceiling | ran the full 1800s | **ABORTED**: `timeout:S15-1` — did not finish at all |
+| solo diagnostic (4th) | 4096 tok, 1800s ceiling | 580s → 655s total | **PASS** (1/1) |
+
+**Real tally: 2 of 3 clean attempts at 4096 tokens succeed (584s, 655s);
+one exceeds even a 1800s (30-minute) ceiling entirely.** This is
+materially different from "fixed" — it is a real, substantial
+improvement in the odds (0/1 at 2048 tokens vs. roughly 2/3 at 4096 in
+this small sample), not a deterministic resolution. The `.env` change is
+**left standing, not rolled back unilaterally** — it was a real,
+operator-authorised production change and reverting it silently would be
+its own undisclosed action — but the claim it was authorised on is
+corrected here for the record.
+
+The two official-rerun attempts also each independently failed
+REQ-V160-BEN-07 precondition (3): both aborted partway through (after
+`S13`/`S14`/`S15`), so **`S16`, `S17`, `S18` never executed in either.**
+Precondition (3)'s own text — "one non-baseline smoke run executes all
+six new scenarios, none skipped" — is not satisfied by any currently
+existing document: the one run that satisfied it (the original, 2048-token
+run above) no longer exists as a file, and neither later attempt reached
+all six scenarios. **This precondition is unmet on the record right now,
+independent of S13's own blocking status below.**
+
+### S13 — deterministic, confirmed at three repeats
+
+```bash
+uv run --locked python devtools/bench.py run --tag smoke-s13-diag \
+  --only S13 --repeats 3 --out .bench/smoke-s13-diag.json
+```
+
+(run at `LLM_MAX_TOKENS=2048`, before the `.env` change above — S13 is
+unaffected by the S15 budget question)
+
+| repeat | tool calls | answer | `tool_calls_max(4)` |
+|---|---|---|---|
+| 1 | 5 | correct (5050) | FAIL — "5 tool call(s) > max 4" |
+| 2 | 5 | correct (5050) | FAIL — "5 tool call(s) > max 4" |
+| 3 | 5 | correct (5050) | FAIL — "5 tool call(s) > max 4" |
+
+**5/5/5 — not variance.** `qwen/qwen3.8-27b` consistently takes one more
+`exec` round-trip than the scenario's ceiling allows to do a task the
+prompt itself names as two steps (create the file, then run it), always
+landing on the right answer. `advisor()` was consulted specifically on
+whether to loosen `tool_calls_max(4)` to `5` here and was explicit: **do
+not** — `tool_calls_max` is this release's own new tool-quality check
+(REQ-V160-TQ-06); raising a ceiling because the first live run exceeded it
+is the exact `QUALITY_GATE_SLACK` move T10 already ruled out for a
+different check, and "a correct answer in 5 calls where the prompt names
+2 is the check working, not the check being wrong." This session did not
+make that change. Because T16 requires 3/3 on every one of S13–S18
+(REQ-V160-BEN-07/R2-5 — "a skip or fewer than 3/3 on any of S13…S18 is a
+blocking baseline failure... every 'or a recorded finding' escape is
+gone"), **S13 deterministically blocks T16 with this model at this
+ceiling, and no further live measurement changes that.**
+
+### Disposition
+
+T16 does not start. Two separate, independent gaps, presented to the
+operator as one question each rather than resolved here:
+
+1. **S13's deterministic 0/3.** Either (a) accept this as a genuine STOP
+   and end the v1.6.0 run at T15, with T16, T17 (as scoped) and T18 not
+   executed — everything above stands as the record of the run — or (b)
+   authorise a scoped, disclosed correction to `tool_calls_max(4)` for
+   `S13` specifically, in `devtools/bench_scenarios.py`, following the
+   in-place-erratum pattern already used for REQ-V160-PRE-04 above. This
+   is presented as the operator's decision, not proposed as a fix, exactly
+   because of the `QUALITY_GATE_SLACK` precedent named above — this
+   session does not have standing to decide a tool-quality ceiling is
+   "wrong" just because the first live run against it failed.
+2. **`smoke-v160`'s own precondition (3), currently unmet.** If (1)(b) is
+   chosen, a fresh, complete, all-six-scenario `smoke-v160.json` still
+   needs to be produced (at `LLM_MAX_TOKENS=4096`, a generous `--timeout-s`
+   given S15's own measured variance, and — this time — copied out of
+   `.bench/` immediately) before T16 can start at all. If (1)(a) is
+   chosen, this is moot.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
