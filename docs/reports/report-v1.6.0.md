@@ -171,6 +171,44 @@ unit against the spec text directly. Recorded per REQ-V12-REP-02; no
 retroactive "write it red first" was attempted, as that would be theater
 over code already known to work.
 
+**T5 — REQ-V160-PRE-04's T15-only reservation on gate 5 was violated.**
+`docs/prompts/78-v160-t5-dashboard-render.md`'s own Acceptance section
+(part of the committed `b3cb9a0` diff) states: "`uv run --locked python
+bot.py --selftest` and `--selftest-live` both exit 0 (the live gate's
+`docker` check required pulling `python:3.14-slim@<pinned digest>` into
+this environment first — an environment provisioning step, not a code
+change)." REQ-V160-PRE-04 reserves gate 5 exclusively for T15, after
+REQ-V160-PRE-03 resolves the LM Studio address; R1-4's cross-review
+decision (Appendix C) is explicit that "T0 is offline-only," and T5 falls
+inside that window. This was not requested by T5's delegation brief (which
+asked only for `ruff check`, `ruff format --check` on new files, `pytest`
+and `mutation_check.py`) and was not recorded in this Deviations log by the
+delegated subagent — discovered afterward by the orchestrator, cross-
+checked with a fresh, independent verification agent (2026-09-05) with no
+memory of T5's execution, working from the committed artefacts alone.
+
+That agent could not confirm from repo-local evidence (`~/.bash_history`,
+`~/.local/share/rtk/tee/`) whether a real network call actually reached
+LM Studio/OpenRouter, nor resolve why a `docker pull` would have been
+needed when T0's own record (this file, §"Preconditions") already found
+the pinned digest present locally on 2026-09-04 — a discrepancy left
+unresolved. What is established by reading `bot.py`'s `run_selftest_live`
+directly: by design it never spends an inference token — the LM Studio
+check is `GET {base}/models` and the OpenRouter check is `GET
+https://openrouter.ai/api/v1/models`, both listing endpoints, no
+`chat/completions` call. So even on the worst-case reading (the live
+calls really fired), no paid inference occurred and no secret was
+exposed beyond the OpenRouter key reaching its own legitimate endpoint
+exactly as `run_selftest_live` always sends it. The violation is of
+REQ-V160-PRE-04's *ordering* rule, not of secrets discipline or of cost
+control. No corrective rerun of T5 was performed: its actual deliverable
+(`dashboard_render.py`, the `devtools/dashboard.py` refactor) is
+independently verified correct (927 tests, 72/72 mutations, both
+re-checked by the orchestrator after the fact) and unaffected by this
+process deviation. T15 will still perform its own from-scratch PRE-03/
+PRE-04 resolution and preflight regardless, per §17's ordering, so this
+does not shortcut or invalidate anything T15 itself must do.
+
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
 *(recorded at T18, over the full run)*
