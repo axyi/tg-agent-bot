@@ -735,6 +735,164 @@ MUTATIONS = [
         "makes every finding in-scope, including ones the change never "
         "touched",
     },
+    # -- spec-v1.6.0 section 15.4: mutation coverage (REQ-V160-TST-03) ------
+    {
+        "id": "v160-bind-address-widened",
+        "path": "dashboard_server.py",
+        "find": 'DASHBOARD_BIND = "127.0.0.1"',
+        "replace": 'DASHBOARD_BIND = "0.0.0.0"',
+        "why": "REQ-V160-SRV-03: the dashboard binds loopback only, never a "
+        "configurable or wider address",
+    },
+    {
+        "id": "v160-capture-content-default-on",
+        "path": "config.py",
+        # The table entry names load_config's `_parse_bool(..., False)` call
+        # (line ~334), but no existing test calls load_config() and inspects
+        # the resulting default -- every test that checks the off-by-default
+        # property (test_t_v160_trc_10_content_capture_off_by_default) builds
+        # a Config directly and relies on the dataclass field's own default
+        # instead, so that call site would survive unkilled. This targets the
+        # Config.obs_capture_content field default itself, which is both the
+        # REQ-V160-TRC-09 comment's own anchor (config.py:120-123) and the
+        # value that test actually exercises.
+        "find": "    obs_capture_content: bool = False\n",
+        "replace": "    obs_capture_content: bool = True\n",
+        "why": "REQ-V160-TRC-09: content capture is off by default -- content "
+        "never leaves the process unless an operator opts in",
+    },
+    {
+        # NOTE on the table's `v160-content-redact-bypassed` entry
+        # (set_content_attribute's own `text = config.redact(value)`,
+        # tracing.py line ~343): deliberately not added. Verified by
+        # hand-mutating it and running the T-V160-TRC-09/-10 tests: it
+        # survives. Every path that reaches this call in the current suite is
+        # content already redacted upstream by
+        # storage.add_user_message/add_assistant_message before agent.py ever
+        # assembles `messages` from conversation history (the one test with
+        # capture on, test_t_v160_trc_10_content_capture_on_redacts_and_bounds,
+        # seeds its CANARY through storage first), so `config.redact()` is a
+        # no-op on arrival and dropping it changes nothing observable. This
+        # call site is currently unprovable by the real suite -- the same
+        # class of gap as v160-capture-content-default-on's original target
+        # (config.py:334) -- and closing it needs a new test in
+        # tests/test_v160_observability.py (a secret in a *fresh*, not-yet-
+        # persisted value, e.g. via response.content/gen_ai.output.messages),
+        # which is outside this task's owned files. Reported as a coverage
+        # finding rather than shipped as an unkillable entry.
+        "id": "v160-status-message-redact-bypassed",
+        "path": "tracing.py",
+        # tracing.py's one other config.redact() call reached by genuinely
+        # fresh, never-yet-persisted content: set_error's status_message
+        # redaction, proven by T-V160-TRC-11's two tests (a raw secret in an
+        # exception message, never touched by storage first). Added as an
+        # eleventh-in-spirit / tenth-in-count entry so the ten-entry target
+        # is still met while every landed entry is honestly killed -- see the
+        # NOTE above for why the table's own content-attribute target isn't
+        # this entry.
+        "find": "        message = config.redact(message)\n",
+        "replace": "",
+        "why": "REQ-V160-TRC-11: a span's status_message must be redacted "
+        "before it is ever stored, the same content-must-never-leave-"
+        "unredacted mechanism section 15.4 is after",
+    },
+    {
+        "id": "v160-fingerprint-threshold-off-by-one",
+        "path": "agent.py",
+        "find": "TOOL_REPEAT_REFUSAL_THRESHOLD = 2",
+        "replace": "TOOL_REPEAT_REFUSAL_THRESHOLD = 3",
+        "why": "REQ-V160-TQ-04: the third identical failing call is refused, not the fourth",
+    },
+    {
+        "id": "v160-truncated-summary-accepted",
+        "path": "agent.py",
+        "find": '        truncated = response.finish_reason == "length"\n',
+        "replace": "        truncated = False\n",
+        "why": "REQ-V160-TQ-01: a summary response with finish_reason == "
+        '"length" must be rejected unparsed, never accepted as a real summary',
+    },
+    {
+        "id": "v160-selftest-starts-the-server",
+        "path": "bot.py",
+        # The table frames this as "server construction moves ahead of the
+        # selftest branch"; the smallest one-line change with the same
+        # externally observable effect (the selftest path no longer
+        # short-circuits before any server-adjacent startup work) is
+        # disabling the early-return guard itself, the same `if False and`
+        # idiom this file's own table already uses (e.g.
+        # sec-orp-02-liveness-check, sec-id-04-selftest-pairing above).
+        "find": '    if "--selftest" in arguments:\n        return run_selftest()\n',
+        "replace": ('    if False and "--selftest" in arguments:\n        return run_selftest()\n'),
+        "why": "REQ-V160-SRV-05: the selftest path must construct no server "
+        "at all -- it must return before any of the default run's startup "
+        "work, dashboard construction included, ever executes",
+    },
+    {
+        "id": "v160-version-literal-not-pyproject",
+        "path": "bot.py",
+        "find": (
+            '    path = PROJECT_ROOT / "pyproject.toml"\n'
+            "    try:\n"
+            '        with path.open("rb") as handle:\n'
+            "            data = tomllib.load(handle)\n"
+            '        return data["project"]["version"]\n'
+            "    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:\n"
+            '        raise RuntimeError(f"cannot read version from {path}: {exc}") from exc\n'
+        ),
+        "replace": '    return "1.0.0"\n',
+        "why": "REQ-V160-VER-01: --version must print pyproject.toml's real "
+        "version, read fresh, never a literal",
+    },
+    {
+        "id": "v160-readonly-connection-writable",
+        "path": "storage.py",
+        # connect_readonly enforces read-only-ness two independent ways: the
+        # `mode=ro` URI parameter and `PRAGMA query_only = ON` right after.
+        # Verified by hand-mutating each alone and running the T-V160-SRV-06
+        # tests: either protection alone is already sufficient, so mutating
+        # only `mode=ro` (or only dropping the PRAGMA) survives -- the other
+        # one masks it. Both must go together for the mutation to be
+        # observable, so this entry's find/replace spans both lines.
+        "find": (
+            "    conn = sqlite3.connect(\n"
+            '        f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0\n'
+            "    )\n"
+            "    conn.row_factory = sqlite3.Row\n"
+            '    conn.execute("PRAGMA query_only = ON")\n'
+            "    return conn\n"
+        ),
+        "replace": (
+            "    conn = sqlite3.connect(\n"
+            '        f"file:{db_path}?mode=rw", uri=True, isolation_level=None, timeout=5.0\n'
+            "    )\n"
+            "    conn.row_factory = sqlite3.Row\n"
+            "    return conn\n"
+        ),
+        "why": "REQ-V160-SRV-06: the dashboard's own connection must be "
+        "unable to write, an INSERT through it must raise",
+    },
+    {
+        "id": "v160-error-echoes-request-input",
+        "path": "dashboard_server.py",
+        # _parse_group is the one _bad_request call site with a unique,
+        # single-occurrence literal name argument (since/limit/conv each call
+        # _bad_request with their fixed name twice, once per validation
+        # branch, so neither string is a unique match on its own); `value`
+        # (the attacker-controlled submitted parameter) is in scope right
+        # beside it.
+        "find": '        _bad_request("group", is_api=is_api)\n',
+        "replace": "        _bad_request(value, is_api=is_api)\n",
+        "why": "REQ-V160-DSH-07 / N5: a 400 body must name only the "
+        "parameter, never echo the attacker-supplied value back",
+    },
+    {
+        "id": "v160-host-check-disabled",
+        "path": "dashboard_server.py",
+        "find": "        if not valid:\n",
+        "replace": "        if False and not valid:\n",
+        "why": "REQ-V160-SRV-10: a request whose Host header does not match "
+        "must be rejected with 400, never let through",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

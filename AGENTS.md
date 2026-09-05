@@ -109,7 +109,7 @@ Telegram message. **Gate 5 must be fully green at every commit, including its
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 72 entries as of spec-v1.5;
+the test suite once per mutation) — 82 entries as of spec-v1.6.0;
 `--select <prefix>` runs a named subset (mutually exclusive with
 `--only`).
 

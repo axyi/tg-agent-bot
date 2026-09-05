@@ -1695,6 +1695,7 @@ _GATE_MATRIX_LABEL_TO_NAME = {
     "`bot.py --selftest`": "selftest",
     "`bot.py --selftest-live`": "selftest-live",
     "`mutation_check.py --select v15-`": "mutation-v15",
+    "`mutation_check.py --select v160-`": "mutation-v160",
     "`mutation_check.py` (all)": "mutation-all",
     "`trivy fs`": "trivy",
     "`semgrep scan`": "semgrep",
@@ -1723,7 +1724,7 @@ def _parse_gate_matrix(spec_text: str) -> dict[str, dict[str, bool]]:
 
 
 def test_v15_gate_04_profile_matrix_agrees_with_the_spec_table():
-    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.5.md").read_text(encoding="utf-8")
+    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.6.0.md").read_text(encoding="utf-8")
     matrix = _parse_gate_matrix(spec_text)
     config = checks.load_gate_config()
 

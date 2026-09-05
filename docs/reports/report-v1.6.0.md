@@ -121,6 +121,7 @@ REQ-V160-EC-06.
 | T10 | yes | general-purpose subagent, full task (six literal scenarios + `tool_calls_max` kind + `_validate_catalog` rule + `tests/test_v160_bench.py`); orchestrator applied a bounded follow-up fix to `tests/test_bench.py` (see Deviations) |
 | T11 | yes | general-purpose subagent, full task (`BENCH_SCHEMA` 2, `runs[].spans`, `_validate`'s `mode`, six locked `meta` fields, dirty-tree guard, the bench.py:1420-1422 report-text fix, plus REQ-V160-TRC-11's own bench-side wiring, undiscovered until this task); orchestrator confirmed one genuine design decision and tracked one open gap for T16 (see Deviations) |
 | T12 | yes | general-purpose subagent, full task (`pyproject.toml` version bump, `README.md`/`AGENTS.md`/`docs/plan.md` documentation catch-up); orchestrator independently re-verified all gates (see Deviations) |
+| T13 | yes | general-purpose subagent, full task (ten `v160-*` mutation entries, `mutation-v160` gate, both re-measured timeouts — subagent ran `mutation_check.py` itself, the one authorised exception to the no-self-run rule); orchestrator independently reproduced the most consequential finding by hand-mutation before trusting it (see Deviations) |
 
 *(filled in per task as the run proceeds)*
 
@@ -384,6 +385,77 @@ past this run's threshold). Orchestrator independently re-ran
 `lint-docs`, `ruff check`, the full `pytest` suite (1004 passed, unchanged
 — a docs-only task adds no tests), `bot.py --version` and `bot.py
 --selftest` before trusting the subagent's own claims.
+
+**T13 — one substituted mutation id, two related coverage gaps found and
+independently reproduced, one recovered incident.** Full ten-row ledger
+and both raw wall-clock measurements are in
+`docs/prompts/87-v160-t13-mutation-entries.md`; the highlights:
+
+1. **`v160-content-redact-bypassed` (spec §15.4's own id) could not be
+   landed as prescribed.** Its named target — `tracing.py:343`,
+   `set_content_attribute`'s `text = config.redact(value)` — is masked by
+   a redundant upstream protection: every content-capture test path
+   reaches this call with content already redacted by
+   `storage.add_user_message`/`add_assistant_message` before `agent.py`
+   ever re-reads it from storage, so removing this specific `redact()`
+   call changes nothing any current test observes. **Orchestrator
+   independently reproduced this by hand**: mutated the line directly,
+   ran the full 1007-test suite, 0 failures, confirming the gap is real
+   and not an artifact of the subagent's own testing. The subagent
+   substituted `v160-status-message-redact-bypassed`, proving the same
+   redact-before-storage mechanism one call site over
+   (`MutableSpan.set_error`'s `tracing.py:224`, REQ-V160-TRC-11, which has
+   no such upstream double-protection) rather than landing an entry that
+   would look like it proves REQ-V160-TRC-10 while actually proving
+   nothing — the right call: REQ-V160-REV-01 item 5 checking "a mutation
+   entry whose `find` matches once" would have passed on a false premise
+   otherwise. Ten `v160-*` entries landed either way (net count unchanged).
+2. **A second, related gap**: `config.py:334`'s `load_config()`-path
+   parsing of `OBS_CAPTURE_CONTENT` is equally untested (no test calls
+   `load_config()` and inspects the resulting field for this variable
+   specifically) — `v160-capture-content-default-on` was retargeted to the
+   `Config` dataclass field default itself (`config.py:123`), which every
+   content-capture test actually exercises.
+3. **`T-V160-DSH-05`'s "canary sweep"** doesn't appear to exercise the
+   specific error-body-echo failure mode `v160-error-echoes-request-input`
+   proves — the real killer is N5
+   (`test_n5_bad_params_400_names_only_the_parameter`). Not a defect in
+   the landed entry (it is still honestly killed by a real test), just a
+   mismatch between the spec table's claimed killer and what's actually
+   true today.
+
+All three flagged in a new task-tracker item for T14 (the clean-context
+code review — the correct place per its own "findings are fixed, not
+suppressed" rule and "every fix of this run lands here or earlier — never
+after T16"), not fixed inside T13 itself, since T13's own file ownership
+does not include the production/test files a real fix for finding 1 would
+need to touch.
+
+**Incident, disclosed for transparency**: mid-task, an earlier
+(uncorrected) full-suite mutation measurement attempt was interrupted with
+`pkill -9` while `bot.py` was mid-mutation, bypassing
+`mutation_check.py`'s `finally`-based restore and briefly leaving the
+working tree dirty outside the task's owned files. Caught via `git status
+--porcelain`, restored with `git checkout -- bot.py`, and the restore was
+verified — not assumed — by rerunning `tests/test_mutation_check.py`
+before relaunching the (successful) corrected run via `nohup ... &
+disown`. Orchestrator's own final `git status --porcelain` before staging
+confirmed only the task's owned files were dirty.
+
+Delegated to a general-purpose subagent (RLM: ten precise, unique-match
+mutation targets across five production files, plus running and timing
+the mutation suite twice — the one task in this run where an agent was
+explicitly authorised to run `devtools/mutation_check.py` itself, since
+measuring the two timeouts requires a real run). Given the mutation-all
+run's own cost (~32 minutes, just completed successfully), the
+orchestrator's gate-6 verification for this task consisted of: reading the
+subagent's own just-completed 82/82 full-run output directly (not merely
+trusting a secondhand claim), independently re-running `ruff check`,
+`pytest` (1007 passed), `lint-docs` and `bot.py --selftest`, and — for the
+one claim carrying real security weight — independently reproducing the
+`tracing.py:343` finding by hand-mutation rather than accepting the
+narrative. A third full 32-minute mutation run was judged disproportionate
+given that level of direct verification already performed.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
