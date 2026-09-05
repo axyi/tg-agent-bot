@@ -13,9 +13,11 @@ stands in for anything that would otherwise look like a live secret.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import importlib.util
 import json
+import logging
 import re
 import sqlite3
 from pathlib import Path
@@ -198,6 +200,33 @@ def test_t_v160_dsh_01_bench_report_imports_dashboard_render_and_emits_no_html()
     assert "import dashboard_render" in source
     for needle in ("<section", "<table", "<svg", "<style", "<!doctype"):
         assert needle not in source, needle
+
+
+def test_t_v160_dsh_01_dashboard_server_holds_no_html_literal():
+    """spec-v1.6.0's own test table (S15.2, T-V160-DSH-01): "no string
+    literal in `dashboard_server.py` contains `<` followed by a letter or
+    `/`" -- every HTML body the server sends must come from
+    `dashboard_render`. T14 review finding: this assertion did not exist
+    before T14 (the sibling test above only sweeps `devtools/dashboard.py`
+    against a five-needle list), which is why an HTML fragment
+    (`'<section id="errors">...'`, and a second one building the `/` page's
+    `<p class="meta">` footer) survived in `dashboard_server.py` through
+    T13. Scanned via `ast.Constant` string nodes rather than a source regex,
+    so a `<` in a comparison operator, a type hint or a docstring can never
+    produce a false positive, and an f-string's literal segments (which
+    `ast.walk` visits as `Constant` nodes inside `JoinedStr`) can't produce a
+    false negative either.
+    """
+    source = (REPO_ROOT / "dashboard_server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source, filename="dashboard_server.py")
+    offenders = [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and re.search(r"<[A-Za-z/]", node.value)
+    ]
+    assert offenders == []
 
 
 # ----------------------------------------------------------------------------
@@ -862,6 +891,151 @@ def test_a_trace_page_and_api_serve_real_spans(live_server):
     status, _, html_body = _request(port, "GET", f"/traces/{trace_id}")
     assert status == 200
     assert b"<script" not in html_body
+
+
+# ----------------------------------------------------------------------------
+# T-V160-DSH-05 / -06: the canary sweep (REQ-V160-DSH-07's own proof) -- T14
+# review finding: this test did not exist before T14, leaving REQ-V160-DSH-07
+# (a MUST) and Appendix B's scenario E6 unproven by any test.
+#
+# The canary is planted directly through `storage.*` writers, at rest, in
+# every place REQ-V160-DSH-07 names, and is deliberately never registered
+# via `config.register_secret`: this sweep proves *structural exclusion* --
+# that no dashboard handler ever reads the `messages`/`summaries` tables and
+# that `served_span()` drops every non-served attribute key -- not
+# redaction, which `test_t_v160_trc_10_content_capture_on_redacts_and_bounds`
+# and its `_a_fresh_never_stored_secret` sibling (test_v160_observability.py)
+# already prove elsewhere. Registering the canary as a secret first would
+# let `config.redact()` mask a genuine serving leak and pass vacuously.
+#
+# `dashboard_server.py` never reads `cfg.obs_capture_content` (grepped: no
+# such reference exists in the module) -- the flag governs what the *writer*
+# stores, which is exactly why REQ-V160-DSH-07's two spec tests collapse
+# into one implementation here: "capture off for the server" and "capture on
+# for the writer" both reduce to "does the database contain a content
+# attribute," which the second sweep call below covers directly by seeding
+# one.
+# ----------------------------------------------------------------------------
+
+_SWEEP_TRACE_ID = "c" * 32
+
+
+def _seed_canary(db_path, *, with_content_attribute: bool):
+    """Plants the canary in the five storage-level places REQ-V160-DSH-07
+    names, plus a sixth, `tg_agent.tool.fingerprint`, which is in
+    `ATTRIBUTE_KEYS` but not `SERVED_SPAN_ATTRIBUTE_KEYS`. The content
+    attribute (the fourth place) is only written when `with_content_attribute`
+    is true, so the same helper drives both the "capture off" and "capture
+    on" sweeps."""
+    conn = storage.connect(db_path)
+    try:
+        conv = storage.get_or_create_active_conversation(conn, USER_ID)
+        storage.add_user_message(conn, conv, f"remember: {CANARY}")
+        storage.add_summary(conn, conv, USER_ID, json.dumps({"goal": CANARY}))
+        storage.add_tool_turn(
+            conn, conv, "",
+            [
+                {
+                    "id": "c0", "type": "function",
+                    "function": {"name": "exec", "arguments": json.dumps({"argv": [CANARY]})},
+                }
+            ],
+            [("c0", "ok")],
+        )
+        attributes = {"gen_ai.conversation.id": conv, "tg_agent.tool.fingerprint": CANARY}
+        if with_content_attribute:
+            attributes["gen_ai.output.messages"] = CANARY
+        storage.add_span(
+            conn, trace_id=_SWEEP_TRACE_ID, span_id="a" * 16, parent_span_id=None,
+            conv_id=conv, turn_id=None, name="invoke_agent tg-agent-bot", kind="INTERNAL",
+            ts=storage.utc_now_iso(), start_ns=0, duration_ms=1, status="error",
+            status_message=f"leaked: {CANARY}",
+            attributes_json=json.dumps(attributes),
+        )
+    finally:
+        conn.close()
+
+
+def _sweep_routes(port):
+    """Every route `dashboard_server._route` serves, plus a 404 path and a
+    405 method -- 18 cases, not the spec prose's "14": `/` and `/api/usage`
+    each counted once per grouping there (x4 = 8), the trace-detail routes
+    and the flat routes make up the rest. The exact figure is this sweep's
+    own count, not a target to force."""
+    cases = [
+        ("GET", "/"),
+        ("GET", "/?group=model"),
+        ("GET", "/?group=day"),
+        ("GET", "/?group=purpose"),
+        ("GET", "/?group=scenario"),
+        ("GET", "/traces"),
+        ("GET", "/tools"),
+        ("GET", f"/traces/{_SWEEP_TRACE_ID}"),
+        ("GET", "/api/health"),
+        ("GET", "/api/usage"),
+        ("GET", "/api/usage?group=day"),
+        ("GET", "/api/usage?group=purpose"),
+        ("GET", "/api/usage?group=scenario"),
+        ("GET", "/api/traces"),
+        ("GET", "/api/tools"),
+        ("GET", f"/api/traces/{_SWEEP_TRACE_ID}"),
+        ("GET", "/nope"),          # 404
+        ("POST", "/"),             # 405
+    ]
+    results = []
+    for method, path in cases:
+        status, headers, body = _request(port, method, path)
+        results.append((method, path, status, headers, body))
+    return results
+
+
+def _assert_canary_absent(results):
+    for method, path, status, headers, body in results:
+        text = body.decode("utf-8", "replace")
+        assert CANARY not in text, (method, path, status, "canary in body")
+        for name, value in headers.items():
+            assert CANARY not in value, (method, path, name, "canary in header")
+
+
+def _sweep_and_check_log(port, caplog):
+    """Runs the route sweep with logging captured, scoped to *this* sweep's
+    own requests only: `caplog.clear()` right before dispatching discards
+    whatever `_seed_canary` itself logged during setup (`storage.py`'s own
+    write-time row log legitimately contains the raw canary here, precisely
+    because this test does not register it as a secret -- see `_seed_canary`'s
+    docstring). REQ-V160-DSH-07/E6's "no log line" is about the *serving*
+    path's own log output, not a write-time audit trail three function calls
+    earlier in the same test."""
+    with caplog.at_level(logging.DEBUG, logger="dashboard"):
+        caplog.clear()
+        results = _sweep_routes(port)
+        log_text = caplog.text
+    # a guard against a vacuous log assertion: the sweep must have actually
+    # produced log output for this check to mean anything
+    assert log_text != ""
+    assert CANARY not in log_text
+    return results
+
+
+def test_t_v160_dsh_05_canary_sweep_content_capture_off(live_server, caplog):
+    port, db_path = live_server
+    _seed_canary(db_path, with_content_attribute=False)
+    results = _sweep_and_check_log(port, caplog)
+    _assert_canary_absent(results)
+
+
+def test_t_v160_dsh_06_canary_sweep_content_capture_on_for_the_writer(live_server, caplog):
+    """The same sweep, with the writer having stored a genuine content
+    attribute this time (`gen_ai.output.messages`) -- `served_span()`
+    dropping it is what REQ-V160-DSH-09 requires and what this proves."""
+    port, db_path = live_server
+    _seed_canary(db_path, with_content_attribute=True)
+    results = _sweep_and_check_log(port, caplog)
+    _assert_canary_absent(results)
+    # the trace route did serve *something* for this trace -- an empty/404
+    # response would make the sweep above vacuous for this specific case
+    trace_status = next(s for m, p, s, h, b in results if p == f"/api/traces/{_SWEEP_TRACE_ID}")
+    assert trace_status == 200
 
 
 # ============================================================================

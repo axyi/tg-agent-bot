@@ -133,3 +133,39 @@ def test_history_tool_stub_rejects_anything_else(value):
     with pytest.raises(ConfigError) as exc:
         load_config(env=base_env(HISTORY_TOOL_STUB=value), load_env_file=False)
     assert "HISTORY_TOOL_STUB" in str(exc.value)
+
+
+def test_obs_capture_content_defaults_to_false_via_load_config(monkeypatch):
+    """spec-v1.6.0 REQ-V160-TRC-09: `OBS_CAPTURE_CONTENT` is parsed through
+    `load_config()`'s own `_parse_bool(source, "OBS_CAPTURE_CONTENT", False)`
+    call (config.py) -- unlike the `Config.obs_capture_content` dataclass
+    field default, which every `make_cfg()`-style test fixture already
+    exercises by constructing `Config` directly, nothing before this test
+    called `load_config()` itself and inspected the resulting field for this
+    variable. That left the `_parse_bool(..., False)` call itself unproven:
+    a `False` -> `True` mutation there would have survived the full suite.
+    """
+    monkeypatch.setattr(config, "_secrets", set())
+    assert load_config(env=base_env(), load_env_file=False).obs_capture_content is False
+    cfg = load_config(env=base_env(OBS_CAPTURE_CONTENT="true"), load_env_file=False)
+    assert cfg.obs_capture_content is True
+    cfg = load_config(env=base_env(OBS_CAPTURE_CONTENT="false"), load_env_file=False)
+    assert cfg.obs_capture_content is False
+
+
+@pytest.mark.parametrize("value", ["maybe", "2", ""])
+def test_obs_capture_content_rejects_anything_else(value):
+    if value == "":
+        # An explicitly empty value is the same as unset -- the default
+        # applies, it is not a rejected value (matches `_parse_bool`'s own
+        # "not raw -> default" branch, exercised the same way `test_t_cfg_05`
+        # and `test_history_tool_stub_defaults_to_on` exercise their siblings).
+        assert (
+            load_config(env=base_env(OBS_CAPTURE_CONTENT=value), load_env_file=False)
+            .obs_capture_content
+            is False
+        )
+        return
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(OBS_CAPTURE_CONTENT=value), load_env_file=False)
+    assert "OBS_CAPTURE_CONTENT" in str(exc.value)

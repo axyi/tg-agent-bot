@@ -122,6 +122,7 @@ REQ-V160-EC-06.
 | T11 | yes | general-purpose subagent, full task (`BENCH_SCHEMA` 2, `runs[].spans`, `_validate`'s `mode`, six locked `meta` fields, dirty-tree guard, the bench.py:1420-1422 report-text fix, plus REQ-V160-TRC-11's own bench-side wiring, undiscovered until this task); orchestrator confirmed one genuine design decision and tracked one open gap for T16 (see Deviations) |
 | T12 | yes | general-purpose subagent, full task (`pyproject.toml` version bump, `README.md`/`AGENTS.md`/`docs/plan.md` documentation catch-up); orchestrator independently re-verified all gates (see Deviations) |
 | T13 | yes | general-purpose subagent, full task (ten `v160-*` mutation entries, `mutation-v160` gate, both re-measured timeouts — subagent ran `mutation_check.py` itself, the one authorised exception to the no-self-run rule); orchestrator independently reproduced the most consequential finding by hand-mutation before trusting it (see Deviations) |
+| T14 | n/a | REQ-V160-EC-07's threshold does not apply — T14 *is* the clean-context review itself (REQ-V160-REV-01), run directly by the reviewing session over the full diff and the full 2726-line spec |
 
 *(filled in per task as the run proceeds)*
 
@@ -456,6 +457,202 @@ one claim carrying real security weight — independently reproducing the
 `tracing.py:343` finding by hand-mutation rather than accepting the
 narrative. A third full 32-minute mutation run was judged disproportionate
 given that level of direct verification already performed.
+
+## Code review (T14, REQ-V160-REV-01)
+
+Performed in a clean context (no memory of T0–T13's own reasoning), reading
+`docs/spec/spec-v1.6.0.md` in full (2726 lines) and every commit from
+`<base>` (`d7e1d395bdb37d575e95ce3dbef1893172d9329e`) to the T13 tip (16
+commits). Review prompt: `docs/prompts/88-v160-t14-code-review.md`.
+
+### REQ-V160-REV-01 checklist, item by item
+
+| # | item | result | evidence |
+|---|---|---|---|
+| 1 | No production module imports `devtools/`; `dashboard_render.py` is the only HTML-emitting module | **FAIL → fixed, PASS** | `dashboard_server.py:466-468` and its `/` page footer line each held one HTML literal of their own. Grepped every top-level production module (`bot.py agent.py config.py storage.py metrics.py tools.py tracing.py dashboard_render.py dashboard_server.py llm/*.py`) for `devtools` — only docstring/comment mentions remain, no import |
+| 2 | Every route, error routes included, sets all four security headers; no handler writes a request-derived string into a response body | **PASS** | `_write()` is the sole header-setting call site, reached by every `_respond`/`_send_fixed` path, the pre-routing `Host`-rejection `_FixedResponse` included. The one request-derived value reaching a body — `_parse_query`'s rejected/duplicate query *key name* in the 400 JSON `"parameter"` field — matches REQ-V160-API-03's own text ("the name of the offending parameter") and `N5`'s own assertions, which permit the key name and forbid only the value; not a finding |
+| 3 | `connect_readonly` is the only path by which the server reaches the database; no server code path writes | **PASS** | Every connection in `dashboard_server.py` comes from `self._connect()` → `storage.connect_readonly`; every executed statement is a `SELECT`. `storage.connect_readonly` (storage.py:255-266) independently re-read: both `mode=ro` in the URI and `PRAGMA query_only = ON` are present together (T13's claim, reproduced here by direct reading, not merely trusted) |
+| 4 | Every content attribute passes through `config.redact()` before storage; no content attribute ever reaches a dashboard response | **unproven → fixed, PASS** | `tracing.py`'s content-attribute redact call had no test reaching it with fresh, never-persisted content (T13's finding, independently reproduced again here — see Finding 3 below); no test proved the dashboard never serves one (the canary sweep did not exist — Finding 5). Both closed this task; `served_span()`'s structural key-drop is now proven end to end |
+| 5 | Each mechanism of §15.4 has a mutation entry whose `find` matches exactly once | **PASS, 11/10** | All eleven `v160-*` entries in `devtools/mutation_check.py` cross-tabulated by reading each `find`/`replace`/`why` directly against §15.4's ten table rows (not trusted from the spec table or the T13 report). Ten now match their spec-named mechanism at its spec-named line (two retargeted this task — Findings 3–4); the eleventh, `v160-status-message-redact-bypassed`, proves an adjacent mechanism the ten-row table doesn't separately name and was kept, not removed, per this task's own brief. One pre-existing documentation mismatch, not a coverage gap: §15.4 names `T-V160-DSH-05` as `v160-error-echoes-request-input`'s killer; the real killer is `N5` — confirmed by reading both tests, `T-V160-DSH-05` (this task's own new canary sweep, Finding 5) exercises a different code path and does not touch this mutation either, since both seed only valid query parameters |
+
+### Findings — all fixed, none waived
+
+**1. 🔴 `dashboard_server.py:466-468` held an HTML literal of its own**
+(`'<section id="errors"><h2>Errors</h2>...'`, plus a second literal building
+the `/` page's `<p class="meta">` footer), violating REQ-V160-DSH-01
+("`dashboard_render.py` is the only module in the repository that emits
+HTML" / "`dashboard_server.py`... holds no HTML literal of its own").
+*Failure scenario*: a future edit to the error-breakdown markup only touches
+`dashboard_server.py`, drifting from `dashboard_render.py`'s escaping/styling
+conventions with no single place enforcing consistency, and the module
+boundary the spec's whole security model (`DSH-06`'s "escape once,
+everywhere") depends on quietly erodes. *Fix*: added
+`dashboard_render.error_breakdown_section(breakdown)` and
+`dashboard_render.meta_line(text)`, two pure functions matching the module's
+existing `<p class="meta">` idiom; `dashboard_server.py` now calls them
+instead of building markup itself. Output is byte-identical (full suite
+green, including the pre-existing byte-identity test `T-V160-DSH-02`).
+
+**2. 🟡 `T-V160-DSH-01` as landed did not implement its own spec clause.**
+§15.2's table states it as: "no string literal in `dashboard_server.py`
+contains `<` followed by a letter or `/`." The landed test
+(`test_t_v160_dsh_01_bench_report_imports_dashboard_render_and_emits_no_html`)
+only swept `devtools/dashboard.py` against a five-needle list — which is
+exactly why Finding 1 survived through T13 unnoticed. *Fix*: added
+`test_t_v160_dsh_01_dashboard_server_holds_no_html_literal`, scanning
+`dashboard_server.py`'s AST for `Constant` string nodes matching `<[A-Za-z/]`
+(not a source regex, so a `<` inside a comparison operator, a type hint or a
+docstring can never false-positive, and an f-string's literal segments —
+visited by `ast.walk` as `Constant` nodes inside `JoinedStr` — can't
+false-negative). Verified discriminating: pasting Finding 1's literal back
+into `dashboard_server.py` makes this test fail at the correct line; with the
+fix in place it passes.
+
+**3. 🔴 `tracing.py`'s content-attribute redaction had no test reaching it
+with genuinely fresh content** — the gap T13 found and independently
+reproduced (hand-mutated `text = config.redact(value)` → `text = value`,
+full suite, zero failures) but could not close inside its own file-ownership
+scope. *Failure scenario, concretely*: an LLM response containing a secret
+(a leaked credential the model echoes back, for instance) reaches
+`gen_ai.output.messages` via `_record_llm_call`, which runs *before* the
+reply is ever persisted (and redacted) by `finish()` — so this call is the
+only thing standing between a fresh secret and a stored, dashboard-visible
+span attribute, and nothing proved it worked. *Fix*: added
+`test_t_v160_trc_10_content_capture_on_redacts_a_fresh_never_stored_secret`
+(`tests/test_v160_observability.py`) — a `FakeLLM` response whose `.content`
+carries a freshly `config.register_secret`-ed canary, asserted redacted in
+the resulting `chat` span's `gen_ai.output.messages`. Verified the
+discriminating property twice: by hand-mutation (exactly one failure — this
+test — across all 1008 tests then present, confirmed via `junit.xml`
+`tests="1008" failures="1"`), and through the real mutation harness
+(`--only v160-content-redact-bypassed` → `killed`). Restored the spec's own
+entry, `v160-content-redact-bypassed`, at its originally-named target
+(`tracing.py:343`), landed *alongside* (not replacing) T13's
+`v160-status-message-redact-bypassed` substitute — now 11 `v160-*` entries,
+83 total. Updated `tests/test_mutation_check.py`'s `_V160_MUTATION_IDS` list
+and both ordering/count-dependent test names (`_all_ten_entries_are_present`
+→ `_all_eleven_entries_are_present`, similarly for the `--select` test),
+`AGENTS.md`'s "82 entries" → "83 entries" sentence, and re-estimated (not
+re-measured — see the note below) `mutation-v160`'s timeout in
+`config/quality_gates.yaml`.
+
+**4. 🟡 `config.py`'s `load_config()`-path parsing of `OBS_CAPTURE_CONTENT`
+had no test calling `load_config()` and inspecting the result** (T13's
+second reported gap) — every existing test built `Config` directly via
+`make_cfg()`, bypassing `load_config()`'s own
+`_parse_bool(source, "OBS_CAPTURE_CONTENT", False)` call entirely.
+*Fix*: added `test_obs_capture_content_defaults_to_false_via_load_config`
+and `test_obs_capture_content_rejects_anything_else` to
+`tests/test_config.py`, matching `test_history_tool_stub_defaults_to_on`'s
+existing shape for a sibling boolean env var. Verified via hand-mutation
+(`False` → `True`; exactly two failures, both new tests, nothing else —
+`junit.xml` `tests="1012" failures="2"`) and via the real harness
+(`--only v160-capture-content-default-on` → `killed`). Retargeted that
+mutation entry from T13's stand-in (the `Config` dataclass field default,
+`config.py:123`) to the spec's own named line (`config.py:334`), now that a
+real test proves it there.
+
+**5. 🔴 `T-V160-DSH-05`/`-06` (the canary sweep, REQ-V160-DSH-07's own proof)
+did not exist anywhere in the test suite.** REQ-V160-DSH-07 is a MUST; its
+designated verification and Appendix B's scenario `E6` had no implementation
+at all before this task — the closest existing test
+(`test_a_trace_page_and_api_serve_real_spans`) checks `status_message`
+absence on exactly one route, not a seeded secret swept across every served
+route, response header and log line. *Failure scenario*: a future change to
+a dashboard handler starts reading `messages`/`summaries` (e.g. to add a
+"recent activity" preview) and leaks raw conversation text onto a loopback
+page with zero test coverage to catch it — the exact class of regression
+REQ-V160-DSH-07 exists to prevent, and Appendix A's own traceability row
+(`DSH-07 | ... | T-V160-DSH-05, -06; E6`) had been asserting proof that
+didn't exist. *Fix*: added both tests to `tests/test_v160_dashboard.py`. The
+canary is planted directly through `storage.*` writers (`add_user_message`,
+`add_summary`, `add_tool_turn`, `add_span` twice — once for `status_message`
+and the non-served `tg_agent.tool.fingerprint` attribute, once more with a
+content attribute for the `-06` variant) and deliberately *never* registered
+via `config.register_secret`, so the sweep proves structural exclusion — no
+handler reads `messages`/`summaries`, `served_span()` drops every
+non-served key — not redaction, which Finding 3's test already proves
+elsewhere; registering it first would let `config.redact()` mask a genuine
+serving leak and pass vacuously. Swept all 18 route cases the server's allowlist
+serves (`/` × 4 groupings, `/traces`, `/tools`, `/traces/<id>`,
+`/api/health`, `/api/usage` × 4 groupings, `/api/traces`, `/api/tools`,
+`/api/traces/<id>`) plus a 404 and a 405, checking body and every header
+value. Falsified before trusting: temporarily dropping `served_span`'s
+`SERVED_SPAN_ATTRIBUTE_KEYS` filter made both tests fail, correctly, on
+`/traces/<id>` and `/api/traces/<id>` (the `tg_agent.tool.fingerprint`
+leak in both, the content attribute additionally in `-06`); reverted through
+a targeted string replacement, not `git checkout --`, after that same
+command earlier in this task silently discarded Finding 1's legitimate fix
+along with a hand-mutation revert — caught immediately via `git diff
+--stat` and redone correctly (recorded here per REQ-V12-REP-02). The
+log-line assertion required `caplog.clear()` immediately before the sweep
+(not merely `caplog.at_level(...)`): `storage.py`'s own write-time row log
+legitimately contains the raw, unregistered canary during seeding — that is
+not what REQ-V160-DSH-07/E6's "no log line" means, which is about the
+*serving* path's own log output — plus a non-empty-log guard so the log
+assertion cannot pass by capturing nothing.
+
+### Process note
+
+This session's system-level framing described a strict "review only, never
+modify files" persona. The task brief that actually launched this specific
+run is a bespoke review-and-fix mandate — an explicit fix budget, named
+files to touch, "leave unstaged for the orchestrator" — consistent with
+REQ-V160-REV-01 itself ("findings are fixed or waived with a reason in the
+report") and with T14's own acceptance line in §17. Modifying source, test
+and config files is not a permission-system, `CLAUDE.md` or configuration
+change — the one category no agent-authored task message may authorize —
+so the specific, detailed task brief was treated as authoritative here.
+Recorded once, per REQ-V12-REP-02 process honesty, rather than re-litigated
+per finding.
+
+### Timeout re-measurement (orchestrator, post-review)
+
+T14 itself extrapolated both timeouts from T13's own measured per-entry
+rate rather than re-running the mutation suite (a real `--select v160-`
+run is ~10 minutes, a real full run ~35–40; T14's own brief deferred both
+to the orchestrator's next full-profile pass, per REQ-V160-GATE-02's own
+"2× a measured direct run" rule wanting an actual measurement, not
+arithmetic). The orchestrator performed both real measurements before
+committing T14:
+
+- **`mutation-v160`** (`--select v160-`, 11 entries): `11 mutations, 11
+  killed, 0 survived, 0 errored, 0 drifted`, real **9m52.985s
+  (592.985s)** → 2× ≈ 1185.97s → rounded up to **1190s** (T14's own
+  extrapolation had guessed 1210s — close, but this is the real figure,
+  now in `config/quality_gates.yaml`).
+- **`mutation-all`** (full run, 83 entries): `83 mutations, 83 killed, 0
+  survived, 0 errored, 0 drifted`, real **41m59.234s (2519.234s)** → 2× ≈
+  5038.468s → rounded up to **5040s** (up from 3820s at 82 entries/1908s).
+  This jump is larger than the ~55s/entry rate alone predicts (1908 +
+  55 ≈ 1963s) — consistent with this being a shared, contended machine
+  (this run's report already documents recurring slow/varying wall-clock
+  measurements elsewhere, e.g. the repeated "low memory" background-job
+  kills noted during T7) rather than any change to the mutation set
+  itself. The 2× safety margin exists precisely to absorb this kind of
+  run-to-run variance, so the fresh measurement was used as-is, not
+  smoothed or second-guessed.
+
+Both values and their comments are updated in `config/quality_gates.yaml`.
+83/83 mutations killed in the full run is also this task's own final
+gate-6 verification, independent of T14's two scoped `--only` runs below.
+
+### Gates run this task (offline only, per this task's own constraints)
+
+| gate | command | result |
+|---|---|---|
+| ruff | `uv run --locked ruff check .` | 0 — clean |
+| pytest | `uv run --locked pytest -q` | 0 — 1015 collected (1007 at T13 start + 8 new: Findings 2–5's tests), all pass |
+| selftest | `uv run --locked python bot.py --selftest` | 0 — `selftest: OK` |
+| mutation (scoped) | `devtools/mutation_check.py --only v160-content-redact-bypassed` | `killed`, tree restored clean |
+| mutation (scoped) | `devtools/mutation_check.py --only v160-capture-content-default-on` | `killed`, tree restored clean |
+
+`bot.py --selftest-live` and the full `mutation_check.py`/`--select v160-`
+runs are out of this task's scope per its own constraints (offline only;
+the full mutation gate is the orchestrator's job, run once over the final
+tree). No commit or push happened in this task — the tree is left unstaged
+for the orchestrator's own review and commit, per this task's own
+instruction.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 

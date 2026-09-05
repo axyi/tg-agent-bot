@@ -137,7 +137,17 @@ def test_t_v12_mut_04_every_find_string_occurs_exactly_once_in_the_real_repo():
 
 # ---------------------------------------------------------------------------
 # spec-v1.6.0 section 15.4 (REQ-V160-TST-03, -04, REQ-V160-GATE-02, -03):
-# the ten new v160-* entries and the mutation-v160 gate that runs them.
+# the ten table-named v160-* entries and the mutation-v160 gate that runs
+# them, plus one eleventh entry T14 landed: `v160-content-redact-bypassed`
+# is the table's own §15.4 row, unkillable at T13 (no test reached
+# set_content_attribute's redact call with genuinely fresh content) and
+# closed at T14 by a test that does
+# (tests/test_v160_observability.py
+# ::test_t_v160_trc_10_content_capture_on_redacts_a_fresh_never_stored_secret).
+# `v160-status-message-redact-bypassed`, T13's stand-in proving a distinct
+# mechanism (span error messages), stays -- neither removed nor renamed, per
+# spec-v1.6.0 T14's own instruction not to erase a finding that honestly
+# proves something else.
 #
 # `test_t_v12_mut_04_at_least_28_entries_each_with_a_unique_id` and
 # `test_t_v12_mut_04_every_find_string_occurs_exactly_once_in_the_real_repo`
@@ -148,6 +158,7 @@ def test_t_v12_mut_04_every_find_string_occurs_exactly_once_in_the_real_repo():
 _V160_MUTATION_IDS = [
     "v160-bind-address-widened",
     "v160-capture-content-default-on",
+    "v160-content-redact-bypassed",
     "v160-status-message-redact-bypassed",
     "v160-fingerprint-threshold-off-by-one",
     "v160-truncated-summary-accepted",
@@ -159,13 +170,13 @@ _V160_MUTATION_IDS = [
 ]
 
 
-def test_t_v160_tst_03_all_ten_entries_are_present():
+def test_t_v160_tst_03_all_eleven_entries_are_present():
     ids = {m["id"] for m in mc.MUTATIONS}
     for expected_id in _V160_MUTATION_IDS:
         assert expected_id in ids, expected_id
 
 
-def test_t_v160_tst_03_select_v160_matches_exactly_the_ten_entries():
+def test_t_v160_tst_03_select_v160_matches_exactly_the_eleven_entries():
     selected = [m["id"] for m in mc.MUTATIONS if m["id"].startswith("v160-")]
     assert selected == _V160_MUTATION_IDS
 

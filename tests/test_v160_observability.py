@@ -858,6 +858,51 @@ def test_t_v160_trc_10_content_capture_on_redacts_and_bounds(conn, tmp_path):
     assert "status_message" not in attrs
 
 
+def test_t_v160_trc_10_content_capture_on_redacts_a_fresh_never_stored_secret(
+    conn, tmp_path
+):
+    """The gap the T13 report flagged: unlike the test above, this canary is
+    never written through `storage.add_user_message`/`add_assistant_message`
+    (both of which redact on the way in) before `set_content_attribute` sees
+    it. It arrives fresh inside the FakeLLM response's own `.content`, read
+    straight off `response` by `_record_llm_call` -- which runs and captures
+    `gen_ai.output.messages` *before* `finish()` ever persists the reply
+    (agent.py: `_record_llm_call` at the top of the round loop vs. `finish()`
+    only once the round ends). So `tracing.set_content_attribute`'s own
+    `config.redact(value)` call is the *only* thing standing between this
+    secret and the stored span -- exactly the line the round-3 orchestrator
+    hand-mutated (`text = config.redact(value)` -> `text = value`) and found
+    zero test failures against, before this test existed.
+    """
+    fresh_secret = "SYNTHETIC-CANARY-TRC-FRESH-NEVER-STORED-FIRST"
+    config.register_secret(fresh_secret)
+    cfg = make_cfg(tmp_path, obs_capture_content=True)
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    storage.add_user_message(conn, conv, "hello")
+    agent.run_agent(
+        conn=conn,
+        conv_id=conv,
+        llm=FakeLLM([LLMResponse(f"the secret is {fresh_secret}", [], "stop")]),
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda _s: None,
+        cfg=cfg,
+    )
+    trace_id = _trace_id_of(conn)
+    spans = storage.spans_for_trace(conn, trace_id)
+    chat_spans = [s for s in spans if s["name"].startswith("chat")]
+    assert len(chat_spans) == 1
+    attrs = json.loads(chat_spans[0]["attributes_json"])
+    assert "gen_ai.output.messages" in attrs
+    captured = attrs["gen_ai.output.messages"]
+    # This is the discriminating assertion: `response.content` has not
+    # touched `config.redact()` anywhere else by this point -- the reply is
+    # only persisted (redacted, independently) afterward, inside `finish()`.
+    assert fresh_secret not in captured
+    assert config.REDACTION in captured
+
+
 # --- T-V160-TRC-14: persistence failure over operation failure, no bare ROLLBACK
 
 

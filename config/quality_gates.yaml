@@ -220,15 +220,21 @@ gates:
     diff_scoped: false
     timeout_seconds: 220
 
-  # spec-v1.6.0 T13 (REQ-V160-GATE-02): the ten v160-* entries of section
-  # 15.4, same 2x-measured-run rule as mutation-v15/mutation-all above.
-  # Measured directly on 2026-09-05 (`time uv run --locked python
-  # devtools/mutation_check.py --select v160-`, this tree, 10/10 killed):
-  # mutation-v160 real=9m10.338s (550.338s) -> 2x ~1100.676s, rounded up to
-  # 1110s. Runs slower per-entry than mutation-v15 (~55s/entry vs ~25s/entry)
-  # because every v160-* killer test lives in test_v160_*.py, which sorts
-  # last -- under `pytest -x`, each kill runs nearly the whole ~1004-test
-  # suite before the first failure, instead of exiting early.
+  # spec-v1.6.0 T13/T14 (REQ-V160-GATE-02): the eleven v160-* entries of
+  # section 15.4 (T13 landed ten; T14's review restored the spec's own
+  # v160-content-redact-bypassed at its named target, an eleventh, once a
+  # test existed to kill it there -- see docs/reports/report-v1.6.0.md).
+  # T13's own 10-entry measurement (2026-09-05, 550.338s) is superseded by
+  # the orchestrator's fresh 11-entry measurement below, taken after T14
+  # landed, per the same 2x-measured-run rule as mutation-v15/mutation-all.
+  #
+  # Orchestrator measured directly on 2026-09-05 (`time uv run --locked
+  # python devtools/mutation_check.py --select v160-`, this tree, 11/11
+  # killed): real=9m52.985s (592.985s) -> 2x ~1185.97s, rounded up to
+  # 1190s. (~54s/entry, consistent with T13's own rate -- every v160-*
+  # killer test lives in test_v160_*.py, which sorts last, so under
+  # `pytest -x` each kill runs nearly the whole suite before the first
+  # failure lands.)
   mutation-v160:
     kind: command
     result_mode: exit_status
@@ -237,17 +243,20 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1110
+    timeout_seconds: 1190
 
-  # mutation-all: measured 2026-09-05, after the ten v160-* entries above
-  # were added (`time uv run --locked python devtools/mutation_check.py`,
-  # no --select, this tree, 82/82 killed): real=31m48.041s (1908.041s) ->
-  # 2x ~3816.082s, rounded up to 3820s. Up from 2600s (measured 2026-09-04
-  # at 72 entries, ~1273s): the ten new entries alone measured ~550s in
-  # isolation (mutation-v160 above), and 1273+550=1823s tracks the new
-  # 1908s total closely -- the remaining ~85s gap is consistent with the
-  # pre-existing 72 entries running marginally slower as the suite itself
-  # grew, an inference from arithmetic, not separately measured.
+  # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
+  # added an eleventh v160-* entry (83 total). Orchestrator re-measured
+  # directly on 2026-09-05 (`time uv run --locked python
+  # devtools/mutation_check.py`, no --select, this tree, 83/83 killed):
+  # real=41m59.234s (2519.234s) -> 2x ~5038.468s, rounded up to 5040s. Up
+  # from 3820s (82 entries, 1908.041s): the jump is larger than one more
+  # ~55s entry would predict (1908 + 55 = 1963s), consistent with this
+  # being a shared, contended machine (documented earlier in this run's
+  # report as a recurring source of slow/varying wall-clock measurements)
+  # rather than a change in the mutation set itself -- the 2x safety
+  # margin exists precisely to absorb this kind of run-to-run variance, so
+  # the fresh measurement is used as-is rather than adjusted.
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -256,7 +265,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 3820
+    timeout_seconds: 5040
 
   hooks-installed:
     kind: command

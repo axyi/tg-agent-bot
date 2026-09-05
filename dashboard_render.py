@@ -56,6 +56,16 @@ def esc(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
+def meta_line(text: Any) -> str:
+    """One `<p class="meta">...</p>` fragment, escaped -- the generic form of
+    the `<p class="meta">` pattern already used throughout this module (e.g.
+    `tool_health_section`, `compare_section`). Added at T14
+    (REQ-V160-DSH-01 review finding) so `dashboard_server.py`'s `/` page
+    footer line (db basename + schema version) no longer needs to hold that
+    one HTML literal itself."""
+    return f'<p class="meta">{esc(text)}</p>'
+
+
 # ----------------------------------------------------------------------------
 # the named colour palette (REQ-V160-DSH-04) -- every chart also encodes its
 # information in text, so removing colour never loses information
@@ -356,6 +366,24 @@ def usage_section(rows: Sequence[Any], *, group: str, totals: Any) -> str:
         f"{body_rows}\n</tbody></table>\n"
     )
     return f'<section id="usage">\n<h2>Usage</h2>\n{totals_table}{group_table}</section>'
+
+
+def error_breakdown_section(breakdown: Any) -> str:
+    """The `/` page's error-breakdown fragment (REQ-V160-DSH-03: "the error
+    breakdown by finish reason and by error kind"), relocated here from
+    `dashboard_server.py` (REQ-V160-DSH-01, T14 review finding): the server
+    held this one HTML literal of its own, in violation of "`dashboard_render.py`
+    is the only module in the repository that emits HTML." Byte-identical to
+    the fragment it replaces -- `esc()` applied to the whole dict, matching
+    `ErrorBreakdown.by_finish_reason`/`.by_error_kind`'s existing `str(dict)`
+    rendering rather than iterating pairs, so no rendered byte changes."""
+    finish_reasons = _field(breakdown, "by_finish_reason")
+    error_kinds = _field(breakdown, "by_error_kind")
+    return (
+        '<section id="errors"><h2>Errors</h2>'
+        f"<p>finish reasons: {esc(finish_reasons)}</p>"
+        f"<p>error kinds: {esc(error_kinds)}</p></section>"
+    )
 
 
 def tool_health_section(rows: Sequence[Any], *, summary: Any) -> str:

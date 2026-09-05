@@ -462,16 +462,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
         for hist in tokens_in + tokens_out:
             body.append(dashboard_render.histogram_svg(hist, width=640, height=160, title="Tokens"))
-        body.append(
-            '<section id="errors"><h2>Errors</h2>'
-            f"<p>finish reasons: {dashboard_render.esc(breakdown.by_finish_reason)}</p>"
-            f"<p>error kinds: {dashboard_render.esc(breakdown.by_error_kind)}</p></section>"
-        )
+        body.append(dashboard_render.error_breakdown_section(breakdown))
         footer = f"db: {Path(self.server.db_path).name} · schema v{schema}"
         html = dashboard_render.page(
             "Usage",
             nav=nav,
-            body="\n".join(body) + f'\n<p class="meta">{dashboard_render.esc(footer)}</p>',
+            body="\n".join(body) + "\n" + dashboard_render.meta_line(footer),
             generated_at=storage.utc_now_iso(),
         )
         self._respond(200, html.encode("utf-8"), "text/html; charset=utf-8", send_body=send_body)

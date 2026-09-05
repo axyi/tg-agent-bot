@@ -747,49 +747,60 @@ MUTATIONS = [
     {
         "id": "v160-capture-content-default-on",
         "path": "config.py",
-        # The table entry names load_config's `_parse_bool(..., False)` call
-        # (line ~334), but no existing test calls load_config() and inspects
-        # the resulting default -- every test that checks the off-by-default
-        # property (test_t_v160_trc_10_content_capture_off_by_default) builds
-        # a Config directly and relies on the dataclass field's own default
-        # instead, so that call site would survive unkilled. This targets the
-        # Config.obs_capture_content field default itself, which is both the
-        # REQ-V160-TRC-09 comment's own anchor (config.py:120-123) and the
-        # value that test actually exercises.
-        "find": "    obs_capture_content: bool = False\n",
-        "replace": "    obs_capture_content: bool = True\n",
+        # Originally targeted at the `Config.obs_capture_content` dataclass
+        # field default: at T13, no test called `load_config()` itself and
+        # inspected the resulting field for this variable, so the table's own
+        # named target -- `load_config`'s `_parse_bool(..., "OBS_CAPTURE_CONTENT",
+        # False)` call, line ~334 -- would have survived unkilled.
+        # T14 closed that gap
+        # (tests/test_config.py::test_obs_capture_content_defaults_to_false_via_load_config
+        # and its `_rejects_anything_else` sibling), so this entry now targets
+        # the table's own named line directly.
+        "find": '_parse_bool(source, "OBS_CAPTURE_CONTENT", False)',
+        "replace": '_parse_bool(source, "OBS_CAPTURE_CONTENT", True)',
         "why": "REQ-V160-TRC-09: content capture is off by default -- content "
         "never leaves the process unless an operator opts in",
     },
     {
-        # NOTE on the table's `v160-content-redact-bypassed` entry
+        # T13 could not land this entry against its spec-named target
         # (set_content_attribute's own `text = config.redact(value)`,
-        # tracing.py line ~343): deliberately not added. Verified by
-        # hand-mutating it and running the T-V160-TRC-09/-10 tests: it
-        # survives. Every path that reaches this call in the current suite is
-        # content already redacted upstream by
-        # storage.add_user_message/add_assistant_message before agent.py ever
-        # assembles `messages` from conversation history (the one test with
-        # capture on, test_t_v160_trc_10_content_capture_on_redacts_and_bounds,
-        # seeds its CANARY through storage first), so `config.redact()` is a
-        # no-op on arrival and dropping it changes nothing observable. This
-        # call site is currently unprovable by the real suite -- the same
-        # class of gap as v160-capture-content-default-on's original target
-        # (config.py:334) -- and closing it needs a new test in
-        # tests/test_v160_observability.py (a secret in a *fresh*, not-yet-
-        # persisted value, e.g. via response.content/gen_ai.output.messages),
-        # which is outside this task's owned files. Reported as a coverage
-        # finding rather than shipped as an unkillable entry.
+        # tracing.py line ~343) because every content-capture test path in the
+        # suite at the time reached that call with content already redacted
+        # upstream by storage.add_user_message/add_assistant_message before
+        # agent.py ever re-read it from conversation history -- so
+        # `config.redact()` was a no-op on arrival and dropping it changed
+        # nothing observable. T13 substituted
+        # `v160-status-message-redact-bypassed` (below) instead and reported
+        # the gap. T14 closed it with a genuinely fresh, never-yet-persisted
+        # secret: `tests/test_v160_observability.py
+        # ::test_t_v160_trc_10_content_capture_on_redacts_a_fresh_never_stored_secret`
+        # drives a FakeLLM response whose `.content` carries a freshly
+        # registered secret straight into `gen_ai.output.messages`, read by
+        # `_record_llm_call` before `finish()` ever persists (and redacts) the
+        # reply. Verified by hand-mutating this exact line and running the
+        # full suite: exactly one failure, that test, before this entry
+        # existed. This is now the table's own originally-intended entry,
+        # landed at its named target.
+        "id": "v160-content-redact-bypassed",
+        "path": "tracing.py",
+        "find": "    text = config.redact(value)\n",
+        "replace": "    text = value\n",
+        "why": "REQ-V160-TRC-09: every opt-in content attribute must be "
+        "redacted before it is ever stored, content that has not already "
+        "been redacted on some other path included",
+    },
+    {
         "id": "v160-status-message-redact-bypassed",
         "path": "tracing.py",
-        # tracing.py's one other config.redact() call reached by genuinely
-        # fresh, never-yet-persisted content: set_error's status_message
-        # redaction, proven by T-V160-TRC-11's two tests (a raw secret in an
-        # exception message, never touched by storage first). Added as an
-        # eleventh-in-spirit / tenth-in-count entry so the ten-entry target
-        # is still met while every landed entry is honestly killed -- see the
-        # NOTE above for why the table's own content-attribute target isn't
-        # this entry.
+        # tracing.py's other config.redact() call reached by genuinely fresh,
+        # never-yet-persisted content: set_error's status_message redaction,
+        # proven by T-V160-TRC-11's two tests (a raw secret in an exception
+        # message, never touched by storage first). Landed alongside
+        # v160-content-redact-bypassed above (an eleventh entry net) rather
+        # than removed or renamed: it proves a distinct mechanism -- span
+        # error messages, not opt-in content attributes -- that the ten-entry
+        # table does not separately name but that is equally
+        # redact-before-store and equally worth a mutation proof.
         "find": "        message = config.redact(message)\n",
         "replace": "",
         "why": "REQ-V160-TRC-11: a span's status_message must be redacted "
