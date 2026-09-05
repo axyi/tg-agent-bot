@@ -21,6 +21,7 @@ implementation is produced by an AI agent from it.
 | `docs/spec/spec-v1.3.md` + implementation | done — token economy (assignment 5): observability layer, benchmark harness and dashboard, the baseline token audit, six optimizations O1–O6. Four commits, six gates green at C1 and C3, 719 tests, 65/65 mutations killed, two clean-context reviews. **Benchmark verdict: FAIL** — cost per successful task $0.002687 → $0.002492 (−7.3 %, target −30 %), success rate 100.0 % → 94.4 % (−5.6 pp, budget −2 pp). Prompt tokens −18.1 %, tool output −31.3 %, median latency −36.7 %. See `docs/reports/report-v1.3.md` |
 | `docs/spec/spec-v1.4.md` + implementation | done — patch release: a bounded spike (RSN-01…06) tried all five candidate reasoning-off mechanisms LM Studio might honor, live, in strict order. **None both honored and shippable — verdict FAIL, cause: no honored reasoning mechanism (RSN-06 STOP).** `a` (`chat_template_kwargs.enable_thinking`) and `d` (Qwen3 `/no_think`) not honored; `b` (`reasoning.effort`) unsupported (LM Studio never documents a disable value); `c` (empty `<think>` prefill) honored 3/3 but rejected — breaks the byte-stable cached-prefix invariant (POL-05); `e` (an LM Studio GUI/`lms` CLI default) has no documented control for the running version at all. Per RSN-06/GATE-02, sections 6–7 (policy + observability) and candidate benchmarking are declared not-executed. Still delivered: the S01 check repair (H1 — the check measured phrasing, not capability), a fresh `baseline-v1.4` ($0.003009/success), REL-01 (the `LLM_TIMEOUT_S`/`LLM_MAX_TOKENS` consistency check, default 120→240), mutation coverage for the shipped code (68/68 killed), and a code review with two real, fixed findings. 11 commits, six gates green at every commit (2 of 5 repair cycles consumed — T6, T9), 728 tests (+9 over v1.3). Numbers come from `baseline-v1.4.json`/`docs/reports/report-v1.4.md` — `docs/reports/bench-v1.4.md` does not exist on this branch (it is `report --gate --candidate`'s output, and no candidate was ever produced). See `docs/reports/report-v1.4.md` |
 | `docs/spec/spec-v1.5.md` + implementation | **complete** (all 20 tasks landed) — patch release, not a token-economy iteration despite the version number: local engineering standards and quality gates. A versioned `.githooks/` chain (`commit-msg`/`pre-commit`/`pre-push`) live from T8 on; a config-driven runner (`devtools/checks.py` + `config/quality_gates.yaml`, which is the sole authority for gate membership, severity thresholds and tool pins — never a literal in the code) adding `doctor` (pinned-tool drift, fails closed on a newer version too), `lint-docs` (prompt format, the report's ledger row) and `replay` (re-verifies historical commits from git objects only); gitleaks upgraded to 8.30.1 and three new scanners — semgrep (vendored ruleset), trivy, skylos (shadow) — plus four `v15-*` mutation entries and `--select`; Python 3.13 → 3.14 and the sandbox image pinned by digest (byte-compared exec smoke: identical, not benchmark-affecting). 842 tests (+114 over v1.4); 0 of 5 repair cycles consumed across the whole run. See `docs/reports/report-v1.5.md` |
+| `docs/spec/spec-v1.6.0.md` + implementation | **in progress** — task 12 of 19 in the implementation order (T0–T11 landed). So far: the observability layer (`tracing.py` spans, storage schema 4, `agent.py` wiring), the live read-only dashboard (`dashboard_render.py`/`dashboard_server.py`, on by default, loopback-only, plus `/status`'s new line), three tool-quality fixes (truncated-summary retry, closed outcome vocabulary, repeat-call refusal), six new benchmark scenarios S13–S18 with a `tool_calls_max` ceiling, and `bench_schema` 2 (per-run `spans`, six locked instrument meta fields); this task (T12) is the version bump (`pyproject.toml` → 1.6.0) and the matching README/AGENTS.md/plan documentation catch-up. Not yet run: the `mutation-v160` gate and its new mutation entries (T13), the clean-context code review (T14), the live preflight (T15), a fresh `baseline-v1.6.0` (T16), the provisional report (T17) and final acceptance/tag (T18). 1004 tests as of T12 (843 at T0, spec-v1.6.0's own floor). See `docs/spec/spec-v1.6.0.md`; `docs/reports/report-v1.6.0.md` is provisional and does not yet carry final numbers |
 
 ## How the implementation run works
 
@@ -209,6 +210,43 @@ acceptance run (six gates, `full`
 15/15, all 12 Appendix-B scenarios, `replay` 17/19 with the 2
 exceptions diagnosed and confined to pre-hook-activation commits). Full
 detail: `docs/reports/report-v1.5.md`.
+
+## v1.6.0 (in progress) — spec: `docs/spec/spec-v1.6.0.md`, report: `docs/reports/report-v1.6.0.md`
+
+A minor release (the first under the SemVer policy this release itself
+introduces — see below): observability, tool-quality fixes and the
+groundwork for a future baseline. Adds a self-built tracing layer
+(`tracing.py`, storage schema 4's `spans` table) wired through `agent.py`'s
+LLM and tool call paths; a local, read-only HTTP dashboard
+(`dashboard_render.py` + `dashboard_server.py`) served alongside the
+polling loop — on by default, loopback-only, never writing — with usage,
+tool-health and per-trace views, and a matching `/status` line; three
+tool-quality fixes (a bounded retry for a summary truncated by its own
+token cap, a closed outcome vocabulary for tool calls, and refusal of an
+exact repeat tool call); six new benchmark scenarios (S13–S18) and a
+`tool_calls_max` ceiling; and `bench_schema` 2, which adds a `spans` array
+to each benchmark run and locks six more instrument fields into `meta`
+(`lmstudio_version`, `served_model_id`, `lmstudio_context_length`,
+`generation_settings`, `prompt_tools_sha256`, `obs_capture_content`). It
+also fixes the CLI grammar (`--version`, `--no-dashboard`) and, in this
+task (T12), moves `project.version` from the placeholder `0.1.0` to
+`1.6.0` and adds the semantic-versioning policy this and every future
+release now follows.
+
+**This section describes work in progress, not a finished release.** T0–T11
+have landed (tracing, storage, dashboard, tool-quality fixes, benchmark
+scenarios and schema, the version/CLI groundwork); T12 (this task) is the
+version bump and documentation catch-up. Still to run: T13 (the
+`mutation-v160` gate and its new mutation entries), T14 (a clean-context
+code review), T15 (the live preflight gate 5 run), T16 (a fresh
+`baseline-v1.6.0` benchmark), T17 (the provisional report) and T18 (final
+acceptance and the `v1.6.0` tag, created only on that run's evidence-only
+commit). Test count: 1004 as of T12 (843 at T0). Final numbers — the
+completed test/mutation counts, benchmark deltas against
+`baseline-v1.4.json`, and the gate results — are not yet known and belong
+in this section (and in `docs/reports/report-v1.6.0.md`) once T18
+completes; this paragraph is expected to be rewritten by that later task,
+not read as the release's final word.
 
 ## Token-economy candidates (unscheduled)
 

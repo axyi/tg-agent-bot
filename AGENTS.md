@@ -42,6 +42,13 @@ changes behaviour without touching `docs/spec/` is incomplete.
 - `storage.py` — conversation/state persistence
 - `metrics.py` — pure functions over the `llm_calls`/`tool_calls` rows; the one
   implementation `/stats`, the benchmark report and the dashboard all use
+- `tracing.py` — self-built span/trace instrumentation (start/end a span, the
+  sink seam), consumed by `agent.py` and `devtools/bench.py`
+- `dashboard_render.py` — the one HTML/SVG-emitting module in the repository:
+  pure functions, no I/O, shared by the live dashboard server and the static
+  benchmark report renderer
+- `dashboard_server.py` — the live dashboard's HTTP server: loopback-only,
+  read-only, started as a daemon thread alongside the polling loop
 - `skills/` — skill definitions loaded by the agent
 - `tests/` — pytest suite
 - `devtools/` — operator tooling, never imported by the bot: `bench.py`
@@ -93,7 +100,8 @@ uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
 ```
 
-Gates 1–4 are unconditional and offline. Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1004 tests as of
+spec-v1.6.0 T12). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its

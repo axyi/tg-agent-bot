@@ -120,6 +120,7 @@ REQ-V160-EC-06.
 | T9 | no | — (matches §14.1: the refusal decision sits directly inside `_execute_tool_calls`'s existing budget/excess branching, small and self-contained enough that direct implementation is cheaper than a delegation round-trip) |
 | T10 | yes | general-purpose subagent, full task (six literal scenarios + `tool_calls_max` kind + `_validate_catalog` rule + `tests/test_v160_bench.py`); orchestrator applied a bounded follow-up fix to `tests/test_bench.py` (see Deviations) |
 | T11 | yes | general-purpose subagent, full task (`BENCH_SCHEMA` 2, `runs[].spans`, `_validate`'s `mode`, six locked `meta` fields, dirty-tree guard, the bench.py:1420-1422 report-text fix, plus REQ-V160-TRC-11's own bench-side wiring, undiscovered until this task); orchestrator confirmed one genuine design decision and tracked one open gap for T16 (see Deviations) |
+| T12 | yes | general-purpose subagent, full task (`pyproject.toml` version bump, `README.md`/`AGENTS.md`/`docs/plan.md` documentation catch-up); orchestrator independently re-verified all gates (see Deviations) |
 
 *(filled in per task as the run proceeds)*
 
@@ -349,6 +350,40 @@ Delegated to a general-purpose subagent (RLM: five separate regions of
 validation, CLI/meta). Orchestrator independently re-ran all gates plus
 the `baseline-v1.4.json` verification above before trusting the subagent's
 own claims.
+
+**T12 — one forced amendment outside the task's own file list
+(`uv.lock`), both fully mechanical.** `uv sync --locked` (gate 1) failed
+immediately after the `pyproject.toml` version bump: `uv.lock` records the
+local `tg-agent-bot` package's own version independently
+(`source = { virtual = "." }`), left out of sync by the edit. `uv lock`
+regenerated exactly one line (`0.1.0` → `1.6.0` inside that package's own
+block); orchestrator independently confirmed `git diff --stat uv.lock`
+shows `1 file changed, 1 insertion(+), 1 deletion(-)`, no dependency
+touched, and re-ran `uv sync --locked` to confirm it now succeeds. A
+direct, unavoidable consequence of REQ-V160-VER-01 itself — no alternative
+reading makes the version bump "wrong" per REQ-V160-EC-03.
+
+Two scope decisions the subagent made and the orchestrator reviewed and
+accepted: (1) `AGENTS.md` does not enumerate individual environment
+variables anywhere (verified by the subagent's own reading, spot-checked
+by the orchestrator against the committed diff), so the four new env vars
+went into `README.md`'s `## Configure` table only, which was renamed
+("Output windows, history and pricing" → "…, pricing and observability")
+to stay accurate; (2) `AGENTS.md`'s gate section gained the measured
+`pytest` count ("1004 tests as of spec-v1.6.0 T12") but deliberately left
+the pre-existing "72 entries as of spec-v1.5" mutation-registry sentence
+untouched, correctly deferring that number's update to T13's own commit
+(the one that actually adds the ten new `v160-*` entries) — matching
+REQ-V160-VER-06's "same commit as the change it describes" clause exactly,
+and avoiding describing the not-yet-existing `mutation-v160` gate anywhere
+in `AGENTS.md`.
+
+Delegated to a general-purpose subagent (RLM: four large documentation
+files — README.md 706 lines, AGENTS.md 192 lines, docs/plan.md 260 lines —
+past this run's threshold). Orchestrator independently re-ran
+`lint-docs`, `ruff check`, the full `pytest` suite (1004 passed, unchanged
+— a docs-only task adds no tests), `bot.py --version` and `bot.py
+--selftest` before trusting the subagent's own claims.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 

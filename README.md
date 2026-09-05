@@ -71,7 +71,7 @@ The bot writes **two** files of its own: `AUDIT_LOG_PATH` (default
 you point either variable — or `DB_PATH`, which decides where `.resolv-empty`
 lands — somewhere else inside the repository, git-ignore that name yourself.
 
-### Output windows, history and pricing
+### Output windows, history, pricing and observability
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -79,9 +79,13 @@ lands — somewhere else inside the repository, git-ignore that name yourself.
 | `FETCH_INLINE_DEFAULT_CHARS` | `5000` | inline window for a `fetch` result, in characters (500–20000); the model can override it per call with `max_chars`. The full text of a truncated fetch is saved under `<EXEC_WORKDIR>/fetch/` |
 | `HISTORY_TOOL_STUB` | `on` | replace tool results of earlier turns with a short stub **in the request only**. `off` sends every tool result verbatim. The database, the audit trail and `/summary` always keep the full text |
 | `LLM_SUMMARY_MODEL` | empty | route `/summary` and the `/new` hand-off to a second model, written `<provider>:<model>` — `lmstudio` or `openrouter`, and that provider must be configured. Empty keeps the summary on the main client; no failover applies to the routed client |
+| `LLM_SUMMARY_MAX_TOKENS` | `1536` | retry budget for a summary call truncated at its first attempt (`finish_reason == "length"`), range 256–8192, tried exactly once, after which the turn proceeds without a summary rather than blocking the user |
 | `LLM_PRICE_REF_MODEL` | empty | an OpenRouter model id whose list price is used as the **reference price** for local LM Studio calls. Empty leaves local calls unpriced. The resulting cost is an estimate — see [Observability](#observability) |
 | `LLM_PRICE_INPUT_USD_PER_MTOK` | empty | manual price in USD per million input tokens — the fallback when the OpenRouter price list is unreachable |
 | `LLM_PRICE_OUTPUT_USD_PER_MTOK` | empty | manual price in USD per million output tokens. Set both manual prices or neither; `0` is a valid (free) price |
+| `OBS_CAPTURE_CONTENT` | `false` | store message/tool content on trace spans, redacted like everything else. Off by default, so content never leaves the process unless this is explicitly turned on; the dashboard (see [Dashboard](#dashboard)) never serves it either way — this only affects what is written to the database |
+| `DASHBOARD_ENABLED` | `true` | turn the local dashboard on or off; `--no-dashboard` does the same and wins when the two disagree — see [Dashboard](#dashboard) |
+| `DASHBOARD_PORT` | `8765` | port the dashboard binds, range 1024–65535; the bind address itself (`127.0.0.1`) is fixed and not configurable |
 
 ## Run
 
@@ -90,12 +94,18 @@ uv sync --locked
 uv run --locked python bot.py
 ```
 
+`bot.py` also takes `--no-dashboard` (the same run, with the local dashboard
+suppressed — see [Dashboard](#dashboard)) and `--version` (prints
+`tg-agent-bot <version>` to stdout and exits 0, without starting the bot).
+`--version`, `--selftest` and `--selftest-live` are mutually exclusive; only
+`--no-dashboard` combines with the default run.
+
 ## Commands
 
 | Command | Effect |
 |---|---|
 | `/new` | summarize the current conversation, store the summary, start a fresh one |
-| `/status` | uptime, active provider, provider failure counts, exec backend, database size and schema version, loaded skills, and one token line — `Tokens this conversation: in N / out M` |
+| `/status` | uptime, active provider, provider failure counts, exec backend, database size and schema version, loaded skills, a token line — `Tokens this conversation: in N / out M` — and a `Dashboard: <state>` line reporting whether the local dashboard is running |
 | `/stats` | token, cost and tool counters for this conversation and for all time — see [Observability](#observability) |
 | `/summary` | summarize the current conversation on demand and show the five-field rendering |
 | `/model [lmstudio\|openrouter\|auto]` | show or change the provider override; the override survives restarts |
@@ -186,6 +196,31 @@ call is priced through `LLM_PRICE_REF_MODEL`, `/stats`, the reports and the
 dashboard label it as such — "reference price of `<model>` on OpenRouter as of
 `<date>`; local inference is free". The number answers "what would this
 conversation have cost on a cloud model", not "what was spent".
+
+## Dashboard
+
+The bot serves a small live dashboard alongside the polling loop — a
+read-only view over the same `llm_calls`/`tool_calls`/spans data `/stats`
+draws on, reachable from a browser instead of Telegram.
+
+It is **on by default** (`DASHBOARD_ENABLED=true`), binds **loopback-only**
+(`127.0.0.1`, never configurable — this is not meant to be reachable from
+outside the host) on port `DASHBOARD_PORT` (default `8765`), and is
+**read-only**: only `GET`/`HEAD` are accepted, and the server opens nothing
+but read-only database connections.
+
+Open `http://127.0.0.1:8765/` for usage and cost aggregates, `/traces` for
+the list of recent traces with a detail page per trace (a span tree and a
+Gantt-style SVG timeline), and `/tools` for tool health (call counts, error
+rates, latency) — each page also has a JSON twin under `/api/…` for
+scripting. Every response carries the standard security headers, and no
+route ever serves message or tool content, regardless of
+`OBS_CAPTURE_CONTENT` (see [Configure](#configure)) — only counters,
+timings and truncated non-content attributes.
+
+Turn it off with `DASHBOARD_ENABLED=false` or `bot.py --no-dashboard`; the
+flag wins when the two disagree. `/status` reports the dashboard's current
+state on its own line.
 
 ## Switch provider
 
@@ -512,7 +547,7 @@ delivery is not provided and is not claimed.
 | LLM request timeout | `LLM_TIMEOUT_S` = 120 s |
 | rate limit | 10 burst, 1 per 6 s |
 | send retries | 3 attempts |
-| summary output cap | 512 tokens |
+| summary output cap | 512 tokens for the first attempt; on truncation (`finish_reason == "length"`) one retry at `LLM_SUMMARY_MAX_TOKENS`, default 1536 (256–8192) |
 | failover threshold / cooldown | 3 consecutive failures / 300 s |
 
 ## Error behaviour
@@ -535,6 +570,40 @@ delivery is not provided and is not claimed.
 | SIGTERM mid-run | the current round finishes, then the run is interrupted | the "shutting down" fallback, best-effort |
 | rate limit exceeded | rejected before storage | the fixed rate-limit message |
 | message too long | rejected before storage, no bucket token spent | the fixed too-long message |
+
+## Versioning
+
+`pyproject.toml`'s `project.version` is the single source of truth; `bot.py
+--version` prints `tg-agent-bot <version>` to stdout and exits 0. An
+annotated git tag named `v<version>` is created, by convention, on the
+release's final evidence-only commit, once that commit exists — this
+repository's own releases follow that convention but do not pre-empt it,
+so a `v1.6.0` tag does not exist until this release's own final commit
+lands.
+
+**The policy:**
+
+| bump | meaning here |
+|---|---|
+| **MAJOR** | a break in the bot's contract: a command removed or renamed, an environment variable removed or given incompatible semantics, a storage schema change needing manual migration, a tool removed from the exposed set |
+| **MINOR** | a spec release — new capability, new commands, new environment variables, an additive schema migration, new scenarios |
+| **PATCH** | a fix with no new spec: a defect repaired, a pin moved, a document corrected |
+
+**Historic labels**, mapped to SemVer for documentation only — no retroactive
+tags are created and the two existing tags `v1.3` and `v1.3-baseline` stay
+exactly as they are:
+
+| historic label | SemVer | note |
+|---|---|---|
+| v0 | 0.1.0 | the initial spec release |
+| v1 | 1.0.0 | first complete agent |
+| v1.1 | 1.1.0 | |
+| v1.2 | 1.2.0 | |
+| v1.3 | 1.3.0 | tags `v1.3`, `v1.3-baseline` exist |
+| v1.4 | — | no release: RSN-06 STOP, verdict FAIL |
+| v1.5 | 1.5.0 | |
+| v1.5.1 | 1.5.1 | |
+| v1.6.0 | 1.6.0 | this release |
 
 ## Token economy
 
