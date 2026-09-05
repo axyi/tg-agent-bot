@@ -117,6 +117,7 @@ REQ-V160-EC-06.
 | T6 | no | — (matches §14.1: one new self-contained module, same shape as T1) |
 | T7 | no | — (matches §14.1: CLI grammar and server lifecycle interleave with `main()`'s existing startup/shutdown sequence closely enough that a fresh subagent would need to re-derive the T3/T6 control-flow understanding already in hand) |
 | T8 | no | — (matches §14.1: the truncation retry interleaves with `_ask_for_summary`'s existing malformed-JSON repair path and the shared `_record_llm_call` transaction sequence closely enough that a fresh subagent would need to re-derive the T3 control-flow understanding already in hand) |
+| T9 | no | — (matches §14.1: the refusal decision sits directly inside `_execute_tool_calls`'s existing budget/excess branching, small and self-contained enough that direct implementation is cheaper than a delegation round-trip) |
 
 *(filled in per task as the run proceeds)*
 

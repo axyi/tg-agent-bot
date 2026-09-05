@@ -79,6 +79,13 @@ BUDGET_EXHAUSTED_RESULT = json.dumps({"error": "tool budget exhausted for this m
                                                "answer with the information you already have"})
 EXCESS_CALL_RESULT = json.dumps({"error": "too many tool calls in one response; only "
                                           "the first 3 are executed. This call was not executed."})
+# REQ-V160-TQ-04: a model that repeats an identical failing call is stopped
+# in code rather than left to loop. Threshold and envelope are both literal.
+TOOL_REPEAT_REFUSAL_THRESHOLD = 2
+REFUSED_REPEAT_RESULT = json.dumps({
+    "error": "refused: this exact tool call already failed twice in this message; "
+             "report the failure to the user instead of repeating it"
+})
 
 # REQ-V13-PFX-01: the cacheable prefix, compressed to imperative English and
 # kept under 550 characters (measured with `{skill_lines}` removed). Every
@@ -295,6 +302,10 @@ def _run_agent_turn(
     # stays valid until something actually writes a row with it, which is why
     # it is safe to hold across retries within the same round.
     turn_id = storage.next_turn_id(conn, conv_id)
+    # REQ-V160-TQ-04: one user message, one count -- created with the root
+    # span (this function runs once per `run_agent` call) and discarded when
+    # it returns; never persisted, never shared across conversations.
+    repeat_failures: dict[tuple[str, str], int] = {}
 
     while round_no <= ROUND_LIMIT:
         if should_stop():
@@ -387,6 +398,7 @@ def _run_agent_turn(
             normalized, skills=skills, runner=runner, tools_used=tools_used,
             fetcher=fetcher, audit=audit, on_tool=on_tool,
             conn=conn, conv_id=conv_id, turn_id=turn_id,
+            repeat_failures=repeat_failures,
         )
         # REQ-V11-RED-01: the assistant turn is redacted once, before either
         # sink sees it, and the same redacted pair feeds both the database and
@@ -597,6 +609,42 @@ def _stub_head(content: str) -> str:
     return config.strip_secret_fragment(content[:STUB_HEAD_CHARS])
 
 
+def _call_key(call: ToolCall) -> str:
+    """REQ-V160-TQ-04: pre-execution identity of a call -- the vetted wire
+    name, never the model's raw string, plus its canonical arguments."""
+    tool_name = _wire_name(call)
+    canonical = _canonical_arguments(call.arguments)
+    return hashlib.sha256(f"{tool_name}\x00{canonical}".encode()).hexdigest()
+
+
+def _canonical_arguments(raw: str) -> str:
+    """Sorted, separator-normalised JSON when `raw` parses as an object, so
+    key reordering cannot change `_call_key`; the raw string otherwise."""
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw
+    if not isinstance(parsed, dict):
+        return raw
+    return json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _normalized_error_class(result: str) -> str:
+    """Diagnostic-only error class for repeat-failure tracking: the error
+    envelope's `error` value, lower-cased, non-alphanumeric runs collapsed to
+    `_`, stripped, truncated to 64 characters. Only called after
+    `_tool_outcome` has confirmed `result` parses as a dict carrying
+    `error`."""
+    error = json.loads(result)["error"]
+    text = error if isinstance(error, str) else json.dumps(error, ensure_ascii=False)
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:64]
+
+
+def _repeat_failure_count(repeat_failures: dict[tuple[str, str], int], call_key: str) -> int:
+    """Summed over every error class this `call_key` has failed under."""
+    return sum(count for (key, _class), count in repeat_failures.items() if key == call_key)
+
+
 def _execute_tool_calls(
     normalized: list[ToolCall],
     *,
@@ -609,6 +657,7 @@ def _execute_tool_calls(
     conn: sqlite3.Connection,
     conv_id: int,
     turn_id: int,
+    repeat_failures: dict[tuple[str, str], int],
 ) -> tuple[list[tuple[str, str]], int]:
     executable = normalized[:MAX_TOOL_CALLS_PER_RESPONSE]
     excess = normalized[MAX_TOOL_CALLS_PER_RESPONSE:]
@@ -625,7 +674,15 @@ def _execute_tool_calls(
         # REQ-V13-TOO-03: the tool reports its own measurement; only it knows
         # what the stream held before compaction.
         measured: list[OutputSize] = []
-        if tools_used < TOOL_EXECUTION_LIMIT:
+        call_key = _call_key(call)
+        # REQ-V160-TQ-04: decided before the call runs, ahead of the budget
+        # check below -- a call already known to fail twice must not spend
+        # the tool budget on a third identical attempt.
+        if _repeat_failure_count(repeat_failures, call_key) >= TOOL_REPEAT_REFUSAL_THRESHOLD:
+            result = REFUSED_REPEAT_RESULT
+            outcome = "refused_repeat"
+            tools_used += 1  # counts toward TOOL_EXECUTION_LIMIT exactly as an execution would
+        elif tools_used < TOOL_EXECUTION_LIMIT:
             if on_tool is not None:
                 on_tool(call.name, _first_argument(call))
             result = execute_tool(
@@ -634,6 +691,9 @@ def _execute_tool_calls(
             )
             tools_used += 1
             outcome = _tool_outcome(result)
+            if outcome == "error":
+                key = (call_key, _normalized_error_class(result))
+                repeat_failures[key] = repeat_failures.get(key, 0) + 1
         else:
             # `budget` and `rejected` below win over what `_tool_outcome` would
             # say: both envelopes carry an `error`, but the reason the model
@@ -643,12 +703,15 @@ def _execute_tool_calls(
             if root is not None:
                 root.add_limit_hit("TOOL_EXECUTION_LIMIT")
         # REQ-V160-TRC-04: one `execute_tool` span per recorded tool call,
-        # `budget`/`rejected` outcomes included.
+        # `budget`/`rejected`/`refused_repeat` outcomes included.
         with tracing.start_span(
             "execute_tool", tracing.KIND_INTERNAL, sink=sink, conv_id=conv_id, turn_id=turn_id,
         ) as span:
+            if outcome == "refused_repeat":
+                span.set_attribute("tg_agent.tool.fingerprint", call_key[:16])
             _record_tool_call(
-                conn, conv_id, turn_id, call, result, outcome, _elapsed_ms(started),
+                conn, conv_id, turn_id, call, result, outcome,
+                0 if outcome == "refused_repeat" else _elapsed_ms(started),
                 measured[-1] if measured else None, span=span,
             )
         results.append((call.id, result))

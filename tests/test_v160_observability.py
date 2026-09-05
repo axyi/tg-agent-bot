@@ -1315,3 +1315,87 @@ def test_t_v160_tq_03_closed_outcome_vocabulary(conn):
         with pytest.raises(ValueError):
             agent._record_tool_call(conn, conv, 1, call, "{}", "bogus", 0, None, span=span)
     assert len(tool_rows(conn)) == len(agent.TOOL_OUTCOMES)  # the bogus row never landed
+
+
+# ============================================================================
+# T9 -- repeat-call refusal (REQ-V160-TQ-04)
+# ============================================================================
+
+
+def test_t_v160_tq_04_call_key_ignores_argument_key_order(conn):
+    a = tool_call(arguments='{"argv": ["true"], "timeout_s": null}')
+    b = tool_call(index=2, arguments='{"timeout_s": null, "argv": ["true"]}')
+    assert agent._call_key(a) == agent._call_key(b)
+    # A different tool, or different arguments, is a different key.
+    different_tool = tool_call(index=3, name="fetch", arguments=a.arguments)
+    different_args = tool_call(index=4, arguments='{"argv": ["false"]}')
+    assert agent._call_key(different_tool) != agent._call_key(a)
+    assert agent._call_key(different_args) != agent._call_key(a)
+
+
+def test_t_v160_tq_04_third_identical_failure_is_refused_not_executed(conn, monkeypatch):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    call = tool_call(arguments='{"argv": ["true"]}')
+    responses = iter([
+        json.dumps({"error": "docker: no such host"}),
+        json.dumps({"error": "docker: TIMEOUT exceeded!!"}),
+        json.dumps({"exit_code": 0, "stdout": "ok"}),
+    ])
+    calls_made = []
+
+    def fake_execute_tool(name, arguments, **kwargs):
+        calls_made.append((name, arguments))
+        return next(responses)
+
+    monkeypatch.setattr(agent, "execute_tool", fake_execute_tool)
+    repeat_failures: dict[tuple[str, str], int] = {}
+    for _ in range(2):
+        agent._execute_tool_calls(
+            [call], skills={}, runner=RecordingRunner(), tools_used=0,
+            conn=conn, conv_id=conv, turn_id=1, repeat_failures=repeat_failures,
+        )
+    assert len(calls_made) == 2
+    # Two distinct error classes, same call_key -- summed, not the max of either.
+    assert len(repeat_failures) == 2
+    assert sum(repeat_failures.values()) == 2
+
+    results, tools_used = agent._execute_tool_calls(
+        [call], skills={}, runner=RecordingRunner(), tools_used=0,
+        conn=conn, conv_id=conv, turn_id=1, repeat_failures=repeat_failures,
+    )
+    assert len(calls_made) == 2                      # the third call is never dispatched
+    assert results == [(call.id, agent.REFUSED_REPEAT_RESULT)]
+    assert tools_used == 1                            # counts toward TOOL_EXECUTION_LIMIT
+
+    row = tool_rows(conn)[-1]
+    assert row["outcome"] == "refused_repeat"
+    assert row["duration_ms"] == 0
+
+    span_row = conn.execute(
+        "SELECT attributes_json FROM spans "
+        "WHERE name = 'execute_tool exec' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    attrs = json.loads(span_row["attributes_json"])
+    assert attrs["tg_agent.tool.fingerprint"] == agent._call_key(call)[:16]
+
+    # A fresh user message (a fresh dict) starts the count again.
+    agent._execute_tool_calls(
+        [call], skills={}, runner=RecordingRunner(), tools_used=0,
+        conn=conn, conv_id=conv, turn_id=1, repeat_failures={},
+    )
+    assert len(calls_made) == 3
+
+
+def test_t_v160_tq_04_end_to_end_through_run_agent(conn):
+    malformed = tool_call(arguments="not valid json")
+    script = [
+        LLMResponse("", [malformed], "tool_calls"),
+        LLMResponse("", [malformed], "tool_calls"),
+        LLMResponse("", [malformed], "tool_calls"),
+        LLMResponse("done", [], "stop"),
+    ]
+    reply, llm, conv = run(conn, script)
+    assert reply == "done"
+    rows = tool_rows(conn)
+    assert [r["outcome"] for r in rows] == ["error", "error", "refused_repeat"]
+    assert rows[-1]["duration_ms"] == 0
