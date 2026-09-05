@@ -620,3 +620,245 @@ def test_error_pages_each_wrap_one_fixed_string():
     assert "invalid host" in dashboard_render.invalid_host_page()
     assert "boom" in dashboard_render.error_page("boom")
     assert "<html" in dashboard_render.error_page("boom")
+
+
+# ============================================================================
+# T6 -- dashboard_server.py (REQ-V160-API-01..06, SRV-01..11)
+# ============================================================================
+
+import http.client  # noqa: E402 -- appended block, module-level import style matches T4
+import socket  # noqa: E402
+import threading  # noqa: E402
+
+import dashboard_server  # noqa: E402
+
+USER_ID = 424242
+
+
+def _loopback_getaddrinfo(host, port, *args, **kwargs):
+    """`tests/conftest.py`'s `no_dns` guard bars every DNS lookup by default
+    (REQ-V12-OFF-01); a server test binding real port 0 on 127.0.0.1
+    (REQ-V160-TST-01) must inject its own stub for that one literal address,
+    per the guard's own docstring -- never the real resolver."""
+    if host != "127.0.0.1":
+        raise AssertionError(f"unexpected DNS lookup: {host}")
+    return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", int(port)))]
+
+
+def _write_pyproject_stub(tmp_path):
+    """`_project_version()` reads `config.PROJECT_ROOT / "pyproject.toml"`
+    (REQ-V160-VER-01); `isolated_project_root` (autouse, conftest.py) points
+    `PROJECT_ROOT` at `tmp_path` for every test, so a server test that
+    exercises `/api/health` needs its own stub file there."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.6.0"\n', encoding="utf-8")
+
+
+@pytest.fixture
+def live_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", _loopback_getaddrinfo)
+    _write_pyproject_stub(tmp_path)
+    db_path = tmp_path / "srv.db"
+    conn = storage.connect(db_path)
+    storage.init_schema(conn)
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    storage.add_user_message(conn, conv, "hello")
+    conn.close()
+
+    server = dashboard_server.build_server(db_path=db_path, port=0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield port, db_path
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def _request(port, method, path, *, host=None, extra_headers=None):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        headers = {"Host": host if host is not None else f"127.0.0.1:{port}"}
+        if extra_headers:
+            headers.update(extra_headers)
+        conn.request(method, path, headers=headers)
+        resp = conn.getresponse()
+        body = resp.read()
+        return resp.status, dict(resp.getheaders()), body
+    finally:
+        conn.close()
+
+
+SECURITY_HEADER_NAMES = (
+    "Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy", "Cache-Control",
+)
+
+
+def test_t_v160_srv_03_bind_address_is_fixed_loopback():
+    assert dashboard_server.DASHBOARD_BIND == "127.0.0.1"
+
+
+def test_t_v160_srv_05_security_headers_on_200_404_405_400(live_server):
+    port, _ = live_server
+    for method, path, host, expected in [
+        ("GET", "/api/health", None, 200),
+        ("GET", "/nope", None, 404),
+        ("POST", "/", None, 405),
+        ("GET", "/api/usage?group=nope", None, 400),
+    ]:
+        status, headers, _ = _request(port, method, path, host=host)
+        assert status == expected, (method, path)
+        for name in SECURITY_HEADER_NAMES:
+            assert name in headers, (method, path, name)
+        assert "Set-Cookie" not in headers
+
+
+def test_t_v160_srv_03_405_carries_allow_header(live_server):
+    port, _ = live_server
+    for method in ("POST", "PUT", "DELETE", "OPTIONS", "PATCH"):
+        status, headers, _ = _request(port, method, "/")
+        assert status == 405
+        assert headers.get("Allow") == "GET, HEAD"
+
+
+def test_n4_unlisted_paths_are_404_no_traversal_no_normalisation(live_server):
+    port, _ = live_server
+    for path in (
+        "/../etc/passwd", "/traces/../..", "/api/usage/../health", "/tools/",
+        "/index.html", "/%2e%2e/",
+    ):
+        status, _, _ = _request(port, "GET", path)
+        assert status == 404, path
+
+
+def test_t_v160_srv_10_host_header_rejected_cases(live_server):
+    port, _ = live_server
+    good = f"127.0.0.1:{port}"
+    for bad_host in (f"evil.example.com:{port}", f"127.0.0.1:{port}@evil", "localhost:%d" % port):
+        status, headers, body = _request(port, "GET", "/", host=bad_host)
+        assert status == 400
+        for name in SECURITY_HEADER_NAMES:
+            assert name in headers
+        # the rejected Host value is never logged or echoed
+        assert "evil" not in body.decode("utf-8", "ignore")
+    status, _, _ = _request(port, "GET", "/", host=good)
+    assert status == 200
+
+
+def test_n5_bad_params_400_names_only_the_parameter(live_server):
+    port, _ = live_server
+    cases = [
+        "/api/usage?group=nope", "/api/usage?since=2026-13-45", "/api/usage?since=yesterday",
+        "/api/traces?limit=0", "/api/traces?limit=9999", "/api/traces?conv=-1",
+        "/api/usage?unknown=1", "/api/usage?group=model&group=day",
+    ]
+    for path in cases:
+        status, _, body = _request(port, "GET", path)
+        assert status == 400, path
+        payload = json.loads(body)
+        assert payload["error"] == "invalid parameter"
+        assert "parameter" in payload
+        # the offending VALUE must never appear in the body
+        for needle in ("nope", "2026-13-45", "yesterday", "9999", "-1"):
+            if needle in path:
+                assert needle not in body.decode("utf-8")
+
+
+def test_t_v160_api_01_health_shape(live_server):
+    port, _ = live_server
+    status, headers, body = _request(port, "GET", "/api/health")
+    assert status == 200
+    assert headers["Content-Type"] == "application/json; charset=utf-8"
+    payload = json.loads(body)
+    assert set(payload.keys()) == {
+        "status", "version", "schema_version", "spans", "spans_dropped", "traces", "generated_at",
+    }
+    assert payload["status"] == "ok"
+    assert payload["schema_version"] == storage.SCHEMA_VERSION
+
+
+def test_t_v160_api_02_unknown_trace_id_is_404_not_empty_200(live_server):
+    port, _ = live_server
+    status, _, body = _request(port, "GET", "/api/traces/" + "a" * 32)
+    assert status == 404
+    status, _, _ = _request(port, "GET", "/traces/" + "a" * 32)
+    assert status == 404
+
+
+def test_t_v160_api_03_json_is_sorted_and_ascii_false(live_server):
+    port, _ = live_server
+    _, _, body = _request(port, "GET", "/api/health")
+    text = body.decode("utf-8")
+    # sort_keys=True + compact separators: no space after the colon
+    assert '":' in text or ":" in text
+    payload = json.loads(text)
+    assert list(payload.keys()) == sorted(payload.keys())
+
+
+def test_t_v160_srv_06_missing_database_is_503(tmp_path, monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", _loopback_getaddrinfo)
+    _write_pyproject_stub(tmp_path)
+    db_path = tmp_path / "does-not-exist.db"
+    server = dashboard_server.build_server(db_path=db_path, port=0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, headers, _ = _request(port, "GET", "/api/health")
+        assert status == 503
+        for name in SECURITY_HEADER_NAMES:
+            assert name in headers
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_t_v160_srv_06_connect_readonly_cannot_write(live_server):
+    port, db_path = live_server
+    conn = storage.connect_readonly(db_path)
+    try:
+        with pytest.raises(sqlite3.Error):
+            conn.execute("INSERT INTO conversations (tg_user_id, created_at) VALUES (1, 'x')")
+    finally:
+        conn.close()
+
+
+def test_t_v160_dsh_08_head_matches_get_headers_empty_body(live_server):
+    port, _ = live_server
+    get_status, get_headers, get_body = _request(port, "GET", "/api/health")
+    head_status, head_headers, head_body = _request(port, "HEAD", "/api/health")
+    assert head_status == get_status
+    assert head_headers.get("Content-Length") == get_headers.get("Content-Length")
+    assert head_body == b""
+
+
+def test_api_traces_and_usage_pages_render(live_server):
+    port, _ = live_server
+    for path in ("/", "/traces", "/tools", "/api/usage", "/api/traces", "/api/tools"):
+        status, _, _ = _request(port, "GET", path)
+        assert status == 200, path
+
+
+def test_a_trace_page_and_api_serve_real_spans(live_server):
+    port, db_path = live_server
+    conn = storage.connect(db_path)
+    trace_id = "b" * 32
+    storage.add_span(
+        conn, trace_id=trace_id, span_id="1" * 16, parent_span_id=None, conv_id=1,
+        turn_id=None, name="invoke_agent tg-agent-bot", kind="INTERNAL",
+        ts=storage.utc_now_iso(), start_ns=0, duration_ms=5, status="ok",
+        status_message=None, attributes_json=json.dumps({"gen_ai.conversation.id": 1}),
+    )
+    conn.close()
+    status, _, body = _request(port, "GET", f"/api/traces/{trace_id}")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["trace_id"] == trace_id
+    assert len(payload["spans"]) == 1
+    assert "status_message" not in payload["spans"][0]
+
+    status, _, html_body = _request(port, "GET", f"/traces/{trace_id}")
+    assert status == 200
+    assert b"<script" not in html_body

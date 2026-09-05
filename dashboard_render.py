@@ -61,6 +61,11 @@ def esc(value: Any) -> str:
 # information in text, so removing colour never loses information
 # ----------------------------------------------------------------------------
 
+# REQ-V160-API-05: a safety bound for a malformed database, never a cap a
+# legitimate trace can reach (the agent's own limits bound a legitimate
+# trace at 35 spans -- T6 asserts 35 <= this constant).
+MAX_SPANS_PER_TRACE = 64
+
 PALETTE: dict[str, str] = {
     "kind_internal": "#8b95a3",
     "kind_client": "#3f7fd0",
