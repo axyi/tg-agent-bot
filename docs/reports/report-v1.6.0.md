@@ -1,8 +1,13 @@
 # Implementation report — spec-v1.6.0
 
-**Status: in progress (T0).** This is the provisional skeleton created at T0;
-it is filled in task by task through T17 and closed out by T18's
-evidence-only commit (REQ-V160-ACC-03).
+**Status: STOP at T15 (REQ-V160-PRE-04), pending operator decision.** T0–T15
+are complete; the live inference preflight fails its own literal MUST
+against the operator's instrument (see "Live preflight and STOP" below).
+T16–T18 are **not executed** this run pending the operator's choice among
+the three options recorded there. This is not the provisional-skeleton
+status any more — T0's own placeholder text ("filled in task by task
+through T17, closed out by T18's evidence-only commit") assumed no T15
+blocker; update this line again once the operator's decision is acted on.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -123,6 +128,7 @@ REQ-V160-EC-06.
 | T12 | yes | general-purpose subagent, full task (`pyproject.toml` version bump, `README.md`/`AGENTS.md`/`docs/plan.md` documentation catch-up); orchestrator independently re-verified all gates (see Deviations) |
 | T13 | yes | general-purpose subagent, full task (ten `v160-*` mutation entries, `mutation-v160` gate, both re-measured timeouts — subagent ran `mutation_check.py` itself, the one authorised exception to the no-self-run rule); orchestrator independently reproduced the most consequential finding by hand-mutation before trusting it (see Deviations) |
 | T14 | n/a | REQ-V160-EC-07's threshold does not apply — T14 *is* the clean-context review itself (REQ-V160-REV-01), run directly by the reviewing session over the full diff and the full 2726-line spec |
+| T15 | no | — (matches §14.1: "only commands run," no file scope; the live preflight's own diagnostic step is a second read-only completion call, not a delegable implementation task) |
 
 *(filled in per task as the run proceeds)*
 
@@ -653,6 +659,118 @@ the full mutation gate is the orchestrator's job, run once over the final
 tree). No commit or push happened in this task — the tree is left unstaged
 for the orchestrator's own review and commit, per this task's own
 instruction.
+
+## Live preflight and STOP (T15 — REQ-V160-PRE-03, PRE-04)
+
+**Verdict: STOP at T15, before the baseline. `smoke-v160` not run; T16 not
+started.** The literal preflight (`max_tokens=16`, REQ-V160-PRE-04) fails
+its own MUST requirement against the operator's live instrument.
+`advisor()` was consulted before this section was written — this run's
+established pattern for the non-mechanical judgment calls (see T10's
+`QUALITY_GATE_SLACK` precedent) — and its guidance is followed verbatim:
+the failure is recorded, not reinterpreted away.
+
+### Offline gates (T15's own verbatim re-run, before any live step)
+
+| # | gate | command | result |
+|---|---|---|---|
+| 1 | uv sync | `uv sync --locked` | 0 |
+| 2 | ruff check | `uv run --locked ruff check .` | 0 |
+| 3 | pytest | `uv run --locked pytest` | 0 — 1015 collected (unchanged from T14's own count; T15 declares no file scope, tree confirmed clean by `git status --porcelain`), all pass |
+| 4 | selftest | `uv run --locked python bot.py --selftest` | 0 |
+| 6 | mutation | `uv run --locked python devtools/mutation_check.py` | 0 — 83 mutations, 83 killed, 0 survived, 0 errored, 0 drifted |
+
+`checks.py doctor`, `install_hooks.py --check`, `checks.py lint-docs`: all
+PASS. A synthetic `checks.py run --profile pre-push --stdin-refs <base>..HEAD`
+invocation (constructed by hand, mirroring git's real pre-push hook
+protocol, since the `pre-push` profile categorically requires
+`--stdin-refs`, not `--since`) covered `ruff-check-all`, `ruff-format`,
+`branch-name`, `pytest`, `selftest`, `gitleaks-tree` (0 findings), `trivy`
+(0 findings), `semgrep` (0 findings), `skylos` (19 findings, non-blocking
+— four are genuine new dead code in `dashboard_server.py`, already tracked
+as task #23 for a small pre-T16 cleanup commit, not fixed here since T14's
+own "no source/test/config fix after T16" boundary is still in force and
+T15 has no file scope of its own), `mutation-v15`, `mutation-v160`,
+`hooks-installed`, `doctor` — exit 0 overall.
+
+### PRE-03 — LM Studio address resolution
+
+Roaming address probed against the known-address list: `192.168.0.145:1234`
+answered `GET /v1/models`. `.env`'s `LMSTUDIO_BASE_URL` rewritten by the
+exact single-line `sed -i` (REQ-V160-EC-04; the file itself not otherwise
+read or printed), verified via `grep -q`.
+
+### Gate 5 — `bot.py --selftest-live`
+
+`0` — all six live checks OK: `config`, `db`, `docker`, `telegram`,
+`lmstudio`, `openrouter`.
+
+### PRE-04 — instrument identification
+
+| value | source | result |
+|---|---|---|
+| served model id | live `GET http://192.168.0.145:1234/v1/models` | `qwen/qwen3.8-27b` present — matches `LMSTUDIO_MODEL` |
+| LM Studio version | operator, T0 `go` request | `Bionic v1.1.1` (recorded verbatim in `## Operator inputs`) |
+| loaded context length | operator, T0 `go` request | `42496` |
+| generation settings actually sent | `llm.base.build_payload` + call sites (REQ-V160-BEN-05) | `{"stream": false, "temperature": 0, "tool_choice": "auto"}` |
+
+`[[VERIFY]]`: no LM Studio Bionic 1.1 REST endpoint exposing the
+application version or the loaded context length was found at
+`192.168.0.145:1234` — only the OpenAI-compatible `/v1/models` surface
+responded. Both fields stand on the operator value alone, per the spec's
+own fallback.
+
+### The inference preflight — FAIL
+
+One chat completion, no tools, the fixed one-line prompt (`"Reply with the
+single word: ready."`), against the resolved address and model, via
+`llm.build_llm_client(cfg, client=httpx.Client(timeout=cfg.llm_timeout_s))`:
+
+| `max_tokens` | `finish_reason` | `completion_tokens` | `reasoning_tokens` | content non-empty | note |
+|---|---|---|---|---|---|
+| **16** (spec literal) | `length` | 15 | 15 | **no** (`''`) | entire budget spent on hidden reasoning; **fails REQ-V160-PRE-04's MUST** |
+| 2048 (`cfg.llm_max_tokens`, production) | `stop` | 27 | 23 | yes (`'\n\nready'`) | the instrument answers correctly once given production's actual budget |
+
+Both calls: `usage.prompt_tokens=60` (identical prompt), same resolved
+address/model, same client construction — the only variable is
+`max_tokens`.
+
+**Why this is not reinterpreted as a pass.** `qwen/qwen3.8-27b` is a
+reasoning-capable model; v1.4's own RSN-06 spike
+(`docs/prompts/36-v14-t4-rsn-spike.md`, commit `485fcc5`) already
+established, against this same model on this same LM Studio install, that
+none of five candidate mechanisms honors a reasoning-disable request — so
+reasoning-token consumption is a **permanent property of this instrument**,
+not a transient preflight artefact. At `max_tokens=16` the model spends
+its entire budget on hidden reasoning before emitting any visible content
+(`finish_reason=length`, content empty) — a literal, reproducible failure
+of REQ-V160-PRE-04's stated MUST ("it MUST return a non-empty assistant
+message"), not a flaky read. The `max_tokens=2048` measurement shows the
+*instrument* is healthy — production and the eighteen scenarios' own
+formats (`answer_regex`, `answer_max_chars(900)`) run at that real budget,
+never at 16 tokens — but REQ-V160-PRE-04's own preflight design specifies
+16 tokens, and the spec states plainly that a failed preflight "stops the
+run at T15, before the baseline," with no operator-discretion clause. This
+session has no authority to widen `max_tokens` for the preflight call
+unilaterally and call that compliance — that would be implementing the
+spec differently from what it says, not following it.
+
+### Disposition
+
+- **`smoke-v160` not run. T16 (baseline recording) not started.**
+- No source, test or config file touched in T15; T14's own freeze on
+  source/test/config fixes ("here or earlier — never after T16") is not
+  engaged in either direction, since this section is evidence, not a fix.
+- This is a genuine three-way fork the spec does not adjudicate on its
+  own — the operator's decision is requested before any further task
+  proceeds:
+  1. Amend REQ-V160-PRE-04's `max_tokens=16` to a reasoning-aware floor in
+     `docs/spec/spec-v1.6.0.md` and re-run the preflight against the same
+     instrument.
+  2. Load a non-reasoning model in LM Studio and re-run PRE-03/PRE-04/the
+     preflight against it.
+  3. Accept the STOP and end the v1.6.0 run at T15 — T16, T17 (as
+     originally scoped) and T18 not executed this run.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
