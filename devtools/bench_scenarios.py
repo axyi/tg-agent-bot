@@ -24,10 +24,11 @@ NO_TOOLS = "no_tools"
 JSON_KEYS = "json_keys"
 EXIT_CODE_SEEN = "exit_code_seen"
 SUMMARY_EXISTS = "summary_exists"
+TOOL_CALLS_MAX = "tool_calls_max"
 
 KINDS = (
     ANSWER_REGEX, ANSWER_NOT_REGEX, ANSWER_MAX_CHARS, TOOL_USED,
-    NO_TOOLS, JSON_KEYS, EXIT_CODE_SEEN, SUMMARY_EXISTS,
+    NO_TOOLS, JSON_KEYS, EXIT_CODE_SEEN, SUMMARY_EXISTS, TOOL_CALLS_MAX,
 )
 # The kinds that address one answer; the rest are about the whole run. A check
 # of these kinds without a `turn` could never find an answer and so could never
@@ -52,6 +53,7 @@ class Check:
     tool: str = ""
     json_pairs: tuple[tuple[str, object], ...] = ()
     nonzero: bool = True
+    max_calls: int = 0
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
@@ -84,6 +86,12 @@ def json_keys(expected: Mapping[str, object], turn: int = LAST_TURN) -> Check:
 
 def exit_code_seen(nonzero: bool = True) -> Check:
     return Check(kind=EXIT_CODE_SEEN, nonzero=nonzero)
+
+
+def tool_calls_max(n: int) -> Check:
+    if n < 1:
+        raise ValueError(f"tool_calls_max requires n >= 1, got {n}")
+    return Check(kind=TOOL_CALLS_MAX, max_calls=n)
 
 
 # The two kinds that take no argument are values, not factories, so that the
@@ -260,6 +268,94 @@ SCENARIOS: list[Scenario] = [
         ],
         checks=[answer_regex("Orion", turn=2), summary_exists],
     ),
+    Scenario(
+        id="S13",
+        title="multi-step-exec",
+        turns=[
+            "Через exec создай файл calc.py, который печатает сумму целых "
+            "чисел от 1 до 100. Затем вторым вызовом exec запусти его через "
+            "python3 и назови полученное число.",
+        ],
+        checks=[tool_used("exec"), answer_regex(r"\b5050\b"), tool_calls_max(4)],
+    ),
+    Scenario(
+        id="S14",
+        title="error-recovery",
+        turns=[
+            "Выполни через exec ровно этот argv: "
+            '["python3", "-c", "print(2 ** )"]. В нём синтаксическая ошибка. '
+            "Исправь её так, чтобы печаталось 2 в степени 10, перезапусти и "
+            "назови результат одним числом.",
+        ],
+        checks=[
+            tool_used("exec"),
+            exit_code_seen(nonzero=True),
+            answer_regex(r"\b1024\b"),
+            tool_calls_max(4),
+        ],
+    ),
+    Scenario(
+        id="S15",
+        title="big-output-answer",
+        turns=[
+            "Через exec выведи числа от 1 до 1000, по одному в строке. Вывод "
+            "будет обрезан. Всё равно определи, сколько всего строк было "
+            "выведено, и назови это число.",
+        ],
+        checks=[
+            tool_used("exec"),
+            answer_regex(r"\b1000\b"),
+            answer_max_chars(900),
+            tool_calls_max(3),
+        ],
+    ),
+    Scenario(
+        id="S16",
+        title="skill-then-exec",
+        turns=[
+            "Загрузи скилл host-info и выполни ту команду, которую он "
+            "предписывает для версии Python. Назови только номер версии.",
+        ],
+        checks=[
+            tool_used("load_skill"),
+            tool_used("exec"),
+            answer_regex(r"\b3\.\d+(\.\d+)?\b"),
+            tool_calls_max(4),
+        ],
+    ),
+    Scenario(
+        id="S17",
+        title="fetch-then-exec",
+        turns=[
+            "Сделай fetch на https://wttr.in/Berlin?format=3, затем через exec "
+            "посчитай, сколько символов в полученной строке. Ответь так: "
+            "сначала слово Berlin, затем число символов.",
+        ],
+        checks=[
+            tool_used("fetch"),
+            tool_used("exec"),
+            answer_regex("Berlin|Берлин"),
+            answer_regex(r"\b\d{1,4}\b"),
+            tool_calls_max(4),
+        ],
+        network=True,
+    ),
+    Scenario(
+        id="S18",
+        title="multi-turn-summary",
+        turns=[
+            "Запомни: проект называется Vega, дедлайн 3 ноября.",
+            "Как называется проект? Ответь одним словом.",
+            "Какой дедлайн? Ответь одной строкой.",
+            "/new",
+        ],
+        checks=[
+            answer_regex("Vega|Вега", turn=2),
+            answer_regex(r"3\s*нояб|11", turn=3),
+            summary_exists,
+            tool_calls_max(3),
+        ],
+    ),
 ]
 
 
@@ -269,6 +365,15 @@ def _validate_catalog(scenarios: list[Scenario]) -> None:
         if scenario.id in seen:
             raise ValueError(f"duplicate scenario id: {scenario.id}")
         seen.add(scenario.id)
+        distinct_tools = {check.tool for check in scenario.checks if check.kind == TOOL_USED}
+        for check in scenario.checks:
+            if check.kind != TOOL_CALLS_MAX:
+                continue
+            if check.max_calls < len(distinct_tools):
+                raise ValueError(
+                    f"{scenario.id}: tool_calls_max({check.max_calls}) is below "
+                    f"the {len(distinct_tools)} distinct tool_used check(s)"
+                )
 
 
 _validate_catalog(SCENARIOS)

@@ -303,6 +303,11 @@ def _evaluate(check, scenario: Scenario, obs: Observation) -> dict:
     if kind == bench_scenarios.SUMMARY_EXISTS:
         goals = [goal for goal in obs.summary_goals if goal.strip()]
         return _outcome(bool(goals), f"{len(obs.summary_goals)} summary row(s), no goal")
+    if kind == bench_scenarios.TOOL_CALLS_MAX:
+        count = len(obs.tool_rows)
+        return _outcome(
+            count <= check.max_calls, f"{count} tool call(s) > max {check.max_calls}"
+        )
 
     answer = _answer_for(check, scenario, obs)
     if answer is None:
