@@ -1395,7 +1395,10 @@ def test_selftest_live_argv_is_accepted(monkeypatch, capsys):
     monkeypatch.setattr(bot, "run_selftest_live", lambda: 0)
     assert bot.main(["--selftest-live"]) == 0
     assert bot.main(["--nope"]) == 2
-    assert "usage: bot.py [--selftest|--selftest-live]" in capsys.readouterr().out
+    assert (
+        "usage: bot.py [--selftest|--selftest-live|--version] [--no-dashboard]"
+        in capsys.readouterr().out
+    )
 
 
 def test_selftest_writes_nothing_under_the_project_root(monkeypatch):

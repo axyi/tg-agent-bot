@@ -862,3 +862,148 @@ def test_a_trace_page_and_api_serve_real_spans(live_server):
     status, _, html_body = _request(port, "GET", f"/traces/{trace_id}")
     assert status == 200
     assert b"<script" not in html_body
+
+
+# ============================================================================
+# T7 -- config.py (DASHBOARD_ENABLED/PORT), bot.py CLI grammar and server
+# start/stop wiring (REQ-V160-SRV-01, -02, -07, -09, VER-01, -02)
+# ============================================================================
+
+import bot as bot_module  # noqa: E402
+import config  # noqa: E402
+
+
+def test_t_v160_srv_01_dashboard_port_validation():
+    for bad in ("80", "70000", "abc"):
+        with pytest.raises(config.ConfigError, match="DASHBOARD_PORT"):
+            config.load_config(env={**base_env_for_config(), "DASHBOARD_PORT": bad},
+                                load_env_file=False)
+    cfg = config.load_config(env=base_env_for_config(), load_env_file=False)
+    assert cfg.dashboard_port == 8765
+    assert cfg.dashboard_enabled is True
+
+
+def base_env_for_config():
+    return {
+        "TELEGRAM_BOT_TOKEN": "123456789:sentinel-token-for-t7-tests",
+        "ALLOWED_TG_IDS": "1",
+        "LLM_PROVIDER": "lmstudio",
+        "LMSTUDIO_MODEL": "m",
+    }
+
+
+def test_t_v160_srv_02_dashboard_enabled_false_and_flag_disable(monkeypatch, tmp_path):
+    _write_pyproject_stub(tmp_path)
+    cfg = make_cfg_for_bot(tmp_path, dashboard_enabled=False)
+    monkeypatch.setattr(bot_module, "load_config", lambda: cfg)
+    _stub_bot_startup(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(bot_module, "poll_loop", lambda **kw: captured.update(kw) or 0)
+    assert bot_module.main([]) == 0
+    assert captured["dashboard_status"] == "off (DASHBOARD_ENABLED=false)"
+
+    cfg2 = make_cfg_for_bot(tmp_path, dashboard_enabled=True)
+    monkeypatch.setattr(bot_module, "load_config", lambda: cfg2)
+    captured2 = {}
+    monkeypatch.setattr(bot_module, "poll_loop", lambda **kw: captured2.update(kw) or 0)
+    assert bot_module.main(["--no-dashboard"]) == 0
+    assert captured2["dashboard_status"] == "off (--no-dashboard)"
+
+
+def make_cfg_for_bot(tmp_path, **overrides):
+    fields = {
+        "telegram_bot_token": "123456789:sentinel-token-for-t7-tests",
+        "allowed_tg_ids": frozenset({1}),
+        "llm_provider": "lmstudio",
+        "lmstudio_base_url": "http://localhost:1234/v1",
+        "lmstudio_model": "m",
+        "openrouter_api_key": "",
+        "openrouter_model": "",
+        "llm_timeout_s": 240.0,
+        "exec_workdir": tmp_path / "sandbox",
+        "db_path": tmp_path / "bot_t7.db",
+        "audit_log_path": tmp_path / "audit.jsonl",
+    }
+    fields.update(overrides)
+    return config.Config(**fields)
+
+
+def _stub_bot_startup(monkeypatch):
+    monkeypatch.setattr(bot_module.tools, "load_skills", lambda path: {})
+    monkeypatch.setattr(bot_module.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(
+        bot_module, "build_llm_client", lambda cfg, *, client, override=None, purpose=None: object()
+    )
+    monkeypatch.setattr(bot_module, "exec_backend_status", lambda: (None, False))
+    monkeypatch.setattr(bot_module, "_startup_docker_wiring", lambda cfg, docker_ok: (False, None))
+    monkeypatch.setattr(bot_module.signal, "signal", lambda signum, handler: None)
+    monkeypatch.setattr(
+        bot_module, "build_cost_resolver", lambda conn, cfg, client: (lambda *a, **k: (None, None))
+    )
+
+
+def test_t_v160_srv_03_bind_address_never_configurable(monkeypatch, tmp_path):
+    _write_pyproject_stub(tmp_path)
+    cfg = make_cfg_for_bot(tmp_path, dashboard_port=0)
+    monkeypatch.setattr(bot_module, "load_config", lambda: cfg)
+    _stub_bot_startup(monkeypatch)
+    monkeypatch.setattr(socket, "getaddrinfo", _loopback_getaddrinfo)
+    captured = {}
+    monkeypatch.setattr(bot_module, "poll_loop", lambda **kw: captured.update(kw) or 0)
+    assert bot_module.main([]) == 0
+    assert captured["dashboard_status"].startswith("http://127.0.0.1:")
+
+
+def test_t_v160_srv_04_selftest_binds_nothing(monkeypatch):
+    def _forbidden_bind(self, address, *a, **k):
+        raise AssertionError(f"unexpected bind: {address!r}")
+
+    monkeypatch.setattr(socket.socket, "bind", _forbidden_bind)
+    monkeypatch.setattr(bot_module, "run_selftest", lambda: 0)
+    assert bot_module.main(["--selftest"]) == 0
+
+
+def test_t_v160_srv_09_status_line_each_state(tmp_path):
+    conn = storage.connect(tmp_path / "status.db")
+    storage.init_schema(conn)
+    cfg = make_cfg_for_bot(tmp_path)
+    for status_value in (
+        "http://127.0.0.1:8765/", "off (--no-dashboard)",
+        "off (DASHBOARD_ENABLED=false)", "off (bind failed)",
+    ):
+        rendered = bot_module._render_status(
+            conn, cfg, object(), {}, None, False, None, 1, status_value
+        )
+        lines = rendered.splitlines()
+        assert len(lines) == 8
+        assert lines[-1] == f"Dashboard: {status_value}"
+    conn.close()
+
+
+def test_n9_usage_errors_exit_2(monkeypatch):
+    for bad_args in (
+        ["--selftest", "--version"], ["--selftest", "--no-dashboard"],
+        ["--no-dashboard", "--no-dashboard"], ["extra"], ["--bogus"],
+    ):
+        assert bot_module.main(bad_args) == 2
+
+
+def test_t_v160_ver_01_version_matches_pyproject(tmp_path, monkeypatch, capsys):
+    # `bot.py` does `from config import PROJECT_ROOT` -- a snapshot at import
+    # time, a separate binding from `config.PROJECT_ROOT` -- so the autouse
+    # `isolated_project_root` fixture (which only patches the latter) does not
+    # reach it; `bot.PROJECT_ROOT` needs its own patch, same as
+    # `tests/test_v1_guardrails.py:1166` already does for the same reason.
+    monkeypatch.setattr(bot_module, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "9.9.9"\n', encoding="utf-8")
+    assert bot_module.main(["--version"]) == 0
+    out = capsys.readouterr().out
+    assert out == "tg-agent-bot 9.9.9\n"
+
+
+def test_n10_version_with_missing_key_is_a_clean_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(bot_module, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    assert bot_module.main(["--version"]) == 2
+    err = capsys.readouterr().err
+    assert "pyproject.toml" in err

@@ -17,7 +17,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -25,6 +27,7 @@ import httpx
 
 import agent
 import config
+import dashboard_server
 import metrics
 import storage
 import tools
@@ -58,7 +61,7 @@ NOTHING_TO_SUMMARIZE_REPLY = "Nothing to summarize yet."
 MODEL_USAGE_REPLY = "Usage: /model [lmstudio|openrouter|auto]"
 STATUS_WORKING = "⚙️ working…"
 STATUS_DONE = "✅ done"
-USAGE = "usage: bot.py [--selftest|--selftest-live]"
+USAGE = "usage: bot.py [--selftest|--selftest-live|--version] [--no-dashboard]"
 
 log = logging.getLogger("bot")
 
@@ -604,6 +607,7 @@ def process_update(
     set_provider: Callable[[str | None], object] | None = None,
     resolve_cost: CostResolver | None = None,
     summary_llm=None,
+    dashboard_status: str = "off (--no-dashboard)",
 ) -> None:
     if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
         log.warning("update without a usable update_id ignored")
@@ -662,7 +666,7 @@ def process_update(
         if name == "/status":
             _send(tg, chat_id, split_message(_render_status(
                 conn, cfg, llm, skills, docker_version, docker_ok,
-                load_provider_override(conn), from_id,
+                load_provider_override(conn), from_id, dashboard_status,
             )))
             return
         if name == "/stats":
@@ -782,6 +786,7 @@ def _render_status(
     docker_ok: bool,
     override: str | None,
     from_id: int,
+    dashboard_status: str = "off (--no-dashboard)",
 ) -> str:
     here = metrics.conversation_stats(conn, storage.active_conversation_id(conn, from_id))
     uptime = max(0, int(time.monotonic() - _started_at))
@@ -799,7 +804,8 @@ def _render_status(
         f"Exec backend: {backend}\n"
         f"DB: {db_size} bytes, schema v{storage.schema_version(conn)}\n"
         f"Skills: {len(skills)} loaded\n"
-        f"Tokens this conversation: in {here.tokens_in or 0} / out {here.tokens_out or 0}"
+        f"Tokens this conversation: in {here.tokens_in or 0} / out {here.tokens_out or 0}\n"
+        f"Dashboard: {dashboard_status}"
     )
 
 
@@ -981,6 +987,7 @@ def poll_loop(
     get_llm: Callable[[], object] | None = None,
     resolve_cost: CostResolver | None = None,
     summary_llm=None,
+    dashboard_status: str = "off (--no-dashboard)",
 ) -> int:
     raw = storage.get_state(conn, "last_update_id")
     offset = int(raw) + 1 if raw is not None else None
@@ -1021,6 +1028,7 @@ def poll_loop(
                     set_provider=set_provider,
                     resolve_cost=resolve_cost,
                     summary_llm=summary_llm,
+                    dashboard_status=dashboard_status,
                 )
                 if isinstance(update, dict) and isinstance(update.get("update_id"), int):
                     offset = update["update_id"] + 1
@@ -1328,6 +1336,34 @@ def _live_openrouter(cfg: Config, client: httpx.Client) -> int:
     return 0
 
 
+def _read_version() -> str:
+    """REQ-V160-VER-01: `pyproject.toml`'s `project.version` is the single
+    source of truth, read fresh (never cached, never a literal here)."""
+    path = PROJECT_ROOT / "pyproject.toml"
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+        return data["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(f"cannot read version from {path}: {exc}") from exc
+
+
+def _print_version() -> int:
+    try:
+        version = _read_version()
+    except RuntimeError as exc:
+        print(redact(str(exc)), file=sys.stderr)
+        return 2
+    print(f"tg-agent-bot {version}")
+    return 0
+
+
+# REQ-V160-VER-03: --selftest, --selftest-live and --version are mutually
+# exclusive; only --no-dashboard combines, and only with the default run.
+_EXCLUSIVE_FLAGS = frozenset({"--selftest", "--selftest-live", "--version"})
+_KNOWN_FLAGS = _EXCLUSIVE_FLAGS | {"--no-dashboard"}
+
+
 def main(argv: list[str] | None = None) -> int:
     global _started_at
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -1336,13 +1372,24 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         stream=sys.stderr,
     )
-    if arguments == ["--selftest"]:
-        return run_selftest()
-    if arguments == ["--selftest-live"]:
-        return run_selftest_live()
-    if arguments:
+    # A repeated flag, an unknown token, a positional argument, or combining
+    # two exclusive flags (or an exclusive flag with --no-dashboard) is a
+    # usage error -- exit 2, print USAGE, nothing runs.
+    if (
+        len(set(arguments)) != len(arguments)
+        or any(arg not in _KNOWN_FLAGS for arg in arguments)
+        or len(_EXCLUSIVE_FLAGS & set(arguments)) > 1
+        or (_EXCLUSIVE_FLAGS & set(arguments) and "--no-dashboard" in arguments)
+    ):
         print(USAGE)
         return 2
+    if "--version" in arguments:
+        return _print_version()
+    if "--selftest" in arguments:
+        return run_selftest()
+    if "--selftest-live" in arguments:
+        return run_selftest_live()
+    no_dashboard = "--no-dashboard" in arguments
 
     try:
         cfg = load_config()
@@ -1394,6 +1441,38 @@ def main(argv: list[str] | None = None) -> int:
     # REQ-V13-PRC-02: once, at startup, and never per message.
     resolve_cost = build_cost_resolver(conn, cfg, client)
 
+    # REQ-V160-SRV-01/-07: on by default; either switch suffices to turn it
+    # off, the flag winning when they disagree. A failure to bind, to create
+    # the server, or to start the thread is caught -- broadly, not just
+    # OSError, since "a failure to create the server" is exactly as much
+    # REQ-V160-SRV-07's business as a bind failure is -- logged once, and the
+    # bot continues without the dashboard: no retry, no alternate port.
+    dashboard_srv = None
+    dashboard_thread = None
+    if no_dashboard:
+        dashboard_status = "off (--no-dashboard)"
+    elif not cfg.dashboard_enabled:
+        dashboard_status = "off (DASHBOARD_ENABLED=false)"
+    else:
+        try:
+            dashboard_srv = dashboard_server.build_server(
+                db_path=cfg.db_path, port=cfg.dashboard_port
+            )
+        except Exception as exc:  # noqa: BLE001 -- REQ-V160-SRV-07's broad startup guard
+            log.error(
+                "dashboard: failed to start on port %d: %s",
+                cfg.dashboard_port,
+                redact(f"{type(exc).__name__}: {exc}"),
+            )
+            dashboard_status = "off (bind failed)"
+        else:
+            dashboard_thread = threading.Thread(
+                target=dashboard_srv.serve_forever, daemon=True
+            )
+            dashboard_thread.start()
+            dashboard_status = f"http://127.0.0.1:{cfg.dashboard_port}/"
+            log.info("dashboard: serving at %s", dashboard_status)
+
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
     log.info("polling as @%s with %d skill(s)", bot_username, len(skills))
@@ -1436,8 +1515,16 @@ def main(argv: list[str] | None = None) -> int:
             # the agent's client, never the routed summary one, which the
             # configuration pins for the life of the process (REQ-V13-RTE-01).
             summary_llm=summary_llm,
+            dashboard_status=dashboard_status,
         )
     finally:
+        if dashboard_srv is not None:
+            dashboard_srv.shutdown()
+            dashboard_srv.server_close()
+            if dashboard_thread is not None:
+                dashboard_thread.join(timeout=5.0)
+                if dashboard_thread.is_alive():
+                    log.warning("dashboard: server thread did not stop within 5s")
         client.close()
         conn.close()
 

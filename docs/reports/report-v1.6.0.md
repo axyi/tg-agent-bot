@@ -115,6 +115,7 @@ REQ-V160-EC-06.
 | T4 | no | — (matches §14.1: whole-file reads of `metrics.py` and `bot.py:776-830` only) |
 | T5 | yes | general-purpose subagent, full task (dashboard_render.py + devtools/dashboard.py refactor) |
 | T6 | no | — (matches §14.1: one new self-contained module, same shape as T1) |
+| T7 | no | — (matches §14.1: CLI grammar and server lifecycle interleave with `main()`'s existing startup/shutdown sequence closely enough that a fresh subagent would need to re-derive the T3/T6 control-flow understanding already in hand) |
 
 *(filled in per task as the run proceeds)*
 

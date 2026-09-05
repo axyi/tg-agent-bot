@@ -121,6 +121,12 @@ class Config:
     # attributes on spans. Off by default -- content never leaves the
     # process unless an operator turns this on explicitly.
     obs_capture_content: bool = False
+    # v1.6.0 additions (REQ-V160-SRV-01/-02): the dashboard is on by default;
+    # either switch (the flag or this) suffices to turn it off, and the flag
+    # wins when they disagree. The bind address is a fixed constant in
+    # dashboard_server.py, never configurable.
+    dashboard_enabled: bool = True
+    dashboard_port: int = 8765
 
 
 def register_secret(value: str) -> None:
@@ -320,6 +326,8 @@ def load_config(
         llm_price_output_usd_per_mtok=manual_output_price,
         llm_summary_model=summary_model,
         obs_capture_content=_parse_bool(source, "OBS_CAPTURE_CONTENT", False),
+        dashboard_enabled=_parse_bool(source, "DASHBOARD_ENABLED", True),
+        dashboard_port=_parse_int(source, "DASHBOARD_PORT", 8765, 1024, 65535),
     )
 
 
