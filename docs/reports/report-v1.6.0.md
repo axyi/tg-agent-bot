@@ -116,6 +116,7 @@ REQ-V160-EC-06.
 | T5 | yes | general-purpose subagent, full task (dashboard_render.py + devtools/dashboard.py refactor) |
 | T6 | no | — (matches §14.1: one new self-contained module, same shape as T1) |
 | T7 | no | — (matches §14.1: CLI grammar and server lifecycle interleave with `main()`'s existing startup/shutdown sequence closely enough that a fresh subagent would need to re-derive the T3/T6 control-flow understanding already in hand) |
+| T8 | no | — (matches §14.1: the truncation retry interleaves with `_ask_for_summary`'s existing malformed-JSON repair path and the shared `_record_llm_call` transaction sequence closely enough that a fresh subagent would need to re-derive the T3 control-flow understanding already in hand) |
 
 *(filled in per task as the run proceeds)*
 
@@ -210,6 +211,24 @@ re-checked by the orchestrator after the fact) and unaffected by this
 process deviation. T15 will still perform its own from-scratch PRE-03/
 PRE-04 resolution and preflight regardless, per §17's ordering, so this
 does not shortcut or invalidate anything T15 itself must do.
+
+**T8 — two existing tests amended outside §15.1's list, both forced,
+mechanical consequences of `summarize_conversation` gaining a keyword-only
+`retry_max_tokens` parameter that the list does not enumerate.** Two
+pre-existing test doubles fully replace `agent.summarize_conversation` and
+mirror its whole caller-visible signature: `tests/test_pricing.py`'s
+`fake_summarize` inside
+`test_prc02_the_resolver_reaches_the_summarizer`, and a `lambda` in
+`tests/test_v11_patch.py::test_t_v11_red_04_summary_reply_redacted_only_by_send`
+(whose own comment already documents the "mirrors the *whole*
+caller-visible signature" intent). `bot.py` now always passes
+`retry_max_tokens=cfg.llm_summary_max_tokens` at both call sites
+(REQ-V160-TQ-02), so both stubs raised `TypeError` on the unexpected
+keyword before either test's own assertions ran. Both gained
+`retry_max_tokens=None` in their signature and nothing else — no
+behavioural change, the same shape as T2's precedent. Swept
+`tests/*.py` for any other `summarize_conversation` stub/lambda
+afterward; none found.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 

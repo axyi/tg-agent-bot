@@ -127,6 +127,11 @@ class Config:
     # dashboard_server.py, never configurable.
     dashboard_enabled: bool = True
     dashboard_port: int = 8765
+    # v1.6.0 addition (REQ-V160-TQ-02): the retry budget for a summary call
+    # whose first attempt was truncated (finish_reason == "length"). Three
+    # times agent.py's SUMMARY_MAX_TOKENS (512) starving value, below
+    # LLM_MAX_TOKENS's default, so the timeout floor is unchanged by default.
+    llm_summary_max_tokens: int = 1536
 
 
 def register_secret(value: str) -> None:
@@ -278,7 +283,8 @@ def load_config(
 
     llm_timeout_s = _parse_timeout(_value(source, "LLM_TIMEOUT_S"))
     llm_max_tokens = _parse_int(source, "LLM_MAX_TOKENS", 2048, 1, 8192)
-    _check_timeout_budget(llm_timeout_s, llm_max_tokens)
+    llm_summary_max_tokens = _parse_int(source, "LLM_SUMMARY_MAX_TOKENS", 1536, 256, 8192)
+    _check_timeout_budget(llm_timeout_s, max(llm_max_tokens, llm_summary_max_tokens))
 
     return Config(
         telegram_bot_token=token,
@@ -328,6 +334,7 @@ def load_config(
         obs_capture_content=_parse_bool(source, "OBS_CAPTURE_CONTENT", False),
         dashboard_enabled=_parse_bool(source, "DASHBOARD_ENABLED", True),
         dashboard_port=_parse_int(source, "DASHBOARD_PORT", 8765, 1024, 65535),
+        llm_summary_max_tokens=llm_summary_max_tokens,
     )
 
 
@@ -367,17 +374,24 @@ def _parse_timeout(raw: str) -> float:
     return timeout
 
 
-def _check_timeout_budget(llm_timeout_s: float, llm_max_tokens: int) -> None:
+def _check_timeout_budget(llm_timeout_s: float, effective_max_tokens: int) -> None:
     """REQ-V14-REL-01: a completion budget the timeout cannot outlast times
     out and is retried with identical parameters, re-sending the whole
-    prompt. Raise before that pair ever reaches a live request."""
-    floor = LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * llm_max_tokens
+    prompt. Raise before that pair ever reaches a live request.
+
+    `effective_max_tokens` is the larger of LLM_MAX_TOKENS and
+    LLM_SUMMARY_MAX_TOKENS (REQ-V160-TQ-02): either one can be the actual
+    largest completion the process will ever request, so the error names
+    both variables rather than just the one this call happened to receive.
+    """
+    floor = LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * effective_max_tokens
     if llm_timeout_s < floor:
         raise ConfigError(
             f"LLM_TIMEOUT_S ({llm_timeout_s}) is below the latency-model floor "
-            f"for LLM_MAX_TOKENS ({llm_max_tokens}): needs at least {floor:.3f}s "
-            f"({LATENCY_INTERCEPT_S} + {LATENCY_PER_TOKEN_S} * llm_max_tokens). "
-            "Raise LLM_TIMEOUT_S or lower LLM_MAX_TOKENS."
+            f"for the larger of LLM_MAX_TOKENS/LLM_SUMMARY_MAX_TOKENS "
+            f"({effective_max_tokens}): needs at least {floor:.3f}s "
+            f"({LATENCY_INTERCEPT_S} + {LATENCY_PER_TOKEN_S} * tokens). "
+            "Raise LLM_TIMEOUT_S or lower LLM_MAX_TOKENS/LLM_SUMMARY_MAX_TOKENS."
         )
 
 

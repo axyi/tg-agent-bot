@@ -505,7 +505,7 @@ def test_prc02_the_resolver_reaches_run_agent(conn, tmp_path, monkeypatch):
 def test_prc02_the_resolver_reaches_the_summarizer(conn, tmp_path, monkeypatch, command):
     seen = {}
 
-    def fake_summarize(conn_, conv_id, llm, cfg, *, resolve_cost=None):
+    def fake_summarize(conn_, conv_id, llm, cfg, *, resolve_cost=None, retry_max_tokens=None):
         seen["resolve_cost"] = resolve_cost
         return None
 

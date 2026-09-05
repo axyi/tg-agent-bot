@@ -46,6 +46,12 @@ STUB_HASH_CHARS = 16
 SUMMARY_MAX_TOKENS = 512
 SUMMARY_KEYS = ("goal", "files", "decisions", "errors", "next_action")
 
+# REQ-V160-TQ-03: the closed vocabulary `_record_tool_call` writes to
+# tool_calls.outcome. "ok"/"error" come from `_tool_outcome`, "budget" from
+# the TOOL_EXECUTION_LIMIT path, "rejected" from the excess-call path,
+# "refused_repeat" from the repeat-failure refusal (REQ-V160-TQ-04).
+TOOL_OUTCOMES = ("ok", "error", "budget", "rejected", "refused_repeat")
+
 FALLBACK_EMPTY = "The model returned an empty answer. Please rephrase your message."
 FALLBACK_NO_ANSWER = ("I could not produce an answer within the allowed number of steps. "
                       "Please try a simpler request.")
@@ -689,6 +695,10 @@ def _record_tool_call(
     problem, a normal and fully-recorded outcome, not a tracing-layer
     failure (`_tool_outcome`'s docstring: a non-zero exit is not an error of
     the tool)."""
+    # REQ-V160-TQ-03: the outcome vocabulary is closed -- an unknown value
+    # raises here, before BEGIN IMMEDIATE, rather than landing in the database.
+    if outcome not in TOOL_OUTCOMES:
+        raise ValueError(f"unknown tool outcome: {outcome!r}")
     # REQ-V13-TOO-03: where a tool produced no stream text — an error envelope, a
     # refusal, a call the harness never ran — the envelope is the whole of what
     # the model is shown, so it is the honest measure of both columns.
@@ -953,25 +963,40 @@ def summarize_conversation(
     cfg: Config | None,
     *,
     resolve_cost: CostResolver | None = None,
+    max_tokens: int = SUMMARY_MAX_TOKENS,
+    retry_max_tokens: int = SUMMARY_MAX_TOKENS,
 ) -> str | None:
-    """At most two calls: one ask, one repair. Returns normalised JSON or `None`.
+    """At most two calls on the golden path: one ask, one repair. A truncated
+    first attempt (REQ-V160-TQ-01) adds a third, at `retry_max_tokens`; there
+    is no second retry, so at most three calls total. Returns normalised JSON
+    or `None`.
 
     `cfg` is part of the pinned signature; the summarizer's own caps are
     fixed -- only `obs_capture_content` (REQ-V160-TRC-09) is read from it.
+    `max_tokens`/`retry_max_tokens` both default to `SUMMARY_MAX_TOKENS` so
+    every caller that does not pass them keeps today's behaviour
+    (REQ-V160-TQ-02); `bot.py` passes `retry_max_tokens=cfg.llm_summary_max_tokens`
+    and nothing else.
     """
     base = storage.load_context_messages(conn, conv_id, CONTEXT_WINDOW_MESSAGES)
     messages = base + [{"role": "user", "content": SUMMARY_PROMPT}]
 
     capture_content = cfg is not None and cfg.obs_capture_content
     record = (conn, conv_id, resolve_cost, capture_content)
-    parsed, reason = _ask_for_summary(llm, messages, record)
-    if parsed is None and reason is not None:
+    parsed, reason, truncated = _ask_for_summary(
+        llm, messages, record, attempt=1, max_tokens=max_tokens
+    )
+    if truncated:
+        parsed, reason, truncated = _ask_for_summary(
+            llm, messages, record, attempt=2, max_tokens=retry_max_tokens
+        )
+    elif parsed is None and reason is not None:
         repair = messages + [{
             "role": "user",
             "content": f"Your reply was not valid JSON ({reason}). "
                        "Return only the JSON object.",
         }]
-        parsed, _ = _ask_for_summary(llm, repair, record)
+        parsed, _, _ = _ask_for_summary(llm, repair, record, attempt=1, max_tokens=max_tokens)
     if parsed is None:
         return None
     # The summary is model output on its way to SQLite, so it takes the same
@@ -980,15 +1005,20 @@ def summarize_conversation(
 
 
 def _ask_for_summary(
-    llm: LLMClient, messages: list[dict], record: tuple
-) -> tuple[dict | None, str | None]:
+    llm: LLMClient, messages: list[dict], record: tuple, *,
+    attempt: int = 1, max_tokens: int = SUMMARY_MAX_TOKENS,
+) -> tuple[dict | None, str | None, bool]:
+    """Returns `(parsed, reason, truncated)`. `truncated` is REQ-V160-TQ-01's
+    signal: a `finish_reason == "length"` response is rejected without
+    parsing, so `parsed` and `reason` are both `None` whenever it is `True`."""
     conn, conv_id, resolve_cost, capture_content = record
     ts = storage.utc_now_iso()
     started = time.monotonic()
-    # REQ-V13-OBS-04 pins the summary purpose to round 0 and attempt 1; the
-    # repair call is a second row, not a second attempt.
+    # REQ-V13-OBS-04 pins the summary purpose to round 0; the JSON-repair call
+    # is a second row at attempt 1, not a second attempt -- only the
+    # truncation retry (REQ-V160-TQ-01) is recorded as attempt 2.
     common = {
-        "purpose": "summary", "round_no": 0, "attempt": 1, "ts": ts, "turn_id": None,
+        "purpose": "summary", "round_no": 0, "attempt": attempt, "ts": ts, "turn_id": None,
         "messages": messages, "tools": None, "capture_content": capture_content,
     }
     sink = tracing.SqliteSpanSink(conn)
@@ -998,7 +1028,7 @@ def _ask_for_summary(
     # span) -- `start_span` already resolves this from `current_span()`.
     with tracing.start_span("chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id) as span:
         try:
-            response = llm.complete(messages, None, max_tokens=SUMMARY_MAX_TOKENS)
+            response = llm.complete(messages, None, max_tokens=max_tokens)
         except LLMError as exc:
             span.set_error(exc)
             _record_llm_call(
@@ -1006,12 +1036,18 @@ def _ask_for_summary(
                 response=None, error_kind=getattr(exc, "kind", "http"), **common,
             )
             log.warning("summarization failed: %s", config.redact(str(exc)))
-            return None, None
+            return None, None, False
+        truncated = response.finish_reason == "length"
+        if truncated:
+            span.set_attribute("tg_agent.summary.truncated", True)
         _record_llm_call(
             conn, conv_id, llm, resolve_cost, span=span, latency_ms=_elapsed_ms(started),
-            response=response, error_kind=None, **common,
+            response=response, error_kind="truncated" if truncated else None, **common,
         )
-    return _parse_summary(response.content)
+    if truncated:
+        return None, None, True
+    parsed, reason = _parse_summary(response.content)
+    return parsed, reason, False
 
 
 def _parse_summary(text: str) -> tuple[dict | None, str | None]:

@@ -1180,3 +1180,138 @@ def test_stats_gains_two_lines_appended(conn):
     assert any(line.startswith("Summaries: ") for line in lines)
     assert lines[-2].startswith("Errors: ")
     assert lines[-1].startswith("Summaries: ")
+
+
+# ============================================================================
+# T8 -- truncated-summary retry, LLM_SUMMARY_MAX_TOKENS, closed outcome
+# vocabulary (REQ-V160-TQ-01, -02, -03)
+# ============================================================================
+
+from tests.test_config import base_env  # noqa: E402 -- appended block
+
+SUMMARY_PAYLOAD = json.dumps(
+    {"goal": "ship it", "files": [], "decisions": [], "errors": [], "next_action": ""}
+)
+
+
+def _seed_summary_history(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    storage.add_user_message(conn, conv, "hi")
+    storage.add_assistant_message(conn, conv, "hello")
+    return conv
+
+
+def test_t_v160_tq_01_double_truncation_proceeds_without_a_summary(conn):
+    conv = _seed_summary_history(conn)
+    llm = FakeLLM(
+        [LLMResponse("cut off", [], "length"), LLMResponse("cut off again", [], "length")]
+    )
+    result = agent.summarize_conversation(conn, conv, llm, None, retry_max_tokens=1536)
+    assert result is None
+    rows = llm_rows(conn)
+    assert [r["attempt"] for r in rows] == [1, 2]
+    assert [r["error_kind"] for r in rows] == ["truncated", "truncated"]
+    assert llm.max_tokens_calls == [agent.SUMMARY_MAX_TOKENS, 1536]
+    for row in conn.execute("SELECT attributes_json FROM spans WHERE name LIKE 'chat%'"):
+        assert json.loads(row["attributes_json"])["tg_agent.summary.truncated"] is True
+    health = metrics.summary_health(conn)
+    assert health.truncated == 2
+    # N8: a summary truncated twice is one terminal failure -- the attempt=2
+    # row, not the lone attempt=1 truncation TQ-01 still gets to retry.
+    assert health.failed == 1
+
+
+def test_t_v160_tq_01_single_truncation_retries_and_then_succeeds(conn):
+    conv = _seed_summary_history(conn)
+    llm = FakeLLM([LLMResponse("cut off", [], "length"), LLMResponse(SUMMARY_PAYLOAD, [], "stop")])
+    result = agent.summarize_conversation(conn, conv, llm, None, retry_max_tokens=1536)
+    assert result is not None
+    assert json.loads(result)["goal"] == "ship it"
+    rows = llm_rows(conn)
+    assert [r["attempt"] for r in rows] == [1, 2]
+    assert [r["error_kind"] for r in rows] == ["truncated", None]
+    assert llm.max_tokens_calls == [agent.SUMMARY_MAX_TOKENS, 1536]
+    health = metrics.summary_health(conn)
+    assert health.truncated == 1
+    assert health.failed == 0  # a lone attempt=1 truncation is not a terminal failure
+
+
+def test_t_v160_tq_01_malformed_reply_still_repairs_once_at_attempt_1(conn):
+    """A non-truncated malformed reply keeps REQ-V13-OBS-04's existing
+    behaviour -- both rows at attempt=1 -- untouched by REQ-V160-TQ-01."""
+    conv = _seed_summary_history(conn)
+    llm = FakeLLM([LLMResponse("not json", [], "stop"), LLMResponse(SUMMARY_PAYLOAD, [], "stop")])
+    result = agent.summarize_conversation(conn, conv, llm, None)
+    assert result is not None
+    rows = llm_rows(conn)
+    assert [r["attempt"] for r in rows] == [1, 1]
+    assert [r["error_kind"] for r in rows] == [None, None]
+
+
+def test_t_v160_tq_01_n8_non_truncation_failure_also_counts(conn):
+    """N8's second half: a row whose only failure is a non-truncation
+    error_kind is a terminal failure too, exactly like MET-06's formula."""
+    conv = _seed_summary_history(conn)
+    llm = FakeLLM([LLMError("boom", retryable=False, kind="timeout")])
+    result = agent.summarize_conversation(conn, conv, llm, None, retry_max_tokens=1536)
+    assert result is None
+    rows = llm_rows(conn)
+    assert len(rows) == 1
+    assert rows[0]["error_kind"] == "timeout"
+    health = metrics.summary_health(conn)
+    assert health.failed == 1
+
+
+def test_t_v160_tq_02_retry_budget_never_requested_without_truncation(conn, tmp_path):
+    conv = _seed_summary_history(conn)
+    cfg = make_cfg(tmp_path, llm_summary_max_tokens=1536)
+    llm = FakeLLM([LLMResponse(SUMMARY_PAYLOAD, [], "stop")])
+    result = agent.summarize_conversation(
+        conn, conv, llm, cfg, retry_max_tokens=cfg.llm_summary_max_tokens
+    )
+    assert result is not None
+    assert llm.max_tokens_calls == [agent.SUMMARY_MAX_TOKENS]
+
+
+def test_t_v160_tq_02_llm_summary_max_tokens_parsed_and_defaulted():
+    cfg = config.load_config(env=base_env(), load_env_file=False)
+    assert cfg.llm_summary_max_tokens == 1536
+    cfg = config.load_config(env=base_env(LLM_SUMMARY_MAX_TOKENS="900"), load_env_file=False)
+    assert cfg.llm_summary_max_tokens == 900
+    # Unchanged at default configuration: max(2048, 1536) == 2048, same floor as before T8.
+    assert cfg.llm_timeout_s == 240.0
+
+
+def test_t_v160_tq_02_config_error_names_both_variables():
+    with pytest.raises(config.ConfigError) as exc:
+        config.load_config(
+            env=base_env(LLM_TIMEOUT_S="240", LLM_MAX_TOKENS="2048", LLM_SUMMARY_MAX_TOKENS="8192"),
+            load_env_file=False,
+        )
+    message = str(exc.value)
+    assert "LLM_TIMEOUT_S" in message
+    assert "LLM_MAX_TOKENS" in message
+    assert "LLM_SUMMARY_MAX_TOKENS" in message
+
+
+def test_t_v160_tq_03_closed_outcome_vocabulary(conn):
+    conv = storage.get_or_create_active_conversation(conn, USER_ID)
+    call = tool_call()
+    for outcome in agent.TOOL_OUTCOMES:
+        with tracing.start_span(
+            "execute_tool", tracing.KIND_INTERNAL, sink=tracing.SqliteSpanSink(conn)
+        ) as span:
+            agent._record_tool_call(conn, conv, 1, call, "{}", outcome, 5, None, span=span)
+    rows = tool_rows(conn)
+    assert [r["outcome"] for r in rows] == list(agent.TOOL_OUTCOMES)
+    health = metrics.tool_health(conn)
+    assert len(health) == 1
+    row = health[0]
+    assert (row.ok, row.error, row.budget, row.rejected, row.refused_repeat) == (1, 1, 1, 1, 1)
+
+    with tracing.start_span(
+        "execute_tool", tracing.KIND_INTERNAL, sink=tracing.NullSink()
+    ) as span:
+        with pytest.raises(ValueError):
+            agent._record_tool_call(conn, conv, 1, call, "{}", "bogus", 0, None, span=span)
+    assert len(tool_rows(conn)) == len(agent.TOOL_OUTCOMES)  # the bogus row never landed

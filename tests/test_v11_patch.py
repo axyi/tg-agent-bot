@@ -179,7 +179,7 @@ def test_t_v11_red_04_summary_reply_redacted_only_by_send(conn, tmp_path, monkey
     # where the redaction below is vacuously true.
     monkeypatch.setattr(
         agent, "summarize_conversation",
-        lambda conn, conv_id, llm, cfg, *, resolve_cost=None: json.dumps({
+        lambda conn, conv_id, llm, cfg, *, resolve_cost=None, retry_max_tokens=None: json.dumps({
             "goal": SENTINEL, "files": [], "decisions": [], "errors": [], "next_action": "",
         }),
     )
