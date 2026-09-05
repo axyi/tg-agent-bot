@@ -119,6 +119,7 @@ REQ-V160-EC-06.
 | T8 | no | — (matches §14.1: the truncation retry interleaves with `_ask_for_summary`'s existing malformed-JSON repair path and the shared `_record_llm_call` transaction sequence closely enough that a fresh subagent would need to re-derive the T3 control-flow understanding already in hand) |
 | T9 | no | — (matches §14.1: the refusal decision sits directly inside `_execute_tool_calls`'s existing budget/excess branching, small and self-contained enough that direct implementation is cheaper than a delegation round-trip) |
 | T10 | yes | general-purpose subagent, full task (six literal scenarios + `tool_calls_max` kind + `_validate_catalog` rule + `tests/test_v160_bench.py`); orchestrator applied a bounded follow-up fix to `tests/test_bench.py` (see Deviations) |
+| T11 | yes | general-purpose subagent, full task (`BENCH_SCHEMA` 2, `runs[].spans`, `_validate`'s `mode`, six locked `meta` fields, dirty-tree guard, the bench.py:1420-1422 report-text fix, plus REQ-V160-TRC-11's own bench-side wiring, undiscovered until this task); orchestrator confirmed one genuine design decision and tracked one open gap for T16 (see Deviations) |
 
 *(filled in per task as the run proceeds)*
 
@@ -275,6 +276,79 @@ forbade it from touching `tests/test_bench.py` even if a test broke, so
 these five amendments were applied by the orchestrator after review, not
 by the subagent. Swept for a sixth affected assertion (grepped
 `devtools/` for bare `12`/`36` literals outside test files); none found.
+
+**T11 — REQ-V160-TRC-11 wiring was missing, not merely unread; one bug
+found and fixed; one design decision confirmed; one gap tracked for T16.**
+Four findings, all documented in the subagent's own
+`docs/prompts/85-v160-t11-bench-schema2.md` and independently verified by
+the orchestrator before commit:
+
+1. **`tracing.set_run_context` had zero callers in `devtools/bench.py`
+   before this task**, contrary to the delegation brief's premise that
+   scenario/tag attribution already existed. The spec's own task table
+   confirms this by mapping TRC-11 to `T-V160-BEN-03` inside T11's row, not
+   T3's. The subagent did the wiring itself: `run_bench`/`_execute_run`
+   gained an optional `tag: str | None = None` (defaulted, so none of the
+   ~13 existing direct `run_bench(...)` test callers needed amendment),
+   calling `tracing.set_run_context(...)` unconditionally once per run so
+   the process-global `tracing._run_context` never leaks a stale tag
+   forward. Verified independently: a real `run_bench` call now produces
+   genuine `spans` rows that round-trip through `check_document`.
+2. **A real, pre-existing bug**: `TOOL_ROW_KEYS` doubled as its own
+   REQUIRED bound on a comment's premise ("that schema is unchanged by this
+   spec") that had been stale since T2/T3 added `trace_id`/`span_id` to
+   `storage.TOOL_CALL_COLUMNS` with no REQUIRED fallback — silently making
+   `docs/assets/bench/baseline-v1.4.json` (the real, committed artefact
+   REQ-V160-BEN-02 keeps specifically for T16's informational comparison)
+   unreadable on every commit since T2/T3, masked only because a bare
+   `bench_schema` mismatch always raised first. Fixed with a new
+   `REQUIRED_TOOL_ROW_KEYS`, mirroring how `REQUIRED_LLM_ROW_KEYS` already
+   handles the identical situation. Orchestrator re-verified independently
+   (not just trusting the subagent's own claim):
+   `bench.check_document(json.loads(baseline-v1.4.json), <S01..S12 subset>,
+   mode="informational")` returns `(0, "meta.scenarios_sha256 does not
+   match devtools/bench_scenarios.py")` — exactly the one expected note,
+   nothing else.
+3. **One forced amendment outside the task's own file list**:
+   `tests/test_dashboard.py::test_fixtures_are_arithmetically_valid_benchmark_documents`
+   (not one of the two lines, `:136`/`:502`, §15.1 names for BEN-03) had to
+   move from tolerating only a stale `scenarios_sha256` to
+   `mode="informational"` outright, once `BENCH_SCHEMA` became 2 and its
+   frozen, never-bumped dashboard fixtures (pinned at `bench_schema: 1`)
+   started failing strict validation on schema too, not just on the digest.
+   A forced, mechanical consequence of BEN-03's mandated schema bump, the
+   same pattern as T2/T8/T10's amendments.
+4. **One design decision, confirmed by the orchestrator**: `meta.lmstudio_version`/
+   `served_model_id`/`lmstudio_context_length` have no live-probe source
+   anywhere in `bench.py`'s call graph, by design — the first two are
+   operator-typed text (the `go` request's own answers), the third a T15-
+   exclusive live `/models` read this offline harness must never call
+   itself. The subagent added three new optional CLI flags on `bench.py
+   run` (`--lmstudio-version`, `--served-model-id`,
+   `--lmstudio-context-length`) as the threading mechanism and flagged the
+   choice explicitly rather than deciding it unilaterally. Confirmed: this
+   is the only clean way to get operator/T15-preflight data into an offline
+   CLI tool with no other channel, and it changes nothing for any caller
+   that omits the flags. **Consequence for T15/T16**: their own `bench.py
+   run` invocations must pass these three flags when running against
+   `lmstudio`, or the six-key `meta` lock will carry three `null`s instead
+   of the real instrument fingerprint.
+
+A fifth item — `bench.py report`'s CLI has no scenario-narrowing flag, so
+REQ-V160-BEN-02's actual S01–S12 comparison cannot be produced by a bare
+CLI command yet, even though `check_document`'s Python `scenarios=`
+parameter already supports it — was left unresolved on purpose (T11 does
+not own BEN-02/-06, and T16's own task-table row adds no files of its
+own). Tracked as a task-tracker item for T16 preparation, with both
+resolution options recorded (a small scoped flag addition before T16, or
+T16 calling the Python API directly instead of the CLI for this one
+comparison).
+
+Delegated to a general-purpose subagent (RLM: five separate regions of
+`devtools/bench.py` — schema/constants, key-set derivation, run assembly,
+validation, CLI/meta). Orchestrator independently re-ran all gates plus
+the `baseline-v1.4.json` verification above before trusting the subagent's
+own claims.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 

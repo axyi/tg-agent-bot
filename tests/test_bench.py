@@ -108,7 +108,7 @@ def fake_doc(runs=None, *, repeats=1, skipped=(), flags=None, **meta):
                 for scenario in SCENARIOS if scenario.id not in skipped
                 for repeat in range(1, repeats + 1)]
     document = {
-        "bench_schema": 1,
+        "bench_schema": bench.BENCH_SCHEMA,
         "meta": {
             "tag": "t", "started_at": "2026-01-01T00:00:00Z",
             "finished_at": "2026-01-01T01:00:00Z", "git_commit": "0" * 40,

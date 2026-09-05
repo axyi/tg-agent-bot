@@ -36,6 +36,7 @@ import re
 import shutil
 import sqlite3
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -59,6 +60,7 @@ import llm as llm_module  # noqa: E402
 import metrics  # noqa: E402
 import storage  # noqa: E402
 import tools  # noqa: E402
+import tracing  # noqa: E402
 from config import Config  # noqa: E402
 from devtools import bench_scenarios  # noqa: E402
 from devtools.bench_scenarios import SCENARIOS, Scenario  # noqa: E402
@@ -67,7 +69,7 @@ from llm import pricing  # noqa: E402
 
 log = logging.getLogger("bench")
 
-BENCH_SCHEMA = 1
+BENCH_SCHEMA = 2
 DEFAULT_REPEATS = 3
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_OUT_DIR = REPO_ROOT / "docs" / "assets" / "bench"
@@ -152,6 +154,12 @@ LOCKED_META_FIELDS = (
     # both require `report` to render a file produced by `--only`. Locking it
     # keeps a one-run file from ever being compared with a full one.
     "only",
+    # REQ-V160-BEN-05: the instrument, locked. `git_commit` is deliberately
+    # NOT here — it is provenance, always a later commit on the candidate
+    # side, and locking it would make every baseline/candidate pair
+    # non-comparable by construction.
+    "lmstudio_version", "served_model_id", "lmstudio_context_length",
+    "generation_settings", "prompt_tools_sha256", "obs_capture_content",
 )
 
 TOTALS_KEYS = (
@@ -164,21 +172,54 @@ PRICING_BASES_WITH_MODEL = ("openrouter-list", "openrouter-list-stale")
 
 LLM_ROW_KEYS = frozenset(storage.LLM_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"}
 TOOL_ROW_KEYS = frozenset(storage.TOOL_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"}
+# REQ-V160-BEN-03: derived exactly as the two above, so it widens with the
+# `spans` schema itself; `attributes_json` (the stored JSON string) is
+# subtracted because REQ-V160-BEN-04 emits the *parsed* object under
+# `attributes` instead — `attributes_json` therefore appears in no key set
+# in this file, by design.
+SPAN_ROW_KEYS = (
+    frozenset(storage.SPAN_COLUMNS) - {"conv_id", "attributes_json"} | {"conv_seq", "attributes"}
+)
 
 # REQ-V14-BEN-03: a literal frozen tuple spelling out the v1.3 `llm_calls` row
 # shape — deliberately NOT derived from `storage`, which would drift forward
 # with every schema change and guard nothing. A row loaded from an older tree
 # (e.g. `baseline-v1.4`'s stage-A worktree, `69ebc75`) carries exactly this
 # set; a row from the running tree may carry more (REQ-V14-OBS-01's two new
-# columns) without being rejected. `TOOL_ROW_KEYS` needs no separate REQUIRED
-# constant: that schema is unchanged by this spec, so REQUIRED == current and
-# the same variable serves as both bounds below.
+# columns) without being rejected.
 REQUIRED_LLM_ROW_KEYS = frozenset({
     "id", "conv_seq", "turn_id", "purpose", "round", "attempt", "ts",
     "provider", "model", "prompt_tokens", "completion_tokens", "total_tokens",
     "cached_tokens", "reasoning_tokens", "reasoning_chars", "prompt_chars",
     "prompt_chars_by_role", "messages_n", "tools_exposed", "latency_ms",
     "finish_reason", "tool_calls_n", "error_kind", "cost_usd", "cost_basis",
+})
+
+# T11: `TOOL_ROW_KEYS`'s own comment used to claim it "needs no separate
+# REQUIRED constant: that schema is unchanged by this spec, so REQUIRED ==
+# current" — true when written, stale since T2/T3 added `trace_id`/`span_id`
+# to `storage.TOOL_CALL_COLUMNS` with no REQUIRED fallback of their own. A
+# `tool_calls` row from an older tree (REQ-V13-BEN-03's own
+# `baseline-v1.4.json`, still standing per REQ-V160-BEN-02) lacks both
+# columns and was silently unreadable by `check_document` — masked only
+# because a bare `bench_schema` mismatch always raised first, before this
+# loop ever ran. Spelled out the same way `REQUIRED_LLM_ROW_KEYS` already is,
+# for the same reason.
+REQUIRED_TOOL_ROW_KEYS = frozenset({
+    "id", "conv_seq", "turn_id", "tool_call_id", "tool", "ts", "input_chars",
+    "raw_output_chars", "output_chars", "output_tokens_est", "duration_ms", "outcome",
+})
+
+# REQ-V160-BEN-03: `spans` is new at this schema — there is no older tree
+# to stay readable against, so every column of `SPAN_ROW_KEYS` is required.
+# Still a literal, not `SPAN_ROW_KEYS` itself: the two are equal today by
+# construction, not by definition, exactly as `REQUIRED_LLM_ROW_KEYS` is
+# spelled out rather than aliased to `LLM_ROW_KEYS`. Names `attributes`;
+# never `attributes_json`, which belongs in no key set in this file.
+REQUIRED_SPAN_ROW_KEYS = frozenset({
+    "id", "trace_id", "span_id", "parent_span_id", "conv_seq", "turn_id",
+    "name", "kind", "ts", "start_ns", "duration_ms", "status",
+    "status_message", "attributes",
 })
 
 FLOAT_REL_TOL = 1e-9
@@ -272,6 +313,7 @@ class Observation:
     answers: list[str] = field(default_factory=list)
     llm_rows: list[dict] = field(default_factory=list)
     tool_rows: list[dict] = field(default_factory=list)
+    span_rows: list[dict] = field(default_factory=list)
     exit_codes: list[int] = field(default_factory=list)
     summary_goals: list[str] = field(default_factory=list)
     audit_read: bool = True
@@ -651,6 +693,7 @@ def run_bench(
     runs_root: Path,
     resolve_cost=None,
     max_cost_usd: float | None = None,
+    tag: str | None = None,
 ) -> BenchResult:
     """The measurable core (REQ-V13-BEN-07). `main()` wires real objects; the
     tests wire `FakeLLM` / `RecordingRunner` / `FakeFetcher` and never touch
@@ -662,6 +705,10 @@ def run_bench(
     `bot.main()` loads once, and `resolve_cost` is the `CostResolver` that
     REQ-V13-PRC-02 requires to be built once per CLI invocation and handed down
     — without it no run would have a cost and the cost cap could never trip.
+    `tag` (REQ-V160-TRC-11) is optional and defaults to `None` so every
+    existing caller keeps working unamended; it is the `--tag` value
+    `tracing.set_run_context` stamps onto each scenario run's root span, and
+    the value `_read_spans` filters `runs[].spans` on.
 
     The docker probe and `bot._startup_docker_wiring` live inside the *real*
     `runner_factory`, called once per run with that run's `cfg`: they are the
@@ -703,7 +750,7 @@ def run_bench(
                 cfg=cfg, runs_root=runs_root, llm_factory=llm_factory,
                 runner_factory=runner_factory, fetcher_factory=fetcher_factory,
                 telegram_factory=telegram_factory, timeout_s=timeout_s, clock=clock,
-                skills=skills, resolve_cost=resolve_cost,
+                skills=skills, resolve_cost=resolve_cost, tag=tag,
             )
             runs.append(record)
             if aborted is not None:
@@ -743,6 +790,7 @@ def _execute_run(
     clock,
     skills: dict,
     resolve_cost,
+    tag: str | None = None,
 ) -> tuple[dict, str | None]:
     run_dir = Path(runs_root) / f"{scenario.id}-{repeat}"
     aborted: str | None = None
@@ -759,6 +807,11 @@ def _execute_run(
 
     recorder = telegram_factory()
     started = clock()
+    # REQ-V160-TRC-11: set once per run, unconditionally (even when `tag` is
+    # `None`) — `tracing._run_context` is process-global, so an explicit
+    # `None` here clears whatever a previous run (or a previous test, in the
+    # same pytest process) left behind, rather than leaking it forward.
+    tracing.set_run_context(scenario_id=scenario.id, bench_tag=tag)
     worker = threading.Thread(
         target=_run_turns,
         kwargs={
@@ -786,7 +839,7 @@ def _execute_run(
             failure = FAIL_HARNESS_ERROR
     wall_ms = max(0, round((clock() - started) * 1000))
 
-    observation = _observe(run_cfg, answers)
+    observation = _observe(run_cfg, answers, scenario_id=scenario.id, bench_tag=tag)
     record = _run_record(scenario, repeat, observation, wall_ms, failure)
     if aborted is None:
         # An aborted run's directory stays for inspection; `.bench/` is
@@ -863,12 +916,16 @@ def _update(index: int, tg_id: int, text: str) -> dict:
     }
 
 
-def _observe(cfg: Config, answers: list[str]) -> Observation:
+def _observe(
+    cfg: Config, answers: list[str], *, scenario_id: str, bench_tag: str | None
+) -> Observation:
     llm_rows, tool_rows, goals = _read_rows(cfg.db_path)
+    span_rows = _read_spans(cfg.db_path, scenario_id=scenario_id, bench_tag=bench_tag)
     exit_codes, audit_read = _read_exit_codes(cfg.audit_log_path)
     return Observation(
         answers=list(answers), llm_rows=llm_rows, tool_rows=tool_rows,
-        exit_codes=exit_codes, summary_goals=goals, audit_read=audit_read,
+        span_rows=span_rows, exit_codes=exit_codes, summary_goals=goals,
+        audit_read=audit_read,
     )
 
 
@@ -930,6 +987,53 @@ def _with_conv_seq(
     return convert(llm_rows), convert(tool_rows)
 
 
+def _read_spans(
+    db_path: Path, *, scenario_id: str, bench_tag: str | None
+) -> list[dict]:
+    """The `spans` rows of the trace(s) belonging to this scenario run
+    (REQ-V160-BEN-04): the ones whose trace's **root** span (`parent_span_id`
+    is `None`) carries the matching `tg_agent.scenario_id` /
+    `tg_agent.bench_tag` attributes — the same two `tracing.set_run_context`
+    stamped before this run started (REQ-V160-TRC-11). `conv_id` never
+    leaves this function, exactly as `_with_conv_seq` above; `attributes_json`
+    travels as the *parsed* `attributes` object, never as embedded text.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        log.error("the run database could not be opened: %s", config.redact(str(exc)))
+        return []
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = [dict(row) for row in conn.execute("SELECT * FROM spans ORDER BY id")]
+    except sqlite3.Error as exc:
+        log.error("the run database could not be read: %s", config.redact(str(exc)))
+        return []
+    finally:
+        conn.close()
+
+    trace_ids: set[str] = set()
+    for row in rows:
+        if row["parent_span_id"] is not None:
+            continue
+        attributes = json.loads(row["attributes_json"])
+        if (attributes.get("tg_agent.scenario_id") == scenario_id
+                and attributes.get("tg_agent.bench_tag") == bench_tag):
+            trace_ids.add(row["trace_id"])
+    selected = [row for row in rows if row["trace_id"] in trace_ids]
+
+    order: dict[int, int] = {}
+    for row in selected:
+        order.setdefault(row["conv_id"], len(order) + 1)
+    converted = []
+    for row in selected:
+        row = dict(row)
+        row["conv_seq"] = order[row.pop("conv_id")]
+        row["attributes"] = json.loads(row.pop("attributes_json"))
+        converted.append(row)
+    return converted
+
+
 def _read_exit_codes(audit_log_path: Path) -> tuple[list[int], bool]:
     """The exec exit codes of the run, from its audit log — the `tool_calls`
     table records the outcome of the *tool*, not the command's exit status."""
@@ -968,6 +1072,7 @@ def _run_record(
         "answers": list(obs.answers),
         "llm_calls": obs.llm_rows,
         "tool_calls": obs.tool_rows,
+        "spans": obs.span_rows,
         "totals": totals_from_rows(obs.llm_rows, obs.tool_rows, wall_ms),
     }
 
@@ -1003,21 +1108,35 @@ class _Invalid(Exception):
         self.code = code
 
 
-def check_document(document: Any, scenarios: Sequence[Scenario] | None = None) -> tuple[int, str]:
+def check_document(
+    document: Any, scenarios: Sequence[Scenario] | None = None, *, mode: str = "strict"
+) -> tuple[int, str]:
     """`(exit code, reason)`. 0 valid; 1 schema / run set / arithmetic;
-    2 `meta.aborted`; 3 `usage_missing` or invalid token counts."""
+    2 `meta.aborted`; 3 `usage_missing` or invalid token counts.
+
+    `mode="informational"` (REQ-V160-BEN-03) is a **relaxation**, never a new
+    exit path: `bench_schema` may be `1` or `BENCH_SCHEMA`, and a
+    `scenarios_sha256` mismatch is collected as a *note* instead of raised.
+    When such a note was collected, it is returned as `reason` in place of
+    `"valid"` — a caller (`_cmd_report`) can print it without a second pass.
+    A caller that ignores `mode` sees exactly today's strict behaviour: the
+    signature's default is unchanged, so every existing caller is unaffected.
+    """
     scenarios = SCENARIOS if scenarios is None else scenarios
     try:
-        _validate(document, scenarios)
+        note = _validate(document, scenarios, mode=mode)
     except _Invalid as invalid:
         return invalid.code, invalid.reason
-    return EXIT_OK, "valid"
+    return EXIT_OK, note if note else "valid"
 
 
-def _validate(document: Any, scenarios: Sequence[Scenario]) -> None:
+def _validate(document: Any, scenarios: Sequence[Scenario], *, mode: str = "strict") -> str | None:
     _need(isinstance(document, dict), "the document is not an object")
-    _need(document.get("bench_schema") == BENCH_SCHEMA,
-          f"bench_schema must be {BENCH_SCHEMA}")
+    schema = document.get("bench_schema")
+    if mode == "informational":
+        _need(schema in (1, BENCH_SCHEMA), f"bench_schema must be 1 or {BENCH_SCHEMA}")
+    else:
+        _need(schema == BENCH_SCHEMA, f"bench_schema must be {BENCH_SCHEMA}")
     meta = document.get("meta")
     runs = document.get("runs")
     summary = document.get("summary")
@@ -1029,14 +1148,20 @@ def _validate(document: Any, scenarios: Sequence[Scenario]) -> None:
 
     _validate_meta(meta)
     digest = scenarios_sha256()
-    _need(meta["scenarios_sha256"] == digest,
-          "meta.scenarios_sha256 does not match devtools/bench_scenarios.py")
+    note: str | None = None
+    if meta["scenarios_sha256"] != digest:
+        reason = "meta.scenarios_sha256 does not match devtools/bench_scenarios.py"
+        if mode == "informational":
+            note = reason
+        else:
+            raise _Invalid(reason)
 
     for run in runs:
-        _validate_run(run)
+        _validate_run(run, schema)
     _validate_tokens(runs)
     _validate_run_set(meta, runs, summary, scenarios)
     _validate_arithmetic(meta, runs, summary)
+    return note
 
 
 def _need(condition: bool, reason: str, code: int = EXIT_ERROR) -> None:
@@ -1094,7 +1219,7 @@ def _validate_pricing(price: Any) -> None:
           f"meta.pricing.fetched_at is required for basis {basis}")
 
 
-def _validate_run(run: Any) -> None:
+def _validate_run(run: Any, schema: Any = BENCH_SCHEMA) -> None:
     _need(isinstance(run, dict), "a runs[] entry is not an object")
     _need(isinstance(run.get("scenario"), str), "runs[].scenario must be a string")
     _need(_is_int(run.get("repeat")) and run["repeat"] > 0,
@@ -1122,11 +1247,22 @@ def _validate_run(run: Any) -> None:
     # older tree (fewer columns than `allowed`) is accepted as long as it
     # carries every required one; a row with a key neither set expects is
     # still rejected, named.
-    for name, required, allowed in (
+    row_families = [
         ("llm_calls", REQUIRED_LLM_ROW_KEYS, LLM_ROW_KEYS),
-        ("tool_calls", TOOL_ROW_KEYS, TOOL_ROW_KEYS),
-    ):
-        rows = run.get(name)
+        ("tool_calls", REQUIRED_TOOL_ROW_KEYS, TOOL_ROW_KEYS),
+    ]
+    if schema == BENCH_SCHEMA:
+        # REQ-V160-BEN-03: `spans` is new at this schema, so — unlike
+        # `llm_calls`/`tool_calls`, which a v1.3 tree already always wrote —
+        # there is no older row family to stay readable against. The writer
+        # (`_run_record`) always emits the key; the validator tolerates its
+        # absence the same way it tolerates a v1.3 row missing `trace_id`:
+        # a document built by hand (or predating this schema bump) is not
+        # thereby invalid. `bench_schema == 1` skips this family entirely —
+        # an informational v1.4-shaped document has no concept of spans.
+        row_families.append(("spans", REQUIRED_SPAN_ROW_KEYS, SPAN_ROW_KEYS))
+    for name, required, allowed in row_families:
+        rows = run.get(name, [] if name == "spans" else None)
         _need(isinstance(rows, list), f"runs[].{name} must be an array")
         for row in rows:
             _need(isinstance(row, dict), f"runs[].{name}[] must be an object")
@@ -1416,10 +1552,15 @@ def verdict(baseline: dict, candidate: dict) -> Verdict:
     rate_c = candidate["summary"]["success_rate"]
     delta_pp = (rate_c - rate_b) * 100
     quality_ok = rate_c >= rate_b - QUALITY_GATE_SLACK
+    # T11: this was a hardcoded "2.8-3.0 pp", accurate only for the pre-v1.6.0
+    # twelve-scenario catalogue; the pp cost of one lost run is
+    # `100 / runs`, computed from the candidate's own actual run count so the
+    # line never states a number that is wrong for the run it describes.
+    one_run_pp = 100 / candidate["summary"]["runs"]
     lines.append(
         f"success rate: {rate_b:.4f} → {rate_c:.4f} ({delta_pp:+.1f} pp; the "
         f"assignment's headline is 2 pp, but at {candidate['summary']['runs']} runs one "
-        "flipped run is already 2.8–3.0 pp, so the candidate may lose no run net)"
+        f"flipped run is already {one_run_pp:.1f} pp, so the candidate may lose no run net)"
     )
     regressed = []
     for scenario_id, entry in baseline["summary"]["per_scenario"].items():
@@ -1822,6 +1963,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout-s", type=float, default=DEFAULT_TIMEOUT_S)
     run.add_argument("--max-cost-usd", type=float)
     run.add_argument("--out")
+    # REQ-V160-PRE-04 / REQ-V160-BEN-05: the instrument identification a
+    # `lmstudio` run cannot read from any code path of its own — the version
+    # string and the loaded context length are operator-typed (the `go`
+    # request's own text), the served model id a **T15** live `/models` read
+    # (bot.py's `_live_lmstudio`) this offline harness never calls. `bench.py
+    # run` itself makes no live probe; these three are threaded through only
+    # when the operator (or the T15/T16 invocation) supplies them.
+    run.add_argument("--lmstudio-version")
+    run.add_argument("--served-model-id")
+    run.add_argument("--lmstudio-context-length", type=int)
 
     report = sub.add_parser("report", help="render the markdown report")
     report.add_argument("--baseline", required=True)
@@ -1865,22 +2016,36 @@ def _cmd_report(arguments) -> int:
             print(error, file=sys.stderr)
             return EXIT_ERROR
 
-    for label, document in (("baseline", baseline), ("candidate", candidate)):
-        if document is None:
-            continue
-        code, reason = check_document(document)
-        if code != EXIT_OK:
-            print(f"{label}: {reason}", file=sys.stderr)
-            return code
-
     if arguments.gate and candidate is None:
         print("--gate needs both --baseline and --candidate", file=sys.stderr)
         return EXIT_NOT_COMPARABLE
+
+    # REQ-V160-BEN-03: `--gate` stays strict (today's exact behaviour); plain
+    # `report` validates in `informational` mode, so a `bench_schema: 1`
+    # document (or one whose `scenarios_sha256` no longer matches the live
+    # catalog — REQ-V160-BEN-02's v1.4-vs-v1.6.0 comparison) is accepted, and
+    # whatever `_validate` noted about it is surfaced below.
+    mode = "strict" if arguments.gate else "informational"
+    notes: list[str] = []
+    for label, document in (("baseline", baseline), ("candidate", candidate)):
+        if document is None:
+            continue
+        code, reason = check_document(document, mode=mode)
+        if code != EXIT_OK:
+            print(f"{label}: {reason}", file=sys.stderr)
+            return code
+        if mode == "informational" and reason != "valid":
+            notes.append(reason)
+
     if candidate is not None:
         reason = comparability(baseline, candidate)
         if reason is not None:
             print(f"not comparable: {reason}", file=sys.stderr)
             return EXIT_NOT_COMPARABLE
+
+    for note in notes:
+        print(f"informational comparison: {note}; deltas are indicative, not measured",
+              file=sys.stderr)
 
     text = render_report(baseline, candidate)
     if arguments.out:
@@ -2083,9 +2248,73 @@ def _git_commit() -> str:
         return ""
 
 
+def _tree_is_dirty() -> bool:
+    """`True` when `git status --porcelain` reports anything at all — the
+    dirty-tree guard REQ-V160-BEN-05 puts on a `baseline-*` run: `git_commit`
+    would otherwise name a commit that is not actually what ran."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=REPO_ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    return bool(result.stdout.strip())
+
+
+def _generation_settings(cfg: Config) -> dict:
+    """REQ-V160-BEN-05: a fixed, literal dict reflecting what `build_payload`
+    (llm/base.py) and its call sites actually send today — never a live
+    call. `provider_defaults` documents what is sent **nowhere**."""
+    return {
+        "agent": {"temperature": 0, "max_tokens": cfg.llm_max_tokens,
+                   "stream": False, "tool_choice": "auto"},
+        "summary_initial": {"temperature": 0, "max_tokens": agent.SUMMARY_MAX_TOKENS,
+                             "stream": False},
+        "summary_retry": {"temperature": 0, "max_tokens": cfg.llm_summary_max_tokens,
+                           "stream": False},
+        "provider_defaults": ["seed", "stop", "top_p"],
+    }
+
+
+def _prompt_tools_sha256(skills: dict) -> str:
+    """REQ-V160-BEN-05: `sha256` of the system prompt concatenated with the
+    exposed tool schema — the same prompt/tool pair `_prefix_tokens` above
+    already assembles to run a scenario at all."""
+    prompt = agent.build_system_prompt(skills, storage.utc_now_iso())
+    schema = json.dumps(
+        tools.tool_specs(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256((prompt + schema).encode()).hexdigest()
+
+
+def _instrument_meta(cfg: Config, arguments) -> dict:
+    """REQ-V160-PRE-04 / REQ-V160-BEN-05: `lmstudio_version` and
+    `lmstudio_context_length` are operator-typed (the `go` request's own
+    text) and `served_model_id` a T15 live `/models` read (bot.py's
+    `_live_lmstudio`) — this offline harness makes no such call itself.
+    `bench.py run` threads them through only when supplied on the command
+    line; off `lmstudio` (or when not supplied) they are `null`."""
+    if cfg.llm_provider != "lmstudio":
+        return {
+            "lmstudio_version": None, "served_model_id": None,
+            "lmstudio_context_length": None,
+        }
+    return {
+        "lmstudio_version": arguments.lmstudio_version,
+        "served_model_id": arguments.served_model_id,
+        "lmstudio_context_length": arguments.lmstudio_context_length,
+    }
+
+
 def _cmd_run(arguments) -> int:
     provider = arguments.provider
     scenarios = _selected(arguments.only)
+
+    # REQ-V160-BEN-05: a dirty tree refuses a baseline — `meta.git_commit`
+    # would otherwise name a commit that is not actually what ran. Any other
+    # tag, `smoke-v160` included, is unaffected regardless of tree state.
+    if arguments.tag.startswith("baseline-") and _tree_is_dirty():
+        print("a baseline run refuses a dirty tree (git status --porcelain "
+              "is non-empty)", file=sys.stderr)
+        return EXIT_ERROR
 
     if BENCH_ROOT.exists():
         shutil.rmtree(BENCH_ROOT, ignore_errors=True)
@@ -2129,6 +2358,7 @@ def _cmd_run(arguments) -> int:
             runs_root=BENCH_ROOT / arguments.tag,
             resolve_cost=resolver,
             max_cost_usd=arguments.max_cost_usd,
+            tag=arguments.tag,
         )
     finally:
         client.close()
@@ -2142,6 +2372,10 @@ def _cmd_run(arguments) -> int:
         "git_commit": _git_commit(),
         "prefix_tokens": prefix,
         "pricing": meta_pricing,
+        **_instrument_meta(cfg, arguments),
+        "generation_settings": _generation_settings(cfg),
+        "prompt_tools_sha256": _prompt_tools_sha256(skills),
+        "obs_capture_content": cfg.obs_capture_content,
     })
     document = _ordered(result)
     document = redact_document(document, sorted(cfg.allowed_tg_ids))
@@ -2174,7 +2408,10 @@ def _ordered(result: BenchResult) -> dict:
     order = ("tag", "started_at", "finished_at", "git_commit", "provider", "model",
              "context_length", "repeats", "only", "timeout_s", "prefix_tokens",
              "scenarios_sha256", "pricing", "skipped_scenarios", "env_flags",
-             "config_sha256", "constants", "aborted")
+             "config_sha256", "constants",
+             "lmstudio_version", "served_model_id", "lmstudio_context_length",
+             "generation_settings", "prompt_tools_sha256", "obs_capture_content",
+             "aborted")
     meta = {key: result.meta[key] for key in order if key in result.meta}
     meta.update({key: value for key, value in result.meta.items() if key not in meta})
     return {

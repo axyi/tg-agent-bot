@@ -167,13 +167,18 @@ def priced(scenario, costs):
 
 def test_fixtures_are_arithmetically_valid_benchmark_documents():
     """The fixtures are not hand-typed numbers: `bench.check_document`
-    recomputes every total and every summary value from the embedded rows. The
-    one tolerated failure is a stale `scenarios_sha256` — amending
-    `bench_scenarios.py` changes the digest, never the arithmetic the dashboard
-    reads."""
+    recomputes every total and every summary value from the embedded rows.
+    `mode="informational"` (REQ-V160-BEN-03) is what lets these frozen,
+    pre-`BENCH_SCHEMA`-2 fixtures — pinned for dashboard rendering, never
+    bumped for a schema or scenario-catalogue release — validate at all: it
+    tolerates their `bench_schema: 1` outright and turns their now-stale
+    `scenarios_sha256` into a note rather than a failure. Either way the
+    arithmetic underneath is still fully verified."""
     for path in (BASELINE, CANDIDATE):
-        code, reason = bench.check_document(json.loads(path.read_text(encoding="utf-8")))
-        assert code == 0 or "scenarios_sha256" in reason, f"{path.name}: {reason}"
+        code, reason = bench.check_document(
+            json.loads(path.read_text(encoding="utf-8")), mode="informational"
+        )
+        assert code == 0, f"{path.name}: {reason}"
 
 
 def test_page_parses_and_holds_the_four_ids_without_compare():
