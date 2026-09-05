@@ -133,7 +133,7 @@ def run(scenario, repeat, *, llm_rows=None, tool_rows=None, wall_ms=1000, succes
 
 def document(runs, **meta):
     base = {
-        "bench_schema": 1,
+        "bench_schema": bench.BENCH_SCHEMA,
         "meta": {
             "tag": "synthetic", "started_at": "2026-01-01T00:00:00Z",
             "finished_at": "2026-01-01T00:10:00Z", "git_commit": "0" * 40,
@@ -499,7 +499,7 @@ def test_cli_compare_flag_adds_the_section(tmp_path):
 @pytest.mark.parametrize("payload, needle", [
     ("not json at all", "not valid JSON"),
     (json.dumps([1, 2]), "not an object"),
-    (json.dumps({"bench_schema": 2, "meta": {}, "runs": [], "summary": {}}), "bench_schema"),
+    (json.dumps({"bench_schema": 3, "meta": {}, "runs": [], "summary": {}}), "bench_schema"),
     (json.dumps({"bench_schema": 1, "runs": [], "summary": {}}), "meta is missing"),
     (json.dumps({"bench_schema": 1, "meta": {}, "summary": {}}), "runs is missing"),
 ])

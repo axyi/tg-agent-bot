@@ -193,7 +193,7 @@ def _reset_tracing_state():
 def test_t_v160_trc_01_module_resolves_to_a_py_file_not_a_package():
     # dashboard_render and dashboard_server are added at T5/T6; this check
     # widens to cover them once those modules exist (REQ-V160-TREE-03).
-    for name in ("tracing",):
+    for name in ("tracing", "dashboard_render"):
         spec = importlib.util.find_spec(name)
         assert spec is not None, name
         assert spec.origin is not None and spec.origin.endswith(".py"), name

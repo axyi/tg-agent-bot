@@ -113,6 +113,7 @@ REQ-V160-EC-06.
 | T2 | yes | general-purpose subagent, full task (schema migration + storage helpers) |
 | T3 | no (deviation, justified in `docs/prompts/76-v160-t3-agent-span-wiring.md`) | reading stayed within the map's ranges; done directly rather than by a subagent because TRC-08's turn_id repair over the existing retry control flow is exactly the kind of high-risk mechanism this release requires mutation proof for, and the reading cost was already paid |
 | T4 | no | — (matches §14.1: whole-file reads of `metrics.py` and `bot.py:776-830` only) |
+| T5 | yes | general-purpose subagent, full task (dashboard_render.py + devtools/dashboard.py refactor) |
 
 *(filled in per task as the run proceeds)*
 
@@ -149,6 +150,26 @@ Recorded per REQ-V12-REP-02 process honesty. Worth feeding back: §15.1's
 exhaustiveness claim should be verified against the repository (as PRE-01
 items are) rather than asserted, at least for any requirement that changes
 a version constant multiple tests hardcode independently.
+
+**T5 — REQ-V160-TST-02's test-first rule was not followed.** `dashboard_render.py`
+and the refactored `devtools/dashboard.py` were written before
+`tests/test_v160_dashboard.py`; the new suite was not observed to fail
+against an absent implementation first. 21 of the 23 new tests passed on
+their first run against already-written code — the other two
+(`test_t_v160_dsh_01_dashboard_render_never_imports_devtools`, which
+initially flagged the module's own docstring mentioning `devtools/dashboard.py`
+in prose, and `test_t_v160_dsh_07_histogram_zero_count_bucket_still_shows_its_label`,
+whose overflow-bucket assertion did not account for `esc()`'s own escaping
+of `>`) failed on the first run and were corrected in the test, not the
+implementation, which is the opposite of what test-first would have shown.
+Rationale, not excuse: T5's own byte-identity constraint (REQ-V160-DSH-05 —
+`render()`'s output must match the pre-refactor page exactly) meant the
+relocation had to be verified against the *existing* `tests/test_dashboard.py`
+suite as the primary correctness signal before any new test made sense to
+write; the new DTO/chart/section functions were then implemented as one
+unit against the spec text directly. Recorded per REQ-V12-REP-02; no
+retroactive "write it red first" was attempted, as that would be theater
+over code already known to work.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
