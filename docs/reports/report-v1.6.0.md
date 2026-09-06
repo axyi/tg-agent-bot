@@ -1,21 +1,24 @@
 # Implementation report — spec-v1.6.0
 
-**Status: RESUMED under errata 2–6, T16 recorded, T17 provisional report in
-progress (2026-09-06).** The run below first stopped at T15 (S13's
-deterministic `tool_calls_max` overage — "Run closed at T15" section), was
-resumed under four lab errata (S13's ceiling corrected to the measured
-reference, S15 exempted from the blocking 3/3, `bench.py run`'s evidence-
-destroying wipe fixed, the operator's `LLM_MAX_TOKENS=4096`/
-`LLM_TIMEOUT_S=600` locked in as the instrument — "Resume under errata 2–5"
-section), stopped again inside T16 when S18 hit the same reasoning-budget-
-exhaustion mechanism as S15 (a sixth erratum, operator-authorised — same
-section), and then **completed T16**: `baseline-v1.6.0.json` recorded at
-53/54, the dashboard rendered, the informational v1.4 comparison produced
-("T16 — baseline recorded" section). This section and the ones below it
-are T17's own provisional finalisation; T18 (final acceptance + the
-`v1.6.0` tag) has not run yet. `pyproject.toml` reads `"1.6.0"` (from T12);
-**no `v1.6.0` git tag exists yet** — T18 creates it, last, on the
-evidence-only commit.
+**Status: T18 final acceptance complete (2026-09-06). Tag `v1.6.0` not yet
+created — awaiting the operator's explicit, separate approval.** The run
+below first stopped at T15 (S13's deterministic `tool_calls_max` overage —
+"Run closed at T15" section), was resumed under four lab errata (S13's
+ceiling corrected to the measured reference, S15 exempted from the
+blocking 3/3, `bench.py run`'s evidence-destroying wipe fixed, the
+operator's `LLM_MAX_TOKENS=4096`/`LLM_TIMEOUT_S=600` locked in as the
+instrument — "Resume under errata 2–5" section), stopped again inside T16
+when S18 hit the same reasoning-budget-exhaustion mechanism as S15 (a
+sixth erratum, operator-authorised — same section), completed T16
+(`baseline-v1.6.0.json` recorded at 53/54, the dashboard rendered, the
+informational v1.4 comparison produced — "T16 — baseline recorded"
+section), landed T17's provisional report ("T17 — provisional report"
+section, commit `726771f` = `<implementation-tip>`), and has now completed
+**T18**: both `checks.py run --profile full` invocations, `replay`,
+Appendix B and the ACC-02 regression check all green on the exact tip tree
+("T18 — final acceptance" section, below). `pyproject.toml` has read
+`"1.6.0"` since T12; **no `v1.6.0` git tag exists yet** — it is the one
+action still pending, deliberately, on the operator's word.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -23,8 +26,9 @@ evidence-only commit.
 - **Executor:** claude-sonnet-5 (Claude Code)
 - **`<base>`** (HEAD before this run's first commit):
   `d7e1d395bdb37d575e95ce3dbef1893172d9329e`
-- **`<implementation-tip>`**: recorded at T17/T18 — a commit cannot contain
-  its own SHA.
+- **`<implementation-tip>`**: `726771fb62ccbdd6f807449a2d80da525800936b`
+  (T17's own commit — recorded here at T18, since a commit cannot contain
+  its own SHA).
 
 ## Operator inputs
 
@@ -1029,7 +1033,7 @@ left as T18's unfulfilled placeholder, since T18 never runs in this run.
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.6.0 (T17 provisional, no tag yet — T18 pending) | 2026-09-06 | ~184.5 KB spec / 27 commits, prompts 72–98 | 0 of 5 repair cycles drawn on the actual codebase across the whole run; the only failure this resume hit (a stray `git worktree`/branch from a self-inflicted `TaskStop`) was operational, not a gate or code failure | 4 real findings total: PRE-04's preflight budget (fixed in place, T15), S13's deterministic `tool_calls_max` overage (erratum 2, ceiling corrected to measured 5), S15's reasoning-budget timeout (erratum 3, exempted, non-deterministic), S18's `summary_exists` under the same mechanism (erratum 6, exempted, non-deterministic) — plus 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference measured directly by the benchmark harness: ~$0.10 (original T15 smoke/diagnostics) + $0.1858 (this resume's 54-run baseline) + smoke-v160 reruns, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.6.0 (T18 final acceptance complete — tag not yet created, pending operator approval) | 2026-09-06 | ~184.5 KB spec / 28 commits, prompts 72–100 | 0 of 5 repair cycles drawn on the actual codebase across the whole run; the only failure this resume hit (a stray `git worktree`/branch from a self-inflicted `TaskStop`) was operational, not a gate or code failure | 4 real findings total: PRE-04's preflight budget (fixed in place, T15), S13's deterministic `tool_calls_max` overage (erratum 2, ceiling corrected to measured 5), S15's reasoning-budget timeout (erratum 3, exempted, non-deterministic), S18's `summary_exists` under the same mechanism (erratum 6, exempted, non-deterministic) — plus 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference measured directly by the benchmark harness: ~$0.10 (original T15 smoke/diagnostics) + $0.1858 (this resume's 54-run baseline) + smoke-v160 reruns, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
 ```
 
 ## Run closed at T15 (2026-09-06)
@@ -1530,3 +1534,159 @@ self-inflicted operational incident from killing a background process, not
 a gate or code failure — diagnosed, cleaned, and reconfirmed green without
 touching source, test or config, so it never drew on the repair budget. No
 gate failed on the actual codebase at any point in this resume.
+
+## T18 — final acceptance (2026-09-06, prompt 100)
+
+Before starting, `git diff --stat ca9c656..726771f` was checked: zero
+`.py`, test or `config/*.yaml` changes since the last code-touching commit
+— only `docs/`, `docs/assets/*` and the spec's erratum text differ. That
+raised the question of whether gate 6 and the `full` profile's
+`mutation-all` member needed a literal third re-run given a confirmed
+zero-diff prediction of an identical result. `advisor()` was consulted
+specifically on this point: the answer was to run them anyway —
+REQ-V160-ACC-03 says "T18 **re-runs** against the final tree", this is the
+last check before an irreversible tag, and the two earlier substitutions
+this resume made (the pre-push-profile stand-in at T15, the Python-API
+bypass of `bench.py report`'s CLI gap at T16) were each justified by
+*equivalent coverage under a stated constraint*, not by *predicted
+redundancy* — which is exactly what ACC-03's wording exists to refuse.
+Gate 6 was therefore re-run alone first (mutations write files in place;
+nothing else touched the tree while it ran), then gates 1–5, then both
+`full`-profile invocations, in that order.
+
+### Six verbatim gates, tip `726771f`
+
+| gate | result |
+|---|---|
+| 1 `uv sync --locked` | clean |
+| 2 `ruff check .` | all checks passed |
+| 3 `pytest` | **1016 passed**, 55.59s — matches T17 Item 2's count exactly |
+| 4 `bot.py --selftest` | `selftest: OK` |
+| 5 `bot.py --selftest-live` | `config`/`db`/`docker (29.7.2)`/`telegram`/`lmstudio`/`openrouter` all `OK` |
+| 6 `mutation_check.py` | **83 mutations, 83 killed, 0 survived, 0 errored, 0 drifted** — 29m11.653s, essentially identical to the resume's earlier 29m11.884s measurement on the same unchanged source tree |
+
+`git status --porcelain` clean after each gate.
+
+### `checks.py run --profile full`, both `<base>` candidates
+
+Prompt 93's own text ("resume from T15 per docs/prompts/93…") and
+REQ-V160-ACC-03's `<base>` terminology could name two different commits —
+`d7e1d395…` (this whole run's T0 base, per the report header) or
+`65146f0` (the commit immediately preceding this resume's own errata-2–5
+work). Rather than pick one silently, both were run and recorded:
+
+| `--since` | result |
+|---|---|
+| `d7e1d395bdb37d575e95ce3dbef1893172d9329e` | all 15 checks `[PASS]` (`uv-sync`, `ruff-check-all`, `ruff-format`, `branch-name`, `pytest`, `selftest`, `selftest-live`, `mutation-all`, `gitleaks-tree`, `trivy`, `semgrep`, `skylos` — 19 in-scope findings, `hooks-installed`, `doctor`, `lint-docs`); 30m46.282s |
+| `65146f0` | all 15 checks `[PASS]`, same set; `skylos` differs (1 in-scope, 23 out-of-scope) and `ruff-format`'s legacy-file count differs (3 vs 25) — both expected, since the diff-scoped checks resolve against a different, narrower commit range, and `skylos` is shadow/non-blocking regardless (REQ-V15-GATE-06); 30m40.029s |
+
+Both green. `git status --porcelain` clean after each.
+
+### `checks.py replay --range d7e1d395…726771f`
+
+All **28 commits** in range reported `clean`, ending at `726771fb62cc`
+(`<implementation-tip>`) — the full commit sequence of this run replays
+without incident by reading git objects only, per REQ-V15-VER-03's
+guarantee.
+
+### Appendix B — REQ-V160-ACC-01
+
+`git tag -l` before this section: `v1.3`, `v1.3-baseline` — nothing else,
+confirming E14's precondition ahead of any tag action.
+
+| scenario | verdict | how driven |
+|---|---|---|
+| E1 trace shape, including the failure-path atomicity | PASS | `tests/test_observability.py` (part of the 1016-test gate-3 run above) |
+| E2 v3→v4 migration, idempotent re-run | PASS | `tests/test_storage.py` migration tests |
+| E3 dashboard default-on, `/status` line 8 | PASS | `tests/test_v160_dashboard.py:1153` and the live capture at T17 Item 9 |
+| E4 trace tree + inline SVG gantt, attribute allowlist | PASS | `tests/test_v160_dashboard.py` server tests |
+| E5 security headers on every route, malformed-Host 400s | PASS | `tests/test_v160_dashboard.py` header/Host tests |
+| E6 canary never leaves the dashboard, both capture settings | PASS | canary tests across the six files named in T17 Item 9 |
+| E7 `--selftest` binds nothing | PASS | gate 4 above, patched-bind assertion in `tests/test_selftest.py` |
+| E8 busy port degrades, does not kill | PASS | `tests/test_v160_dashboard.py` bind-failure test |
+| E9 a bench run opens in the dashboard as traces | PASS | `tests/test_v160_dashboard.py` + T16's own `dashboard-v1.6.0.html` render |
+| E10 starved summary retried once, never accepted truncated | PASS | `tests/test_summary.py` / `T-V160-TQ-01`-family tests |
+| E11 third identical failing call refused | PASS | `tests/test_agent.py` `T-V160-TQ-04` tests |
+| E12 ledger row + prompt format | PASS | `lint-docs`, both `full`-profile runs above |
+| E13 baseline recorded against a named, preflighted instrument | **PASS, under the amended criterion — see Deviation below** | T15's live preflight, `smoke-v160`, and T16's `baseline-v1.6.0.json` (53/54) |
+| E14 tag created last, on the evidence-only commit, `v1.3`/`v1.3-baseline` unchanged | PASS (this commit only; the tag step itself follows, gated on operator approval) | this section, `git tag -l` above and after tag creation |
+
+**Deviation — Appendix B's E13 text has not been amended for errata 3 and
+6 (task #10, originally scoped narrower).** E13's Gherkin literally reads
+"each of S13…S18 succeeded 3 times out of 3 within its `tool_calls_max`,
+none skipped — anything less voids the run rather than becoming a
+finding." Two disclosed, operator-authorised errata now carve exceptions
+into that sentence: erratum 3 excludes S15's blocking 3/3 (2/3 recorded,
+non-blocking, re-enters the gate in 1.7.0) and erratum 6 excludes S18's
+`summary_exists` check on the same grounds (2/3 recorded in the baseline,
+same reasoning-budget mechanism, same 1.7.0 disposition). Erratum 2 (S13's
+ceiling raised from 4 to 5) does not itself contradict E13's wording,
+since the Gherkin never names a ceiling value — only the "3 out of 3"
+sentence is now stale. This is recorded as a **PASS under the amended
+criterion**, exactly as spec-v1.5.1 handled its own erratum against an
+unamended Appendix B, and is named here explicitly rather than
+reinterpreted silently. A future task should update Appendix B's E13 text
+itself to reflect the two exemptions, or fold it into 1.7.0's own
+Appendix B when S15/S18 re-enter the blocking gate.
+
+### ACC-02 — regression check
+
+Concrete evidence, not assertion:
+
+- **spec-v1.2 D1** ("a secret in a tool-call identifier never reaches
+  storage"): `tests/test_v12_patch.py::test_t_v12_id_01_model_authored_id_and_name_never_stored`
+  asserts the synthetic sentinel is absent from the stored assistant row,
+  the stored tool row and the following round's request payload, and that
+  the assistant call and its tool result still share one identifier —
+  every clause of D1's Gherkin, automated. Green in gate 3 above.
+- **spec-v1.2 D2** ("an unreadable subtree cannot hide sandbox usage"):
+  `tests/test_v12_patch.py::test_t_v12_qta_03_unreadable_subtree_cannot_bypass_the_quota`
+  asserts the refusal names measurement ("sandbox size could not be
+  measured"), not fullness, exactly as D2 specifies. Green in gate 3
+  above.
+- **spec-v1.4 S01 acceptance**: read directly from the recorded
+  `docs/assets/bench/baseline-v1.6.0.json` — S01 is 3/3 `success: true`,
+  every check (`no_tools`, `answer_regex`, `answer_max_chars`) `ok: true`
+  on all three repeats, unchanged in shape from v1.4.
+- **spec-v1.5 freeze properties**: this run's own T16 froze the tree
+  (REQ-V160-BEN-07) and T18's replay above confirms all 28 commits since
+  `<base>` are `clean`; the six verbatim gates and both `full`-profile
+  runs stayed green with zero source/test/config drift across the whole
+  resume, the same property v1.5's own freeze machinery enforces.
+- **No earlier security posture weakened**: the exec sandbox
+  (`sec-qta-*`, `cov-01…11` mutation entries, all killed in gate 6), the
+  redaction choke points (`sec-aud-01-hook-redaction`, `v160-content-
+  redact-bypassed`, `v160-status-message-redact-bypassed`, all killed),
+  the SSRF domain allowlist (`sec-ssr-01-shape-check`, `sec-ssr-03-
+  request-time-guard`, `test_t_v12_ssr_01…04`, all green/killed) and the
+  `.env` handling (unchanged since T15's single-line `sed`, never read or
+  printed raw in this session) are all untouched by this release.
+
+### Fix cycles used at T18
+
+**0 of 5.** Every gate, both `full`-profile runs, `replay` and every
+Appendix B scenario passed on the first attempt.
+
+### A second gap named, not fixed here
+
+`docs/llm-usage.md` never received rows for prompt 99 (T17) or this
+prompt (100) — T17's own commit (`726771f`) is already frozen and cannot
+be amended, and adding those rows here would stretch ACC-03's "`docs/
+reports/*` and nothing else" scope a second time beyond the one exception
+already justified above (the commit-msg hook's hard requirement). This
+joins the pre-existing "prompts 72–92 never logged" gap already recorded
+in row 51's neighbourhood as a known, un-backfilled hole — left for a
+future documentation-only correction rather than stretched into this
+commit for tidiness.
+
+### The tag — REQ-V160-VER-04, E14
+
+This commit records `<implementation-tip>` = `726771fb62ccbdd6f807449a2d80da525800936b`,
+the `replay` output above, and the **intended** tag name `v1.6.0` — it
+creates no tag and claims nowhere that one exists. Per this project's own
+production-action approval gate, creating and pointing an annotated tag
+at a commit is exactly the kind of hard-to-reverse, shared-state action
+that needs the operator's own explicit, named approval in this session
+before it happens; that approval has not yet been requested. Once given,
+`git tag -a v1.6.0` is created on this commit's SHA and nothing is pushed,
+per E14 and REQ-V160-NG-13.
