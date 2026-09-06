@@ -1535,7 +1535,7 @@ in order, to the end of `SCENARIOS`:
             "чисел от 1 до 100. Затем вторым вызовом exec запусти его через "
             "python3 и назови полученное число.",
         ],
-        checks=[tool_used("exec"), answer_regex(r"\b5050\b"), tool_calls_max(4)],
+        checks=[tool_used("exec"), answer_regex(r"\b5050\b"), tool_calls_max(5)],
     ),
     Scenario(
         id="S14",
@@ -1653,6 +1653,25 @@ Facts the block rests on, each measured in the repository:
 than 3/3, for any of S13…S18 is a **blocking baseline failure**: repair it
 before the baseline, or — if it surfaces during T16 — **void the run** and rerun
 after the repair. There is no "or a recorded finding" escape anywhere.
+
+`[[ERRATUM 2, disclosed post-T15 by the lab: S13's ceiling originally read
+`tool_calls_max(4)`. At T15 the live instrument (`qwen/qwen3.8-27b` on LM
+Studio Bionic) used **exactly five** `exec` calls in all three repeats and
+answered 5050 every time — a deterministic reference cost, not variance. The
+ceilings of S13…S18 were written before any measurement (spec-v1.6.0's own
+open question at authoring); the measured value is the reference this baseline
+exists to record, so the ceiling is set to 5 and the extra call is a cost
+finding for spec-v1.7.0's reasoning policy to reduce, not a failed scenario.]]`
+
+`[[ERRATUM 3, disclosed post-T15 by the lab: **S15 is excluded from the
+blocking 3/3 for the 1.6.0 baseline.** At T15 S15 passed 2 of 3 clean attempts
+at `LLM_MAX_TOKENS=4096` (536–655 s each) and one attempt exceeded an 1800 s
+ceiling; the variable is the model's hidden reasoning over the truncated tool
+output, which is spec-v1.7.0's subject. S15 still executes in `smoke-v160` and
+in the baseline (BEN-07's precondition 3 requires execution, not success); its
+per-repeat outcome, `finish_reason` and durations are recorded in the report
+and in the baseline document, and it re-enters the blocking gate in 1.7.0.
+S13, S14, S16, S17, S18 stay at 3/3.]]`
 
 **REQ-V160-TQ-06 (MUST) — a tool-call ceiling is a new check kind.** There is
 **no** existing field bounding tool calls: `Check` (bench_scenarios.py:42-62) has
@@ -1801,6 +1820,13 @@ differs: <name>"`, and `report --gate` exits `EXIT_NOT_COMPARABLE` (2).
 `smoke-v160` included, are unaffected. REQ-V160-BEN-02 is untouched: the v1.4
 comparison is informational and never passes `--gate`.
 
+`[[ERRATUM 5, disclosed post-T15 by the lab: the operator set
+`LLM_MAX_TOKENS=4096` and `LLM_TIMEOUT_S=600` in `.env` during T15 (authorised
+in-session, recorded in the report). Those are the **1.6.0 instrument**: they
+land in `generation_settings.agent.max_tokens` and the timeout evidence of
+the baseline, and a 1.7.0 candidate compared against `baseline-v1.6.0` must
+run with the same values or be non-comparable.]]`
+
 **REQ-V160-BEN-06 (MUST) — the static report is regenerated from the new
 baseline, inside T16's one commit.** EC-10 gives T16 one commit and TREE-01 both
 artefacts in it, so the order is fixed: run the baseline into `.bench/`, copy it
@@ -1844,6 +1870,20 @@ here, voiding nothing, because no baseline exists yet.
 source, test, config, prompt, scenario, tool schema, model setting or
 inference-setting change voids the baseline and requires the complete baseline
 run again** — its full ≈ 40 minutes, with the re-run and its trigger reported.
+
+**REQ-V160-BEN-08 (MUST) — `run` removes only its own tag directory.**
+`[[ERRATUM 4, disclosed post-T15 by the lab: added after T15 lost evidence.]]`
+`bench.py run --tag <tag>` deletes `.bench/<tag>/` before writing and nothing
+else under `.bench/`; sibling tag directories and any `--out` document of an
+earlier run survive. Today `run` removes the whole `BENCH_ROOT`
+(bench.py:2319-2320), which destroyed the first complete `smoke-v160.json` when
+the S15 diagnostics ran a second time (report-v1.6.0.md, "Evidence lost").
+`T-V160-BEN-08`: two consecutive `run` invocations with different tags under
+the stub client leave both documents on disk; a third run with the first tag
+replaces only that tag's directory. Fixed and committed before any further
+inference, as one prompt and one commit. The ≈ 40 minutes above is the
+pre-T15 estimate; with `LLM_MAX_TOKENS=4096` and S15's durations the executor
+reports the measured wall-clock instead.
 
 ---
 
@@ -2263,6 +2303,7 @@ v15-` still selects exactly the four `v15-*` entries).
 | `T-V160-BEN-02` | a `scenarios_sha256` mismatch is fatal for `check` and for `report --gate`, and a stderr note for plain `report` |
 | `T-V160-BEN-03` | `runs[].spans` round-trips: `attributes` is a parsed object, `conv_id` is replaced by `conv_seq`, `SPAN_ROW_KEYS` equals the document's own key set and holds `attributes`, not `attributes_json` or `conv_id`, and `REQUIRED_SPAN_ROW_KEYS` is enforced only for schema 2 |
 | `T-V160-BEN-04` | the six new `meta` keys are present; `LOCKED_META_FIELDS` holds the **six** of REQ-V160-BEN-05 beside the ten it held and **not** `git_commit`; `report --gate` exits `EXIT_NOT_COMPARABLE` when any of the six differs **and** when one side omits it, and 0 on a pair differing only in `git_commit`; `run --tag baseline-x` exits `EXIT_ERROR` on a dirty tree and proceeds on a clean one, while `run --tag smoke-x` proceeds either way |
+| `T-V160-BEN-08` | two consecutive `bench.py run` invocations with different tags under the stub client leave both `.bench/<tag>/` documents on disk; a third run reusing the first tag replaces only that tag's directory; a sibling `--out` document survives (REQ-V160-BEN-08, erratum 4) |
 | `T-V160-VER-01` | `bot.main(["--version"])` prints `tg-agent-bot <v>` where `<v>` equals an independent `tomllib` read of `pyproject.toml`, and returns 0 |
 | `T-V160-VER-02` | the CLI grammar table in full: every accepted form, every rejected combination, exit codes 0 and 2, and the exact usage string |
 
@@ -2504,6 +2545,7 @@ test, a Gherkin scenario or a recorded artefact — never "by inspection".
 | BEN-05 `meta` records and locks the instrument | v1.4 recorded no version; `bench.py:147-155`, `:1291-1320` | `T-V160-BEN-04` |
 | BEN-06 static report regenerated | REQ-V160-DSH-01 | `docs/assets/dashboard-v1.6.0.html` |
 | BEN-07 baseline last, over a frozen tree; smoke run first | REQ-V160-EC-06; the round-1 critique | §17's ordering; the `smoke-v160` document; the report's timeline |
+| BEN-08 `run` wipes only its own tag directory | T15 evidence loss (report-v1.6.0.md, "Evidence lost"); lab erratum 4 | `T-V160-BEN-08` |
 | VER-01 one version source, `tomllib` | `[tool.uv] package = false` | `T-V160-VER-01`; `N10`; `v160-version-literal-not-pyproject` |
 | VER-02 the SemVer policy and the map | user decision 6 | `README.md` § Versioning; this table |
 | VER-03 the CLI grammar | `bot.py:61`, `:1306-1321` | `T-V160-VER-02`; `N9`; §15.1's `:1398` |
