@@ -626,6 +626,39 @@ def test_smoke_tag_proceeds_regardless_of_tree_state(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# T15 resume, erratum 4: REQ-V160-BEN-08 -- `run` removes only its own tag
+# directory (T-V160-BEN-08)
+# --------------------------------------------------------------------------
+
+
+def test_run_removes_only_its_own_tag_directory(tmp_path, monkeypatch):
+    """Two consecutive `run` invocations with different tags leave both
+    `.bench/<tag>/` documents on disk, and a sibling `--out` document written
+    directly under `.bench/` (the `smoke-v160.json` shape) survives too; a
+    third run reusing the first tag replaces only that tag's own directory."""
+    _stub_cli(monkeypatch, tmp_path)
+    bench_root = tmp_path / ".bench"
+
+    assert bench.main(["run", "--tag", "tag-a", "--repeats", "1", "--only", "S01"]) == 0
+    assert (bench_root / "tag-a").is_dir()
+
+    sibling_out = bench_root / "sibling.json"
+    sibling_out.write_text("{}", encoding="utf-8")
+
+    assert bench.main(["run", "--tag", "tag-b", "--repeats", "1", "--only", "S01"]) == 0
+    assert (bench_root / "tag-a").is_dir(), "sibling tag directory must survive"
+    assert (bench_root / "tag-b").is_dir()
+    assert sibling_out.exists(), "a sibling --out document under .bench/ must survive"
+
+    marker = bench_root / "tag-a" / "marker"
+    marker.write_text("stale", encoding="utf-8")
+    assert bench.main(["run", "--tag", "tag-a", "--repeats", "1", "--only", "S01"]) == 0
+    assert not marker.exists(), "a third run must replace tag-a's own directory"
+    assert (bench_root / "tag-b").is_dir(), "tag-b must still survive"
+    assert sibling_out.exists()
+
+
+# --------------------------------------------------------------------------
 # T11: the bench.py:1420-1422 report-text fix -- a computed pp figure, not a
 # hardcoded "2.8-3.0 pp"
 # --------------------------------------------------------------------------

@@ -2316,8 +2316,13 @@ def _cmd_run(arguments) -> int:
               "is non-empty)", file=sys.stderr)
         return EXIT_ERROR
 
-    if BENCH_ROOT.exists():
-        shutil.rmtree(BENCH_ROOT, ignore_errors=True)
+    # REQ-V160-BEN-08: remove only this run's own tag directory. Wiping the
+    # whole BENCH_ROOT here destroyed a sibling tag's evidence (and any
+    # `--out` document living directly under `.bench/`) the moment a second
+    # `run` invocation followed the first.
+    tag_dir = BENCH_ROOT / arguments.tag
+    if tag_dir.exists():
+        shutil.rmtree(tag_dir, ignore_errors=True)
     try:
         cfg = _base_config(arguments.tag, provider)
     except config.ConfigError as exc:
