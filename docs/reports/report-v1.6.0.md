@@ -1078,3 +1078,264 @@ full technical record — the preflight fix, the `smoke-v160` findings, the
 S13/S15 measurements, and every correction made along the way — stands
 above as this run's complete account, closed at the operator's explicit
 instruction rather than by reaching T18.
+
+## Resume under errata 2–5 (2026-09-06, prompts 93–96) — STOP again, at S18
+
+Prompt `93-v160-resume-t15.md` resumed the run above under the four lab
+errata disclosed post-T15 (commit `28363b2`, `docs/spec/spec-v1.6.0.md`):
+S13's ceiling raised to the measured reference (erratum 2), S15 excluded
+from the blocking 3/3 (erratum 3), `bench.py run` scoped to wipe only its
+own tag directory (erratum 4, REQ-V160-BEN-08), and `LLM_MAX_TOKENS=4096`/
+`LLM_TIMEOUT_S=600` locked in as the 1.6.0 instrument (erratum 5).
+
+### Two source commits, before any inference
+
+- `20f3200` — `devtools/bench_scenarios.py`: S13's `tool_calls_max(4)` →
+  `tool_calls_max(5)`, plus the one dependent test literal
+  (`tests/test_v160_bench.py`). Prompt `94-v160-t15-erratum2-s13-ceiling.md`.
+- `ca9c656` — `devtools/bench.py`'s `_cmd_run`: the wipe-before-write step
+  narrowed from `shutil.rmtree(BENCH_ROOT, ...)` to
+  `shutil.rmtree(BENCH_ROOT / arguments.tag, ...)`, plus the new test
+  `test_run_removes_only_its_own_tag_directory`
+  (`tests/test_v160_bench.py`). Prompt `95-v160-t15-erratum4-ben08.md`.
+
+Both commits reviewed by the `code-reviewer` subagent in a clean context
+(REQ-V160-REV-01) before any inference — **verdict: approve**, one 🟡 and
+two 🟢 findings:
+
+- 🟡 `devtools/bench.py:2323-2325` — `arguments.tag` is used unsanitized as
+  an `rmtree` target for the first time (before this fix the delete target
+  was the fixed constant `BENCH_ROOT`; a tag value could never influence
+  *what* got deleted). A tag containing `..` or an absolute path could in
+  principle escape `.bench/`. **Waived, not fixed**: `--tag` is
+  operator-typed CLI input, not model or network input; neither erratum 2
+  nor 4 asks for tag validation; and the resume prompt's own constraint
+  limits source changes to exactly the two commits above, before any
+  inference — adding a third change here would be the same kind of
+  unilateral scope expansion this run has consistently deferred to the lab
+  (the S13-ceiling precedent). Tracked for a future task, not this one.
+- 🟢 Prompt 93's claim that BEN-08 "guarantees `.bench/smoke-v160/` on disk"
+  overstates the code: `_remove_run_dir` already deletes each non-aborted
+  scenario-repeat's own working directory as it finishes, so the tag
+  directory itself is typically empty after a clean run — the artefact that
+  actually needs to survive is the `--out` JSON sibling, which the fix
+  correctly preserves. Confirmed empirically below.
+- 🟢 The new test stubs `_base_config` away entirely, so it doesn't pin the
+  wipe's ordering relative to `_base_config`'s own `_base` write under
+  `BENCH_ROOT / tag / "_base"`. Manual inspection of `_cmd_run` confirms the
+  wipe runs first; a latent test gap, not a live bug.
+
+Gates 1–4 and 6 (`uv run --locked python devtools/mutation_check.py`,
+verbatim) both green after the two commits: pytest 1006 collected, all
+pass; `bot.py --selftest` OK; mutation gate `83 mutations, 83 killed, 0
+survived, 0 errored, 0 drifted`, real **29m11.884s** (faster than T14's own
+41m59.234s measurement of the same 83-entry set — machine contention
+varies, per the existing note on this figure's own history; `--timeout-s`
+in `config/quality_gates.yaml` already covers this at 5040s, unchanged).
+
+**One operational incident, self-inflicted and corrected.** A first attempt
+at `checks.py run --profile full --since <base>` was killed
+(`TaskStop`) a few seconds in, before it reached `mutation-all`, to avoid
+re-running the already-fresh gate-6 measurement above a second time. The
+kill landed mid-test inside `tests/test_v15_standards.py`'s
+`git_worktree` fixture (`test_n6_pre_push_refused_when_pytest_fails`),
+whose `finally` cleanup (`git worktree remove` + `git branch -D`) never
+ran because the process was terminated, leaving a real linked worktree
+(`/tmp/pytest-of-akh/.../wt`) and branch (`test/v15-test_n6_pre_push_...`)
+on this repository. `git status --porcelain` stayed clean (the leak is in
+`git worktree`/`git branch`, not the tracked tree), but the next `pytest`
+run genuinely failed with `git checkout -q -b ...` exit 128 (branch already
+exists) — a real, reproducible failure with a root cause, not a flake.
+Diagnosed by reading the failing test's own fixture, cleaned up with the
+exact commands the fixture itself uses (`git worktree remove --force`,
+`git branch -D`), and confirmed by a clean `pytest -q` rerun (1006 passed).
+**Lesson for a future session: never `TaskStop` a background job that may
+be mid-`pytest` inside this repo's own `git_worktree`-fixture tests — let
+it reach a natural stopping point, or expect to clean up a leaked
+worktree/branch afterward.**
+
+Following T14/T15's own precedent (report, "Offline gates" under "Live
+preflight and STOP" above) rather than literally re-running `mutation-all`
+a second time inside `checks.py run --profile full`, offline coverage was
+instead assembled from a synthetic `pre-push --stdin-refs` invocation
+(`refs/heads/main <HEAD> refs/heads/main <base>`, mirroring the real git
+pre-push protocol) plus the two `full`-only members it excludes:
+
+| gate | command | result |
+|---|---|---|
+| ruff-check-all / ruff-format / branch-name / pytest / selftest / gitleaks-tree / trivy / semgrep / skylos / mutation-v15 / mutation-v160 / hooks-installed / doctor | `checks.py run --profile pre-push --stdin-refs` (synthetic, `<base>..ca9c656`) | all PASS (skylos: 19 in-scope findings, non-blocking shadow gate — the same pre-existing `dashboard_server.py` dead code T15 already tracked, not fixed here for the same "no source change after the two commits" reason) |
+| lint-docs | `checks.py lint-docs` | PASS |
+| selftest-live (gate 5) | `bot.py --selftest-live` | PASS — config/db/docker(29.7.2)/telegram/lmstudio/openrouter all OK |
+| hooks (extra) | `install_hooks.py --check` | PASS |
+
+### PRE-03 / PRE-04, resolved
+
+The probe found `192.168.0.145:1234` reachable this time (`172.16.50.233`
+and `192.168.178.170` still timed out) after the operator started the
+GPU box mid-session; `.env`'s `LMSTUDIO_BASE_URL` rewritten by the spec's
+own single-line `sed`, confirmed by the exact `grep -q` and never printed.
+`GET /v1/models` lists `qwen/qwen3.8-27b` — contains `LMSTUDIO_MODEL`.
+Operator inputs reused verbatim from T0 per this run's own `go` request:
+LM Studio version `Bionic v1.1.1`, loaded context length `42496` (no new
+values were supplied this time). The inference preflight (`max_tokens =
+cfg.llm_max_tokens = 4096`, corrected clause from the original T15 run):
+`finish_reason=stop`, content `'\n\nready'` non-empty,
+`usage: prompt_tokens=60, completion_tokens=27, reasoning_tokens=23,
+total_tokens=87` — **PASS**, identical shape to the original T15 preflight
+at `max_tokens=2048` (this model spends the same ~23 reasoning tokens
+regardless of the larger ceiling, then stops on its own).
+
+### `smoke-v160` reproduced, in two invocations (BEN-08 verified live)
+
+`bench.py run --tag smoke-v160 --only S13,S14,S15,S16,S17,S18 --repeats 1
+--timeout-s 1800` aborted at `ABORTED: timeout:S15-1` after S13 (5/5 exec
+calls — erratum 2's ceiling confirmed exactly right) and S14 succeeded:
+S15's first LLM call timed out twice at `LLM_TIMEOUT_S=600` each
+(`error_kind: transport`), hitting the 1800s scenario wall-clock before a
+third attempt could start. `run_bench`'s own loop (`devtools/bench.py:742-
+764`) breaks both the repeat loop and the scenario loop on any `aborted`
+result — **a single S15 timeout stops the whole invocation, S16–S18
+included**, which is exactly the evidence-loss shape REQ-V160-BEN-08 exists
+to survive. A second invocation, `--only S16,S17,S18 --repeats 1 --out
+.bench/smoke-v160-part2.json` (same tag), then ran S16/S17/S18 to 3/3 — and
+the first document (`.bench/smoke-v160.json`) came out **byte-identical**
+before and after the second `run` call, confirmed by a direct diff: BEN-08
+holds under a real timeout, not only under the stub-client test. All six
+scenarios executed, none skipped (BEN-07 precondition 3 met); S15's outcome
+recorded as `failure: "timeout"`, 2 attempts, `wall_ms: 1800001`, no
+`finish_reason` on either attempt (never got a response) — a live,
+independent confirmation of erratum 3's own characterisation, not the same
+measurement repeated.
+
+### Baseline measured, in five invocations — 53 of 54 pass, STOP at S18
+
+A single 18-scenario × 3-repeat `bench.py run --tag baseline-v1.6.0`
+invocation was not attempted: the same abort-cascade above would risk
+losing S16–S18 (or worse, scenarios after wherever S15 sits) to one S15
+timeout, 30–48 minutes into an already-long run. Instead, run as five
+separate invocations against the identical clean tree (`git status
+--porcelain` empty throughout — no baseline-dirty-tree refusal fired), each
+copied out of `.bench/` immediately on completion:
+
+| part | `--only` | repeats | result | measured wall-clock |
+|---|---|---|---|---|
+| A | S01–S14 | 3 | **42/42 (100%)** — S13 3/3 within `tool_calls_max(5)` (exactly 5 exec calls each run), S14 3/3 | 48m49.961s |
+| B1 | S15 | 1 | 1/1 — 212s, clean | 3m35.535s |
+| B2 | S15 | 1 | 1/1 — 413s, clean | 6m56.509s |
+| B3 | S15 | 1 | 1/1 — 393s, clean | 6m36.777s |
+| C | S16,S17,S18 | 3 | S16 3/3, S17 3/3, **S18 2/3** | 27m15.566s |
+
+S15 came out **3/3 clean this run** (212s/413s/393s, all `finish_reason:
+stop`) — better than erratum 3's own historical 2/3, and better than this
+same session's `smoke-v160` attempt minutes earlier. This is exactly the
+non-determinism erratum 3 describes: the exemption remains the governing
+rule for `baseline-v1.6.0` regardless of any one run's luck, since a future
+candidate run could see the timeout again.
+
+**S18 repeat 3 failed `summary_exists`** (`detail: "0 summary row(s), no
+goal"`); both `answer_regex` checks (turn 2 "Vega", turn 3 the deadline)
+and `tool_calls_max` passed — only the summary is missing. The cause, read
+from the embedded `llm_calls` row: the `/new` command's summary attempt
+returned `finish_reason: "length"`, `error_kind: "truncated"`,
+`completion_tokens=511`, of which `reasoning_tokens=511` — the **entire**
+completion budget spent on hidden reasoning, zero visible summary text.
+Both the initial summary call and its REQ-V160-TQ-01 retry truncated the
+same way, so the turn correctly completed **without** a summary, exactly as
+Appendix B's E10 and REQ-V160-TQ-01 specify ("the turn completes without a
+summary, no exception escapes, and /stats reports one failed summary").
+**This is the code and the check both working as designed — the design and
+this instrument are what disagree.** It is the same mechanism as S15's and
+the original PRE-04 preflight's failures (`qwen/qwen3.8-27b` spending an
+entire small-to-medium completion budget on hidden reasoning before any
+visible content), applied to a different call site (the summary path
+rather than the agent path). It is also, by the smoke-v160/baseline
+contrast, **probabilistic, not deterministic**: S18 was 1/1 in `smoke-v160`
+minutes earlier and 2/3 here, at the identical `LLM_MAX_TOKENS=4096` — the
+S15 family (instrument reasoning-budget variance), not the S13 family
+(deterministic, reproduced 5/5/5 across every measurement).
+
+Per prompt 93's own Stop clause — "any of S14, S16, S17, S18 below 3/3 …
+stop, report, no tag" — **the run stops here, before T16's commit.**
+`docs/assets/bench/baseline-v1.6.0.json` is **not** written or committed;
+none of T16, T17 or T18 ran. `advisor()` was consulted before writing this
+section; its explicit guidance, matching this run's own S13 precedent
+twice over, was not to retry S18 in search of a passing measurement (that
+would convert "3/3" into "3/3 eventually" and amount to authoring a sixth
+erratum unilaterally) and to hand the operator the same three-option
+choice S13 received.
+
+**Evidence preserved**, all five baseline parts plus the two `smoke-v160`
+parts, copied out of the git-ignored `.bench/` the moment each invocation
+returned (per this run's own standing operational hazard about `.bench/`
+being ephemeral and unprotected by version control):
+
+- `baseline-partA-S01-S14.json` (42 runs, 423 298 B)
+- `baseline-partB1-S15-r1.json`, `-partB2-S15-r2.json`, `-partB3-S15-r3.json`
+- `baseline-partC-S16-S18.json` (9 runs, 113 496 B, S18 repeat 3's failure
+  embedded)
+- `smoke-v160-part1-S13-S14-S15.json` (aborted at S15), `-part2-S16-S18.json`
+
+All share identical `LOCKED_META_FIELDS` (`git_commit=ca9c656...`,
+`config_sha256`, `scenarios_sha256`, `lmstudio_version`, `served_model_id`,
+`lmstudio_context_length`, `generation_settings` with
+`agent.max_tokens=4096`, `prompt_tools_sha256`, `obs_capture_content`) —
+confirmed by direct comparison across parts A/B1/B2/B3/C. The tree has not
+moved since (`ca9c656`, still clean); if the operator authorises proceeding
+without a source change, none of this measurement needs to be re-run.
+
+### Deviations (this resume, prompts 93–96)
+
+1. `checks.py run --profile full --since <base>` was not run literally as
+   one command; a synthetic `pre-push --stdin-refs` invocation plus two
+   separate `full`-only checks (`lint-docs`, `bot.py --selftest-live`)
+   covered the same ground without a third `mutation-all` run. Same
+   reasoning T15's own report already used for the same substitution.
+2. The baseline was measured as five invocations, not one, because
+   `run_bench` aborts its **entire** scenario loop (not just the offending
+   repeat) on any per-scenario-repeat wall-clock timeout — a mechanism this
+   session confirmed by direct code reading (`devtools/bench.py:742-764`)
+   after `smoke-v160`'s own abort, not assumed. REQ-V160-BEN-08's fix is
+   exactly what makes this decomposition survivable; without it, each of
+   the five invocations would have destroyed the previous one's evidence.
+3. A stray `test/v15-*` git worktree and branch, self-inflicted by
+   `TaskStop`-killing a `checks.py run --profile full` invocation mid-test,
+   was found and cleaned as described above.
+4. The code-reviewer's 🟡 unsanitized-`--tag` finding was waived, not
+   fixed, per the two-commit constraint already recorded above.
+5. Appendix B's **E13** Gherkin text ("each of S13…S18 succeeded 3 times
+   out of 3 within its `tool_calls_max`, none skipped — anything less voids
+   the run rather than becoming a finding") was never amended by errata 2/3
+   when they were disclosed — it still reads as if S15 is blocking, which
+   erratum 3 explicitly says it is not, and it does not anticipate S18
+   joining the same non-deterministic family. Flagged here rather than
+   silently reinterpreted; a future T18 (or a lab correction to Appendix B
+   itself) needs to resolve which text governs before ACC-01's Appendix B
+   pass can be scored against E13 without ambiguity.
+6. `docs/llm-usage.md` has no rows for prompts 72–92 (this spec's own T0–T15
+   execution) — a pre-existing gap from before this resume session, not
+   introduced here and not backfilled here (this session has no first-hand
+   token data for prompts it did not run). Recorded as a known gap rather
+   than silently left unmentioned; row 51 below covers only this session's
+   own prompts 93–96.
+
+### The operator's decision
+
+Three options, no default recommended:
+
+1. **Accept the stop** — no `v1.6.0` tag this run either; S18's
+   `summary_exists`-under-reasoning-budget-exhaustion joins S15's as
+   spec-v1.7.0's subject (the reasoning/cost policy release REQ-V160-NG-02
+   already earmarks).
+2. **Authorise erratum 6**, extending erratum 3's non-blocking treatment to
+   S18's `summary_exists` check under this instrument (same disclosed-in-
+   place mechanism as errata 1–5) — T16–T18 then proceed on the
+   measurement **already sitting in evidence above**, no re-run needed: the
+   tree hasn't moved since `ca9c656` and every locked meta field already
+   matches across all five parts.
+3. **Authorise a re-measurement** of S18's three repeats as three isolated
+   invocations (the same pattern erratum 3's own S15 measurement above
+   used) — accepting whatever comes out, 3/3 or not.
+
+`pyproject.toml` still reads `"1.6.0"` with no tag — the same
+already-disclosed inconsistency the T15 closure recorded, now carried one
+stop further without being resolved either way.
