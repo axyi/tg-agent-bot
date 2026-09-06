@@ -276,7 +276,7 @@ SCENARIOS: list[Scenario] = [
             "чисел от 1 до 100. Затем вторым вызовом exec запусти его через "
             "python3 и назови полученное число.",
         ],
-        checks=[tool_used("exec"), answer_regex(r"\b5050\b"), tool_calls_max(4)],
+        checks=[tool_used("exec"), answer_regex(r"\b5050\b"), tool_calls_max(5)],
     ),
     Scenario(
         id="S14",

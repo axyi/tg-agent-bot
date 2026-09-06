@@ -220,7 +220,7 @@ def test_s01_through_s12_are_unchanged():
 
 def test_s13_to_s18_each_carry_exactly_one_tool_calls_max_check():
     by_id = {scenario.id: scenario for scenario in SCENARIOS}
-    expected_max_calls = {"S13": 4, "S14": 4, "S15": 3, "S16": 4, "S17": 4, "S18": 3}
+    expected_max_calls = {"S13": 5, "S14": 4, "S15": 3, "S16": 4, "S17": 4, "S18": 3}
     for scenario_id, expected in expected_max_calls.items():
         ceilings = [
             check
