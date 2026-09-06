@@ -1351,8 +1351,93 @@ operator before proceeding. **Erratum 6 authorised and disclosed in place**
 (`docs/spec/spec-v1.6.0.md`, prompt `97-v160-erratum6-s18.md`): S18's
 `summary_exists` check joins S15 outside the blocking 3/3 for this
 baseline. The measurement already in evidence above is used as-is — no
-re-run. T16 proceeds next.
+re-run. T16 proceeds next, below.
 
-`pyproject.toml` still reads `"1.6.0"` with no tag — the same
-already-disclosed inconsistency the T15 closure recorded, now carried one
-stop further without being resolved either way.
+## T16 — baseline recorded (2026-09-06)
+
+Per REQ-V160-BEN-06, the three T16 artefacts, in order:
+
+**1. `docs/assets/bench/baseline-v1.6.0.json`.** The five measured parts
+above (partA/B1/B2/B3/C, 54 runs total) were merged into one document using
+`bench.summarize()` on the combined `runs` list — the same function
+`bench.py check` itself trusts, so the merge's arithmetic is recomputed,
+never asserted. The three isolated S15 invocations (each recorded
+internally as its own "repeat 1") were relabelled 1/2/3 before merging;
+every other field is untouched. `meta.only` set to `null` (the merged
+document covers the full 18-scenario catalog, exactly REQ-V160-BEN-01's
+canonical shape, even though `bench.py` itself never produced it in one
+unbroken invocation) and `meta.aborted` is absent (none of the merge's
+inputs carry it once the isolated per-repeat documents are combined).
+Verified before writing: every `LOCKED_META_FIELDS` entry except `repeats`/
+`only` (legitimately per-invocation run configuration, not instrument
+identity) agrees byte-for-byte across all five source parts.
+
+```
+uv run --locked python devtools/bench.py check docs/assets/bench/baseline-v1.6.0.json
+docs/assets/bench/baseline-v1.6.0.json: valid
+```
+
+`meta.generation_settings.agent.max_tokens = 4096` (erratum 5's instrument),
+`meta.lmstudio_version = "Bionic v1.1.1"`, `meta.served_model_id =
+"qwen/qwen3.8-27b"`, `meta.lmstudio_context_length = 42496`,
+`meta.git_commit = "ca9c656d0e3f38fa22ecb5fff3a6173fc9173fa7"` (the tree at
+the two source commits, unchanged since). 54 runs, 53 successes
+(0.981481…), total measured cost **$0.185776**, total wall-clock across all
+five invocations **93m16.328s** (48m49.961s + 3m35.535s + 6m56.509s +
+6m36.777s + 27m15.566s) — measured, not the pre-T15 ≈40-minute estimate,
+exactly as REQ-V160-BEN-08's closing sentence anticipated. Per-scenario:
+S01–S17 all 3/3 within their `tool_calls_max` where one applies (S13
+exactly 5 exec calls every repeat); **S18 2/3**, exempted from the blocking
+gate by erratum 6.
+
+**2. `docs/assets/dashboard-v1.6.0.html`**, rendered from that committed
+copy (`devtools/dashboard.py docs/assets/bench/baseline-v1.6.0.json --out
+docs/assets/dashboard-v1.6.0.html`, 26 893 bytes) — never from the raw
+merge output, per BEN-06's fixed order.
+
+**3. The informational S01–S12 comparison against `baseline-v1.4.json`**
+(REQ-V160-BEN-02). `bench.py report`'s CLI has no scenario-narrowing flag —
+already flagged as an open item in T11's own Deviations above ("a small
+scoped flag addition before T16, or T16 calling the Python API directly
+instead of the CLI for this one comparison") — so this comparison was
+produced via the Python API directly: `bench.check_document(v14_doc,
+<S01..S12 subset>, mode="informational")` returns `(0,
+"meta.scenarios_sha256 does not match devtools/bench_scenarios.py")` —
+exactly the one expected note, matching T11's own independent
+verification — then `bench.render_report(v14_doc, v160_doc)`.
+`_per_scenario_section` iterates the *baseline*'s own scenario set, so the
+comparison is naturally limited to S01–S12 without any extra filtering:
+S13–S18 never appear against a v1.4 baseline that never ran them.
+
+**Caption (the four reasons this delta is a hint, not a measurement,**
+REQ-V160-BEN-02): the two documents differ in (1) `bench_schema` (1 vs 2),
+(2) `scenarios_sha256` (S13–S18 added), (3) the scenario set itself
+(12 vs 18 scenarios — this comparison's own S01–S12 restriction exists
+because of this), and (4) two declared agent-behaviour changes
+(REQ-V160-EC-06): the truncated-summary retry (REQ-V160-TQ-01, observed by
+S12 and S18) and the repeat-call refusal (REQ-V160-TQ-04). No verdict,
+threshold or exit code depends on any of the numbers below.
+
+Selected per-scenario deltas (v1.4 → v1.6.0, median across 3 repeats):
+S01 wall_ms -33.9%, cost +20.3%; S03 wall_ms -34.6%, cost -20.4%; **S12
+success 2/3 → 3/3** (the truncated-summary retry, REQ-V160-TQ-01, fixing
+exactly the failure mode it targets), wall_ms -62.4%, cost -51.2%; S09
+tool_calls +2 (+100%), cost +32.8% (the repeat-call refusal, REQ-V160-TQ-04,
+forcing a different tool-call pattern). Totals (12-scenario baseline vs the
+full 18-scenario candidate, not normalised — inflated by design, per the
+caption above): calls 91→153, cost $0.105306→$0.185776, success_rate
+97.2%→98.1%. The full per-scenario and totals tables are reproducible from
+the two committed JSON files with the one Python snippet above; not
+duplicated here in full.
+
+**Gate**: `docs/assets/bench/baseline-v1.4.json` stays purely informational
+(REQ-V160-BEN-02) — this comparison passed through `check_document` in
+`mode="informational"` only, never `--gate`, and nothing above blocks or
+un-blocks anything.
+
+All three artefacts land in **T16's one commit**, per REQ-V160-BEN-06's
+fixed order (baseline → dashboard from that copy → this comparison
+recorded in the report). The tree is frozen from here per REQ-V160-BEN-07:
+only report and evidence files may change from this point; any source,
+test, config, scenario, tool-schema, model-setting or inference-setting
+change voids this baseline.
