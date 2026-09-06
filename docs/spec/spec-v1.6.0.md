@@ -1671,7 +1671,26 @@ output, which is spec-v1.7.0's subject. S15 still executes in `smoke-v160` and
 in the baseline (BEN-07's precondition 3 requires execution, not success); its
 per-repeat outcome, `finish_reason` and durations are recorded in the report
 and in the baseline document, and it re-enters the blocking gate in 1.7.0.
-S13, S14, S16, S17, S18 stay at 3/3.]]`
+S13, S14, S16, S17, S18 stay at 3/3 — superseded for S18 by erratum 6,
+below.]]`
+
+`[[ERRATUM 6, disclosed post-resume by the lab: **S18's `summary_exists`
+check is excluded from the blocking 3/3 for the 1.6.0 baseline, on the same
+grounds as erratum 3.** In the `baseline-v1.6.0` measurement S18 repeat 3
+failed `summary_exists` (0 summary rows): the `/new` command's summary call
+and its REQ-V160-TQ-01 retry both returned `finish_reason="length"` with the
+entire completion budget spent on hidden reasoning, so the turn correctly
+completed without a summary exactly as REQ-V160-TQ-01 and Appendix B's E10
+specify — the code and the check both worked as designed; the instrument's
+reasoning-budget variance is the variable, the same mechanism as S15 and
+spec-v1.7.0's subject, not a new one. Confirmed probabilistic, not
+deterministic: S18 was 1/1 in the same session's `smoke-v160` run minutes
+earlier and 2/3 in the baseline, at the identical `LLM_MAX_TOKENS=4096`. S18
+still executes at 3 repeats in the baseline and its per-repeat outcome is
+recorded; it re-enters the blocking gate in 1.7.0 alongside S15. S13, S14,
+S16, S17 stay at 3/3, unconditionally. Operator's decision: option 1
+(the recommended one) — authorise erratum 6, use the measurement already
+in evidence, no re-run.]]`
 
 **REQ-V160-TQ-06 (MUST) — a tool-call ceiling is a new check kind.** There is
 **no** existing field bounding tool calls: `Check` (bench_scenarios.py:42-62) has

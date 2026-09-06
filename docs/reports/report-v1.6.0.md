@@ -1336,6 +1336,23 @@ Three options, no default recommended:
    invocations (the same pattern erratum 3's own S15 measurement above
    used) — accepting whatever comes out, 3/3 or not.
 
+**Operator's answer, verbatim (Russian, this session's own AskUserQuestion
+exchange):** *"Говори тут со мной по русски) Бокс выклюался, сейчас включил
+заново, не знаю если это было причиной. Иначе - вариант 1
+(рекомендованный)."* — the LM Studio box had been switched off and was
+restarted; the operator asked whether that could be the cause and, either
+way, chose **option 1**. It is not: S18's failing call returned a real,
+complete response (`finish_reason="length"`, `completion_tokens=511`,
+`reasoning_tokens=511`, `usage.prompt_tokens` present) rather than a
+`transport`/connection error, which rules out an unreachable or restarting
+LM Studio as the cause — the mechanism is exactly the hidden-reasoning
+budget exhaustion already described above, confirmed and stated back to the
+operator before proceeding. **Erratum 6 authorised and disclosed in place**
+(`docs/spec/spec-v1.6.0.md`, prompt `97-v160-erratum6-s18.md`): S18's
+`summary_exists` check joins S15 outside the blocking 3/3 for this
+baseline. The measurement already in evidence above is used as-is — no
+re-run. T16 proceeds next.
+
 `pyproject.toml` still reads `"1.6.0"` with no tag — the same
 already-disclosed inconsistency the T15 closure recorded, now carried one
 stop further without being resolved either way.
