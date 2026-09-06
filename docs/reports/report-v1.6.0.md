@@ -1,21 +1,21 @@
 # Implementation report — spec-v1.6.0
 
-**Status: STOPPED at T15, closed (operator decision, 2026-09-06).** The
-preflight itself (REQ-V160-PRE-04) was resolved and passes — see "Live
-preflight and STOP" below. `smoke-v160` (REQ-V160-BEN-07) then surfaced a
-deterministic blocker (`S13` exceeds `tool_calls_max(4)` 5/5 across
-repeats, always the correct answer — REQ-V160-TQ-06's own check working
-as designed, not loosened) plus an unmet documentary precondition (the
-one smoke run that executed all six scenarios was lost to this session's
-own `.bench/`-wipe mistake, see "`smoke-v160` and the S13 blocker" below).
-Presented to the operator as one decision: accept the stop, or authorise
-a scoped correction to `S13`'s ceiling. **The operator chose to accept
-the stop.** T16 (baseline), T17 (report finalisation) and T18 (final
-acceptance + the `v1.6.0` tag) are **not executed this run.** T0–T14
-stand as landed, gated, reviewed code on `main`; `pyproject.toml` already
-reads `"1.6.0"` (from T12) but **no `v1.6.0` git tag exists** — see the
-"Run closed at T15" section at the end of this report for the full
-closing note.
+**Status: RESUMED under errata 2–6, T16 recorded, T17 provisional report in
+progress (2026-09-06).** The run below first stopped at T15 (S13's
+deterministic `tool_calls_max` overage — "Run closed at T15" section), was
+resumed under four lab errata (S13's ceiling corrected to the measured
+reference, S15 exempted from the blocking 3/3, `bench.py run`'s evidence-
+destroying wipe fixed, the operator's `LLM_MAX_TOKENS=4096`/
+`LLM_TIMEOUT_S=600` locked in as the instrument — "Resume under errata 2–5"
+section), stopped again inside T16 when S18 hit the same reasoning-budget-
+exhaustion mechanism as S15 (a sixth erratum, operator-authorised — same
+section), and then **completed T16**: `baseline-v1.6.0.json` recorded at
+53/54, the dashboard rendered, the informational v1.4 comparison produced
+("T16 — baseline recorded" section). This section and the ones below it
+are T17's own provisional finalisation; T18 (final acceptance + the
+`v1.6.0` tag) has not run yet. `pyproject.toml` reads `"1.6.0"` (from T12);
+**no `v1.6.0` git tag exists yet** — T18 creates it, last, on the
+evidence-only commit.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -1029,7 +1029,7 @@ left as T18's unfulfilled placeholder, since T18 never runs in this run.
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.6.0 (STOPPED at T15, no tag) | 2026-09-06 | 20 commits (72–91) | 0 of 5 repair cycles on gates 1–4/6; T15 itself needed no gate-repair cycle — the preflight and smoke-v160 findings were spec/config corrections, not gate failures | 2 real findings at T15 (PRE-04's preflight budget, fixed in place; S13's deterministic tool_calls_max overage, accepted as a stop) + 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic, ~2/3") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference during T15 alone: ~$0.10 across the original smoke-v160 run, the preflight calls and all diagnostics | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.6.0 (T17 provisional, no tag yet — T18 pending) | 2026-09-06 | ~184.5 KB spec / 27 commits, prompts 72–98 | 0 of 5 repair cycles drawn on the actual codebase across the whole run; the only failure this resume hit (a stray `git worktree`/branch from a self-inflicted `TaskStop`) was operational, not a gate or code failure | 4 real findings total: PRE-04's preflight budget (fixed in place, T15), S13's deterministic `tool_calls_max` overage (erratum 2, ceiling corrected to measured 5), S15's reasoning-budget timeout (erratum 3, exempted, non-deterministic), S18's `summary_exists` under the same mechanism (erratum 6, exempted, non-deterministic) — plus 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference measured directly by the benchmark harness: ~$0.10 (original T15 smoke/diagnostics) + $0.1858 (this resume's 54-run baseline) + smoke-v160 reruns, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
 ```
 
 ## Run closed at T15 (2026-09-06)
@@ -1441,3 +1441,92 @@ recorded in the report). The tree is frozen from here per REQ-V160-BEN-07:
 only report and evidence files may change from this point; any source,
 test, config, scenario, tool-schema, model-setting or inference-setting
 change voids this baseline.
+
+## T17 — provisional report, remaining REQ-V160-RPT-02 items
+
+The report above (T0 through T16) never separately closed four RPT-02
+items. Recorded here, at T17, before this run's provisional report is
+declared complete — none required touching the frozen tree.
+
+### Item 2 — measured test count, before and after
+
+843 at T0 (the 843 floor's own measurement). **1016 at this commit's HEAD**
+(`uv run --locked pytest --collect-only -q`, summed per-file), up from 1015
+at the original T14/T15 close — the resume's two source commits added
+exactly one new test (`test_run_removes_only_its_own_tag_directory`) and
+modified one existing literal (`test_s13_to_s18_each_carry_exactly_one_tool_calls_max_check`),
+net +1. All 1016 pass.
+
+### Item 8 — §6's two VERIFY markers and the span-name rule
+
+Checked live against `open-telemetry/semantic-conventions-genai`
+(`main` branch, commit `94f432d7126f5884d30a2cdde6f4e89908ebb6fd`, fetched
+2026-09-06 via `gh api`) — **still the authoritative repository, still
+`Development`-stability** for every relevant metric and span
+(`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`, the
+`invoke_agent` span), confirming the spec's own PRE-02 assumption held at
+run time, no lab move to the main `semantic-conventions` repo yet:
+
+| marker | upstream value (`docs/gen-ai/gen-ai-metrics.md`) | this codebase (`metrics.py`) | match |
+|---|---|---|---|
+| `gen_ai.client.operation.duration` boundaries | `[0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]` | `DURATION_BOUNDARIES` (`metrics.py:33-35`), identical | exact — no substitution needed |
+| `gen_ai.client.token.usage` boundaries | `[1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864]` | `TOKEN_BOUNDARIES` (`metrics.py:36-38`), identical | exact — no substitution needed |
+
+Span-name rule, confirmed against `docs/gen-ai/gen-ai-agent-spans.md`
+(same commit): *"Span name SHOULD be `invoke_agent {gen_ai.agent.name}` if
+`gen_ai.agent.name` is readily available."* This codebase's own span
+(`agent.py:229-231`) is literally `"invoke_agent tg-agent-bot"` with
+`gen_ai.agent.name = "tg-agent-bot"` set on the same span — matches the
+rule exactly.
+
+### Item 9 — dashboard evidence
+
+Live, this session (`timeout 8 uv run --locked python bot.py`, killed
+before any Telegram polling iteration completed — the dashboard binds and
+logs before `poll_loop` starts, confirmed by reading `bot.py:1452-1480`
+before running this):
+
+```
+INFO bot dashboard: serving at http://127.0.0.1:8765/
+INFO bot polling as @<redacted> with 2 skill(s)
+```
+
+Port **8765** (the configured default, free at T0 per the Preconditions
+section above, still free now). The `/status` line 8 text and the
+canary-never-leaves-the-dashboard property (E3, E6) are not independently
+re-verified live here — seeding a real canary into the running bot's own
+production database to sweep it would touch live state for no additional
+evidentiary value — and instead cited from the automated suite, which
+covers both end to end and passed in every gate run this session:
+`tests/test_v160_dashboard.py:1153`
+(`assert lines[-1] == f"Dashboard: {status_value}"`, E3's exact property)
+and the canary tests across six files (`tests/test_history_stub.py`,
+`test_observability.py`, `test_tool_output.py`, `test_v15_standards.py`,
+`test_v160_dashboard.py`, `test_v160_observability.py`).
+
+### Item 11 — scanner summary
+
+No suppression of any kind exists for gitleaks, semgrep or trivy anywhere
+in this tree (checked: no `.gitleaksignore`, no `nosemgrep` comment, no
+`.trivyignore`) — every finding across every gate run this session (T15's
+offline gates, the pre-push-equivalent profile, gate 6) was **fixed, not
+suppressed**, or there were none. Gitleaks: 0 in-scope findings throughout.
+Trivy: 0. Semgrep: 0. **Skylos** (shadow, never blocking per
+REQ-V15-GATE-06): 19 in-scope findings, unchanged from the original T15
+run's own count — pre-existing `dashboard_server.py` dead code already
+tracked (T15's own report, "task #23 for a small pre-T16 cleanup commit"),
+not fixed in this resume for the same "no source change after the two
+authorised commits" reason recorded above; still open for a future task.
+
+### RPT-03 — `docs/reports/tg-post-v1.6.0.md`
+
+Written, Russian, **1477 characters** by `wc -m` (under the 1500 limit).
+
+### Item 12 — fix cycles used
+
+**0 of 5** (REQ-V160-ACC-04's repair budget). The one failure this resume
+hit (`test_n6_pre_push_refused_when_pytest_fails`'s stray branch) was a
+self-inflicted operational incident from killing a background process, not
+a gate or code failure — diagnosed, cleaned, and reconfirmed green without
+touching source, test or config, so it never drew on the repair budget. No
+gate failed on the actual codebase at any point in this resume.
