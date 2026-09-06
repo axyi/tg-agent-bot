@@ -1,0 +1,1663 @@
+# tg-agent-bot — implementation specification v1.7.0 (reasoning policy, a summary wall-clock budget and the cost gate)
+
+Complete contract for a **minor release** on the implemented v1.6.0 state
+(`main` at `89786ef`, tag `v1.6.0` on `0d33af4`). It is a **delta
+specification**: spec-v0 … spec-v1.6.0 remain in force except where a
+requirement here explicitly **amends**, **supersedes** or **extends** them (§2
+is the authoritative amendment table). Mechanisms already shipped are cited by
+`REQ` id and `file:line` and are **never restated**; where this spec and an
+earlier one disagree, this one wins for the requirement it names and nowhere
+else.
+
+Every requirement has a stable `REQ-V170-*` id and is tagged `MUST` or
+`NON-GOAL`; v1.7.0 ids never collide with v0…v1.6.0 ids. `MUST` = required for
+acceptance; `NON-GOAL` = out of scope, and implementing it is a defect.
+Requirement groups: **EC** (execution contract), **AMEND**, **PRE**, **TREE**,
+**RSN** (stage A — the mechanism spike), **POL** (stage B — the policy), **OBS**
+(what the policy records), **SUM** (the summary wall-clock budget), **BEN**
+(stage C — candidates, comparability and the gates), **CAR** (carried items),
+**VER**, **RPT**, **GATE**, **TST**, **ACC**, **REV**, **ORD**, **NG**.
+
+Target platform: **Linux only**. Language **Python 3.14**, package manager
+**uv**.
+
+Executor: **claude-sonnet-5**. Reviewer: **sonnet in a clean context**. A larger
+model is not needed: every env var, enum value, column name, function
+signature, candidate payload shape, gate formula and test id is written out
+below.
+
+**What this release is.** Four things and nothing else:
+
+1. a **reasoning policy per call purpose** — the mechanism found by stage A,
+   applied by the policy of stage B (§5, §6);
+2. a **wall-clock budget for the whole summary path**, so the S15/S18 family
+   cannot spend `LLM_TIMEOUT_S` twice (§8);
+3. a **cost gate of −30 %** against `docs/assets/bench/baseline-v1.6.0.json`
+   with the quality gate green and **S13…S18 each back at a blocking 3/3**, S15
+   and S18 included (§9);
+4. the **carried items** of v1.6.0 (§10).
+
+Nothing else may change bot behaviour (REQ-V170-EC-06).
+
+**Provenance**, cited where used: v1.4's `RSN-06 STOP` — the spike design of
+`docs/spec/spec-v1.4.md` §5–§7 and §10 is reused **verbatim in vocabulary**, and
+its measurements (`docs/reports/report-v1.4.md:213-303`) are the prior, taken on
+LM Studio **0.4.23** and therefore not binding on Bionic 1.1.x; v1.6.0's errata
+2, 3, 5 and 6, which named the reasoning budget of `qwen/qwen3.8-27b` as this
+release's subject and deferred S15 and S18 here; `baseline-v1.6.0.json` (54
+runs, 53 successes, 93 m 16 s, $0.185776, recorded at `ca9c656`); and the three
+**dormant** `env_flags` keys already carved into `devtools/bench.py:117,121,122`.
+Appendix A maps every requirement to source and verifying artefact.
+
+---
+
+## 1. Execution contract
+
+**REQ-V170-EC-01 (MUST)** Section 1 of every earlier spec applies unchanged,
+with these adjustments:
+
+- "the gate commands" means §13's set — the six of `AGENTS.md` plus the
+  `config/quality_gates.yaml` profiles, with one gate added
+  (REQ-V170-GATE-02);
+- the repair budget is **5 total** repair-and-rerun cycles (one cycle = one fix
+  + a complete run of all gates from the first); exhausted → stop and report;
+- **no project or lab file outside the repository root may be read or written.**
+  The only permitted external effects are the LM Studio probe of
+  REQ-V170-PRE-03, stage A's and stage C's own inference traffic, S17's
+  `wttr.in` fetch, and tool-owned caches. The lab ledger `economics.md` lives
+  above the root: the operator writes it, never the executor
+  (REQ-V170-RPT-01);
+- the **runtime** dependency set is unchanged and MUST stay so: `httpx`,
+  `python-dotenv`, and the `docker` CLI as a host dependency. **Zero new Python
+  dependencies** (REQ-V170-NG-06). The **developer** tool set of v1.5/v1.6.0
+  (ruff, gitleaks, semgrep, trivy, skylos, rtk, pytest) is unchanged and no pin
+  moves.
+
+**REQ-V170-EC-02 (MUST)** Test-first: write §14's tests, watch them fail for the
+right reason, then implement in §16's order. Every `MUST` in §§5–12 has a named
+unit test, a negative test, a Gherkin scenario in Appendix B, or a recorded
+artefact; Appendix A is the map and is complete. The high-risk mechanisms of
+§14.4 additionally require mutation proof through `devtools/mutation_check.py`.
+
+**REQ-V170-EC-03 (MUST)** The v1.6.0 suite is **1016 collected tests**
+(`uv run --locked pytest --collect-only -q`, measured 2026-09-06 at `89786ef`).
+`AGENTS.md:103` still says **1004**, the count as of v1.6.0's T12; it is stale
+and REQ-V170-RPT-04 corrects it. The executor **re-measures at HEAD** at T0 and
+records the number; if it differs, the measured number is the floor. No test may
+be deleted; tests may be modified **only** where §14.1 lists them, and that list
+is exhaustive. A change making an unlisted test fail means the change is wrong —
+stop and reconsider, do not edit the test.
+
+**REQ-V170-EC-04 (MUST) — secrets discipline, and the four permitted `.env`
+machine reads.** REQ-V160-EC-04 applies verbatim: credential **values** are
+never printed, logged, committed or quoted in `docs/`; presence checks are by
+key **name** only; tests use the synthetic sentinel pattern; `data/`,
+`sandbox/`, `*.db` and `exec_audit.jsonl` are never opened, printed or quoted by
+any task of this run.
+
+`.env` contents and values are never emitted — not printed, logged, `cat`-ed,
+diffed, quoted or pasted into any file. **Four** machine reads are permitted,
+each yielding only an exit status or an in-process value:
+
+1. `grep -q '^KEY=' .env` — named-key presence;
+2. `grep -q '^KEY=<expected>$' .env` — **value confirmation without
+   disclosure**, used by REQ-V170-PRE-04 to prove the instrument's
+   `LLM_MAX_TOKENS=4096` and `LLM_TIMEOUT_S=600` without printing either;
+3. `python-dotenv` loading by the bot and the bench commands;
+4. PRE-03's `sed -i 's|^LMSTUDIO_BASE_URL=.*|LMSTUDIO_BASE_URL=<url>|' .env`
+   followed by the confirming `grep -q` of read 2.
+
+Any other read, by the executor or a subagent, is a defect, and **no backup copy
+may be made**: a `.env.bak*` file is itself a secrets-discipline defect. **No
+new key is ever written into `.env`** — REQ-V170-POL-01's two variables are
+documented in `.env.example` with their defaults, which apply when the keys are
+absent (REQ-V170-EC-05). Stage A and stage C set the treatment by a
+**process-environment prefix on the command** (REQ-V170-BEN-04); `load_config`
+reads `os.environ` after `dotenv.load_dotenv(..., override=False)`
+(`config.py:202-203`), so the prefix wins by construction and nothing is edited.
+
+**REQ-V170-EC-05 (MUST)** Backward compatibility as in REQ-V1-EC-05: every new
+parameter, config field, environment variable and helper defaults to **current
+behaviour** when absent, so unlisted tests and fakes keep passing. In particular
+`LLM_REASONING_POLICY` defaults to `model-default`, which sends a byte-identical
+request to today's (REQ-V170-POL-03), and the summary budget of §8 is inert
+until a request would actually exceed it.
+
+**REQ-V170-EC-06 (MUST) — this release is benchmark-affecting, and it
+*satisfies* the `AGENTS.md` before/after rule rather than superseding it.**
+`AGENTS.md:149-155` requires a behaviour change touching tokens to be
+accompanied by a benchmark run **before and after**, compared with `report
+--candidate`. That is exactly what §9 does: `baseline-v1.6.0.json` is the
+"before", each candidate of REQ-V170-BEN-05 is an "after", and REQ-V170-BEN-07
+compares them with `report --gate`. **The report states that the rule is
+satisfied**, names the pair and quotes the verdict — the opposite of
+REQ-V160-EC-06, which declared it superseded because no comparable "before"
+existed. Copying that supersession wording here would be a defect.
+
+Two behaviour changes are declared **before** implementation:
+
+1. **REQ-V170-POL-04**, the per-purpose reasoning field on the request body —
+   the treatment the gate measures;
+2. **REQ-V170-SUM-02/-03**, the shared summary budget and the skipped retry —
+   token-affecting (a skipped retry spends nothing) but **prompt-neutral**: no
+   message, system prompt or tool schema changes, so
+   `meta.prompt_tools_sha256` is byte-identical and the pair stays comparable.
+
+If a *further* benchmark-affecting change is proposed or discovered: (1) stop
+the task that proposed it; (2) record it and its trigger in the report under
+"Benchmark-affecting changes"; (3) either drop it and hand it to v1.8.0, or fold
+it in **before** the first candidate run (T10). Recording a candidate and *then*
+changing behaviour voids it.
+
+**REQ-V170-EC-07 (MUST) — the RLM execution rule.** REQ-V160-EC-07 applies
+verbatim: a task exceeding **one** of these thresholds is delegated to a
+subagent — more than one file or folder **to explore beyond the files and line
+ranges the task's own reading map names**; a single read over **100 lines** or
+**8 KB**; more than **10 edits** to one file in a task; applying a review or
+critique to a spec. The subagent gets a **≤ 5-line brief** with no history and
+MUST return a **summary only**, never a raw file dump. In the main context reads
+use `Read` with `offset`/`limit` or `grep`/`find` with line context — never a
+whole-file read, never a directory walk. §13.1's map is authoritative for the
+file-count threshold; the report records **per task** whether the executor
+delegated and to what.
+
+**REQ-V170-EC-08 (MUST)** Every prompt file carries the seven-bullet header
+(`Date`, `Executor model`, `Model reason`, `Harness`, `Stage`, `Owner of`,
+`REQ ids`) then exactly four level-2 blocks in order — `## Goal`,
+`## Constraints`, `## Acceptance`, `## Stop` — per REQ-V15-PRM-01 and
+`docs/prompts/TEMPLATE.md`, unchanged by this release. `checks.py lint-docs`
+enforces it in the `full` profile, but only once REQ-V170-RPT-02 has repointed
+its `report_path`.
+
+**REQ-V170-EC-09 (MUST) — `--no-verify` stays forbidden, and one prompt is one
+commit.** REQ-V15-EC-09 and REQ-V160-EC-10 apply unchanged: no commit or push in
+this run may use `git commit --no-verify`, `git push --no-verify`, `-n`, or any
+other bypass (environment switches, a temporary `core.hooksPath` change, `git
+config --unset`, deleting and restoring a hook). The report MUST contain the
+sentence *"No commit or push in this run used `--no-verify` or any other hook
+bypass."* — and MUST omit it, with an explanation, if that is untrue.
+`devtools/checks.py replay --range <base>..<implementation-tip>` supplies the
+evidence; the two historical exceptions v1.5.1 documented are expected to
+persist. Each task of §16 is one prompt file under `docs/prompts/` and one
+commit whose body carries `(prompt: docs/prompts/NN-….md)`. The installed
+`.githooks/` chain is live from the first commit of this run;
+`devtools/install_hooks.py --check` must exit 0 at T0. A whole-spec solo run may
+commit to `main`, where the branch-name gate is warn-only.
+
+---
+
+## 2. Amendments to spec-v0 … spec-v1.6.0 — authoritative table
+
+**REQ-V170-AMEND-01 (MUST)** Apply exactly these; unlisted requirements stay in
+force verbatim.
+
+| id | Status | Change |
+|---|---|---|
+| `llm.base.LLMClient.complete` (llm/base.py:67-73) | extended | gains **two** keyword-only parameters, `reasoning: str = "default"` (REQ-V170-POL-04) and `timeout_s: float \| None = None` (REQ-V170-SUM-03); both default to today's behaviour |
+| `llm/lmstudio.py:35`, `llm/openrouter.py:72`, `llm/failover.py:50`, `bot.py:1071` (`_SelftestLLM`) `complete`; `llm/failover.py:73` `_try_other` | extended | the same two parameters, forwarded at the **five** invocation sites `llm/failover.py:60`, `:83`, `agent.py:335`, `agent.py:1094`, `devtools/bench.py:2186`. The last is the bench warm-up probe (`max_tokens=1`) and passes the defaults explicitly (REQ-V170-POL-04) |
+| `llm.base.build_payload` (llm/base.py:112-129) | extended | gains keyword-only `reasoning_fields: dict \| None = None`, merged into the payload **after** the existing keys and **only** when not `None`; the `tools`/`tool_choice` branch is untouched |
+| `llm.base.REQUEST_DEFAULTS` (llm/base.py:85-89) | unchanged | stays exactly `{"temperature": 0, "stream": False, "tool_choice": "auto"}`. It is embedded verbatim in `meta.constants`, which is a **locked** meta field (`devtools/bench.py:151`), and `tests/test_v14_patch.py:89-92` asserts no `reasoning` key in either. Adding one voids every baseline **and** fails gate 3 (REQ-V170-NG-05) |
+| `bench.constants()` (devtools/bench.py:278) | unchanged | same reason; the summary-budget floor of REQ-V170-SUM-02 is an `agent.py` module constant and is deliberately **not** added here |
+| `bench.ENV_FLAG_FIELDS` (devtools/bench.py:113-123) | clarified | already carries `LLM_REASONING_POLICY` and `LLM_REASONING_ON_PURPOSES`; both become **live** once REQ-V170-POL-01's `Config` fields exist, with no edit to this dict. The comment at `:109-112` says "the last two" are dormant; **three** are (`LLM_REASONING` never gained a field either) and the comment is corrected in the same commit |
+| `bench.CONFIG_HASH_EXCLUDED` (devtools/bench.py:140-147) | extended | gains `llm_reasoning_policy` and `llm_reasoning_on_purposes`, beside `llm_reasoning`, with a comment naming REQ-V170-BEN-02. `config_sha256` is locked; without this every candidate is non-comparable |
+| `bench.comparability` stage-C clause (devtools/bench.py:1451-1460) | **superseded** | the rule "`env_flags.<STAGE_C_KEY>` must be null on the baseline side" was written for v1.3's four-commit stage-C contract and makes **`baseline-v1.6.0.json` non-comparable with itself** (measured: it returns `env_flags.HISTORY_TOOL_STUB must be null on the baseline side`). Replaced by REQ-V170-BEN-02's equality rule |
+| `bench.LOCKED_META_FIELDS` (devtools/bench.py:149-163) | unchanged | all sixteen entries stay; `env_flags` is **not** among them, which is what lets a treatment-only pair compare (REQ-V170-BEN-02) |
+| `bench._generation_settings` (devtools/bench.py:2262-2275) | unchanged | stays the sampling literal and stays locked. The reasoning mechanism is recorded in the **new, unlocked** `meta.reasoning` block (REQ-V170-BEN-03) |
+| `devtools/bench_scenarios.py` | **frozen** | `meta.scenarios_sha256` is locked and the baseline pins `f2b6c41c…1972`. Not one byte of this file changes — no new scenario, no ceiling moved, no turn edited (REQ-V170-NG-01) |
+| REQ-V160 errata 3 and 6 (S15 / S18 non-blocking) | **superseded** | S15 and S18 re-enter the blocking 3/3 through REQ-V170-BEN-06's acceptance text. The exemption never lived in code — verified by exhaustive grep of `devtools/` and `tests/`, whose only S15/S18 mentions are the catalogue itself and `tests/test_v160_bench.py`'s id/ceiling assertions — so no code change implements this |
+| `storage.SCHEMA_VERSION = 4` (storage.py:18) | amended | → `5`; `_MIGRATION_4_TO_5` added and chained after `_MIGRATION_2_TO_4` / `_MIGRATION_3_TO_4`; the accepted tuple at `storage.py:289` becomes `(1, 2, 3, 4, SCHEMA_VERSION)` (REQ-V170-OBS-01) |
+| REQ-V13-OBS-03 / REQ-V160-TRC-05 (`llm_calls` shape) | extended | two nullable columns appended, `reasoning_requested` and `reasoning_honored`. No column is removed, renamed or retyped, and the `CHECK (purpose IN ('agent','summary'))` constraint (storage.py:63) is **not** touched — the reasoning tag is a separate, derived value (REQ-V170-POL-02) |
+| `tracing._TG_AGENT_ATTRIBUTE_KEYS` (tracing.py:65-80) | extended | gains exactly one member, `tg_agent.reasoning.requested` (REQ-V170-OBS-02); the honored verdict is derivable from the existing `gen_ai.usage.reasoning.output_tokens` and needs no second key |
+| `agent.SUMMARY_MAX_TOKENS = 512` (agent.py:46) | unchanged | stays the first-attempt budget; REQ-V160-TQ-02's `retry_max_tokens` pair is unchanged |
+| `agent.summarize_conversation` (agent.py:1022-1030) | extended | gains keyword-only `budget_s: float \| None = None` and `clock: Callable[[], float] = time.monotonic`; `_ask_for_summary` (agent.py:1070) gains `timeout_s: float \| None = None`. Both default to today's behaviour (REQ-V170-SUM-01) |
+| `config._check_timeout_budget` (config.py:377-395) | extended | unchanged in formula and in message; REQ-V170-SUM-05 adds the second, **budget-level** check. At the 1.7.0 instrument (`LLM_MAX_TOKENS=4096`, `LLM_SUMMARY_MAX_TOKENS=1536`) the existing floor is `21.1 + 0.093 × 4096 = 402.028 s`, comfortably under `LLM_TIMEOUT_S=600` |
+| `bot.py:730-734`, `:753-755` summary call sites | extended | each additionally passes `budget_s=cfg.llm_timeout_s`; nothing else about either call changes (REQ-V170-SUM-01) |
+| `bench.py` `run --tag` → `shutil.rmtree` (devtools/bench.py:2323-2325) | amended | `--tag` is validated against `^[A-Za-z0-9._-]{1,64}$` and rejected when it is `.` or `..`, **before** any path is built (REQ-V170-CAR-01) |
+| `config/quality_gates.yaml:313` `report_path` | amended | `docs/reports/report-v1.5.md` → `docs/reports/report-v1.7.0.md`. It was never repointed for v1.6.0, so REQ-V160-RPT-01's claim that `lint-docs` enforced that report's ledger row was untrue (REQ-V170-RPT-02) |
+| `config/quality_gates.yaml` profiles | extended | one new gate `mutation-v170` in `pre-push`; `mutation-all`'s `timeout_seconds` re-measured (REQ-V170-GATE-02). No existing gate's command is edited, reordered or removed |
+| `AGENTS.md` Gates / Stack / configuration / Benchmark | extended | the new gate, the two new environment variables, the corrected test count (1004 → measured) and the corrected mutation-entry count, each in the same commit as the change it describes |
+| `README.md`, `.env.example`, `docs/plan.md` | extended | the two new variables with defaults and ranges, the reasoning-policy section, the milestone and test count |
+| Appendix B `E13` of spec-v1.6.0 | superseded | refreshed as Appendix B `E9` here, with S15 and S18 at a blocking 3/3 (REQ-V170-CAR-02) |
+
+Everything else in v0…v1.6.0 — Docker isolation, the redaction choke points,
+the SSRF allowlist, failover, structured memory, commands, rate limiting, the
+error matrix, the token budget, the pricing resolver, tracing, the dashboard,
+the hook chain and the four scanners — is unchanged and MUST keep working.
+
+---
+
+## 3. Preconditions
+
+**REQ-V170-PRE-01 (MUST)** Verify each; on failure stop and emit the blocker
+template (v0 §7.2) instead of guessing.
+
+1. **Repository**: branch `main`, clean tree, HEAD carrying the delivered
+   v1.6.0 (`docs/spec/spec-v1.6.0.md`, `docs/reports/report-v1.6.0.md`,
+   `docs/assets/bench/baseline-v1.6.0.json`) **and this spec, already
+   committed**: `docs/spec/spec-v1.7.0.md` and
+   `docs/prompts/102-v170-spec-authoring.md` exist at HEAD, `102` is the
+   highest-numbered prompt, and the spec's `sha256` is recorded at T0 and MUST
+   NOT change during the run — the executor materialises nothing. **Record the
+   starting HEAD SHA as `<base>`** before the first commit; it is the lower
+   bound of every `--since` and `replay --range` in this run.
+2. **Tags**: `git tag -l` shows `v1.3`, `v1.3-baseline` and `v1.6.0`. None is
+   moved or deleted (REQ-V170-NG-13).
+3. **The offline gates green before anything changes**: at T0,
+   `python3 devtools/checks.py run --profile full --since <base>` exits 0 **with
+   its live member deferred**, and gates 1–4 and 6 of §13 exit 0 in their own
+   right. An already-red gate is a blocker, not something to fix silently here.
+   Gate 5 (`bot.py --selftest-live`) and the `full` profile's live member run at
+   **T8**, after PRE-03 and PRE-04. An unreachable LM Studio is therefore not a
+   T0 blocker — it is a T8 blocker.
+4. **Test count re-measured** at HEAD: `uv run --locked pytest --collect-only
+   -q`. Record the number; it is the floor of REQ-V170-EC-03.
+5. **Hooks**: `python3 devtools/install_hooks.py --check` exits 0 and
+   `python3 devtools/checks.py doctor` exits 0 against the six pinned tools.
+6. **Credentials**: the git-ignored `.env` exists with the keys spec-v1.2 §3.3
+   lists, plus `LMSTUDIO_BASE_URL`. Presence is established **only** by
+   `grep -q '^KEY=' .env` per key name (REQ-V170-EC-04).
+7. **Docker**: `docker version` succeeds without `sudo`; the digest-pinned
+   `python:3.14-slim` image of REQ-V15-IMG-01 is locally present.
+8. **The baseline is readable and self-consistent**: `uv run --locked python
+   devtools/bench.py check docs/assets/bench/baseline-v1.6.0.json` exits 0.
+
+**REQ-V170-PRE-02 (MUST) — the operator inputs arrive in the `go` request's own
+text, and block at T0.** Per the lab's `go` protocol (`AGENTS.md:157-173`) and
+the REQ-V160-PRE-04 precedent, three values are supplied by the operator in the
+text that starts the run and are copied **verbatim** into the T0 report
+skeleton's `## Operator inputs` section:
+
+| value | rule |
+|---|---|
+| LM Studio version | a non-empty string. It MUST equal `meta.lmstudio_version` of the baseline, `"Bionic v1.1.1"`, or REQ-V170-BEN-01's STOP fires |
+| loaded context length | a **positive integer**. It MUST equal `42496` |
+| current LM Studio address | one of `192.168.0.145`, `172.16.50.233`, `192.168.178.170`, or another the operator names; PRE-03 probes in that order regardless |
+
+A missing version, or a context length that is not a positive integer, **stops
+the executor at T0** — blocker template, no T1. A value that is present but
+disagrees with the baseline is **not** a T0 blocker: it is REQ-V170-BEN-01's
+instrument STOP at T8, which is a different, reported outcome.
+
+**REQ-V170-PRE-03 (MUST) — LM Studio, reached without reading `.env`; and the
+one live documentation read.** Probe, in order, until one answers:
+
+```bash
+for h in 192.168.0.145 172.16.50.233 192.168.178.170; do
+  curl -sS -m 3 "http://$h:1234/v1/models" >/dev/null && echo "$h" && break
+done
+```
+
+The winning address is written into `.env` by a **single-line rewrite only**:
+
+```bash
+sed -i 's|^LMSTUDIO_BASE_URL=.*|LMSTUDIO_BASE_URL=http://<addr>:1234/v1|' .env
+```
+
+confirmed by `grep -q '^LMSTUDIO_BASE_URL=http://<addr>:1234/v1$' .env`; a
+non-zero status is a blocker, `sed -i` being silent when the key is absent
+(REQ-V170-EC-04). The served model id is read from `GET
+<LMSTUDIO_BASE_URL>/models`, field `data[].id`, exactly the read `_live_lmstudio`
+already performs (bot.py:1308-1318); the list MUST contain `cfg.lmstudio_model`.
+
+In the same task the executor performs the **documentation read** stage A
+candidate **b** depends on and records, in the report, the URL, the date and the
+exact spelling found:
+
+`[[VERIFY: the per-request **disable** value LM Studio Bionic 1.1.x documents
+for reasoning — an `enabled: false` form, or an effort value meaning *none*.
+Decision rule, fixed in advance and not reopened at run time: a form that
+switches reasoning **off** is candidate b's payload; a merely **smaller**
+effort (`low`) is not an off-switch and never counts; if the documentation
+offers only `low|medium|high`, candidate b is recorded `unsupported`, consumes
+**no** pair of REQ-V170-RSN-05's budget, and probing continues at candidate c.
+The executor MUST NOT substitute a remembered spelling for the read.]]`
+
+`[[VERIFY: OpenRouter's documented per-request off form. The handoff carries
+`"reasoning": {"enabled": false}`; REQ-V170-POL-05 requires it to be confirmed
+against OpenRouter's live documentation in the same read, with URL and date in
+the report. It is never exercised live in this release (REQ-V170-NG-08).]]`
+
+`[[VERIFY: an LM Studio Bionic 1.1.x REST endpoint exposing the application
+version and the loaded context length. Carried unresolved from
+REQ-V160-PRE-04: if the executor finds one, the API value is recorded alongside
+the operator value and the report names the endpoint and field; **on
+disagreement the operator value wins** and both are recorded.]]`
+
+**REQ-V170-PRE-04 (MUST) — the instrument is proved before it is used, and it
+is proved without disclosure.** Before the first inference of stage A the
+executor establishes all six of these, and records each in the report:
+
+1. `grep -q '^LLM_MAX_TOKENS=4096$' .env` exits 0;
+2. `grep -q '^LLM_TIMEOUT_S=600$' .env` exits 0;
+3. the served model id contains `LMSTUDIO_MODEL`;
+4. the operator's LM Studio version string equals `"Bionic v1.1.1"`;
+5. the operator's loaded context length equals `42496`;
+6. the **inference preflight** — one chat completion against the resolved
+   address with the resolved model, **no tools**, a fixed one-line prompt and
+   `max_tokens = cfg.llm_max_tokens` (production's own budget; a fixed small
+   literal is unsafe on a reasoning model, REQ-V160-PRE-04's erratum) returns a
+   non-empty assistant message.
+
+Reads 1 and 2 emit nothing but an exit status and are the second permitted
+`.env` idiom of REQ-V170-EC-04; a `4096`/`600` mismatch is the instrument STOP
+of REQ-V170-BEN-01, not a silent adjustment. Nothing here rewrites `.env` except
+PRE-03's `LMSTUDIO_BASE_URL` line.
+
+---
+
+## 4. Required file tree (delta)
+
+**REQ-V170-TREE-01 (MUST)** New files:
+
+```
+tests/test_v170_reasoning.py        # §14.2  RSN-*, POL-*, OBS-*
+tests/test_v170_summary_budget.py   # §14.2  SUM-*
+tests/test_v170_bench.py            # §14.2  BEN-*, CAR-*, VER-*
+docs/prompts/103-go-spec-v1.7.0.md  # the `go` prompt, created at T0
+docs/prompts/104-v170-*.md …        # one per task of §16
+docs/reports/report-v1.7.0.md
+docs/reports/tg-post-v1.7.0.md
+docs/reports/bench-v1.7.0.md              # §9, the gated comparison
+docs/assets/bench/rsn17-<letter>-<n>-<purpose>-{default,off}.json   # §5 pairs
+docs/assets/bench/cand-v170-<c>.json      # §9, one per candidate run
+```
+
+**REQ-V170-TREE-02 (MUST)** Changed files: `llm/base.py`, `llm/lmstudio.py`,
+`llm/openrouter.py`, `llm/failover.py`, `agent.py`, `config.py`, `bot.py`,
+`storage.py`, `tracing.py`, `devtools/bench.py`, `devtools/mutation_check.py`,
+`config/quality_gates.yaml`, `pyproject.toml`, `.env.example`, `README.md`,
+`AGENTS.md`, `docs/plan.md`, plus exactly the test files named in §14.1.
+`devtools/bench_scenarios.py` is **frozen** (REQ-V170-AMEND-01); `metrics.py`,
+`dashboard_render.py`, `dashboard_server.py` and `devtools/dashboard.py` are
+**not** changed — the existing per-purpose `reasoning_share`
+(`metrics.py:397-416`, `group="purpose"` at `:379-381`) is the whole reporting
+surface this release needs (REQ-V170-NG-04).
+
+**Prompt numbering.** `101-v160-verify-run-fixes.md` closes v1.6.0 and
+`102-v170-spec-authoring.md` is this spec's authoring prompt; both, and
+`spec-v1.7.0.md` itself, are committed **before** this run and are therefore
+neither new nor changed files here (PRE-01.1). `102` not being the highest
+prompt at T0 is a precondition failure. This run's first artefact is the `go`
+prompt `103-go-spec-v1.7.0.md`, created at T0; per-task prompts continue from
+`104` as `NN-v170-t<k>-<slug>.md`. Numbering never restarts and no earlier file
+is renamed.
+
+---
+
+## 5. Stage A — the reasoning mechanism spike (RSN)
+
+v1.4 ran this spike on LM Studio **0.4.23** and it ended in `RSN-06 STOP`
+(`report-v1.4.md:213-303`): **a** had no effect, **b** was `unsupported`, **c**
+was honored 3/3 but rejected as unshippable, **d** was not honored, **e** had no
+control to set. The instrument has since changed to **Bionic 1.1.1** and one
+judgement has changed with this release: **shippability is now decided per
+purpose** (REQ-V170-RSN-04). Everything else about the contract is v1.4's, reused
+by reference to `docs/spec/spec-v1.4.md` §5.
+
+**REQ-V170-RSN-01 (MUST) — the pair contract, and the two probe scenarios.** The
+unit of evidence is a **pair**, named by file, exactly as REQ-V14-RSN-01 defines
+it: one scratch, **uncommitted** patch selecting exactly one mechanism, one
+`bench.py run --only <scenario> --repeats 1` per member, the `default` member
+first and the `off` member second, from the identical scenario input, written to
+`docs/assets/bench/rsn17-<letter>-<n>-<purpose>-default.json` and
+`…-off.json` with their `.log` siblings. Two probe scenarios, and no others:
+
+| purpose group | scenario | why |
+|---|---|---|
+| `tool-round` and `final` | **S05** (`big-output`, bench_scenarios.py:204) | one turn, one tool round, then a final tools-withheld round — both agent tags in one cheap run; v1.4's own probe |
+| `summary` | **S12** (`summary`, bench_scenarios.py:262) | three turns ending in `/new`, whose `summary_exists` check proves a `purpose = 'summary'` row was written |
+
+`--only S05` and `--only S12` set `meta.only`, which is a locked field, so **no
+pair document is ever a benchmark candidate or a baseline** and none is compared
+with `--gate`. After each candidate the tree is restored and `git diff` MUST be
+empty before the next candidate begins; the report records the check. This is an
+explicit, bounded exception to REQ-V170-EC-02's test-first rule and adds **no**
+CLI flag and **no** `bench.py` option.
+
+**REQ-V170-RSN-02 (MUST) — the candidates, in this fixed order, none skipped.**
+Skipping an untried candidate is a defect. Probing stops at the first candidate
+that is honored **and** shippable for the `summary` purpose (REQ-V170-RSN-04);
+a candidate honored but unshippable for a purpose is recorded as such, consumes
+its normal budget, and probing continues.
+
+| # | mechanism | where it goes |
+|---|---|---|
+| **a** | `chat_template_kwargs: {"enable_thinking": false}` | a **top-level key of the JSON body** built by `build_payload` (llm/base.py:112-129) — the project posts raw JSON through `httpx`, so what an SDK would send as `extra_body` is a plain top-level key |
+| **b** | the **vendor-documented disable value** read live at REQ-V170-PRE-03 | a top-level key of the JSON body. `unsupported` when the documentation offers only `low\|medium\|high`; a smaller effort is never an off-switch |
+| **c** | assistant prefill `{"role": "assistant", "content": "<think>\n\n</think>\n\n"}` | **inside the message array, as the last element** |
+| **d** | Qwen3's `/no_think` soft switch | inside the message array, appended to the **last user message**, in the slot REQ-V13-CCH-01 mutates with `(now: …)` |
+| **e** | a model-level default in the LM Studio GUI or `lms` CLI | **not in the request at all** — environmental, informational only. It cannot express a per-purpose policy and therefore can never be a winner (REQ-V170-RSN-04); at most one `rsn17-e-info` note, outside the budget |
+
+**REQ-V170-RSN-03 (MUST) — honored, per purpose.** For a given pair and a given
+purpose tag, the mechanism is **honored** when, over the `llm_calls` rows of that
+purpose in the two documents:
+
+1. the `off` member has `Σ reasoning_tokens == 0` **and** `max reasoning_chars
+   == 0` — both sources, `usage.completion_tokens_details.reasoning_tokens`
+   (`llm/base.py:132-155`) and the locally computed `split_reasoning`
+   (`llm/base.py:158-181`), because a provider that reports neither is not proof
+   of anything;
+2. the `default` member has **positive** `reasoning_tokens` **or** positive
+   `reasoning_chars` — a mechanism that changes nothing on a model that was not
+   reasoning is not evidence;
+3. the scenario's own checks still pass in **both** members (S05 `1/1`, S12
+   `1/1` including `summary_exists`).
+
+If `reasoning_tokens` is absent from either member, the pair is `unknown`, never
+`honored`, unless all three of REQ-V14-RSN-03's fallback conditions hold
+(positive `reasoning_chars` on `default`, zero on `off`, and `off`'s completion
+tokens **and** recomputed cost each ≥ 20 % below `default`'s). The 20 % is fixed
+in advance and not tunable. A candidate is honored for a purpose only when
+**every** pair probing that purpose is honored.
+
+**REQ-V170-RSN-04 (MUST) — shippability is judged PER PURPOSE; that is what
+changed since v1.4.** REQ-V14-POL-05 rejected **c** and **d** outright for
+sitting inside the message array and disturbing REQ-V13-CCH-02's byte-stable
+cache prefix. That still holds **for agent rounds**, whose messages share one
+growing prefix across a turn. It does **not** hold for the summary call:
+`_ask_for_summary` builds `load_context_messages(...) + [{"role": "user",
+"content": SUMMARY_PROMPT}]` (agent.py:1045, `:1094`) with `tools=None` — a
+**one-shot** list sharing no system-prompt-plus-tools prefix with any agent
+round, and never extended. Therefore:
+
+| mechanism | `tool-round` | `final` | `summary` |
+|---|---|---|---|
+| **a**, **b** (outside the array) | shippable | shippable | shippable |
+| **c** (prefill, last element) | **not** shippable — breaks CCH-02(a) | not shippable | **shippable** |
+| **d** (`/no_think`, last user message) | not shippable under `by-purpose`; shippable only when the resolved value is identical for every call of one `run_agent` invocation | same | **shippable** |
+| **e** | never | never | never |
+
+The pair contract measures the price of the disturbance rather than asserting
+it: for each pair the report records `totals.resent_tokens` and
+`totals.new_tokens` per member and per purpose, and v1.4's measured
+`338 → 634` resent-token blow-up on candidate d is quoted as the prior.
+
+**REQ-V170-RSN-05 (MUST) — the budget, counted in live pairs.** At most **three**
+pairs per candidate and at most **fifteen live pairs in total**. An `unsupported`
+candidate consumes none. One re-run is permitted for a pair whose scenario failed
+for a reason unrelated to reasoning (transport timeout, Docker hiccup); the
+re-run replaces the **whole** pair, never one member, and does not raise the
+budget. Per candidate the pairs are spent in this order and stop as soon as the
+candidate is decided: pair 1 on **S05**, pair 2 on **S12**, pair 3 as a
+confirming repeat of whichever purpose the candidate would ship for. The report
+carries one table row **per pair member** — letter, ordinal, purpose group,
+member, mechanism, LM Studio version, HTTP status, `Σ reasoning_tokens`, `max
+reasoning_chars`, `reasoning share`, resent/new tokens, scenario result — with
+the pair verdict stated once, on the `off` row, from the vocabulary `honored` /
+`not honored` / `unknown` / `honored but unshippable` / `unsupported`.
+
+**REQ-V170-RSN-06 (MUST) — the output, and the STOP rule.** Stage A ends with a
+**per-purpose mechanism table** in the report:
+
+| purpose | mechanism | evidence |
+|---|---|---|
+| `tool-round` | one of a, b, or `none` | the pair files |
+| `final` | one of a, b, or `none` | the pair files |
+| `summary` | one of a, b, c, d, or `none` | the pair files |
+
+**If no mechanism is shippable for `summary`, the run STOPS after stage A.**
+The `summary` purpose is the concrete target of this release — S18's lost run
+was a starved, then timed-out summary, and S15's smoke failures were the same
+reasoning-exhaustion family on the agent path — and a policy that cannot switch
+it off does not earn the −30 % gate. On that branch the run still delivers: the
+mechanism table, every pair artefact, the carried items of §10, the report, the
+`tg-post`, the ledger row, and the verdict **STOP, cause: no summary-shippable
+reasoning mechanism on Bionic 1.1.1**. §6, §7, §8 and §9 are declared
+**not-executed**, `pyproject.toml` is **not** bumped, and **no tag is created**.
+
+---
+
+## 6. Stage B — the reasoning policy (POL)
+
+Stage B is written only after stage A has named a summary-shippable mechanism.
+The vocabulary is REQ-V14-POL-01…-05's, unchanged; what follows states the
+deltas and the exact shapes.
+
+**REQ-V170-POL-01 (MUST) — exactly two new environment variables.**
+
+```python
+llm_reasoning_policy = _parse_choice(
+    source, "LLM_REASONING_POLICY", "model-default",
+    ("model-default", "off", "by-purpose"))
+llm_reasoning_on_purposes = _parse_purposes(
+    source, "LLM_REASONING_ON_PURPOSES", "tool-round")
+```
+
+onto `Config.llm_reasoning_policy: str = "model-default"` and
+`Config.llm_reasoning_on_purposes: frozenset[str] = frozenset({"tool-round"})`.
+`LLM_REASONING_ON_PURPOSES` is a comma-separated list of the tags of
+REQ-V170-POL-02, whitespace-trimmed, order-insensitive; the empty string is
+legal and means "none". An unknown policy value or an unknown tag raises
+`ConfigError` naming the variable **and** the offending token. Both variables are
+inert unless the policy is `by-purpose`, and both are added to `.env.example`
+with their defaults and their permitted values. **Neither key is ever written
+into `.env`** (REQ-V170-EC-04).
+
+**REQ-V170-POL-02 (MUST) — the purpose tag is a pure function, in one place.**
+The database `purpose` column keeps exactly `'agent'` and `'summary'` under its
+`CHECK` constraint (storage.py:63) and is **not** changed. The reasoning tag is
+derived at request time, has three values, and lives in `llm/base.py` as the
+single source of truth — never a hand-copied literal list in `config.py`,
+`agent.py`, `devtools/` or a test:
+
+```python
+REASONING_TAGS = ("tool-round", "final", "summary")
+
+def reasoning_tag(purpose: str, request_tools: list[dict] | None) -> str:
+    if purpose == "summary":
+        return "summary"
+    return "tool-round" if request_tools else "final"
+```
+
+Pure: no I/O, no global state, no `Config`. `request_tools` being `None` **or**
+empty means the round exposed no tool, which is the `final` round
+(`agent.py:322` passes `None`); `_ask_for_summary` passes `None` with
+`purpose = "summary"` (agent.py:1085, `:1094`), and `summary` wins over the
+tools test.
+
+**REQ-V170-POL-03 (MUST) — resolution is a second pure function.**
+
+```python
+def resolve_reasoning(policy: str, on_purposes: frozenset[str], tag: str) -> str
+```
+
+returning `"on"`, `"off"` or `"default"`: `model-default` → `"default"` for
+every tag; `off` → `"off"` for every tag; `by-purpose` → `"on"` when
+`tag in on_purposes` else `"off"`. `"default"` MUST send **no** reasoning field
+at all, so the request body is byte-identical to v1.6.0's — that is what makes
+REQ-V170-EC-05 true and what lets `meta.generation_settings` stay locked and
+unchanged. `"on"` sends the mechanism's explicit enable form when the mechanism
+has one and otherwise **degrades to `"default"`**; a degradation is recorded in
+the report and is never silent.
+
+**REQ-V170-POL-04 (MUST) — one keyword-only parameter, carried through every
+site.** `complete()` gains `reasoning: str = "default"` — one of the three
+resolved values, not a tag — in **five** definitions and it is forwarded at
+**five** invocations:
+
+| kind | site |
+|---|---|
+| definition | `llm/base.py:67` (`LLMClient` Protocol) |
+| definition | `llm/lmstudio.py:35` |
+| definition | `llm/openrouter.py:72` |
+| definition | `llm/failover.py:50` |
+| definition | `bot.py:1071` (`_SelftestLLM`, the offline double gate 4 drives through `agent.run_agent` — without it `--selftest` raises `TypeError`) |
+| invocation | `llm/failover.py:60` (active client) |
+| invocation | `llm/failover.py:83` (inside `_try_other` — the site that gets forgotten) |
+| invocation | `agent.py:335` (the agent loop) |
+| invocation | `agent.py:1094` (the summary path) |
+| invocation | `devtools/bench.py:2186` (the warm-up probe at `max_tokens=1`) |
+
+`_try_other` (llm/failover.py:73) carries the value as a positional through its
+own signature, exactly as it already carries `max_tokens`. The bench warm-up
+probe passes the defaults **explicitly**, so a future signature change cannot
+silently give the probe a different treatment from the run it warms up. The
+mutation `v170-failover-drops-reasoning` removes the forwarding at
+`llm/failover.py:83` and MUST be killed by `T-V170-POL-04`.
+
+The agent loop resolves once per request from
+`reasoning_tag(purpose, request_tools)`; `_ask_for_summary` resolves from
+`reasoning_tag("summary", None)`, except where REQ-V170-SUM-04's rescue retry
+overrides it.
+
+**REQ-V170-POL-05 (MUST) — the provider forms.** `resolve_reasoning` is shared;
+the request shape is not.
+
+| provider | `"off"` | `"on"` | `"default"` |
+|---|---|---|---|
+| `lmstudio` | the stage-A mechanism **for that purpose** (a table lookup, REQ-V170-RSN-06), which may differ between `summary` and the agent tags | the mechanism's enable form, or degrade to `"default"` | nothing added |
+| `openrouter` | `"reasoning": {"enabled": false}` as a top-level key, subject to PRE-03's VERIFY | nothing added, i.e. the provider default | nothing added |
+
+Neither form may be written into the system prompt or into the `tools` JSON
+under any policy — that is REQ-V14-POL-05 item 1, and it is also why
+`meta.prompt_tools_sha256` stays byte-identical to the baseline's
+`748fa855…6500e3`. `T-V170-POL-05` asserts both.
+
+**REQ-V170-POL-06 (MUST) — `build_payload` learns one optional argument.**
+`build_payload(..., *, reasoning_fields: dict | None = None)`: when not `None`
+its items are merged into the payload **after** the five existing keys and after
+the `tools`/`tool_choice` branch, so a mechanism can never overwrite `model`,
+`messages`, `temperature`, `max_tokens`, `stream`, `tools` or `tool_choice`. A
+`reasoning_fields` mapping whose keys collide with any of those seven raises
+`ValueError` naming the key. Candidate **c** and candidate **d** are **not**
+`reasoning_fields`: they mutate the message array and are applied by the client
+before `build_payload` is called, on a **copy** of the list the caller passed —
+`T-V170-POL-06` asserts the caller's list is not mutated.
+
+**REQ-V170-POL-07 (MUST) — the shipped default is decided by stage C, not
+guessed.** `LLM_REASONING_POLICY`'s shipped default and, when it is
+`by-purpose`, `LLM_REASONING_ON_PURPOSES`'s shipped default, are set to the
+candidate REQ-V170-BEN-06 selects, in the **same commit** that updates
+`.env.example`, `README.md` and `AGENTS.md`, after the last candidate run. This
+is safe and is the only treatment-affecting change permitted after measurement,
+because REQ-V170-BEN-02 puts both fields in `CONFIG_HASH_EXCLUDED` and neither is
+a locked meta field. Exactly **one** test may pin the literal —
+`T-V170-POL-07` — and the report states that the default was flipped after
+measurement, naming the candidate.
+
+---
+
+## 7. What the policy records (OBS)
+
+**REQ-V170-OBS-01 (MUST) — two additive columns, schema 4 → 5.** `llm_calls`
+gains, appended to `storage.LLM_CALL_COLUMNS` after `span_id`:
+
+| column | type | value |
+|---|---|---|
+| `reasoning_requested` | `TEXT` | `'on'`, `'off'` or `'default'` — the resolved value actually sent |
+| `reasoning_honored` | `INTEGER` | `1`, `0` or `NULL` |
+
+`reasoning_honored` is `NULL` when `reasoning_requested` is `'default'` or when
+the call failed before a response; `1` when `'off'` was requested and both
+`reasoning_tokens` (`NULL` read as 0) and `reasoning_chars` are 0, else `0`;
+when `'on'` was requested, `1` if either is positive, else `0`. The vocabulary is
+REQ-V14-OBS-01's, unchanged.
+
+`SCHEMA_VERSION` becomes **5**; `_MIGRATION_4_TO_5` adds the two columns with
+`ALTER TABLE llm_calls ADD COLUMN`; the accepted tuple at `storage.py:289`
+becomes `(1, 2, 3, 4, SCHEMA_VERSION)`; the existing chain is extended so a
+database at 1, 2, 3 or 4 reaches 5 in one `init_schema` call, and re-running
+`init_schema` changes nothing. Pre-existing rows survive with `NULL` in both
+columns. `_log_row("llm_call", LLM_CALL_COLUMNS, …)` (storage.py:572) picks the
+two up by construction, so the structured log line and the row stay in bijection
+(REQ-V13-OBS-06). Note for the reader, not a change: `_MIGRATION_2_TO_3`
+(storage.py:195) is already unreferenced dead code — it is **left in place** and
+recorded in the report, not deleted (REQ-V170-NG-14).
+
+**REQ-V170-OBS-02 (MUST) — one span attribute.** `tracing.py`'s
+`_TG_AGENT_ATTRIBUTE_KEYS` (`:65-80`) gains exactly one member,
+`tg_agent.reasoning.requested`, carrying the same three-value string. No second
+key is added: the honored verdict is computed from
+`gen_ai.usage.reasoning.output_tokens`, which the span already carries.
+`set_attribute` rejects an unlisted key (`T-V160-TRC-09`), so the addition is
+what makes the write legal.
+
+**REQ-V170-OBS-03 (MUST) — recorded for every call, through the existing
+seam.** Both columns and the span attribute are written for **every** LLM call —
+agent rounds, the final round, the summary, its truncation retry, its JSON-repair
+call, and **every failover attempt** — through `_record_llm_call`
+(agent.py:830-848) and nowhere else; no second write path is created. A call that
+raised before a response records its `reasoning_requested` and `NULL` honored.
+The existing per-purpose aggregate `metrics.usage_by(group="purpose")` and its
+`reasoning_share` (`metrics.py:397-416`) are the whole reporting surface: **no
+new dashboard page, no new API endpoint and no new metrics function**
+(REQ-V170-NG-04).
+
+---
+
+## 8. The summary wall-clock budget (SUM)
+
+The concrete defect: in `baseline-v1.6.0`, S18 repeat 3 spent
+`latency_ms = 205314` on a summary attempt that returned
+`finish_reason = "length"` with `completion_tokens = 511` of which
+`reasoning_tokens = 511` — the entire budget on hidden reasoning — and then
+spent a **further** `latency_ms = 600089` on REQ-V160-TQ-01's retry, which ended
+`error_kind = "transport"` at exactly `LLM_TIMEOUT_S = 600 000 ms`. The summary
+path can therefore consume `LLM_TIMEOUT_S` once per attempt, not once in total,
+because `_ask_for_summary` calls `llm.complete(messages, None,
+max_tokens=max_tokens)` (agent.py:1094) with no timeout of its own and the
+client's fixed `self.timeout_s` applies to each request independently
+(`llm/lmstudio.py:52`, `llm/base.py:250`).
+
+**REQ-V170-SUM-01 (MUST) — one budget for the whole path.**
+`summarize_conversation` (agent.py:1022-1030) gains two keyword-only parameters:
+
+```python
+budget_s: float | None = None,
+clock: Callable[[], float] = time.monotonic,
+```
+
+`budget_s is None` means today's behaviour exactly, so every existing caller,
+fake and test is unaffected (REQ-V170-EC-05). `bot.py`'s two call sites
+(`:730-734` in `_handle_new`, `:753-755` in `_handle_summary`) each add
+`budget_s=cfg.llm_timeout_s` and change in no other way. The deadline is
+`clock() + budget_s`, taken **once**, before attempt 1, and it covers all three
+possible requests: attempt 1 at `SUMMARY_MAX_TOKENS`, the truncation retry at
+`retry_max_tokens`, and the JSON-repair call. `clock` is injectable so §14's
+tests use a fake clock and make no live call (REQ-V170-TST-02).
+
+**REQ-V170-SUM-02 (MUST) — the floor, and what happens below it.** A module
+constant in `agent.py`, beside `SUMMARY_MAX_TOKENS`:
+
+```python
+SUMMARY_BUDGET_FLOOR_S = 30.0
+```
+
+It is a module constant and **not** a `Config` field and **not** a member of
+`bench.constants()`: `config_sha256` and `meta.constants` are both locked meta
+fields, and adding it to either would make every candidate non-comparable with
+the baseline (REQ-V170-BEN-02).
+
+Before each request **after the first**, the remaining budget is
+`deadline - clock()`. When it is **below** `SUMMARY_BUDGET_FLOOR_S`, that request
+is **not issued**. The turn then completes exactly as REQ-V160-TQ-01 item 3
+already specifies — without a summary, with no exception escaping to the user
+turn — and the outcome is recorded: an `llm_calls` row for the skipped request is
+**not** written (no request was made, and a row must describe a request), and
+instead the existing `log.warning` seam emits one redacted line naming the
+elapsed and remaining seconds. `summarize_conversation` returns `None`.
+
+**REQ-V170-SUM-03 (MUST) — each later request's HTTP timeout is the remaining
+budget.** `complete()` gains a second keyword-only parameter,
+`timeout_s: float | None = None`, in the same five definitions and forwarded at
+the same five invocations as REQ-V170-POL-04's. `None` means "use the client's
+own `self.timeout_s`", which is today's behaviour and what every caller but the
+summary path passes. `_ask_for_summary` gains `timeout_s: float | None = None`
+and forwards it; `summarize_conversation` passes
+`min(remaining, <the client's own timeout>)` — expressed simply as `remaining`,
+since the client caps nothing and `remaining ≤ budget_s = LLM_TIMEOUT_S` by
+construction. Attempt 1 passes `None`: it is the first request, the whole budget
+is available, and today's timeout is already exactly right for it. The mutation
+`v170-summary-retry-ignores-budget` makes the retry pass `None` and MUST be
+killed by `T-V170-SUM-03`.
+
+**REQ-V170-SUM-04 (MUST) — the rescue retry runs with reasoning forced off.**
+When a summary-shippable mechanism exists (REQ-V170-RSN-06) the truncation retry
+and the JSON-repair call are issued with `reasoning="off"` **regardless of
+`LLM_REASONING_POLICY`**. Rationale, from the evidence above: the retry exists
+precisely because the first attempt spent its whole budget on reasoning, so
+repeating the attempt with reasoning enabled is the one configuration known to
+fail. Attempt 1 keeps the policy's own resolution. When no summary-shippable
+mechanism exists this requirement is unreachable, because REQ-V170-RSN-06 has
+already stopped the run. `T-V170-SUM-04` asserts the retry's resolved value is
+`"off"` under all three policies including `model-default`.
+
+**REQ-V170-SUM-05 (MUST) — `_check_timeout_budget` is amended, not removed.**
+Its formula, its constants (`LATENCY_INTERCEPT_S = 21.1`,
+`LATENCY_PER_TOKEN_S = 0.093`, config.py:50-51) and its message are unchanged,
+and it keeps being called with
+`max(llm_max_tokens, llm_summary_max_tokens)` (config.py:287). One **additional**
+check is appended in `load_config`, after it: the summary path's own floor must
+fit inside the budget it is given, i.e.
+
+```
+llm_timeout_s >= LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * llm_summary_max_tokens
+                 + SUMMARY_BUDGET_FLOOR_S
+```
+
+so that a configuration in which the retry could never be attempted is refused at
+startup rather than discovered in production. The `ConfigError` names
+`LLM_TIMEOUT_S`, `LLM_SUMMARY_MAX_TOKENS` and the floor. **At the 1.7.0
+instrument this is satisfied with room to spare** and no default moves:
+`21.1 + 0.093 × 1536 + 30 = 193.9 s ≤ 600`, and the pre-existing check is
+`21.1 + 0.093 × 4096 = 402.028 s ≤ 600`. At shipped defaults
+(`LLM_TIMEOUT_S = 240`, `LLM_SUMMARY_MAX_TOKENS = 1536`) it is
+`193.9 ≤ 240` — green, so REQ-V170-EC-05 holds and no existing deployment
+breaks. The mutation `v170-summary-floor-check-removed` deletes the check and
+MUST be killed by `T-V170-SUM-05`.
+
+---
+
+## 9. Stage C — candidates, comparability and the gates (BEN)
+
+**REQ-V170-BEN-01 (MUST) — same instrument, no fresh baseline; a mismatch
+STOPS.** `docs/assets/bench/baseline-v1.6.0.json` **is** the baseline: not
+re-recorded, not regenerated, not superseded — a candidate measured against a
+baseline recorded in the same run proves nothing, which is why REQ-V160-NG-02
+handed this gate here. Six instrument values MUST match, checked before any
+inference is spent:
+
+| field | required value |
+|---|---|
+| `meta.lmstudio_version` | `"Bionic v1.1.1"` |
+| `meta.served_model_id` | `"qwen/qwen3.8-27b"` |
+| `meta.lmstudio_context_length` | `42496` |
+| `.env` `LLM_MAX_TOKENS` | `4096` (proved by REQ-V170-PRE-04's grep) |
+| `.env` `LLM_TIMEOUT_S` | `600` (same) |
+| `meta.obs_capture_content` | `false` |
+
+Any mismatch is a **STOP with a report**, not an adjustment: re-baselining costs
+93 minutes of inference and is the operator's decision. On that branch the code
+of §§6–8 still merges if already green, `pyproject.toml` is **not** bumped and
+**no tag is created**.
+
+Three consequences of the locked fields, to be stated in the report as
+constraints the run obeyed:
+
+1. `meta.scenarios_sha256` is locked at `f2b6c41c…1972`, so
+   `devtools/bench_scenarios.py` is **frozen** — no scenario, ceiling or turn
+   changes, and S15/S18 re-enter the gate through REQ-V170-BEN-06's acceptance
+   text, never through code;
+2. `meta.prompt_tools_sha256` is locked at `748fa855…6500e3`, so the system
+   prompt and the exposed tool schema are frozen and any "do not think"
+   instruction inside either is a **NON-GOAL** (REQ-V170-NG-02);
+3. `meta.generation_settings` is locked and stays the sampling literal
+   `devtools/bench.py:2262-2275` produces (`agent.max_tokens = 4096`,
+   `summary_initial 512`, `summary_retry 1536`, `temperature 0`) — the reasoning
+   mechanism is not a sampling setting and is recorded in REQ-V170-BEN-03's
+   block instead.
+
+**REQ-V170-BEN-02 (MUST) — comparability must accept a treatment-only pair, and
+today it accepts nothing at all.** Measured against the shipped code,
+`bench.comparability(baseline-v1.6.0, baseline-v1.6.0)` returns
+`"env_flags.HISTORY_TOOL_STUB must be null on the baseline side"`. The clause at
+`devtools/bench.py:1451-1460` requires each `STAGE_C_KEYS` entry to be `null` on
+the baseline side — true of v1.3's stage-C worktree contract, false of
+`baseline-v1.6.0`, whose `env_flags` carry `HISTORY_TOOL_STUB: "on"`,
+`EXEC_OUTPUT_DEFAULT_CHARS: 1500`, `FETCH_INLINE_DEFAULT_CHARS: 5000`.
+**`report --gate` against this baseline is impossible until that clause is
+amended**, so this release's cost gate is unreachable without this requirement.
+
+The clause is replaced by an **equality** rule, which is what "same instrument"
+means:
+
+- for each `key` in `STAGE_C_KEYS`, `base_flags.get(key) == cand_flags.get(key)`,
+  else `f"env_flags.{key} differs"`; `null` on one side and a value on the other
+  is a difference, as it should be;
+- the `LLM_FAILOVER == "off"`, `LLM_SUMMARY_MODEL in ("", None)` and
+  `LLM_MAX_TOKENS` equality guards are **kept verbatim**;
+- `LLM_REASONING_POLICY` and `LLM_REASONING_ON_PURPOSES` are deliberately **not**
+  compared: they are the treatment, and `env_flags` is not a locked meta field
+  (`devtools/bench.py:149-163`), so a pair differing only in them compares clean.
+
+`llm_reasoning_policy` and `llm_reasoning_on_purposes` additionally join
+`CONFIG_HASH_EXCLUDED` (devtools/bench.py:140-147), which keeps the **locked**
+`config_sha256` stable across the treatment. `T-V170-BEN-02` asserts all four
+properties: the baseline compares clean with itself; a treatment-only pair
+compares clean; a pair whose `generation_settings` differ is **still** refused;
+a pair whose `HISTORY_TOOL_STUB` differs is refused.
+
+**REQ-V170-BEN-03 (MUST) — a new, unlocked `meta.reasoning` block.** `meta`
+gains one key, `reasoning`, and it does **not** join `LOCKED_META_FIELDS`:
+
+```json
+{"policy": "by-purpose",
+ "on_purposes": ["tool-round"],
+ "mechanism": {"tool-round": "b:reasoning.enabled=false",
+               "final": "b:reasoning.enabled=false",
+               "summary": "c:assistant-prefill"},
+ "provider_form": "lmstudio"}
+```
+
+`policy` and `on_purposes` come from `Config` (`on_purposes` serialised as a
+**sorted list**, so equal sets serialise equally); `mechanism` is stage A's
+per-purpose table, each value a short stable label `<letter>:<payload summary>`
+and `null` for a purpose with no mechanism; `provider_form` names the provider
+whose form was used. On a `model-default` run the block is present with empty
+values, never omitted, so both sides of a pair always carry the same key set.
+Unlocked, it never blocks a comparison; present, it makes every candidate
+self-describing.
+
+**REQ-V170-BEN-04 (MUST) — the treatment is set by a process-environment prefix,
+never by editing `.env`.** Every candidate command has the form
+
+```bash
+LLM_REASONING_POLICY=<policy> LLM_REASONING_ON_PURPOSES=<tags> \
+  uv run --locked python devtools/bench.py run --tag <tag> \
+  --repeats 3 --timeout-s 1800 --out .bench/<tag>/<tag>.json
+```
+
+`dotenv.load_dotenv(..., override=False)` at `config.py:202` means the prefix
+wins over `.env`, so the file is untouched (REQ-V170-EC-04). **`--timeout-s
+1800` is mandatory**: `meta.timeout_s` is a locked field and the baseline carries
+`1800.0`; the default is 600 and a candidate run without the flag is
+non-comparable no matter how good its numbers are. `--repeats 3` and no `--only`
+are equally mandatory — `repeats` and `only` are both locked, and the baseline
+carries `3` and `null`.
+
+**Aborts, and the merge.** `run_bench` breaks **both** the repeat loop and the
+scenario loop on the first aborted run (devtools/bench.py:756-764), sets
+`meta.aborted`, and `_validate` then refuses the document with
+`EXIT_NOT_COMPARABLE` (`:1147`) — which is why the v1.6.0 baseline needed
+**five** invocations (`report-v1.6.0.md`, "resume"). A candidate may therefore be
+assembled the same way, under the rules T16 used and no others: identical clean
+tree throughout (`git status --porcelain` empty), one shared `--tag`, `--only`
+narrowing the parts, each part copied out of `.bench/` immediately, isolated
+repeats relabelled `1/2/3`, the merged `runs` list re-summarised through
+`bench.summarize()` rather than by hand, `meta.only` set to `null`,
+`meta.aborted` absent, every `LOCKED_META_FIELDS` entry except `repeats` and
+`only` verified byte-identical across all parts, and `bench.py check <merged>`
+exiting 0. The report states, per candidate, how many invocations it took and
+why.
+
+**REQ-V170-BEN-05 (MUST) — at most three candidate runs, in this order.** Full
+catalogue, 3 repeats, same instrument. No parameter sweep, no re-tuning between
+runs, no fourth candidate.
+
+| # | tag | `LLM_REASONING_POLICY` | `LLM_REASONING_ON_PURPOSES` | why |
+|---|---|---|---|---|
+| **C1** | `cand-v170-by-purpose-tool` | `by-purpose` | `tool-round` | the expected winner: reasoning kept where tool selection benefits from it, off for the final answer and off for the summary — the two purposes S15 and S18 died on |
+| **C2** | `cand-v170-off` | `off` | *(unset)* | the maximum saving; run only if C1 misses the cost gate, or as the cheaper of two quality-passing candidates |
+| **C3** | `cand-v170-by-purpose-tool-final` | `by-purpose` | `tool-round,final` | the fallback: summary-only off. Run only if both C1 and C2 fail the quality gate |
+
+Each candidate's document is copied to `docs/assets/bench/<tag>.json` and
+committed. A candidate whose merged document fails `bench.py check` is
+re-assembled, not reinterpreted.
+
+**REQ-V170-BEN-06 (MUST) — the quality gate, with S13…S18 blocking at 3/3.**
+A candidate passes the quality gate when **all four** hold:
+
+1. `success_rate(C) >= success_rate(B) - QUALITY_GATE_SLACK`, the shipped rule
+   at `devtools/bench.py:1554` with `QUALITY_GATE_SLACK = 0.02` (`:229`);
+2. no per-scenario regression, the shipped rule at `:1565-1573` — a scenario
+   losing **two or more** repeats fails the gate;
+3. **each of S13, S14, S15, S16, S17 and S18 succeeds 3 of 3**, S15 and S18
+   included. This supersedes v1.6.0's errata 3 and 6. It is **acceptance text,
+   not code**: the exemption never lived in `devtools/` or `tests/`, so nothing
+   is added to `bench.py` to express it, and the executor asserts it by reading
+   `summary.per_scenario` of the candidate document;
+4. the candidate document carries no `meta.aborted`.
+
+Item 3 is the one clause that can fail for a reason outside the treatment's
+control, and the report says so: `baseline-v1.6.0` recorded S15 at 3/3
+(212/413/393 s) and S18 at 2/3, and both failures were traced to the very
+reasoning-budget variance this release removes. A candidate that still loses S15
+or S18 has **not** demonstrated the fix, whatever its cost number says.
+
+Ship the **cheapest** candidate that passes the quality gate.
+
+**REQ-V170-BEN-07 (MUST) — the cost gate and the verdict.** The formulas are the
+shipped ones at `devtools/bench.py:1530-1549` and are not re-derived here:
+`B_plain = Σcost_B / successes_B`, `C_plain = Σcost_C / successes_C`,
+`C_conservative = (Σcost_C + failed_C × mean_ok_C) / successes_C`, all costs
+recomputed at the **baseline's** price snapshot
+(`reference:qwen/qwen3.8-27b`, input 0.42, output 3.0, cached 0.085 USD/Mtok).
+The cost gate passes when `C_plain <= 0.70 × B_plain` **and**
+`C_conservative <= 0.70 × B_plain`, with `COST_GATE_FACTOR = 0.70`
+(`devtools/bench.py:228`). The final comparison is one command:
+
+```bash
+uv run --locked python devtools/bench.py report \
+  --baseline docs/assets/bench/baseline-v1.6.0.json \
+  --candidate docs/assets/bench/<shipped-tag>.json \
+  --gate --out docs/reports/bench-v1.7.0.md
+```
+
+| outcome | meaning | what happens |
+|---|---|---|
+| **PASS** | the shipped candidate passes the quality gate **and** the cost gate; exit 0 | the release completes: `pyproject.toml` → `1.7.0`, and the annotated tag `v1.7.0` is created on the evidence-only commit (REQ-V170-VER-02) |
+| **FAIL** | a quality-passing candidate exists but misses the cost gate; exit 1 | the code **still merges**, with the best quality-passing candidate as the shipped default (REQ-V170-POL-07), `pyproject.toml` **is** bumped to `1.7.0`, and the run **STOPS before tagging**. No tag. The report states the shortfall as a number and the operator decides |
+| **FAIL** | no candidate passes the quality gate | the shipped default stays `model-default`, `pyproject.toml` is **not** bumped, no tag, verdict `FAIL, cause: no reasoning policy satisfied the quality gate` |
+| **exit 2** | `EXIT_NOT_COMPARABLE` | a **process** failure, never a verdict. Fix the comparability cause and re-run the comparison; if the cause is an instrument difference, REQ-V170-BEN-01's STOP applies |
+
+**REQ-V170-BEN-08 (MUST) — latency is reported, never gated.** For the baseline
+and for each candidate the report carries, from the `spans` rows the documents
+already contain (`bench_schema = 2`, REQ-V160-BEN-03): **p50 and p95 of
+`chat`-span duration per purpose tag**, and **wall-clock per scenario** against
+the baseline's. Nothing here is a gate and no threshold is introduced —
+REQ-V160-GATE-05's precedent applies: a number that moves is reported as a
+number, not fixed by demoting a gate. The baseline's own totals are the
+comparison points: 54 runs, 53 successes, 93 m 16 s, $0.185776.
+
+---
+
+## 10. Carried items (CAR)
+
+**REQ-V170-CAR-01 (MUST) — `--tag` is sanitised before any path is built.** The
+v1.6.0 code review raised this as a 🟡 and it was waived, not fixed:
+`devtools/bench.py:2323-2325` does `shutil.rmtree(BENCH_ROOT / arguments.tag,
+ignore_errors=True)` with `arguments.tag` taken straight from `argparse`
+(`:1959`), so `--tag ../../something` escapes `.bench/` and
+`ignore_errors=True` hides the damage. The fix, applied **before** the path is
+constructed and therefore before `_remove_run_dir` (`:1091`) and every other
+`--tag`-derived path:
+
+```python
+_TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+```
+
+A `--tag` that fails the pattern, or that is exactly `.` or `..`, or that
+contains `/` or `\` (already excluded by the pattern, asserted separately so the
+intent survives a future edit), is refused with a message naming the flag and
+the permitted charset, and `run` exits `EXIT_ERROR` **before** any filesystem
+write. `T-V170-CAR-01` and the negative test `N7` cover it; the mutation
+`v170-tag-sanitiser-removed` MUST be killed.
+
+**REQ-V170-CAR-02 (MUST) — Appendix B's baseline scenario is refreshed.**
+spec-v1.6.0's Appendix B `E13` asserts `each of S13…S18 succeeded 3 times out of
+3` while its own errata 3 and 6 exempted S15 and S18 — the Gherkin was left
+stale, deliberately and disclosedly, when the spec froze at the tag. Appendix B
+`E9` of this spec is the corrected successor: it asserts the blocking 3/3 for all
+six against a **candidate**, names the baseline as the fixed comparison side, and
+carries the comparability and instrument preconditions REQ-V170-BEN-01 and -02
+add. spec-v1.6.0's own text is **not** edited — it is a tagged historical record
+(REQ-V170-NG-13).
+
+The related documentation divergence is recorded, not repaired: spec-v1.6.0's
+erratum 6 (`:1677`) still says S18's summary call "and its REQ-V160-TQ-01 retry
+both returned `finish_reason="length"`", while `report-v1.6.0.md`'s prompt-101
+correction establishes that only attempt 1 truncated and attempt 2 ended
+`error_kind = "transport"` at 600 089 ms. §8's evidence uses the **report's**
+figures.
+
+---
+
+## 11. Semantic versioning and the release (VER)
+
+**REQ-V170-VER-01 (MUST) — a MINOR release.** `pyproject.toml`'s
+`project.version` moves from `"1.6.0"` to `"1.7.0"` and remains the single source
+of truth; `bot.py`'s `_read_version` (REQ-V160-VER-01) reads it at call time and
+`--version` prints exactly `tg-agent-bot 1.7.0`. MINOR is the right bump under
+REQ-V160-VER-02's own table: new capability, two new environment variables, an
+additive schema migration, no removed command and no incompatible semantics. The
+version test compares the printed string against an independent `tomllib` read,
+not a literal.
+
+**The bump is conditional.** It lands only on the branches REQ-V170-BEN-07 and
+REQ-V170-RSN-06 permit: not on the stage-A STOP, not on the
+no-quality-passing-candidate branch, and not on the instrument STOP of
+REQ-V170-BEN-01. It **does** land on the cost-gate-FAIL branch, where the code
+ships and only the tag is withheld.
+
+**REQ-V170-VER-02 (MUST) — the tag is created last, on the evidence-only commit,
+and only on PASS.** The order of REQ-V160-VER-04 is unchanged: T12 runs every
+acceptance command against the final tree; the evidence-only commit lands,
+touching `docs/reports/*` and nothing else, recording `<implementation-tip>`, the
+replay output and the **intended** tag name `v1.7.0` — never a claim that the tag
+already exists; then, and only then,
+
+```bash
+git tag -a v1.7.0 -m "tg-agent-bot 1.7.0 at <evidence-commit-sha>"
+```
+
+The tag is created **only** when REQ-V170-BEN-07's verdict is PASS. On the
+cost-gate-FAIL branch the evidence-only commit still lands and still records the
+verdict, the shortfall and the shipped default, and the run stops there with
+`STOP before tagging — operator decides`. `v1.3`, `v1.3-baseline` and `v1.6.0`
+are never moved or deleted, and nothing is pushed by the executor.
+
+**REQ-V170-VER-03 (MUST) — naming.** Specs, reports and prompt slugs carry three
+numbers: `docs/spec/spec-v1.7.0.md`, `docs/reports/report-v1.7.0.md`,
+`docs/reports/tg-post-v1.7.0.md`, `docs/reports/bench-v1.7.0.md`,
+`docs/prompts/NN-v170-*.md`. Existing two-number filenames are **not** renamed
+(REQ-V170-NG-13).
+
+---
+
+## 12. Reporting (RPT)
+
+**REQ-V170-RPT-01 (MUST) — the report carries the ledger row.** REQ-V170-EC-01
+forbids the executor to write the lab-root `economics.md`, so
+`docs/reports/report-v1.7.0.md` MUST contain a section **"Ledger row (paste into
+`economics.md`)"** holding one fenced, ready-to-paste row matching the ledger's
+column order exactly:
+
+```
+| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |
+```
+
+`Ver` is **`1.7.0`**. The row uses the link form
+`[tg-agent-bot](https://github.com/axyi/tg-agent-bot)` and every cell is filled
+from this run's evidence — no `TBD`, no placeholder. "Spec (tokens)" carries both
+the estimate and the measured byte count. The operator pastes it, never the
+executor.
+
+**REQ-V170-RPT-02 (MUST) — `lint-docs` is repointed, and this is why.**
+`config/quality_gates.yaml:313` still reads `report_path:
+docs/reports/report-v1.5.md`. It was never repointed for v1.6.0, so
+REQ-V160-RPT-01's claim that "`checks.py lint-docs` enforces the section's
+presence and the cell count" was **not true of `report-v1.6.0.md`** — the gate
+was checking a two-release-old file. It becomes
+`docs/reports/report-v1.7.0.md` in T11, in the same commit as the report itself,
+and the report states that the previous release's ledger row was unlinted. The
+`ledger_header` value on the following line is unchanged. `T-V170-RPT-02`
+asserts the configured `report_path` names this release's report.
+
+**REQ-V170-RPT-03 (MUST) — the report.** Beyond the project standard,
+`report-v1.7.0.md` carries:
+
+1. the gates table — the six verbatim commands plus every gate of §13, with
+   command, profile and exit code;
+2. the **measured** test count at HEAD before and after, against the 1016 floor,
+   and the corrected `AGENTS.md` figure;
+3. the mutation summary: `mutation-all` entry count (83 at v1.6.0), kills and
+   wall clock, and the `mutation-v170` subset separately, with the
+   **re-measured** timeouts and the arithmetic that produced them;
+4. the committed spec's T0 `sha256`, unchanged at T12; the `.env` interaction
+   record of REQ-V170-EC-04 naming each of the four permitted idioms actually
+   used; the `--no-verify` attestation of REQ-V170-EC-09; `<base>`,
+   `<implementation-tip>` and the `replay --range` output — the last two recorded
+   by the evidence-only commit, not the provisional report;
+5. per task, whether the RLM rule was applied and to what;
+6. **Benchmark-affecting changes**: the two declared in REQ-V170-EC-06, plus any
+   discovered, with the disposition of each, and EC-06's statement that the
+   `AGENTS.md` before/after rule is **satisfied**, naming the pair and quoting
+   the verdict;
+7. **stage A**: the full pair table of REQ-V170-RSN-05, the per-purpose mechanism
+   table of REQ-V170-RSN-06, the resolved values of §3's three VERIFY markers
+   with URLs and dates, and the `git diff`-empty check after each candidate;
+8. **stage C**: the six instrument values of REQ-V170-BEN-01 with their sources;
+   per candidate, the tag, the treatment, the invocation count and why, the
+   per-scenario successes with S13…S18 called out individually, tokens, cost and
+   wall clock; the `comparability` result for each pair; the verdict block from
+   `bench-v1.7.0.md`; and the latency table of REQ-V170-BEN-08;
+9. the shipped default, and the sentence that it was flipped **after**
+   measurement (REQ-V170-POL-07);
+10. the **intended** tag name `v1.7.0`, recorded as an intention and never as an
+    accomplished fact — or, on the cost-gate-FAIL branch, the explicit statement
+    that no tag was created and why;
+11. scanner summary: gitleaks, trivy, semgrep findings and skylos shadow
+    findings, each **fixed, not suppressed**; any suppression quoted with the
+    code comment citing its REQ id. The **19 skylos shadow findings in
+    `dashboard_server.py`** carried from v1.6.0 are restated as informational and
+    are explicitly **not** refactored (REQ-V170-NG-12);
+12. fix cycles used against the budget of 5;
+13. **Deviations**, per REQ-V12-REP-02, process deviations included; "None" only
+    when true.
+
+**REQ-V170-RPT-04 (MUST) — the other artefacts, and the docs that must not
+drift.** Usage rows are appended per prompt to `docs/llm-usage.md`'s existing
+table, never as a headerless fragment. `docs/reports/tg-post-v1.7.0.md` is
+**Russian**, **under 1500 characters** by `wc -m` (the report quotes the count),
+names the executor model, and links
+`https://github.com/axyi/tg-agent-bot`. `AGENTS.md`'s Gates, Stack, project
+layout and Benchmark sections — **including the stale `1004` test count at
+`:103` and the mutation-entry count at `:112`** — `README.md`'s new sections and
+`.env.example`'s two new keys, and `docs/plan.md`'s milestone, are updated in the
+same commits as the changes they describe.
+
+---
+
+## 13. Gates
+
+**REQ-V170-GATE-01 (MUST) — the six existing gates, verbatim and in order.**
+Restated from `AGENTS.md:95-100`; **not one character changes**:
+
+```bash
+uv sync --locked
+uv run --locked ruff check .
+uv run --locked pytest
+uv run --locked python bot.py --selftest
+uv run --locked python bot.py --selftest-live
+uv run --locked python devtools/mutation_check.py
+```
+
+Gates 1–4 and 6 are unconditional and offline. Gate 5 requires the §3
+preconditions and is executed at **T8** and again at T12, never at T0; an
+unreachable LM Studio is then a **blocked run**. The test count MUST exceed the
+number measured at T0 (floor 1016); state the exact number in the report.
+
+**REQ-V170-GATE-02 (MUST) — one new gate, and two re-measured timeouts.**
+`config/quality_gates.yaml` gains exactly one gate:
+
+```yaml
+  mutation-v170:
+    kind: command
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, v170-]
+    result_mode: exit_status
+    blocking: true
+    timeout_seconds: <2 x measured, rounded up to the next 10 s>
+```
+
+placed in the **`pre-push`** profile, mirroring `mutation-v160` exactly. No
+existing gate's `argv`, `result_mode`, `blocking`, `severity` or profile
+membership changes. Two timeouts are **re-measured**, not guessed, per the
+2×-a-measured-run rule already documented in that file: `mutation-v170` itself,
+and `mutation-all`, which grows from v1.6.0's 83 entries by at least the eight of
+§14.4 **and** reruns a larger suite once per entry.
+
+**REQ-V170-GATE-03 (MUST) — the profile matrix, and findings are fixed, not
+suppressed.** REQ-V160-GATE-03's matrix is the authoritative one and is amended
+in exactly two cells: `mutation_check.py --select v170-` joins the `pre-push`
+column, and `checks.py lint-docs` now points at this release's report
+(REQ-V170-RPT-02). `tests/test_v15_standards.py`'s matrix test is repointed at
+**this** file (§14.1) and `_GATE_MATRIX_LABEL_TO_NAME` gains the new label.
+Every other row stands.
+
+Any new gitleaks, trivy, semgrep or skylos finding introduced by this release is
+**fixed**. A suppression requires a code comment on the suppressing line citing
+the REQ id that justifies it, and the report quotes both. The 19 pre-existing
+skylos shadow findings in `dashboard_server.py` are neither fixed nor suppressed
+here: they are shadow, they are recorded, and refactoring that module is a
+NON-GOAL (REQ-V170-NG-12).
+
+### 13.1 Per-task reading map
+
+Navigation aid **and** the authority for REQ-V170-EC-07's file-count threshold;
+reading more is never a defect, reading less never releases a requirement. §1
+(EC-01…09), §2 (AMEND-01), §4 (TREE-01…02) and §17 (NG-*) bind every task and are
+not repeated per line.
+
+| T | spec sections | repository files and ranges | delegate? |
+|---|---|---|---|
+| **T0** | §3, §13 | `AGENTS.md:90-120`, `config/quality_gates.yaml:280-317` | no |
+| **T1** | §6 (POL-01…03), §7 (OBS-01) | `config.py:280-300`, `:341-400`; `llm/base.py:60-130`; `storage.py:16-46`, `:180-230`, `:284-301` | **yes** |
+| **T2** | §6 (POL-04…06), §7 (OBS-02, -03) | `llm/base.py:66-130`, `llm/lmstudio.py:30-53`, `llm/openrouter.py:66-98`, `llm/failover.py:44-95`, `bot.py:1065-1080`, `agent.py:325-350`, `:830-960`, `tracing.py:60-100` | **yes** |
+| **T3** | §8 (SUM-01…05) | `agent.py:40-50`, `:1022-1115`; `bot.py:720-760`; `config.py:280-300`, `:363-400` | **yes** |
+| **T4** | §9 (BEN-02, -03), §10 (CAR-01) | `devtools/bench.py:105-165`, `:225-280`, `:660-740`, `:1430-1470`, `:1950-1990`, `:2260-2290`, `:2310-2330` | **yes** |
+| **T5** | §5 (RSN-01…05) | the scratch patch only; `devtools/bench_scenarios.py:204-212`, `:262-270` read-only | no |
+| **T6** | §11, §12 (RPT-02, -04) | `pyproject.toml`, `.env.example`, `README.md`, `AGENTS.md`, `docs/plan.md`, `config/quality_gates.yaml:288-317` | **yes** |
+| **T7** | §13, §14.4 | `devtools/mutation_check.py` **tail only** (`MUTATIONS` entries and `main()`), `config/quality_gates.yaml:200-235` | **yes** |
+| **T8** | §3 (PRE-03, -04), §13 | none — only commands run | no |
+| **T9** | §5 (RSN-01…06) | none — only commands run, under the scratch patch of T5 | no |
+| **T10** | §9 (BEN-01, -04…-08) | none — the tree is frozen; only commands run | no |
+| **T11** | §12, §15 | this run's own artefacts | no |
+| **T12** | §15 (ACC-03), Appendix B | this run's own artefacts | no |
+
+Any task whose actual reading exceeds its map crosses REQ-V170-EC-07 and is
+delegated; the report records it either way.
+
+---
+
+## 14. Tests
+
+**REQ-V170-TST-01 (MUST)** New tests live in `tests/test_v170_reasoning.py`,
+`tests/test_v170_summary_budget.py` and `tests/test_v170_bench.py` unless stated
+otherwise. They are **offline and deterministic** and touch no Docker daemon, no
+network, no `.env` and no LLM (REQ-V12-OFF-01's `conftest.py` guard, extended by
+REQ-V160-SRV-05's bind guard). Every LLM in a test is a fake; every clock is a
+fake; databases are `tmp_path` fixtures. **No test may call the network** — a
+test that would need a live model asserts against a recorded fixture instead.
+
+**REQ-V170-TST-02 (MUST)** Test-first: each test below is written and observed to
+fail **for the right reason** before its implementation exists; the report
+records any case where a test passed before its code was written. Test values
+come from this spec or from an independent literal, never re-derived from the
+implementation (`standards/workflow.md` §4).
+
+### 14.1 Amendments to existing tests (exhaustive)
+
+This list is **complete**; any other existing test that fails means the change
+is wrong.
+
+| file:line | change | driven by |
+|---|---|---|
+| `tests/test_observability.py:431-432` | `assert storage.SCHEMA_VERSION == 4` → `== 5` and `assert storage.schema_version(conn) == 4` → `== 5`; the table loop is unchanged (no new table) | REQ-V170-OBS-01 |
+| `tests/fakes.py:49`, `tests/test_observability.py:114`, `:639`, `tests/test_bench.py:161`, `:183`, `tests/test_failover.py:31`, `:276` | every test double's `complete()` accepts the two new keyword-only parameters (`reasoning`, `timeout_s`) with the production defaults — a double that records requests records both values; a double that ignores them may take `**kwargs`. Without this every call site of POL-04 raises `TypeError` in the suite | REQ-V170-POL-04, REQ-V170-SUM-03 |
+| `tests/test_storage.py:44` | already compares against `storage.SCHEMA_VERSION`; **verify** it still passes, do not edit | REQ-V170-OBS-01 |
+| `tests/test_v15_standards.py:1697` | `_GATE_MATRIX_LABEL_TO_NAME` gains ``"`mutation_check.py --select v170-`": "mutation-v170"`` | REQ-V170-GATE-02 |
+| `tests/test_v15_standards.py:1726` | the matrix test reads the committed `docs/spec/spec-v1.7.0.md` instead of `spec-v1.6.0.md` | REQ-V170-GATE-03 |
+| `tests/test_bench.py` | the `comparability` cases asserting the stage-C **null-on-baseline** rule become equality cases | REQ-V170-BEN-02 |
+
+**Explicitly NOT amended**, each verified against the test as written:
+`tests/test_v14_patch.py:84-96` (`bench.constants()` and `REQUEST_DEFAULTS` stay
+reasoning-free — REQ-V170-AMEND-01 keeps both untouched, and this test passing
+unamended is the proof); `tests/test_v160_bench.py:170-240` (S13…S18 ids and
+ceilings — `bench_scenarios.py` is frozen); `tests/test_observability.py:593`
+(summary rows keep `turn_id is None`); `tests/test_bench.py:111` and
+`tests/test_dashboard.py:136` (`bench_schema` follows the constant, which does
+not move); `tests/test_failover.py` (the two new keyword-only parameters both
+default to today's behaviour); `tests/test_summary.py` (every existing caller
+omits `budget_s`, so the path is unchanged).
+
+### 14.2 New unit tests — the mechanisms
+
+| id | asserts |
+|---|---|
+| `T-V170-POL-01` | `LLM_REASONING_POLICY` accepts exactly `model-default`, `off`, `by-purpose` and raises `ConfigError` naming the variable **and** the token otherwise; `LLM_REASONING_ON_PURPOSES` parses a comma list order-insensitively into a `frozenset`, accepts the empty string as the empty set, rejects an unknown tag naming it, and defaults to `{"tool-round"}`; both are absent-safe |
+| `T-V170-POL-02` | `reasoning_tag` over the full cross product of `purpose ∈ {"agent","summary"}` and `request_tools ∈ {None, [], [spec]}`: `("agent", None) → "final"`, `("agent", []) → "final"`, `("agent", [spec]) → "tool-round"`, `("summary", *) → "summary"`; the function reads no `Config` and no module global |
+| `T-V170-POL-03` | `resolve_reasoning` over all 3 × 3 combinations of policy and tag, plus `on_purposes` empty and full; `model-default` yields `"default"` for every tag |
+| `T-V170-POL-04` | with a fake primary raising a retryable `LLMError` and a recording secondary, the secondary's request carries the **same** `reasoning` value the caller passed — the `_try_other` forwarding at `llm/failover.py:83`; and `devtools/bench.py:2186`'s warm-up probe passes `reasoning="default"` explicitly |
+| `T-V170-POL-05` | under every policy, neither the system prompt nor the `tools` JSON contains any mechanism string; `prompt_tools_sha256` computed over a treated tree equals the untreated value; the `openrouter` off form is exactly `{"reasoning": {"enabled": false}}` and `"default"` adds nothing |
+| `T-V170-POL-06` | `build_payload(reasoning_fields=None)` is byte-identical to today's output for both the `tools is None` and `tools is not None` branches; a mapping is merged after the existing keys; a mapping colliding with any of the seven protected keys raises `ValueError` naming it; the prefill mechanism does not mutate the caller's `messages` list |
+| `T-V170-POL-07` | the shipped defaults of both variables equal the literals `.env.example` documents — the single permitted pin |
+| `T-V170-OBS-01` | migration 4 → 5 on a populated v4 database: both columns appear nullable, pre-existing rows read `NULL`, the version reads 5; chained 1 → 5, 2 → 5 and 3 → 5; idempotent on re-`init_schema`; an unsupported version (0, 6, `"x"`) still raises the existing `RuntimeError` naming it |
+| `T-V170-OBS-02` | `storage.LLM_CALL_COLUMNS` equals `PRAGMA table_info(llm_calls)`; the `llm_call` log payload's key set equals it too; `tracing.ATTRIBUTE_KEYS` contains `tg_agent.reasoning.requested` and `set_attribute` still rejects an unlisted key |
+| `T-V170-OBS-03` | the honored truth table in full: `'default'` → `NULL`; `'off'` with (0, 0) → 1; `'off'` with (`NULL`, 0) → 1; `'off'` with (1, 0) → 0; `'off'` with (0, 5) → 0; `'on'` with (0, 0) → 0; `'on'` with (7, 0) → 1; a call raising before a response → the requested value and `NULL` |
+| `T-V170-OBS-04` | every LLM call writes both columns: an agent round, the final round, a summary attempt, its truncation retry, its JSON-repair call and **each** failover attempt — six rows, six non-`NULL` `reasoning_requested` values, through `_record_llm_call` only (asserted by patching `storage.add_llm_call` to count calls) |
+| `T-V170-SUM-01` | with a fake clock and `budget_s=100`, attempt 1 consuming 40 s and the retry 50 s, both are issued and the deadline is taken once, before attempt 1; with `budget_s=None` the behaviour is byte-identical to v1.6.0's, proved against a recorded call log |
+| `T-V170-SUM-02` | with `budget_s=100` and attempt 1 consuming 80 s, the truncation retry is **not issued** (remaining 20 s < 30 s floor), `summarize_conversation` returns `None`, no exception escapes, exactly **one** `llm_calls` row exists, and one redacted warning names the elapsed and remaining seconds; the same for the JSON-repair branch |
+| `T-V170-SUM-03` | the retry's `timeout_s` equals the remaining budget, not the client's own; attempt 1 passes `None`; a fake client records the value it received; `min` is not applied to attempt 1 |
+| `T-V170-SUM-04` | the truncation retry and the JSON-repair call resolve to `reasoning="off"` under `model-default`, `off` **and** `by-purpose` with `summary` in `on_purposes`; attempt 1 under `by-purpose` with `summary` on still resolves to `"on"` |
+| `T-V170-SUM-05` | `load_config` raises `ConfigError` naming `LLM_TIMEOUT_S`, `LLM_SUMMARY_MAX_TOKENS` and the floor when `llm_timeout_s < 21.1 + 0.093 × llm_summary_max_tokens + 30`; it does **not** raise at shipped defaults (240 / 1536 → 193.9) nor at the 1.7.0 instrument (600 / 1536); the pre-existing check's message is unchanged |
+| `T-V170-BEN-01` | `meta.reasoning` is present on every run including `model-default`, `on_purposes` serialises sorted, a purpose with no mechanism is `null`, and `reasoning` is **not** in `LOCKED_META_FIELDS` |
+| `T-V170-BEN-02` | `comparability(baseline-v1.6.0, baseline-v1.6.0)` returns `None`; a candidate differing only in `env_flags.LLM_REASONING_POLICY`/`_ON_PURPOSES` and `git_commit` returns `None`; a pair whose `generation_settings` differ returns the locked-field message; a pair whose `HISTORY_TOOL_STUB` differs returns `env_flags.HISTORY_TOOL_STUB differs`; `LLM_FAILOVER != "off"` and a non-empty `LLM_SUMMARY_MODEL` are still refused on either side |
+| `T-V170-BEN-03` | `config_sha256` is byte-identical for two `Config` objects differing **only** in the two new fields, and differs when any non-excluded field differs |
+| `T-V170-BEN-04` | `report --gate` on a hand-built pair exits 0 when both gates pass, 1 when the cost gate fails, 1 when a scenario loses two repeats, and `EXIT_NOT_COMPARABLE` (2) when `timeout_s` differs — the `--timeout-s 1800` trap of REQ-V170-BEN-04 |
+| `T-V170-BEN-05` | the quality-gate helper reads `summary.per_scenario` and fails when any of S13…S18 is below 3/3, including S15 and S18 — the erratum-3/-6 supersession, asserted against a fixture with S18 at 2/3 |
+| `T-V170-CAR-01` | `--tag` accepts `baseline-v1.6.0`, `cand-v170-off`, `a`, and a 64-character name; rejects `..`, `.`, `a/b`, `../x`, `a\\b`, the empty string, a 65-character name and a name with a space — each with `EXIT_ERROR` and **no** filesystem write, asserted by patching `shutil.rmtree` to fail the test if called |
+| `T-V170-RPT-02` | `config/quality_gates.yaml`'s `lint-docs.report_path` names `docs/reports/report-v1.7.0.md` and its `ledger_header` is unchanged |
+| `T-V170-VER-01` | `bot.main(["--version"])` prints `tg-agent-bot <v>` where `<v>` equals an independent `tomllib` read of `pyproject.toml`, and returns 0 |
+
+### 14.3 Negative tests — the mechanisms must be able to fail
+
+| id | scenario | expected |
+|---|---|---|
+| `N1` | `LLM_REASONING_POLICY=aggressive`, and `=OFF` (wrong case) | `ConfigError` at `load_config` naming the variable and the token; the bot does not start |
+| `N2` | `LLM_REASONING_ON_PURPOSES=tool-round,summry` | `ConfigError` naming the variable and `summry`; the valid token is not silently accepted |
+| `N3` | `LLM_REASONING_ON_PURPOSES=summary` under `by-purpose` | accepted — it is a legal configuration, and REQ-V170-SUM-04 still forces the **retry** off. The bot starts |
+| `N4` | a `reasoning_fields` mapping containing `"messages"` | `ValueError` naming `messages`; the payload is not built |
+| `N5` | the summary path with `budget_s=10` (below the floor before attempt 1 even returns) | attempt 1 is still issued — the floor guards only later requests — and no retry follows; the turn completes |
+| `N6` | a candidate document carrying `meta.aborted` | `check` refuses it, `report --gate` exits `EXIT_NOT_COMPARABLE`, and the quality-gate helper refuses it before reading `per_scenario` |
+| `N7` | `bench.py run --tag ../escape` | `EXIT_ERROR`, a message naming `--tag` and the permitted charset, and `shutil.rmtree` never called |
+| `N8` | a database at schema version 6 | the existing `RuntimeError` naming the version; no DDL runs |
+
+### 14.4 Mutation coverage
+
+**REQ-V170-TST-03 (MUST)** Add **at least eight** `v170-*` entries to
+`devtools/mutation_check.py`'s `MUTATIONS` list, each a dict with the existing
+five keys (`id`, `path`, `find`, `replace`, `why`), each breaking a security- or
+correctness-critical mechanism and killed by a named test:
+
+| id | mutation | killed by |
+|---|---|---|
+| `v170-failover-drops-reasoning` | the `reasoning=` forwarding at `llm/failover.py:83` is removed | `T-V170-POL-04` |
+| `v170-summary-retry-ignores-budget` | the retry passes `timeout_s=None` instead of the remaining budget | `T-V170-SUM-03` |
+| `v170-summary-floor-ignored` | `SUMMARY_BUDGET_FLOOR_S = 30.0` → `0.0` | `T-V170-SUM-02` |
+| `v170-summary-floor-check-removed` | the second `load_config` check of REQ-V170-SUM-05 is deleted | `T-V170-SUM-05` |
+| `v170-rescue-retry-keeps-reasoning` | the retry's forced `"off"` becomes the policy's own resolution | `T-V170-SUM-04` |
+| `v170-honored-treats-null-as-positive` | `reasoning_tokens is None` is read as non-zero in the honored computation | `T-V170-OBS-03` |
+| `v170-tag-sanitiser-removed` | the `--tag` pattern check of REQ-V170-CAR-01 always returns `True` | `T-V170-CAR-01`, `N7` |
+| `v170-config-hash-includes-treatment` | `llm_reasoning_policy` is removed from `CONFIG_HASH_EXCLUDED` | `T-V170-BEN-03` |
+
+**REQ-V170-TST-04 (MUST)** Every entry's `find` string must match its target file
+**exactly once**; `mutation_check.py --list` is run and its output recorded
+before the gate is trusted. The whole-tree `ruff format` reformat stays a
+NON-GOAL (REQ-V15-NG-04) so existing `find` strings stay valid.
+
+---
+
+## 15. Acceptance, review and report
+
+**REQ-V170-ACC-01 (MUST)** After the `full` profile is green, execute Appendix B
+against the repository, the running bot and the recorded documents. Record pass
+or fail per scenario and, per REQ-V12-REP-02, **how** each was driven.
+
+**REQ-V170-ACC-02 (MUST)** Regression check: spec-v1.2's D1 and D2, spec-v1.4's
+S01 acceptance, spec-v1.5's freeze properties and spec-v1.6.0's tracing,
+dashboard and tool-quality properties still hold. No earlier security posture is
+weakened; in particular the exec sandbox, the redaction choke points, the SSRF
+domain allowlist, the loopback-only dashboard and the `.env` handling are
+untouched by this release.
+
+**REQ-V170-ACC-03 (MUST) — the final acceptance run, the frozen tip, and the
+freeze.** The v1.5/v1.6.0 machinery applies unchanged:
+
+- **T11 lands a provisional `report-v1.7.0.md`** carrying every REQ-V170-RPT-03
+  item except item 4's `<implementation-tip>` SHA and every T12 artefact. That
+  commit's resulting SHA **is** `<implementation-tip>`.
+- **T12 re-runs against the final tree**: the six verbatim gates of §13,
+  `checks.py run --profile full --since <base>`,
+  `checks.py replay --range <base>..<implementation-tip>` and Appendix B. It then
+  lands **one evidence-only commit** touching `docs/reports/*` and nothing else.
+  That commit is not recursively required to replay against itself. **Only after
+  it has landed**, and **only on REQ-V170-BEN-07's PASS**, is the annotated tag
+  `v1.7.0` created on it; the tag is the last action of the run and no commit
+  follows it.
+- **After the first candidate run (T10) no source, test or config change is
+  permitted** — that is REQ-V160-BEN-07's freeze, re-armed here for the
+  candidates. The one exception is a documentation-only correction of the
+  evidence the run produced, which re-runs the `commit-msg` checks, the
+  `pre-commit` profile, `lint-docs` and `gitleaks-tree` against the final tree.
+  Anything else voids the candidates and T10 is executed again in full.
+
+**REQ-V170-ACC-04 (MUST)** Failures are fixed and the whole set rerun inside the
+**5-cycle** repair budget. Exhausting it means stopping and reporting, not
+relaxing a gate, not deleting a test, not lowering a scenario's declared maximum
+and not widening `QUALITY_GATE_SLACK` or `COST_GATE_FACTOR`.
+
+**REQ-V170-REV-01 (MUST)** Code review by the `code-reviewer` subagent
+(`.claude/agents/code-reviewer.md`) in a **clean context**, after the offline
+gates pass and **before** the first candidate run — never self-review in the
+writing context, and never after the measurement, when no fix could land.
+Findings are fixed or waived with a reason in the report; log the review prompt
+in `docs/prompts/`. Beyond the standard checklist the reviewer checks:
+
+1. `reasoning_tag` and `resolve_reasoning` are pure, live only in `llm/base.py`,
+   and no purpose or policy literal is duplicated anywhere else;
+2. all five `complete()` definitions and all five invocation sites carry both
+   new parameters, `llm/failover.py:83` included;
+3. no mechanism string can reach the system prompt, the tool schema,
+   `REQUEST_DEFAULTS` or `bench.constants()`;
+4. the summary deadline is taken exactly once and every later request derives its
+   timeout from it; no path can raise out of `summarize_conversation` into the
+   user turn;
+5. `--tag` is validated before **any** path is built from it;
+6. each mechanism of §14.4 has a mutation entry whose `find` matches once.
+
+---
+
+## 16. Implementation order
+
+**REQ-V170-ORD-01 (MUST)** Work in this order; each task is one prompt and one
+commit, with the reading map of §13.1 and the delegation rule of
+REQ-V170-EC-07. Three tasks are **conditional exits** and are marked so.
+
+| T | task | acceptance |
+|---|---|---|
+| **T0** | Preconditions (§3): `full` profile green with the live member deferred, hooks installed, `doctor` green, test count re-measured, docker, `bench.py check` on the baseline. **Record `<base>` and the spec's `sha256`**, create `docs/prompts/103-go-spec-v1.7.0.md` and the `report-v1.7.0.md` skeleton with its `## Operator inputs` section copied verbatim from the `go` request. | every item recorded; `102` is the highest pre-existing prompt and the spec is present and unchanged; `<base>` written before the first commit; **a missing version or a non-positive-integer context length stops the run here** |
+| **T1** | `config.py` (two fields, two parsers, the SUM-05 check), `llm/base.py` (`REASONING_TAGS`, `reasoning_tag`, `resolve_reasoning`), `storage.py` (`SCHEMA_VERSION = 5`, the two columns, `_MIGRATION_4_TO_5`, the accepted tuple). Tests `T-V170-POL-01`, `-02`, `-03`, `T-V170-OBS-01`, `T-V170-SUM-05`, `N1`, `N2`, `N3`, `N8`; amends `tests/test_observability.py:431`. | those tests green; migration tests green from v1, v2, v3 and v4 databases; `test_v14_patch` green **unamended** |
+| **T2** | `llm/base.py` (`build_payload`'s `reasoning_fields`), the two new keyword-only parameters across five definitions (incl. `bot.py:1071`) and five invocations, the seven test doubles of §14.1, the two provider forms, `tracing.py`'s one new key, `agent.py`'s `_record_llm_call` wiring. Tests `T-V170-POL-04`, `-05`, `-06`, `T-V170-OBS-02`, `-03`, `-04`, `N4`. | those tests green; `tests/test_failover.py` green unamended; `prompt_tools_sha256` unchanged |
+| **T3** | `agent.py` summary budget (`budget_s`, `clock`, `SUMMARY_BUDGET_FLOOR_S`, the per-request timeout, the rescue retry) and `bot.py`'s two call sites. Tests `T-V170-SUM-01`, `-02`, `-03`, `-04`, `N5`. | those tests green with a fake clock and no live call; `tests/test_summary.py` green unamended |
+| **T4** | `devtools/bench.py`: `meta.reasoning`, the `comparability` equality rule, the two `CONFIG_HASH_EXCLUDED` entries, the `--tag` sanitiser, the corrected `ENV_FLAG_FIELDS` comment. Tests `T-V170-BEN-01`, `-02`, `-03`, `-04`, `-05`, `T-V170-CAR-01`, `N6`, `N7`; amends `tests/test_bench.py`'s comparability cases. | those tests green; `bench_scenarios.py` byte-unchanged (`git diff --stat` proves it) |
+| **T5** | The stage-A scratch harness: the mechanism-selection patch shape, the pair-file naming, the restore-and-`git diff` procedure. **No commit of the patch itself** — this task commits only its prompt, its tests and the report scaffolding. | the procedure is written down and dry-run against the stub client with zero live calls |
+| **T6** | Version and docs: `pyproject.toml` `1.7.0`, `.env.example`, `README.md`, `AGENTS.md` (gate, variables, corrected test and mutation counts), `docs/plan.md`, `config/quality_gates.yaml`'s `report_path`. Tests `T-V170-VER-01`, `T-V170-RPT-02`. | `lint-docs` green; docs match reality; the version bump is provisional until T10's verdict (REQ-V170-VER-01) |
+| **T7** | `mutation_check.py`: the eight `v170-*` entries; `config/quality_gates.yaml`: the `mutation-v170` gate and both re-measured timeouts; `--list` recorded. | `--select v170-` green; `mutation-all` green inside its new timeout; the matrix test green |
+| **T8** | **Review (REQ-V170-REV-01) in a clean context, then the offline gates and the live preflight**: gates 1–4 and 6 verbatim plus `checks.py run --profile full --since <base>`; then PRE-03's probe and documentation reads, PRE-04's six instrument checks, gate 5 and the deferred live member. **Every source, test and config fix of this run lands here or earlier.** | findings closed or waived; every offline gate green; **an instrument mismatch STOPS here** (REQ-V170-BEN-01) |
+| **T9** | **Stage A (§5)**: the candidates in order, under the pair contract and the budget. | the per-purpose mechanism table produced and every pair artefact committed; **no summary-shippable mechanism STOPS the run here** (REQ-V170-RSN-06) |
+| **T10** | **Stage C (§9)**: C1, then C2 and C3 only as REQ-V170-BEN-05 permits; the gated comparison into `bench-v1.7.0.md`; the shipped default set (REQ-V170-POL-07). **The tree is frozen from the first candidate.** | each candidate document `check`-valid, `meta.aborted` absent, comparability `None` against the baseline; **a FAIL verdict continues to T11 but forbids the tag** (REQ-V170-BEN-07) |
+| **T11** | **Provisional** `report-v1.7.0.md` (RPT-03 minus item 4's tip SHA and T12 artefacts, ledger row included), `tg-post-v1.7.0.md` (RU, < 1500 chars), `docs/llm-usage.md` rows. | `lint-docs` green against the repointed `report_path`; `wc -m` recorded; no self-referential SHA claimed |
+| **T12** | **Final acceptance (REQ-V170-ACC-03)**: six verbatim gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the single evidence-only commit; then the annotated tag `v1.7.0` **on that commit, only on PASS**. | every gate green on the tree that ships; the tag recorded, or its deliberate absence recorded with the verdict that withheld it |
+
+---
+
+## 17. Non-goals for v1.7.0
+
+Implementing any of these is a defect.
+
+| ID | NON-GOAL | why |
+|---|---|---|
+| REQ-V170-NG-01 | Changing `devtools/bench_scenarios.py` in any way — a new scenario, a moved ceiling, an edited turn | `meta.scenarios_sha256` is locked; one byte voids `baseline-v1.6.0.json` and with it this release's only gate |
+| REQ-V170-NG-02 | A "do not think" / "answer directly" instruction in the system prompt or a tool description | `meta.prompt_tools_sha256` is locked; and a prompt-level plea is not a mechanism |
+| REQ-V170-NG-03 | A fresh baseline, a re-recorded `baseline-v1.6.0.json`, or gating against a baseline produced in this run | REQ-V170-BEN-01; gating on an instrument recorded in the same run is circular |
+| REQ-V170-NG-04 | A new dashboard page, a new JSON endpoint, a new `metrics.py` function or a reasoning UI | the existing per-purpose `reasoning_share` (metrics.py:397-416) already answers the question |
+| REQ-V170-NG-05 | Adding any reasoning key to `REQUEST_DEFAULTS` or to `bench.constants()` | both are embedded in the **locked** `meta.constants`, and `tests/test_v14_patch.py:89-92` forbids it |
+| REQ-V170-NG-06 | Any new Python dependency, an OpenAI/LM Studio SDK, an OTLP exporter, a YAML or HTTP framework | REQ-V170-EC-01; stdlib plus `httpx` and `python-dotenv` |
+| REQ-V170-NG-07 | A third `purpose` value in the `llm_calls` `CHECK` constraint | the reasoning tag is derived, not stored as `purpose` (REQ-V170-POL-02); widening the constraint is a migration nobody needs |
+| REQ-V170-NG-08 | A live OpenRouter smoke run, or any paid inference | the off form is confirmed from documentation and asserted offline (`T-V170-POL-05`); v1.4's POL-07 smoke is not carried |
+| REQ-V170-NG-09 | Tuning `LLM_MAX_TOKENS`, `LLM_SUMMARY_MAX_TOKENS`, `LLM_TIMEOUT_S`, `CONTEXT_WINDOW_MESSAGES`, `SUMMARY_MAX_TOKENS` or the sampling literal as a cost lever | they are the locked instrument; changing one makes the pair non-comparable, and REQ-V14-NG-01/-02 stand |
+| REQ-V170-NG-10 | A second summary retry, a third attempt, or an exception surfaced to the user turn when the budget runs out | REQ-V160-TQ-01 item 4 stands; REQ-V170-SUM-02 records the outcome instead |
+| REQ-V170-NG-11 | A feature flag for the summary budget or for the rescue retry | the benchmark measures the shipped configuration (REQ-V160-TQ-08) |
+| REQ-V170-NG-12 | Refactoring `dashboard_server.py` to clear its 19 skylos shadow findings | shadow findings are informational; a refactor after the freeze would void the candidates, and this release does not touch that module |
+| REQ-V170-NG-13 | Retroactive tags, renaming existing spec/report/prompt files, moving `v1.3`/`v1.3-baseline`/`v1.6.0`, or editing spec-v1.6.0's text | REQ-V160-VER-02 and -NG-16; a tagged spec is a historical record, errata included |
+| REQ-V170-NG-14 | Deleting `storage._MIGRATION_2_TO_3` or any other pre-existing dead code found in passing | pre-existing dead code is **reported**, never removed as a side effect (lab rule 3) |
+
+---
+
+## Appendix A — requirement traceability
+
+Every `MUST` appears exactly once; the sixty-seven rows below are in bijection
+with the sixty-seven `MUST` ids defined in §§1–16. NON-GOALs live in §17's table
+and are not repeated here. "Verified by" names a test id, a negative test, a
+Gherkin scenario or a recorded artefact — never "by inspection".
+
+| Requirement | Source | Verified by |
+|---|---|---|
+| `REQ-V170-EC-01` — boundary, zero new deps, repair budget 5 | REQ-V160-EC-01 | `uv.lock` and `pyproject.toml` diffs show no new distribution |
+| `REQ-V170-EC-02` — test-first | REQ-V160-EC-02 | the report's per-task "failed first for the right reason" record |
+| `REQ-V170-EC-03` — 1016-test floor, exhaustive §14.1 | measured at `89786ef` | `pytest --collect-only -q` at T0 and T12 |
+| `REQ-V170-EC-04` — secrets discipline, four `.env` reads | REQ-V160-EC-04 | `gitleaks-tree`; the report's `.env` interaction record; `E10` |
+| `REQ-V170-EC-05` — backward compatibility | REQ-V1-EC-05 | `T-V170-SUM-01`; §14.1's unamended-test list |
+| `REQ-V170-EC-06` — benchmark-affecting, rule **satisfied** | `AGENTS.md:149-155` | the report's "Benchmark-affecting changes"; `bench-v1.7.0.md` |
+| `REQ-V170-EC-07` — RLM rule | REQ-V160-EC-07 | §13.1's map; the per-task delegation record |
+| `REQ-V170-EC-08` — prompt format | REQ-V15-PRM-01 | `checks.py lint-docs`; `E11` |
+| `REQ-V170-EC-09` — `--no-verify` ban, one prompt one commit | REQ-V15-EC-09, REQ-V160-EC-10 | `replay --range <base>..<implementation-tip>`; the attestation sentence |
+| `REQ-V170-AMEND-01` — amendment table | this spec | §14.1's amended and not-amended lists |
+| `REQ-V170-PRE-01` — preconditions | REQ-V160-PRE-01 | the T0 record; the blocker template on failure |
+| `REQ-V170-PRE-02` — operator inputs block at T0 | REQ-V160-PRE-04, `AGENTS.md` `go` | the report's `## Operator inputs`; `E10` |
+| `REQ-V170-PRE-03` — LM Studio address and the documentation reads | REQ-V160-PRE-03 | the report's URLs, dates and resolved VERIFY values; `E10` |
+| `REQ-V170-PRE-04` — the instrument proved without disclosure | erratum 5; REQ-V160-PRE-04 | the six recorded checks; `E10` |
+| `REQ-V170-TREE-01` — new files | this spec | the T12 tree listing |
+| `REQ-V170-TREE-02` — changed files, `bench_scenarios.py` frozen | REQ-V170-NG-01 | `git diff --stat <base>..<tip>` |
+| `REQ-V170-RSN-01` — pair contract, S05 and S12 | REQ-V14-RSN-01 | the pair artefacts under `docs/assets/bench/`; the `git diff`-empty record |
+| `REQ-V170-RSN-02` — candidates a…e in fixed order | REQ-V14-RSN-02 | the report's pair table, one row per member |
+| `REQ-V170-RSN-03` — honored, per purpose | REQ-V14-RSN-03 | the rendered `## Reasoning` sections of both members |
+| `REQ-V170-RSN-04` — shippability judged per purpose | REQ-V14-POL-05; agent.py:1045 | the per-purpose shippability table; the resent/new token record |
+| `REQ-V170-RSN-05` — budget, ≤ 3 per candidate, ≤ 15 total | REQ-V14-RSN-05 | the pair count in the report against the budget |
+| `REQ-V170-RSN-06` — mechanism table and the STOP rule | REQ-V14-RSN-06 | the per-purpose mechanism table; the STOP verdict if it fires |
+| `REQ-V170-POL-01` — two environment variables | REQ-V14-POL-01 | `T-V170-POL-01`, `N1`, `N2`, `N3` |
+| `REQ-V170-POL-02` — the purpose tag, pure, in `llm/base.py` | REQ-V14-POL-02 | `T-V170-POL-02` |
+| `REQ-V170-POL-03` — `resolve_reasoning` | REQ-V14-POL-03 | `T-V170-POL-03` |
+| `REQ-V170-POL-04` — one parameter, five definitions, five sites | REQ-V14-POL-04 | `T-V170-POL-04`; mutation `v170-failover-drops-reasoning` |
+| `REQ-V170-POL-05` — the two provider forms | REQ-V14-POL-07; PRE-03 | `T-V170-POL-05` |
+| `REQ-V170-POL-06` — `build_payload`'s `reasoning_fields` | this spec | `T-V170-POL-06`, `N4` |
+| `REQ-V170-POL-07` — the shipped default follows stage C | REQ-V14-BEN-09 | `T-V170-POL-07`; the report's flipped-after-measurement sentence |
+| `REQ-V170-OBS-01` — two columns, schema 4 → 5 | REQ-V14-OBS-01 | `T-V170-OBS-01`, `N8`; `E3` |
+| `REQ-V170-OBS-02` — one span attribute | REQ-V160-TRC-09 | `T-V170-OBS-02` |
+| `REQ-V170-OBS-03` — recorded for every call | REQ-V14-OBS-03 | `T-V170-OBS-03`, `T-V170-OBS-04`; `E4` |
+| `REQ-V170-SUM-01` — one budget for the whole path | report-v1.6.0 S18 | `T-V170-SUM-01`; `E5` |
+| `REQ-V170-SUM-02` — the 30 s floor and the skipped request | this spec | `T-V170-SUM-02`, `N5`; mutation `v170-summary-floor-ignored` |
+| `REQ-V170-SUM-03` — per-request timeout from the remaining budget | agent.py:1094; llm/base.py:250 | `T-V170-SUM-03`; mutation `v170-summary-retry-ignores-budget` |
+| `REQ-V170-SUM-04` — the rescue retry forces reasoning off | report-v1.6.0 S18 attempt 1 | `T-V170-SUM-04`; mutation `v170-rescue-retry-keeps-reasoning` |
+| `REQ-V170-SUM-05` — `_check_timeout_budget` amended, not removed | REQ-V14-REL-01, REQ-V160-TQ-02 | `T-V170-SUM-05`; mutation `v170-summary-floor-check-removed` |
+| `REQ-V170-BEN-01` — same instrument, mismatch STOPS | erratum 5; REQ-V160-BEN-05 | the six recorded instrument checks; `E9` |
+| `REQ-V170-BEN-02` — comparability accepts a treatment-only pair | measured `comparability()` refusal | `T-V170-BEN-02`, `T-V170-BEN-03`; mutation `v170-config-hash-includes-treatment` |
+| `REQ-V170-BEN-03` — the unlocked `meta.reasoning` block | this spec | `T-V170-BEN-01`; the candidate documents |
+| `REQ-V170-BEN-04` — process-env prefix, `--timeout-s 1800`, the merge | config.py:202; bench.py:756-764 | `T-V170-BEN-04`, `N6`; the per-candidate invocation record |
+| `REQ-V170-BEN-05` — at most three candidates, fixed order | user decision | the committed `cand-v170-*.json` documents |
+| `REQ-V170-BEN-06` — quality gate, S13…S18 blocking 3/3 | errata 3 and 6, superseded | `T-V170-BEN-05`; `E9` |
+| `REQ-V170-BEN-07` — cost gate and the four verdicts | bench.py:1530-1549 | `bench-v1.7.0.md`'s verdict block; `E12` |
+| `REQ-V170-BEN-08` — latency reported, never gated | REQ-V160-GATE-05 | the report's per-purpose p50/p95 and per-scenario wall-clock tables |
+| `REQ-V170-CAR-01` — `--tag` sanitised before any path | v1.6.0 review 🟡, waived | `T-V170-CAR-01`, `N7`; mutation `v170-tag-sanitiser-removed` |
+| `REQ-V170-CAR-02` — Appendix B refreshed for S15/S18 | spec-v1.6.0's stale Appendix B scenario 13 | Appendix B `E9` of this spec |
+| `REQ-V170-VER-01` — MINOR bump, conditional | REQ-V160-VER-02 | `T-V170-VER-01`; `pyproject.toml` at the tip |
+| `REQ-V170-VER-02` — tag last, on the evidence commit, only on PASS | REQ-V160-VER-04 | `E12`; `git tag -l` and the annotated-tag message |
+| `REQ-V170-VER-03` — three-number naming | REQ-V160-VER-05 | the T12 tree listing |
+| `REQ-V170-RPT-01` — the ledger row | REQ-V160-RPT-01 | `checks.py lint-docs`; `E11` |
+| `REQ-V170-RPT-02` — `lint-docs` repointed | quality_gates.yaml:313 | `T-V170-RPT-02`; `E11` |
+| `REQ-V170-RPT-03` — the report's thirteen items | `standards/reporting.md` | the report itself, item by item |
+| `REQ-V170-RPT-04` — usage rows, tg-post, docs that must not drift | `standards/reporting.md` | `wc -m` on the tg-post; the `AGENTS.md` diff |
+| `REQ-V170-GATE-01` — the six gates verbatim | `AGENTS.md:95-100` | the gates table with exit codes |
+| `REQ-V170-GATE-02` — one new gate, two re-measured timeouts | REQ-V160-GATE-02 | `mutation-v170` green; the re-measurement arithmetic |
+| `REQ-V170-GATE-03` — the profile matrix, findings fixed not suppressed | REQ-V160-GATE-03/-04 | `tests/test_v15_standards.py:1726`; the scanner summary |
+| `REQ-V170-TST-01` — offline, deterministic, no network | REQ-V12-OFF-01 | the `conftest.py` guard; the suite running with the network down |
+| `REQ-V170-TST-02` — test-first, independent expected values | `standards/workflow.md` §4 | the report's per-test record |
+| `REQ-V170-TST-03` — at least eight `v170-*` mutations | REQ-V160-TST-03 | `mutation_check.py --select v170-` |
+| `REQ-V170-TST-04` — every `find` matches exactly once | REQ-V160-TST-04 | `mutation_check.py --list` output in the report |
+| `REQ-V170-ACC-01` — Appendix B executed | REQ-V160-ACC-01 | the per-scenario pass/fail record |
+| `REQ-V170-ACC-02` — regression check | REQ-V160-ACC-02 | the unamended-test list; gates 3 and 6 |
+| `REQ-V170-ACC-03` — provisional report, frozen tip, freeze | REQ-V160-ACC-03 | the evidence-only commit; `replay --range` |
+| `REQ-V170-ACC-04` — the 5-cycle repair budget | REQ-V160-ACC-04 | the report's fix-cycle count |
+| `REQ-V170-REV-01` — clean-context review before measurement | `AGENTS.md:175-179` | the review prompt in `docs/prompts/`; the findings table |
+| `REQ-V170-ORD-01` — the order, with three conditional exits | this spec | the commit sequence; `replay --range` |
+
+---
+
+## Appendix B — acceptance scenarios (Gherkin, written before code)
+
+```gherkin
+# E1-E8 run offline against fakes, a fake clock and a temporary database in a
+# tmp_path fixture. E9-E12 run against this repository, the live LM Studio and
+# the recorded documents.
+# SAFETY: no live credential is ever used as a test value; no scenario reads or
+# prints .env contents; no scenario names or reads the private corpus.
+
+Scenario: E1 — the tag is a pure function of purpose and exposed tools
+  Given a request with purpose "agent" and a non-empty tools list
+  Then reasoning_tag returns "tool-round"
+  When the same request withholds tools, passing None or an empty list
+  Then reasoning_tag returns "final"
+  When the purpose is "summary"
+  Then reasoning_tag returns "summary" whatever the tools argument is
+  And the function reads no Config, no environment variable and no module global
+
+Scenario: E2 — model-default sends a byte-identical request
+  Given LLM_REASONING_POLICY is unset
+  When one agent round and one summary call are built
+    Then each payload is byte-identical to the payload v1.6.0 builds for the
+       same inputs, and carries no reasoning key of any kind
+  And meta.prompt_tools_sha256 over this tree equals the baseline's
+  And bench.constants() and llm.base.REQUEST_DEFAULTS contain no key whose
+      lower-case form holds "reasoning"
+
+Scenario: E3 — a v4 database migrates without losing a row
+  Given a database at schema version 4 holding llm_calls and tool_calls rows
+  When init_schema runs
+    Then the version reads 5, llm_calls carries reasoning_requested and
+       reasoning_honored, and every pre-existing row survives with NULL in both
+  And the same holds for databases starting at 1, 2 and 3
+  And running init_schema again changes nothing
+
+Scenario: E4 — every call records what it asked for
+  Given a scripted turn with two agent rounds, one failover attempt, one
+      summary attempt and its truncation retry
+  When the turn completes
+    Then five llm_calls rows carry a non-NULL reasoning_requested, each written
+       through _record_llm_call and no other path
+  And a row whose call raised before a response carries its requested value and
+      NULL honored
+  And each row's span carries tg_agent.reasoning.requested with the same value
+
+Scenario: E5 — the summary path spends one budget, not one per attempt
+  Given budget_s is 100 seconds on a fake clock and attempt 1 consumes 40
+  When the response is truncated
+    Then the retry is issued with an HTTP timeout of the remaining 60 seconds,
+       not the client's own
+  When attempt 1 consumes 80 seconds instead
+  Then the retry is not issued at all, exactly one llm_calls row exists, the
+      turn completes without a summary, no exception escapes, and one redacted
+      warning names the elapsed and the remaining seconds
+
+Scenario: E6 — the rescue retry never reasons
+  Given a summary-shippable mechanism exists
+  When the truncation retry is issued under LLM_REASONING_POLICY=model-default
+  Then its resolved reasoning value is "off"
+  And the same holds under off and under by-purpose with summary switched on
+  And attempt 1 under by-purpose with summary switched on still resolves to "on"
+
+Scenario: E7 — a tag cannot reach outside .bench/
+  Given bench.py run is invoked with --tag ../escape
+    Then it exits EXIT_ERROR with a message naming --tag and the permitted
+       charset, and shutil.rmtree is never called
+  And --tag "." and --tag ".." are refused the same way
+  And --tag cand-v170-off is accepted
+
+Scenario: E8 — the baseline is comparable with itself and with a treatment
+  Given docs/assets/bench/baseline-v1.6.0.json
+  When comparability is asked to compare it with itself
+  Then it returns None
+  When it is compared with a document differing only in env_flags'
+      LLM_REASONING_POLICY, LLM_REASONING_ON_PURPOSES and git_commit
+  Then it returns None
+  When it is compared with a document whose generation_settings differ
+  Then it returns the locked-meta-field message and report --gate exits 2
+  And config_sha256 is unchanged by the two new Config fields alone
+
+Scenario: E9 — a candidate is measured against a named, unchanged instrument
+  Given every task through T8 is complete and the working tree is clean
+  And .env was updated by a single-line sed, confirmed by a grep -q that prints
+      nothing, and its contents were never emitted
+  And grep -q proved LLM_MAX_TOKENS=4096 and LLM_TIMEOUT_S=600 without printing
+  And the served model id contains LMSTUDIO_MODEL, the version reads
+      "Bionic v1.1.1" and the loaded context length reads 42496
+  And the one-completion preflight returns a non-empty assistant message
+  When a candidate is run with the treatment set by a process-environment
+      prefix, --repeats 3, no --only and --timeout-s 1800
+    Then its meta matches every locked field of baseline-v1.6.0.json but
+       env_flags and git_commit, meta.aborted is absent, and bench.py check
+       exits 0
+  And each of S13, S14, S15, S16, S17 and S18 succeeded 3 times out of 3 — S15
+      and S18 included, superseding errata 3 and 6
+  And no scenario lost two or more repeats
+  When a source file is then modified
+  Then the candidate is void and stage C is repeated in full
+
+Scenario: E10 — the run never discloses a secret and never guesses the
+    instrument
+  Given the run is complete
+    Then no report, prompt, spec or commit contains a credential value, a .env
+       line, a private corpus name or a path under data/
+  And the only .env interactions recorded are the four idioms EC-04 permits
+  And no .env.bak file was ever created
+  When the operator's version or context length disagrees with the baseline
+  Then the run stopped with a report and created no tag
+
+Scenario: E11 — the report carries a paste-ready ledger row that is actually
+    linted
+  Given the run is complete
+  When checks.py lint-docs runs
+    Then its configured report_path names docs/reports/report-v1.7.0.md, and
+       that file holds a "Ledger row" section with no placeholder cell whose
+       fenced row's cell count matches the ledger header's
+  And every prompt file numbered 103 and above has all seven bullets and four
+      blocks
+
+Scenario: E12 — the tag is created last, and only when the gate passed
+  Given every gate of section 13 is green on the final tree
+  When the evidence-only commit lands
+    Then it records <implementation-tip>, the replay output and the intended tag
+       name v1.7.0, and claims nowhere that the tag exists
+  When bench.py report --gate returned PASS
+  Then git tag -a v1.7.0 is created on that commit and nothing follows it
+  When it returned FAIL on the cost gate instead
+  Then no tag exists, pyproject.toml still reads 1.7.0, the report states the
+      shortfall as a number, and the run stops for the operator
+  And git tag -l still shows v1.3, v1.3-baseline and v1.6.0 unchanged
+  And nothing is pushed
+```
+
+## Appendix C — cross-review log
+
+*(To be filled by the lab: challenger, rounds, findings, verdicts and the
+resulting changes, in the format of spec-v1.6.0's Appendix C. Empty at
+authoring time.)*
