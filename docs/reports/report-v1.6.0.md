@@ -1,7 +1,9 @@
 # Implementation report — spec-v1.6.0
 
-**Status: T18 final acceptance complete (2026-09-06). Tag `v1.6.0` not yet
-created — awaiting the operator's explicit, separate approval.** The run
+**Status: T18 final acceptance complete (2026-09-06); tag `v1.6.0` created
+the same day (tagger timestamp 2026-09-06T21:00:23+02:00) on commit
+`0d33af4`, on the operator's explicit, separate, in-session approval —
+see "Tag `v1.6.0` created", below.** The run
 below first stopped at T15 (S13's deterministic `tool_calls_max` overage —
 "Run closed at T15" section), was resumed under four lab errata (S13's
 ceiling corrected to the measured reference, S15 exempted from the
@@ -16,9 +18,13 @@ section), landed T17's provisional report ("T17 — provisional report"
 section, commit `726771f` = `<implementation-tip>`), and has now completed
 **T18**: both `checks.py run --profile full` invocations, `replay`,
 Appendix B and the ACC-02 regression check all green on the exact tip tree
-("T18 — final acceptance" section, below). `pyproject.toml` has read
-`"1.6.0"` since T12; **no `v1.6.0` git tag exists yet** — it is the one
-action still pending, deliberately, on the operator's word.
+("T18 — final acceptance" section, below), followed by the operator's own
+approval and the tag's creation ("Tag `v1.6.0` created", below).
+`pyproject.toml` has read `"1.6.0"` since T12; the **`v1.6.0` annotated
+git tag now exists**, created on `0d33af4` once the operator's explicit
+approval was given in session — it was deliberately withheld from every
+commit up to and including T18's own, per REQ-V160-VER-04/E14, and
+requested only after T18's evidence was complete.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -144,7 +150,13 @@ REQ-V160-EC-06.
 
 *(filled in per task as the run proceeds)*
 
-## Deviations (running log — compiled into the final §13 Deviations at T17)
+## Deviations (running log — compiled at prompt 101, see below)
+
+Promised above as "compiled into the final §13 Deviations at T17" — T17
+named this as an open RPT-02 item but did not actually produce it; a
+`/verify-run` finding on the resumed run, fixed at prompt 101 by the
+"Deviations — compiled (REQ-V160-RPT-02 item 13)" section near the end of
+this report.
 
 **T2 — two existing tests amended outside §15.1's list, both forced,
 mechanical consequences of `SCHEMA_VERSION` 3 → 4 that the list does not
@@ -1033,7 +1045,7 @@ left as T18's unfulfilled placeholder, since T18 never runs in this run.
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.6.0 (T18 final acceptance complete — tag not yet created, pending operator approval) | 2026-09-06 | ~184.5 KB spec / 28 commits, prompts 72–100 | 0 of 5 repair cycles drawn on the actual codebase across the whole run; the only failure this resume hit (a stray `git worktree`/branch from a self-inflicted `TaskStop`) was operational, not a gate or code failure | 4 real findings total: PRE-04's preflight budget (fixed in place, T15), S13's deterministic `tool_calls_max` overage (erratum 2, ceiling corrected to measured 5), S15's reasoning-budget timeout (erratum 3, exempted, non-deterministic), S18's `summary_exists` under the same mechanism (erratum 6, exempted, non-deterministic) — plus 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference measured directly by the benchmark harness: ~$0.10 (original T15 smoke/diagnostics) + $0.1858 (this resume's 54-run baseline) + smoke-v160 reruns, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.6.0 (T18 final acceptance complete; tag `v1.6.0` created on `0d33af4`, 2026-09-06) | 2026-09-06 | ~184.5 KB spec / 28 commits, prompts 72–100 | 0 of 5 repair cycles drawn on the actual codebase across the whole run; the only failure this resume hit (a stray `git worktree`/branch from a self-inflicted `TaskStop`) was operational, not a gate or code failure | 4 real findings total: PRE-04's preflight budget (fixed in place, T15), S13's deterministic `tool_calls_max` overage (erratum 2, ceiling corrected to measured 5), S15's reasoning-budget timeout (erratum 3, exempted, non-deterministic), S18's `summary_exists` under the same reasoning-exhaustion family (erratum 6, exempted, non-deterministic: attempt 1 truncated at the completion budget, attempt 2 hit the 600 s transport timeout) — plus 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference measured directly by the benchmark harness: ~$0.10 (original T15 smoke/diagnostics) + $0.1858 (this resume's 54-run baseline) + smoke-v160 reruns, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
 ```
 
 ## Run closed at T15 (2026-09-06)
@@ -1238,25 +1250,46 @@ candidate run could see the timeout again.
 
 **S18 repeat 3 failed `summary_exists`** (`detail: "0 summary row(s), no
 goal"`); both `answer_regex` checks (turn 2 "Vega", turn 3 the deadline)
-and `tool_calls_max` passed — only the summary is missing. The cause, read
-from the embedded `llm_calls` row: the `/new` command's summary attempt
-returned `finish_reason: "length"`, `error_kind: "truncated"`,
-`completion_tokens=511`, of which `reasoning_tokens=511` — the **entire**
-completion budget spent on hidden reasoning, zero visible summary text.
-Both the initial summary call and its REQ-V160-TQ-01 retry truncated the
-same way, so the turn correctly completed **without** a summary, exactly as
+and `tool_calls_max` passed — only the summary is missing. **Correction,
+prompt 101** (the two attempts do not fail the same way — the original
+text here, and the live characterisation given to the operator before the
+erratum-6 authorisation below, both said they did; re-read from the
+embedded `llm_calls` rows for this repeat): attempt 1 (the `/new`
+command's own summary call) returned `finish_reason: "length"`,
+`error_kind: "truncated"`, `completion_tokens=511`, of which
+`reasoning_tokens=511` — the **entire** completion budget spent on hidden
+reasoning, zero visible summary text, `latency_ms=205314` (≈205 s).
+REQ-V160-TQ-01's retry (attempt 2) did **not** truncate: it returned no
+tokens at all (`completion_tokens`/`reasoning_tokens`/`finish_reason` all
+`null`), `error_kind: "transport"`, `latency_ms=600089` — it ran into the
+operator's own `LLM_TIMEOUT_S=600` ceiling (erratum 5's instrument, 600
+000 ms) before LM Studio ever produced a response, a distinct failure
+mode from attempt 1's. Both attempts still leave the turn without a
+visible summary, so it correctly completed **without** one, exactly as
 Appendix B's E10 and REQ-V160-TQ-01 specify ("the turn completes without a
-summary, no exception escapes, and /stats reports one failed summary").
-**This is the code and the check both working as designed — the design and
-this instrument are what disagree.** It is the same mechanism as S15's and
-the original PRE-04 preflight's failures (`qwen/qwen3.8-27b` spending an
-entire small-to-medium completion budget on hidden reasoning before any
-visible content), applied to a different call site (the summary path
-rather than the agent path). It is also, by the smoke-v160/baseline
-contrast, **probabilistic, not deterministic**: S18 was 1/1 in `smoke-v160`
-minutes earlier and 2/3 here, at the identical `LLM_MAX_TOKENS=4096` — the
-S15 family (instrument reasoning-budget variance), not the S13 family
-(deterministic, reproduced 5/5/5 across every measurement).
+summary, no exception escapes, and /stats reports one failed summary") —
+the code and the check both worked as designed on each attempt, whichever
+way that attempt failed. **This is the code and the check both working as
+designed — the design and this instrument are what disagree.** Both
+failure modes belong to the same family as S15's and the original PRE-04
+preflight's failures (`qwen/qwen3.8-27b` spending an entire small-to-
+medium completion budget on hidden reasoning before any visible content,
+here compounded by the retry running long enough to exhaust the transport
+timeout instead of truncating), applied to a different call site (the
+summary path rather than the agent path). It is also, by the
+smoke-v160/baseline contrast, **probabilistic, not deterministic**: S18
+was 1/1 in `smoke-v160` minutes earlier and 2/3 here, at the identical
+`LLM_MAX_TOKENS=4096` — the S15 family (instrument reasoning-budget
+variance), not the S13 family (deterministic, reproduced 5/5/5 across
+every measurement). `docs/spec/spec-v1.6.0.md`'s own erratum-6 block
+(disclosed at prompt 97, before this correction existed) still reads
+"both returned `finish_reason=\"length\"`" — left as originally disclosed,
+since the spec is frozen post-tag and this is a documentation-only
+correction (prompt 101); the erratum's substance is unaffected by the
+correction, since a 600 s transport timeout under the same
+`LLM_MAX_TOKENS=4096` instrument is the same reasoning-exhaustion
+mechanism expressed as a timeout rather than a truncation, not a
+different cause.
 
 Per prompt 93's own Stop clause — "any of S14, S16, S17, S18 below 3/3 …
 stop, report, no tag" — **the run stops here, before T16's commit.**
@@ -1320,42 +1353,68 @@ without a source change, none of this measurement needs to be re-run.
    introduced here and not backfilled here (this session has no first-hand
    token data for prompts it did not run). Recorded as a known gap rather
    than silently left unmentioned; row 51 below covers only this session's
-   own prompts 93–96.
+   own prompts 93–96. **Closed at prompt 101**: the T0–T15 execution's own
+   local session transcript (`aee4c17e-…`, 2026-09-04T17:43Z–2026-09-06T06:46Z)
+   turned out to be readable after all, the same way row 25's session was —
+   see `docs/llm-usage.md` row 52.
 
 ### The operator's decision
 
-Three options, no default recommended:
+**Correction, prompt 101:** the numbering below was silently reordered
+from how the options were actually presented — a `/verify-run` finding.
+Restored, per the `AskUserQuestion` call itself (this session's own tool
+record), to the order and labels actually shown to the operator, option 1
+carrying the harness's own "(Recommended)" tag — which is also why the
+spec's own erratum-6 block (`docs/spec/spec-v1.6.0.md`, disclosed at
+prompt 97) reads "option 1 (the recommended one)": that text was correct
+against the real presentation all along; this report's own list was not,
+until now:
 
-1. **Accept the stop** — no `v1.6.0` tag this run either; S18's
+1. **Authorise erratum 6 (recommended)**, extending erratum 3's
+   non-blocking treatment to S18's `summary_exists` check under this
+   instrument (same disclosed-in-place mechanism as errata 1–5) — T16–T18
+   then proceed on the measurement **already sitting in evidence above**,
+   no re-run needed: the tree hasn't moved since `ca9c656` and every
+   locked meta field already matches across all five parts.
+2. **Re-measure S18 only** — run its three repeats as three isolated
+   invocations (the same pattern erratum 3's own S15 measurement above
+   used) — accepting whatever comes out, 3/3 or not.
+3. **Accept the stop** — no `v1.6.0` tag this run either; S18's
    `summary_exists`-under-reasoning-budget-exhaustion joins S15's as
    spec-v1.7.0's subject (the reasoning/cost policy release REQ-V160-NG-02
    already earmarks).
-2. **Authorise erratum 6**, extending erratum 3's non-blocking treatment to
-   S18's `summary_exists` check under this instrument (same disclosed-in-
-   place mechanism as errata 1–5) — T16–T18 then proceed on the
-   measurement **already sitting in evidence above**, no re-run needed: the
-   tree hasn't moved since `ca9c656` and every locked meta field already
-   matches across all five parts.
-3. **Authorise a re-measurement** of S18's three repeats as three isolated
-   invocations (the same pattern erratum 3's own S15 measurement above
-   used) — accepting whatever comes out, 3/3 or not.
 
 **Operator's answer, verbatim (Russian, this session's own AskUserQuestion
 exchange):** *"Говори тут со мной по русски) Бокс выклюался, сейчас включил
 заново, не знаю если это было причиной. Иначе - вариант 1
 (рекомендованный)."* — the LM Studio box had been switched off and was
 restarted; the operator asked whether that could be the cause and, either
-way, chose **option 1**. It is not: S18's failing call returned a real,
-complete response (`finish_reason="length"`, `completion_tokens=511`,
-`reasoning_tokens=511`, `usage.prompt_tokens` present) rather than a
-`transport`/connection error, which rules out an unreachable or restarting
-LM Studio as the cause — the mechanism is exactly the hidden-reasoning
-budget exhaustion already described above, confirmed and stated back to the
-operator before proceeding. **Erratum 6 authorised and disclosed in place**
-(`docs/spec/spec-v1.6.0.md`, prompt `97-v160-erratum6-s18.md`): S18's
-`summary_exists` check joins S15 outside the blocking 3/3 for this
-baseline. The measurement already in evidence above is used as-is — no
-re-run. T16 proceeds next, below.
+way, chose **option 1**, i.e. authorise erratum 6.
+
+**Correction, prompt 101, to the reasoning that followed:** both the
+question text above and the live Russian reply given to the operator at
+the time asserted the retry "also" returned `finish_reason="length"` —
+true only of attempt 1. It is not the box restart, for two independent
+reasons, one of them unavailable at the time: (1) attempt 1 returned a
+real, complete response (`finish_reason="length"`, `completion_tokens=511`,
+`reasoning_tokens=511`, `usage.prompt_tokens` present), not a connection
+failure; (2) attempt 2 did report `error_kind="transport"`, but its
+`latency_ms=600089` sits essentially exactly at the operator's own
+`LLM_MAX_TOKENS=4096`/`LLM_TIMEOUT_S=600` ceiling (600 000 ms) — a
+client-side read timeout firing after the full budget elapsed, not the
+near-instant failure an actually unreachable or restarting box produces —
+and the three `purpose: "agent"` calls earlier in this same repeat all
+completed normally on the same instrument. Both attempts are the same
+hidden-reasoning-budget-exhaustion mechanism already described above; the
+retry simply ran long enough to exhaust the transport timeout instead of
+truncating. The corrected premise does not change the authorisation: the
+operator's own decision rule ("either way, option 1") already covered
+both a box-restart cause and a reasoning-budget cause, so option 1 stands
+regardless of which mechanism attempt 2 actually hit. **Erratum 6
+authorised and disclosed in place** (`docs/spec/spec-v1.6.0.md`, prompt
+`97-v160-erratum6-s18.md`): S18's `summary_exists` check joins S15 outside
+the blocking 3/3 for this baseline. The measurement already in evidence
+above is used as-is — no re-run. T16 proceeds next, below.
 
 ## T16 — baseline recorded (2026-09-06)
 
@@ -1524,7 +1583,10 @@ authorised commits" reason recorded above; still open for a future task.
 
 ### RPT-03 — `docs/reports/tg-post-v1.6.0.md`
 
-Written, Russian, **1477 characters** by `wc -m` (under the 1500 limit).
+Written, Russian, **1477 characters** by `wc -m` (under the 1500 limit) at
+T17; updated at prompt 101 (tag-created note, prompt-count bump to
+72–100) and re-measured at **1497 characters** by `wc -m`, still under the
+1500 limit.
 
 ### Item 12 — fix cycles used
 
@@ -1677,7 +1739,13 @@ already justified above (the commit-msg hook's hard requirement). This
 joins the pre-existing "prompts 72–92 never logged" gap already recorded
 in row 51's neighbourhood as a known, un-backfilled hole — left for a
 future documentation-only correction rather than stretched into this
-commit for tidiness.
+commit for tidiness. **Closed at prompt 101** (that future correction,
+now arrived): row 52 below covers the 72–92 backfill and rows 54–56
+cover prompts 99–101 (row 53 sits between them, renumbered from this
+report's own prompts-97–98 row so the backfill could take its
+chronological place); prompt 101 authorises touching
+`docs/llm-usage.md` explicitly, the same way this row's own two
+exceptions were each separately justified rather than assumed.
 
 ### The tag — REQ-V160-VER-04, E14
 
@@ -1687,6 +1755,86 @@ creates no tag and claims nowhere that one exists. Per this project's own
 production-action approval gate, creating and pointing an annotated tag
 at a commit is exactly the kind of hard-to-reverse, shared-state action
 that needs the operator's own explicit, named approval in this session
-before it happens; that approval has not yet been requested. Once given,
-`git tag -a v1.6.0` is created on this commit's SHA and nothing is pushed,
-per E14 and REQ-V160-NG-13.
+before it happens; that approval was requested immediately after this
+commit, in the same session, and given — see "Tag `v1.6.0` created",
+below. `git tag -a v1.6.0` was then created on this commit's SHA and
+nothing was pushed, per E14 and REQ-V160-NG-13.
+
+### Tag `v1.6.0` created — REQ-V160-VER-04, E14 (post-T18, same session)
+
+Requested immediately after the T18 acceptance evidence above, via
+`AskUserQuestion` ("Тег v1.6.0"): *"T18 (финальная приёмка spec-v1.6.0)
+полностью зелёная: все 6 гейтов, оба прогона checks.py run --profile full
+(обе кандидатуры &lt;base&gt;), replay 28/28 коммитов чисто, Appendix B
+(14/14) и ACC-02 подтверждены конкретными доказательствами. Единственное
+оставшееся действие — создать аннотированный git tag v1.6.0 на коммите
+0d33af4 (только локально, без push). Создать тег?"* — three options were
+offered ("Да, создать тег сейчас (рекомендовано)", "Подожди, хочу сам
+посмотреть отчёт сначала", "Не создавать тег вообще"). **Operator's
+answer, verbatim: "Да, создать тег сейчас (рекомендовано)."**
+
+`git tag -a v1.6.0 -m "…"` ran immediately after (tool-result timestamp
+2026-09-06T19:00:23.457Z UTC = 21:00:23 CEST — matching the tag object's
+own tagger timestamp exactly), on commit `0d33af4` (this run's own
+evidence-only commit, T18), locally only, nothing pushed, exactly as
+approved. The annotated tag message, verbatim (`git cat-file tag
+v1.6.0`):
+
+```
+v1.6.0 -- observability (tracing spans + traces), read-only dashboard,
+tool-quality fixes (truncated-summary retry, repeat-call refusal),
+SemVer + --version, six new benchmark scenarios with a tool_calls_max
+ceiling.
+
+<implementation-tip>: 726771fb62ccbdd6f807449a2d80da525800936b
+Evidence-only commit (T18): 0d33af4
+
+Baseline: docs/assets/bench/baseline-v1.6.0.json (18 scenarios x 3
+repeats, 53/54 -- S18 repeat 3 exempted from the blocking gate by
+disclosed erratum 6, same reasoning-budget mechanism as S15/erratum 3).
+
+Full record: docs/reports/report-v1.6.0.md
+Spec: docs/spec/spec-v1.6.0.md
+```
+
+`git tag -l` confirms `v1.6.0` now exists alongside the pre-existing
+`v1.3`/`v1.3-baseline` tags; nothing else in `git log`/`git status`
+changed (an annotated tag is a new ref plus one new tag object, not a
+commit) and no push occurred, per REQ-V160-NG-13. This whole note is
+itself part of the documentation-only correction that fixed it in place
+(prompt 101, `docs/prompts/101-v160-verify-run-fixes.md`) — no source,
+test, config or spec file changed to write it.
+
+## Deviations — compiled (REQ-V160-RPT-02 item 13)
+
+Compiled at prompt 101, closing the promise the "Deviations (running
+log…)" heading above made for T17. None of the individual deviations
+below are new — each is recorded in full where it happened; this section
+is the single index RPT-02 item 13 calls for.
+
+| Task | Deviation | Disposition |
+|---|---|---|
+| T2 | 2 existing tests amended outside §15.1's list, forced by `SCHEMA_VERSION` 3→4 | both bumped to `5`; tree swept, no third instance |
+| T5 | Test-first (REQ-V160-TST-02) not followed for `dashboard_render.py`/`devtools/dashboard.py` | byte-identity constraint made write-red-first theater; verified against the pre-existing suite instead |
+| T5 | REQ-V160-PRE-04's T15-only reservation on gate 5 violated | ordering violation only — `run_selftest_live` never spends an inference token by design; no rerun needed |
+| T8 | 2 existing tests amended outside §15.1's list, forced by `retry_max_tokens` keyword | mechanical signature mirror, no behavioural change |
+| T10 | 5 existing tests amended for `SCENARIOS` 12→18 | 4 pure literal bumps; the 5th (`QUALITY_GATE_SLACK` test) changed its own `_pair(repeats=…)` instead of the gate constant, per `advisor()` and REQ-V160-NG-02 |
+| T11 | `TRC-11` wiring missing (not merely unread); a real `TOOL_ROW_KEYS` bug found; 1 forced dashboard-test amendment; 1 design decision confirmed | wiring added; `REQUIRED_TOOL_ROW_KEYS` fix landed; test moved to `mode="informational"`; three new optional CLI flags confirmed as the only clean threading mechanism |
+| T12 | 1 forced `uv.lock` regeneration outside the task's file list | mechanical consequence of the version bump; `git diff --stat` confirmed 1 line |
+| T13 | 1 substituted mutation id (`content-redact-bypassed` unreachable, masked by upstream redaction); 1 related coverage gap retargeted; 1 killer-mismatch noted; 1 `pkill -9` incident | substituted with `status-message-redact-bypassed`, hand-verified; net mutation count unchanged; incident's dirty tree caught via `git status --porcelain` and restored, restore verified by test |
+| T14 (review) | A `git checkout --` mishap discarded a legitimate fix mid-revert | caught via `git diff --stat`, redone with a targeted string replacement |
+| T14 (review) | Process note: a bespoke fix-mandate task brief overrode the session's general review-only persona | not a config/permission-system change; the specific brief governs, per REQ-V160-REV-01 itself |
+| Resume, item 1 | `checks.py run --profile full --since <base>` not run as one literal command | covered by an equivalent `pre-push --stdin-refs` plus two `full`-only checks, same reasoning as T15's own report |
+| Resume, item 2 | Baseline measured as 5 invocations, not 1 | `run_bench` aborts its whole scenario loop on any timeout (confirmed by code reading); REQ-V160-BEN-08's fix makes the split survivable |
+| Resume, item 3 | A stray `test/v15-*` git worktree/branch from a self-inflicted `TaskStop` | found and cleaned |
+| Resume, item 4 | The code-reviewer's 🟡 unsanitized-`--tag` finding | waived, not fixed, per the two-commit constraint |
+| Resume, item 5 | Appendix B's E13 text never amended by errata 2/3, ambiguous against S15/S18 | flagged, not silently reinterpreted; still open for a future correction to Appendix B itself |
+| Resume, item 6 | `docs/llm-usage.md` had no rows for prompts 72–92 | **closed at prompt 101** — see `docs/llm-usage.md` row 52 |
+| T17, Item 11 | Skylos: 19 pre-existing `dashboard_server.py` shadow findings, unchanged from T15 | not fixed this resume (no source change after the two authorised commits); still open, tracked as a future small cleanup task |
+| T18 | `docs/llm-usage.md` rows for prompts 99–100 deferred past T18's own frozen commit | **closed at prompt 101** — see `docs/llm-usage.md` rows 53–54 |
+| Prompt 101 (this correction) | The erratum-6 authorisation's own premise (both S18 summary attempts "truncated the same way") was wrong for attempt 2 | corrected above ("S18 repeat 3" and "The operator's decision"); the authorisation itself stands — see the reasoning there |
+| Prompt 101 (this correction) | This report's own three-option list for erratum 6 was silently reordered from how `AskUserQuestion` actually presented it | restored to the real order and labels, source-cited to the tool call itself — see "The operator's decision" |
+
+No deviation above was suppressed or fixed silently; each was fixed,
+waived with a stated reason, or left open and named as such — matching
+REQ-V12-REP-02's own standard applied throughout this report.
