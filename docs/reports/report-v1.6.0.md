@@ -1,16 +1,21 @@
 # Implementation report — spec-v1.6.0
 
-**Status: STOP at T15 (REQ-V160-BEN-07), pending operator decision.** The
-preflight itself (REQ-V160-PRE-04) is resolved and passes — see "Live
-preflight and STOP" below. `smoke-v160` (REQ-V160-BEN-07) surfaced two
-further, independent problems: `S13` deterministically exceeds
-`tool_calls_max(4)` (5/5/5 across repeats, always the correct answer), and
-`smoke-v160`'s own "all six scenarios, none skipped" precondition is
-currently unmet on the documentary record (the one run that satisfied it
-was lost to this session's own `.bench/`-wipe mistake). See "`smoke-v160`
-and the S13 blocker" below for the full record and the two decisions
-requested of the operator. T16–T18 **not executed** pending those
-decisions.
+**Status: STOPPED at T15, closed (operator decision, 2026-09-06).** The
+preflight itself (REQ-V160-PRE-04) was resolved and passes — see "Live
+preflight and STOP" below. `smoke-v160` (REQ-V160-BEN-07) then surfaced a
+deterministic blocker (`S13` exceeds `tool_calls_max(4)` 5/5 across
+repeats, always the correct answer — REQ-V160-TQ-06's own check working
+as designed, not loosened) plus an unmet documentary precondition (the
+one smoke run that executed all six scenarios was lost to this session's
+own `.bench/`-wipe mistake, see "`smoke-v160` and the S13 blocker" below).
+Presented to the operator as one decision: accept the stop, or authorise
+a scoped correction to `S13`'s ceiling. **The operator chose to accept
+the stop.** T16 (baseline), T17 (report finalisation) and T18 (final
+acceptance + the `v1.6.0` tag) are **not executed this run.** T0–T14
+stand as landed, gated, reviewed code on `main`; `pyproject.toml` already
+reads `"1.6.0"` (from T12) but **no `v1.6.0` git tag exists** — see the
+"Run closed at T15" section at the end of this report for the full
+closing note.
 
 - **Spec:** `docs/spec/spec-v1.6.0.md`
 - **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
@@ -1004,31 +1009,72 @@ ceiling, and no further live measurement changes that.**
 
 ### Disposition
 
-T16 does not start. Two separate, independent gaps, presented to the
-operator as one question each rather than resolved here:
-
-1. **S13's deterministic 0/3.** Either (a) accept this as a genuine STOP
-   and end the v1.6.0 run at T15, with T16, T17 (as scoped) and T18 not
-   executed — everything above stands as the record of the run — or (b)
-   authorise a scoped, disclosed correction to `tool_calls_max(4)` for
-   `S13` specifically, in `devtools/bench_scenarios.py`, following the
-   in-place-erratum pattern already used for REQ-V160-PRE-04 above. This
-   is presented as the operator's decision, not proposed as a fix, exactly
-   because of the `QUALITY_GATE_SLACK` precedent named above — this
-   session does not have standing to decide a tool-quality ceiling is
-   "wrong" just because the first live run against it failed.
-2. **`smoke-v160`'s own precondition (3), currently unmet.** If (1)(b) is
-   chosen, a fresh, complete, all-six-scenario `smoke-v160.json` still
-   needs to be produced (at `LLM_MAX_TOKENS=4096`, a generous `--timeout-s`
-   given S15's own measured variance, and — this time — copied out of
-   `.bench/` immediately) before T16 can start at all. If (1)(a) is
-   chosen, this is moot.
+**Operator's decision: accept the STOP.** Presented with S13's
+deterministic 0/3 and the choice between ending the run here or
+authorising a scoped correction to `tool_calls_max(4)` (with the
+`QUALITY_GATE_SLACK`/T10 precedent stated plainly), the operator chose to
+end the v1.6.0 run at T15. `smoke-v160`'s own unmet precondition (3) is
+therefore moot — no further attempt to reproduce a complete six-scenario
+document is made. See "Run closed at T15" at the end of this report for
+the full closing note.
 
 ## `--no-verify` attestation (REQ-V160-EC-09)
 
-*(recorded at T18, over the full run)*
+**Not applicable — the run stopped at T15, before T18.** No hook was
+bypassed at any commit T0–T15 (every commit above ran through the full
+`commit-msg`/`pre-commit` chain, visible in each commit's own tool output
+in this session); this line is recorded as "not applicable" rather than
+left as T18's unfulfilled placeholder, since T18 never runs in this run.
 
 ## Ledger row (paste into `economics.md`)
 
-*(filled in at T17 — provisional report — per REQ-V160-RPT-01; the operator
-pastes it, never the executor)*
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.6.0 (STOPPED at T15, no tag) | 2026-09-06 | 20 commits (72–91) | 0 of 5 repair cycles on gates 1–4/6; T15 itself needed no gate-repair cycle — the preflight and smoke-v160 findings were spec/config corrections, not gate failures | 2 real findings at T15 (PRE-04's preflight budget, fixed in place; S13's deterministic tool_calls_max overage, accepted as a stop) + 1 retracted claim (S15 "fixed" at 4096 tokens, corrected to "probabilistic, ~2/3") | unknown (harness does not expose per-request agent-work tokens/cost); live LM Studio inference during T15 alone: ~$0.10 across the original smoke-v160 run, the preflight calls and all diagnostics | claude-sonnet-5 | Claude Code |
+```
+
+## Run closed at T15 (2026-09-06)
+
+**What shipped, on `main`, right now:** T0–T14 in full — the observability
+layer, the live read-only dashboard, three tool-quality fixes, six new
+benchmark scenarios with a `tool_calls_max` ceiling, `bench_schema` 2, the
+version bump, the `mutation-v160` gate, and a clean-context code review
+with five findings fixed. All 1015 tests pass; all six `AGENTS.md` gates
+are green (gate 5 and the live preflight both verified during T15 itself);
+`pyproject.toml`'s `project.version` reads `"1.6.0"`.
+
+**What did not happen:** T16 (the `baseline-v1.6.0` recording), T17 (the
+provisional report's own finalisation — this report is instead closed
+directly, out of order, since there is no further task to finalise it
+at), and T18 (final acceptance and the annotated `v1.6.0` tag). No
+`v1.6.0` git tag exists. `README.md`'s `## Versioning` section and
+REQ-V160-VER-04 both describe the tag as the last action of a completed
+run — this run did not complete, so the tag-creation step correctly never
+ran.
+
+**The resulting inconsistency, named plainly.** `pyproject.toml` currently
+reports version `"1.6.0"` — that string was written at T12, fifteen tasks
+into a nineteen-task run, before the run's own T15 discovered the blocker
+that ended it. A future session reading only `bot.py --version` or
+`pyproject.toml` would see `"1.6.0"` and could reasonably assume a
+completed, tagged release exists; it does not. This is not silently
+corrected here (rolling the version string back to `"0.1.0"` or forward
+to a placeholder would itself be an undisclosed, unauthorised source
+change this late) — it is named as the one loose end a future run against
+this tree must resolve, by one of:
+
+1. Resuming this same spec: resolve the `S13` question (accept a scoped,
+   operator-authorised correction to `tool_calls_max(4)`, or accept that
+   this model cannot pass it and choose a different one), reproduce a
+   complete `smoke-v160.json`, then run T16–T18 to completion and create
+   the `v1.6.0` tag on the resulting evidence commit — at which point the
+   version string and the tag agree.
+2. Declining to resume: correct `pyproject.toml`'s version back down (with
+   its own disclosed, in-place spec correction, following this run's own
+   PRE-04-erratum precedent) to reflect that no `1.6.0` release actually
+   shipped.
+
+Both are legitimate; neither is this session's to choose unprompted. The
+full technical record — the preflight fix, the `smoke-v160` findings, the
+S13/S15 measurements, and every correction made along the way — stands
+above as this run's complete account, closed at the operator's explicit
+instruction rather than by reaching T18.
