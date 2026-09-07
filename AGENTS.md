@@ -115,8 +115,7 @@ the reasoning policy, the summary budget and the new bench.py gates; see
 `docs/reports/report-v1.7.0.md`); `--select <prefix>` runs a named subset
 (mutually exclusive with `--only`), e.g. `--select v170-`.
 
-Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY`
-(`model-default` | `off` | `by-purpose`, default `model-default`) and
+Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY` (`model-default` | `off` | `by-purpose`, default `by-purpose`) and
 `LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,
 default `tool-round`, read only under `by-purpose`) — see `.env.example` and
 `README.md`'s Reasoning policy section.

@@ -79,7 +79,7 @@ lands — somewhere else inside the repository, git-ignore that name yourself.
 | `FETCH_INLINE_DEFAULT_CHARS` | `5000` | inline window for a `fetch` result, in characters (500–20000); the model can override it per call with `max_chars`. The full text of a truncated fetch is saved under `<EXEC_WORKDIR>/fetch/` |
 | `HISTORY_TOOL_STUB` | `on` | replace tool results of earlier turns with a short stub **in the request only**. `off` sends every tool result verbatim. The database, the audit trail and `/summary` always keep the full text |
 | `LLM_SUMMARY_MODEL` | empty | route `/summary` and the `/new` hand-off to a second model, written `<provider>:<model>` — `lmstudio` or `openrouter`, and that provider must be configured. Empty keeps the summary on the main client; no failover applies to the routed client |
-| `LLM_REASONING_POLICY` | `model-default` | `model-default` \| `off` \| `by-purpose` — see [Reasoning policy](#reasoning-policy) |
+| `LLM_REASONING_POLICY` | `by-purpose` | `model-default` \| `off` \| `by-purpose` — see [Reasoning policy](#reasoning-policy) |
 | `LLM_REASONING_ON_PURPOSES` | `tool-round` | comma-separated tags (`tool-round`, `final`, `summary`), read only when the policy above is `by-purpose`; empty means none |
 | `LLM_SUMMARY_MAX_TOKENS` | `1536` | retry budget for a summary call truncated at its first attempt (`finish_reason == "length"`), range 256–8192, tried exactly once, after which the turn proceeds without a summary rather than blocking the user |
 | `LLM_PRICE_REF_MODEL` | empty | an OpenRouter model id whose list price is used as the **reference price** for local LM Studio calls. Empty leaves local calls unpriced. The resulting cost is an estimate — see [Observability](#observability) |
@@ -260,7 +260,7 @@ tag:
 |---|---|
 | `model-default` (default) | send nothing extra; the provider's own default stands, for every tag |
 | `off` | ask every tag to turn reasoning off |
-| `by-purpose` | ask only the tags listed in `LLM_REASONING_ON_PURPOSES` to turn reasoning off; the rest get the provider's default |
+| `by-purpose` | keep only the tags listed in `LLM_REASONING_ON_PURPOSES` at the provider's default; every other tag is asked to turn reasoning off |
 
 The two settings are inert together unless the policy is `by-purpose`, and
 neither is ever written into `.env` by the bot itself. What "off" actually

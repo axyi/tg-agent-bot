@@ -148,7 +148,7 @@ class Config:
     # today's behaviour -- model-default sends no reasoning field at all -- so
     # every existing caller and fake keeps passing (REQ-V170-EC-05). Binding
     # until T12 (REQ-V170-POL-07 supersedes this compatibility default then).
-    llm_reasoning_policy: str = "model-default"
+    llm_reasoning_policy: str = "by-purpose"
     llm_reasoning_on_purposes: frozenset[str] = frozenset({"tool-round"})
 
 
@@ -305,8 +305,9 @@ def load_config(
     _check_timeout_budget(llm_timeout_s, max(llm_max_tokens, llm_summary_max_tokens))
     _check_summary_floor_budget(llm_timeout_s, llm_summary_max_tokens)
 
+    llm_reasoning_policy_default = "by-purpose"
     llm_reasoning_policy = _parse_choice(
-        source, "LLM_REASONING_POLICY", "model-default", REASONING_POLICIES
+        source, "LLM_REASONING_POLICY", llm_reasoning_policy_default, REASONING_POLICIES
     )
     llm_reasoning_on_purposes = _parse_purposes(
         source, "LLM_REASONING_ON_PURPOSES", "tool-round"
