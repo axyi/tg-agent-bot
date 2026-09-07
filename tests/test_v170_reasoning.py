@@ -966,3 +966,240 @@ def test_t_v170_sum_05_module_constant_matches_config_local_copy():
     from agent import SUMMARY_BUDGET_FLOOR_S
     from config import _SUMMARY_BUDGET_FLOOR_S
     assert SUMMARY_BUDGET_FLOOR_S == _SUMMARY_BUDGET_FLOOR_S == 30.0
+
+
+# --------------------------------------------------------------------------
+# T-V170-BEN-01…-05, CAR-01, N6, N7 -- devtools/bench.py
+# --------------------------------------------------------------------------
+
+import dataclasses  # noqa: E402
+import shutil  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from devtools import bench  # noqa: E402
+
+_REAL_BASELINE_PATH = (
+    Path(__file__).resolve().parents[1] / "docs" / "assets" / "bench" / "baseline-v1.6.0.json"
+)
+
+
+def _load_real_baseline() -> dict:
+    with open(_REAL_BASELINE_PATH) as f:
+        return json.load(f)
+
+
+def _candidate_from_real_baseline(baseline: dict, *, scale: float = 1.0,
+                                   fix_failures: bool = True, tag: str = "cand-test") -> dict:
+    """A copy of the real, committed baseline: `meta.reasoning` and the two
+    new `llm_calls` fields added (T-V170-BEN-01's "candidate-shaped
+    document"); costs/tokens optionally scaled and failing repeats optionally
+    fixed, entirely through the real `totals_from_rows`/`summarize` so the
+    result stays internally consistent for `check_document`."""
+    candidate = json.loads(json.dumps(baseline))  # a plain, dict-only deep copy
+    candidate["meta"]["tag"] = tag
+    candidate["meta"]["git_commit"] = "b" * 40
+    candidate["meta"]["reasoning"] = {
+        "policy": "by-purpose", "on_purposes": ["tool-round"],
+        "mechanism": {"tool-round": None, "final": None, "summary": "c:assistant-prefill"},
+        "provider_form": "lmstudio",
+    }
+    for run in candidate["runs"]:
+        if fix_failures:
+            run["success"] = True
+            run["failure"] = None
+            for check in run.get("checks", []):
+                check["ok"] = True
+                check["detail"] = "ok"
+        for call in run["llm_calls"]:
+            call["reasoning_requested"] = "default"
+            call["reasoning_honored"] = None
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                if call.get(key) is not None:
+                    call[key] = int(call[key] * scale)
+            if call.get("cost_usd") is not None:
+                call["cost_usd"] = call["cost_usd"] * scale
+        run["totals"] = bench.totals_from_rows(
+            run["llm_calls"], run["tool_calls"], run["totals"]["wall_ms"]
+        )
+    candidate["summary"] = bench.summarize(
+        candidate["runs"], candidate["meta"]["skipped_scenarios"], candidate["meta"]["repeats"]
+    )
+    return candidate
+
+
+def test_t_v170_ben_01_meta_reasoning_shape_and_additive_optionality():
+    real_baseline = _load_real_baseline()
+    # The real, committed baseline carries neither field -- frozen, never
+    # back-filled (REQ-V170-NG-03).
+    assert "reasoning" not in real_baseline["meta"]
+    for run in real_baseline["runs"]:
+        for call in run["llm_calls"]:
+            assert "reasoning_requested" not in call
+            assert "reasoning_honored" not in call
+    # bench.py check still exits 0 on it after LLM_CALL_COLUMNS widened.
+    code, reason = bench.check_document(real_baseline, mode="strict")
+    assert (code, reason) == (0, "valid")
+    assert "reasoning" not in bench.LOCKED_META_FIELDS
+
+    # A candidate-shaped document carrying both also passes check.
+    candidate = _candidate_from_real_baseline(real_baseline)
+    code, reason = bench.check_document(candidate, mode="strict")
+    assert (code, reason) == (0, "valid")
+
+    for policy in ("model-default", "off", "by-purpose"):
+        cfg_stub = type("Cfg", (), {
+            "llm_reasoning_policy": policy,
+            "llm_reasoning_on_purposes": frozenset({"final", "tool-round"}),
+        })()
+        meta = bench.reasoning_meta(cfg_stub, "lmstudio")
+        assert meta["policy"] == policy  # present on every run, model-default included
+        assert meta["on_purposes"] == ["final", "tool-round"]  # sorted
+        assert meta["mechanism"]["tool-round"] is None  # no off-mechanism -> null
+        assert meta["mechanism"]["summary"] is not None
+
+
+def test_t_v170_ben_02_comparability_against_the_real_baseline():
+    real_baseline = _load_real_baseline()
+    # The baseline compares clean with itself -- previously impossible
+    # (measured refusal: "env_flags.HISTORY_TOOL_STUB must be null on the
+    # baseline side"), which is why REQ-V170-BEN-02 exists at all.
+    assert bench.comparability(real_baseline, real_baseline) is None
+
+    # A treatment-only pair (only env_flags.LLM_REASONING_POLICY/_ON_PURPOSES
+    # and git_commit differ) compares clean too.
+    treated = _candidate_from_real_baseline(real_baseline)
+    treated["meta"]["env_flags"]["LLM_REASONING_POLICY"] = "off"
+    treated["meta"]["env_flags"]["LLM_REASONING_ON_PURPOSES"] = ""
+    assert bench.comparability(real_baseline, treated) is None
+
+    generation_changed = _candidate_from_real_baseline(real_baseline)
+    generation_changed["meta"]["generation_settings"] = dict(
+        generation_changed["meta"]["generation_settings"], agent={"temperature": 1}
+    )
+    reason = bench.comparability(real_baseline, generation_changed)
+    assert reason is not None and "locked meta field differs" in reason
+
+    stub_changed = _candidate_from_real_baseline(real_baseline)
+    stub_changed["meta"]["env_flags"]["HISTORY_TOOL_STUB"] = "off"
+    assert bench.comparability(real_baseline, stub_changed) == (
+        "env_flags.HISTORY_TOOL_STUB differs"
+    )
+
+    failover_changed = _candidate_from_real_baseline(real_baseline)
+    failover_changed["meta"]["env_flags"]["LLM_FAILOVER"] = "auto"
+    reason = bench.comparability(real_baseline, failover_changed)
+    assert reason is not None and "LLM_FAILOVER" in reason
+
+    routed = _candidate_from_real_baseline(real_baseline)
+    routed["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = "openrouter:cheap/model"
+    reason = bench.comparability(real_baseline, routed)
+    assert reason is not None and "LLM_SUMMARY_MODEL" in reason
+
+
+def test_t_v170_ben_03_config_sha256_excludes_only_the_treatment():
+    base = load_config(env=base_env(), load_env_file=False)
+    treated = dataclasses.replace(
+        base, llm_reasoning_policy="off", llm_reasoning_on_purposes=frozenset()
+    )
+    assert bench.config_sha256(base) == bench.config_sha256(treated)
+
+    non_excluded_changed = dataclasses.replace(base, llm_max_tokens=base.llm_max_tokens + 1)
+    assert bench.config_sha256(base) != bench.config_sha256(non_excluded_changed)
+
+
+def test_t_v170_ben_04_and_ben_06_gate_verdicts_against_the_real_baseline(tmp_path):
+    real_baseline = _load_real_baseline()
+    base_path = tmp_path / "baseline.json"
+    base_path.write_text(json.dumps(real_baseline), encoding="utf-8")
+
+    def _report(candidate: dict) -> int:
+        cand_path = tmp_path / "candidate.json"
+        cand_path.write_text(json.dumps(candidate), encoding="utf-8")
+        return bench.main([
+            "report", "--baseline", str(base_path), "--candidate", str(cand_path),
+            "--gate", "--out", str(tmp_path / "report.md"),
+        ])
+
+    both_pass = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
+    assert _report(both_pass) == 0
+
+    cost_fails = _candidate_from_real_baseline(real_baseline, scale=1.0, fix_failures=True)
+    assert _report(cost_fails) == 1
+
+    s18_stays_2_of_3 = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=False)
+    assert s18_stays_2_of_3["summary"]["per_scenario"]["S18"] == {
+        **s18_stays_2_of_3["summary"]["per_scenario"]["S18"], "success": 2, "of": 3,
+    }
+    v = bench.verdict(real_baseline, s18_stays_2_of_3)
+    assert v.passed is False
+    assert any("S18 2/3" in line for line in v.lines)
+    # item 2 (two-repeat-loss) does NOT catch a 2-of-3 alone -- prove the new
+    # rule is the one doing the work, not the old one.
+    assert not any("regressed scenarios" in line and "S18" in line for line in v.lines)
+    assert _report(s18_stays_2_of_3) == 1
+
+    two_repeat_loss = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
+    s01_runs = [r for r in two_repeat_loss["runs"] if r["scenario"] == "S01"]
+    for run in s01_runs[:2]:
+        run["success"] = False
+        run["failure"] = "checks"
+    two_repeat_loss["summary"] = bench.summarize(
+        two_repeat_loss["runs"], two_repeat_loss["meta"]["skipped_scenarios"],
+        two_repeat_loss["meta"]["repeats"],
+    )
+    assert _report(two_repeat_loss) == 1
+
+    timeout_trap = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
+    timeout_trap["meta"]["timeout_s"] = 600.0
+    assert _report(timeout_trap) == 2
+
+
+def test_n6_aborted_candidate_refused_before_per_scenario():
+    real_baseline = _load_real_baseline()
+    candidate = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
+    candidate["meta"]["aborted"] = "timeout:S05-2"
+    code, reason = bench.check_document(candidate, mode="strict")
+    assert code == bench.EXIT_NOT_COMPARABLE
+    assert "aborted" in reason
+    v = bench.verdict(real_baseline, candidate)
+    assert v.passed is False
+
+
+def test_t_v170_ben_05_gate_required_full_scenarios_shape():
+    assert bench.GATE_REQUIRED_FULL_SCENARIOS == ("S13", "S14", "S15", "S16", "S17", "S18")
+    from llm.base import REQUEST_DEFAULTS
+    assert "GATE_REQUIRED_FULL_SCENARIOS" not in bench.constants()
+    assert "GATE_REQUIRED_FULL_SCENARIOS" not in REQUEST_DEFAULTS
+    real_baseline = _load_real_baseline()
+    assert bench.scenarios_sha256() == real_baseline["meta"]["scenarios_sha256"]
+
+
+# --------------------------------------------------------------------------
+# T-V170-CAR-01, N7 -- the --tag sanitiser
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tag", [
+    "baseline-v1.6.0", "cand-v170-off", "a", "a" * 64,
+])
+def test_t_v170_car_01_tag_accepts(tag):
+    assert bench._TAG_RE.match(tag) is not None
+    assert tag not in (".", "..")
+
+
+@pytest.mark.parametrize("tag", [
+    "..", ".", "a/b", "../x", "a\\b", "", "a" * 65, "a b",
+])
+def test_t_v170_car_01_tag_rejects(tag):
+    assert tag in (".", "..") or bench._TAG_RE.match(tag) is None
+
+
+def test_n7_tag_escape_refused_before_any_filesystem_write(monkeypatch, capsys):
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("shutil.rmtree must not be called")
+
+    monkeypatch.setattr(shutil, "rmtree", _forbidden)
+    code = bench.main(["run", "--tag", "../escape"])
+    assert code == bench.EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "--tag" in err and "[A-Za-z0-9._-]" in err

@@ -106,10 +106,13 @@ REDACTED_TG_ID = "[tg-id]"
 # The nine keys of `meta.env_flags`, in the order of the 7.4/REQ-V14-POL-01
 # schema, mapped to the `config.Config` field that carries each. A field
 # absent at this commit is recorded as `null` (REQ-V13-BEN-10) — never
-# guessed, never omitted. The last two are REQ-V14-BEN-05: added ahead of the
-# `Config` fields themselves (REQ-V14-POL-01, landing in a later task) —
-# `env_flags()`'s existing absent-field fallback already resolves them to
-# `null` with no further code change until then.
+# guessed, never omitted. Corrected (REQ-V170-AMEND-01): the comment this one
+# replaces claimed "the last two" were dormant, ahead of `Config` fields
+# landing in a later task; **three** were, `LLM_REASONING` (singular, a
+# vestige of an earlier design) never gaining a `Config` field at all and
+# staying permanently `null`. `LLM_REASONING_POLICY`/`LLM_REASONING_ON_PURPOSES`
+# are live as of spec-v1.7.0 T4 (REQ-V170-POL-01) — `env_flags()`'s
+# absent-field fallback now applies only to `LLM_REASONING`.
 ENV_FLAG_FIELDS = {
     "HISTORY_TOOL_STUB": "history_tool_stub",
     "EXEC_OUTPUT_DEFAULT_CHARS": "exec_output_default_chars",
@@ -144,6 +147,9 @@ CONFIG_HASH_EXCLUDED = frozenset({
     "exec_workdir", "db_path", "audit_log_path",         # per-run paths
     "llm_failover", "llm_summary_model", "history_tool_stub",
     "exec_output_default_chars", "fetch_inline_default_chars", "llm_reasoning",
+    # v1.7.0 additions (REQ-V170-BEN-02): the treatment, not the instrument --
+    # keeps the locked `config_sha256` stable across a policy-only pair.
+    "llm_reasoning_policy", "llm_reasoning_on_purposes",
 })
 
 LOCKED_META_FIELDS = (
@@ -227,6 +233,19 @@ FLOAT_ABS_TOL = 1e-12
 
 COST_GATE_FACTOR = 0.70
 QUALITY_GATE_SLACK = 0.02
+# REQ-V170-BEN-06 item 3: supersedes v1.6.0 errata 3 and 6 (S15/S18
+# exempted) with an executable rule -- report --gate refuses PASS unless
+# every one of these reads success == of == 3 on the CANDIDATE side. Joins
+# neither `constants()` nor `REQUEST_DEFAULTS` (REQ-V170-NG-05): both feed
+# the locked `meta.constants`, and adding to it would void every baseline.
+GATE_REQUIRED_FULL_SCENARIOS = ("S13", "S14", "S15", "S16", "S17", "S18")
+
+# REQ-V170-CAR-01: applied before any path is built from `--tag`, so before
+# `_remove_run_dir`/`shutil.rmtree` and every other `--tag`-derived path.
+# `.`/`..` are excluded explicitly (the intent survives a future edit even
+# though the pattern already excludes both -- neither is in the charset --
+# and `/`/`\` are excluded by the same charset omission).
+_TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 # --------------------------------------------------------------------------
@@ -261,6 +280,28 @@ def env_flags(cfg: Config) -> dict:
         return sorted(value) if isinstance(value, frozenset) else value
 
     return {key: _value(field_name) for key, field_name in ENV_FLAG_FIELDS.items()}
+
+
+def reasoning_meta(cfg: Config, provider: str) -> dict:
+    """REQ-V170-BEN-03: a new, unlocked `meta.reasoning` block -- present on
+    every run this release produces, `model-default` included, never
+    omitted. `on_purposes` is a **sorted list** (equal sets serialize
+    equally; the empty set serializes as `[]`, never absent and never
+    inherited -- REQ-V170-BEN-05's C2). `mechanism` is stage A's per-purpose
+    **off-mechanism** table -- what `resolve_reasoning` would apply if a
+    purpose resolved to `"off"`, not what each call actually sent, so a
+    `tool-round` that resolves to `"on"` (sending nothing) still shows its
+    would-be off form here."""
+    mechanism = {
+        tag: (None if entry is None else entry.label)
+        for tag, entry in llm_base.REASONING_MECHANISMS.items()
+    }
+    return {
+        "policy": cfg.llm_reasoning_policy,
+        "on_purposes": sorted(cfg.llm_reasoning_on_purposes),
+        "mechanism": mechanism,
+        "provider_form": provider,
+    }
 
 
 def config_sha256(cfg: Config) -> str:
@@ -739,6 +780,7 @@ def run_bench(
         "env_flags": env_flags(cfg),
         "config_sha256": config_sha256(cfg),
         "constants": constants(),
+        "reasoning": reasoning_meta(cfg, provider),
     }
 
     runs: list[dict] = []
@@ -1453,16 +1495,16 @@ def comparability(baseline: dict, candidate: dict) -> str | None:
             return f"env_flags.LLM_SUMMARY_MODEL is not empty on the {side} side"
     if base_flags.get("LLM_MAX_TOKENS") != cand_flags.get("LLM_MAX_TOKENS"):
         return "env_flags.LLM_MAX_TOKENS differs"
+    # REQ-V170-BEN-02: replaces the v1.3 worktree-contract rule ("null on the
+    # baseline side"), which makes baseline-v1.6.0 non-comparable with itself
+    # (its own env_flags carry real values, not null). "Same instrument"
+    # means equal on both sides -- null on one side and a value on the other
+    # is a difference, as it should be. LLM_REASONING_POLICY and
+    # LLM_REASONING_ON_PURPOSES are deliberately NOT in STAGE_C_KEYS: they
+    # are the treatment, not the instrument.
     for key in STAGE_C_KEYS:
-        if base_flags.get(key) is not None:
-            return f"env_flags.{key} must be null on the baseline side"
-        value = cand_flags.get(key)
-        if key == "LLM_REASONING":
-            # REQ-V13-RSN-02: the variable exists only in the `implemented` state.
-            if value not in (STAGE_C_DEFAULTS[key], None):
-                return f"env_flags.{key} must be 'auto' or null on the candidate side"
-        elif value != STAGE_C_DEFAULTS[key]:
-            return f"env_flags.{key} must be its default on the candidate side"
+        if base_flags.get(key) != cand_flags.get(key):
+            return f"env_flags.{key} differs"
     return None
 
 
@@ -1508,6 +1550,16 @@ def _recomputed_total(document: dict, price) -> float:
 
 
 def verdict(baseline: dict, candidate: dict) -> Verdict:
+    # REQ-V170-BEN-06 item 4: refused before per_scenario is ever read. The
+    # CLI's --gate path already catches this earlier, through
+    # check_document(mode="strict") (EXIT_NOT_COMPARABLE) -- this is the
+    # quality gate's own, independent guard for any direct verdict() caller.
+    if candidate["meta"].get("aborted"):
+        return Verdict(False, "quality gate failed", [
+            f"ABORTED candidate: {candidate['meta']['aborted']}",
+            "verdict: **FAIL**",
+        ])
+
     price = _price_from_meta(baseline["meta"].get("pricing"))
     unit = "$" if price is not None else " tokens"
     metric = "cost per successful task" if price is not None else "tokens per successful task"
@@ -1575,6 +1627,23 @@ def verdict(baseline: dict, candidate: dict) -> Verdict:
                              f"{after['success']}/{after['of']}")
     if regressed:
         lines.append("regressed scenarios: " + ", ".join(regressed))
+        quality_ok = False
+
+    # REQ-V170-BEN-06 item 3: executable, not acceptance text -- a candidate
+    # at 2/3 on S15 or S18 alone is not caught by the two-repeat-loss rule
+    # above, which only fails a scenario that loses TWO OR MORE repeats.
+    cand_per_scenario = candidate["summary"]["per_scenario"]
+    not_full = []
+    for scenario_id in GATE_REQUIRED_FULL_SCENARIOS:
+        entry = cand_per_scenario.get(scenario_id)
+        if entry is None or entry.get("success") != 3 or entry.get("of") != 3:
+            success = 0 if entry is None else entry.get("success", 0)
+            of = 0 if entry is None else entry.get("of", 0)
+            not_full.append(f"{scenario_id} {success}/{of}")
+    if not_full:
+        lines.append(
+            "not blocking-3/3 on the candidate (REQ-V170-BEN-06): " + ", ".join(not_full)
+        )
         quality_ok = False
 
     passed = cost_ok and quality_ok
@@ -2316,6 +2385,17 @@ def _instrument_meta(cfg: Config, arguments) -> dict:
 
 
 def _cmd_run(arguments) -> int:
+    # REQ-V170-CAR-01: validated before any path is built -- `arguments.tag`
+    # reaches `shutil.rmtree` below (and every other `--tag`-derived path)
+    # only past this point.
+    if arguments.tag in (".", "..") or not _TAG_RE.match(arguments.tag):
+        print(
+            "--tag must match ^[A-Za-z0-9._-]{1,64}$ and must not be '.' or '..', "
+            f"got: {arguments.tag!r}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
     provider = arguments.provider
     scenarios = _selected(arguments.only)
 

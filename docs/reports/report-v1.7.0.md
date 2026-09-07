@@ -1,8 +1,8 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T6 complete — the summary wall-clock budget landed
-(SUM-01…-05). Gates 1-4-5 green; mutation gate running. Run continues to
-T7.**
+**Status: T7 complete — `devtools/bench.py`'s comparability rule, `meta.reasoning`,
+the S13…S18 executable 3/3 gate and the `--tag` sanitiser all landed. Gates
+1-4-5 green; mutation gate running. Run continues to T8.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -110,6 +110,7 @@ No further benchmark-affecting change discovered yet at T0.
 | T4 | **spec says yes; executed directly instead** | the map's three files (config.py, llm/base.py, storage.py) plus one small necessary companion edit to `devtools/bench.py` (`env_flags`, ~10 lines, outside the map — see T4's own section). Reasoning: the main context already held the T1/T3 findings the implementation directly depends on (the exact `REASONING_MECHANISMS` table); delegating would have required re-deriving or re-transcribing that table into a fresh subagent's brief, a real transcription-error risk for a table this load-bearing. Reads stayed targeted (`Read` with `offset`/`limit`, no whole-file dumps) rather than exhaustive. |
 | T5 | **spec says yes; executed directly instead** | same reasoning as T4 — this task directly extends T4's types across the five sites and both providers, and the main context already holds their exact shapes. Map's files (`llm/base.py`, `llm/lmstudio.py`, `llm/openrouter.py`, `llm/failover.py`, `bot.py`, `agent.py`, `tracing.py`) plus `devtools/mutation_check.py` (one `find`-string sync, self-caught) and `tests/test_v160_dashboard.py` (one line, disclosed erratum instance). |
 | T6 | **spec says yes; executed directly instead** | same reasoning. Map's files (`agent.py`, `bot.py`, `config.py`) plus `tests/test_pricing.py`/`tests/test_v11_patch.py` (two stub-signature fixes, disclosed erratum instances). |
+| T7 | **spec says yes; executed directly instead** | same reasoning. `devtools/bench.py` plus `tests/test_bench.py` (the disclosed fixture-erratum class). |
 
 (extended per task as the run proceeds)
 
@@ -915,6 +916,151 @@ LLM call), never by mocking `time.monotonic` globally. No existing test in
 this section's per-REQ test list). `bot.py --selftest`: 0.
 `bot.py --selftest-live`: 0. `bench.py check baseline-v1.6.0.json`: 0.
 `mutation_check.py`: 0 — 83/83 killed, 0 survived/errored/drifted.
+
+## T7 — `devtools/bench.py`: comparability, `meta.reasoning`, the 3/3 gate, `--tag` (REQ-V170-BEN-02…-08, CAR-01)
+
+### Comparability (REQ-V170-BEN-02)
+
+The v1.3 worktree-contract clause ("`env_flags.{key}` must be null on the
+baseline side") — measured, before this task, to make
+`comparability(baseline-v1.6.0, baseline-v1.6.0)` itself refuse with
+`env_flags.HISTORY_TOOL_STUB must be null on the baseline side` — is
+replaced by a plain equality rule over `STAGE_C_KEYS`: `differs` when the
+two sides disagree, `None` when they agree, on either side, whatever the
+shared value is. `LLM_FAILOVER`/`LLM_SUMMARY_MODEL`/`LLM_MAX_TOKENS`'s own
+checks are untouched. `LLM_REASONING_POLICY`/`LLM_REASONING_ON_PURPOSES`
+stay outside `STAGE_C_KEYS` (the treatment, not the instrument) and now
+additionally join `CONFIG_HASH_EXCLUDED`, keeping the locked
+`config_sha256` stable across a policy-only pair. Verified live:
+`comparability(baseline-v1.6.0, baseline-v1.6.0)` now returns `None`.
+
+### `meta.reasoning` (REQ-V170-BEN-03)
+
+A new `reasoning_meta(cfg, provider)` helper, wired into `run_bench`'s meta
+assembly, unconditionally (present on every run, `model-default` included).
+`mechanism` is the per-purpose **off**-mechanism table's labels (what
+`resolve_reasoning` would apply, not what a given call actually sent);
+`on_purposes` a sorted list. Not added to `LOCKED_META_FIELDS`. The real,
+committed `baseline-v1.6.0.json` carries neither this key nor the two new
+`llm_calls` fields — verified directly against the file, never a hand-built
+stand-in — and `bench.py check` on it still exits 0 (`REQUIRED_LLM_ROW_KEYS`
+is a hand-written literal that does not gain the two columns; `LLM_ROW_KEYS`
+derives from `storage.LLM_CALL_COLUMNS` and widened automatically, no edit
+to either constant needed).
+
+### The S13…S18 executable 3/3 gate (REQ-V170-BEN-06 item 3, item 4)
+
+`GATE_REQUIRED_FULL_SCENARIOS = ("S13", ..., "S18")`, beside
+`COST_GATE_FACTOR`/`QUALITY_GATE_SLACK` (neither `constants()` nor
+`REQUEST_DEFAULTS`, for the same locked-`meta.constants` reason as
+`SUMMARY_BUDGET_FLOOR_S`). `verdict()` refuses PASS unless every one of the
+six reads `success == of == 3` on the **candidate** side, naming every
+failing id with its `success/of`. Also added, since it was found missing
+during this task (REQ-V170-BEN-06 item 4, not previously implemented in
+`verdict()` at all — only reachable indirectly via `check_document`'s own
+independent `meta.aborted` refusal on the CLI path): `verdict()` now refuses
+before reading `per_scenario` at all when `candidate["meta"].get("aborted")`
+is truthy, so a direct `verdict()` caller (not just the CLI's `--gate` path)
+is also covered.
+
+### The `--tag` sanitiser (REQ-V170-CAR-01)
+
+`_TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")`, checked at the very top
+of `_cmd_run`, before `arguments.tag` reaches `shutil.rmtree` or any other
+path built from it. `.`/`..` excluded explicitly (redundant with the
+charset, kept so the intent survives a future edit).
+
+### Corrected comment (REQ-V170-AMEND-01)
+
+`ENV_FLAG_FIELDS`'s comment claimed "the last two" keys were dormant, ahead
+of `Config` fields landing in a later task. Corrected: **three** were
+(`LLM_REASONING`, singular — a vestige of an earlier design that never
+gained a `Config` field and stays permanently `null`); the other two are
+live as of T4.
+
+### Test-fixture errata (§14.1-authorized class, applied without re-confirmation)
+
+`REQ-V170-BEN-02`'s replacement rule structurally invalidated
+`tests/test_bench.py`'s `BASELINE_FLAGS`/`CANDIDATE_FLAGS` fixtures, which
+were built on the OLD contract (baseline null, candidate real, by
+construction — the exact shape the new rule now refuses). §14.1 explicitly
+names this: "the comparability cases asserting the stage-C null-on-baseline
+rule become equality cases." Fixed: both constants now carry **equal**
+`STAGE_C_KEYS` values (matching the real `baseline-v1.6.0.json` shape:
+`HISTORY_TOOL_STUB: "on"`, `EXEC_OUTPUT_DEFAULT_CHARS: 1500`,
+`FETCH_INLINE_DEFAULT_CHARS: 5000`, `LLM_REASONING: null`), differing only
+on the two excluded treatment keys; one parametrized test case's target
+value was adjusted (`HISTORY_TOOL_STUB: "on"` → `"off"` for the baseline-side
+override, since "on" stopped being a difference once it became the shared
+default). `_pair()` also now defaults its candidate to a genuine 3/3 on
+`GATE_REQUIRED_FULL_SCENARIOS` (REQ-V170-BEN-06 item 3 is a new, orthogonal
+gate condition most `_pair()` callers were never testing); two CLI-path
+tests (`test_gate_refuses_a_routed_summary_model_on_either_side`,
+`test_cli_report_gate_exit_codes`) needed a genuine `repeats=3` instead,
+since the CLI's `--gate` path validates document/runs consistency
+(`check_document`) before a patched summary would be caught as drift.
+Same class as T4/T5/T6's disclosed instances (a fixture built on an
+assumption this task's own mandated feature invalidates); disclosed here,
+not re-confirmed.
+
+### Self-caught: a survived mutation from this task's own fixture patch (fixed)
+
+The first full `mutation_check.py` run after the fixture changes above
+landed showed 82/83 killed: `v13-bench-quality-minus-one`
+(`QUALITY_GATE_SLACK 0.02 -> 0.03`) SURVIVED. Root cause: `_pair()`'s
+"force `GATE_REQUIRED_FULL_SCENARIOS` to a genuine 3/3" patch (see the
+errata paragraph above) is applied once, to the freshly built `candidate`
+dict, but `test_the_quality_gate_allows_no_lost_run` (the mutation's
+designated killer) does its own `candidate["summary"] =
+bench.summarize(candidate["runs"], [], 2)` recompute after mutating one
+run's outcome -- and `summarize()` derives `per_scenario` fresh from
+`runs`, wiping the patch. With `repeats=2` there, the honest recompute
+shows `of: 2` on S13..S18, which trips the new REQ-V170-BEN-06 gate inside
+`verdict()` regardless of `QUALITY_GATE_SLACK`'s value, so the test's
+`decision.passed is False` assertion held either way and the mutation's
+one and only killer stopped discriminating it.
+
+Fixed by extracting the patch out of `_pair()` into a small, separately
+named, reusable helper, `_force_full_gate_scenarios(candidate)`, and
+calling it a second time inside the test, immediately after its own
+recompute -- restoring the test to isolating only the `QUALITY_GATE_SLACK`
+boundary property its name asserts. Verified by hand: applying the
+mutation's literal edit (`0.02` -> `0.03`) now fails the test
+(`assert True is False`, i.e. `decision.passed` flips to `True` when
+expected `False` -- correctly killed); reverted, then reconfirmed via a
+full 83-mutation `mutation_check.py` run (below).
+
+A second, purely operational finding surfaced while investigating: the
+mutation-gate invocations across T4..T7 up to this point had all piped
+`mutation_check.py`'s output through `tail` before reading `$?`
+(`... | tail -30; echo $?`), which captures `tail`'s exit code, not the
+piped command's. Harmless every prior time (0 survived was unambiguous
+either way), but it nearly let this exact survivor pass unnoticed here.
+Fixed going forward by using a direct, unpiped redirect
+(`rtk proxy uv run ... > file 2>&1`) and reading the file, never a pipe,
+when the exit code itself is load-bearing.
+
+### Tests
+
+25 new tests: T-V170-BEN-01 (additive-optionality against the **real**
+`baseline-v1.6.0.json`), BEN-02 (5 cases, also against the real file),
+BEN-03 (2), BEN-04 (5 gate-verdict cases in one test, each run through
+`check`+`comparability`+`report --gate`, all against the real baseline —
+built via a helper that scales/repairs a deep copy of it through the real
+`totals_from_rows`/`summarize`, never hand-typed numbers), BEN-05 (2), N6
+(1), CAR-01 (12, accept/reject parametrized), N7 (1, `shutil.rmtree`
+patched to fail the test if called). No test needed a hand-built baseline
+stand-in anywhere in this task — REQ-V170-BEN-01's own requirement.
+
+### Gates
+
+`ruff check .`: 0. `pytest`: 1122 collected (up from 1103 at T6's close --
+several parametrized cases inside the listed test functions above account
+for the count). `bot.py --selftest`: 0. `bot.py --selftest-live`: 0.
+`bench.py check baseline-v1.6.0.json`: 0. `mutation_check.py`: 0 -- 83/83
+killed, 0 survived/errored/drifted (first run surfaced the self-caught
+survivor above; the fix restored full kill coverage, confirmed by a second
+complete 83-mutation run).
 
 ## Ledger row (paste into `economics.md`)
 

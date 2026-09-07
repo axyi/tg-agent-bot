@@ -24,23 +24,28 @@ from llm.base import LLMError, LLMResponse, ToolCall, Usage
 from tests.fakes import FakeFetcher, RecordingRunner
 
 TG_ID = 424242
+# erratum: spec-v1.7.0 T7, REQ-V170-BEN-02 -- the v1.3 worktree contract
+# ("null on the baseline side") is superseded by an equality rule ("same
+# instrument" means equal on both sides), so a fixture pair meant to be
+# comparable must now carry EQUAL values for every STAGE_C_KEYS entry,
+# matching the real baseline-v1.6.0.json shape (HISTORY_TOOL_STUB: "on",
+# EXEC_OUTPUT_DEFAULT_CHARS: 1500, FETCH_INLINE_DEFAULT_CHARS: 5000,
+# LLM_REASONING: null) rather than differing on them by construction.
 BASELINE_FLAGS = {
-    "HISTORY_TOOL_STUB": None,
-    "EXEC_OUTPUT_DEFAULT_CHARS": None,
-    "FETCH_INLINE_DEFAULT_CHARS": None,
+    "HISTORY_TOOL_STUB": "on",
+    "EXEC_OUTPUT_DEFAULT_CHARS": 1500,
+    "FETCH_INLINE_DEFAULT_CHARS": 5000,
     "LLM_REASONING": None,
     "LLM_SUMMARY_MODEL": "",
     "LLM_FAILOVER": "off",
     "LLM_MAX_TOKENS": 2048,
-    # REQ-V14-BEN-05: two more keys, both null on the baseline side — neither
-    # joins STAGE_C_KEYS, so comparability() has no rule for them.
+    # REQ-V170-BEN-02: the treatment, not the instrument -- excluded from
+    # STAGE_C_KEYS, so comparability() has no equality rule for either.
     "LLM_REASONING_POLICY": None,
     "LLM_REASONING_ON_PURPOSES": None,
 }
-CANDIDATE_FLAGS = {**BASELINE_FLAGS, "HISTORY_TOOL_STUB": "on",
-                   "EXEC_OUTPUT_DEFAULT_CHARS": 1500,
-                   "FETCH_INLINE_DEFAULT_CHARS": 5000, "LLM_REASONING": "auto",
-                   "LLM_REASONING_POLICY": "off", "LLM_REASONING_ON_PURPOSES": ""}
+CANDIDATE_FLAGS = {**BASELINE_FLAGS, "LLM_REASONING_POLICY": "off",
+                   "LLM_REASONING_ON_PURPOSES": ""}
 PRICING = {
     "basis": "reference:some/model",
     "model": "some/model",
@@ -1088,6 +1093,23 @@ def test_check_rejects_a_row_with_an_unknown_column():
 # `report` and `--gate` (REQ-V13-BEN-14, section 13.3)
 # --------------------------------------------------------------------------
 
+def _force_full_gate_scenarios(candidate: dict) -> None:
+    """erratum: spec-v1.7.0 T7, REQ-V170-BEN-06 item 3 -- the new executable
+    3/3 rule over GATE_REQUIRED_FULL_SCENARIOS is not what most `_pair()`
+    callers are testing; force a clean 3/3 on all six so those tests keep
+    isolating the property they actually exercise. A **post-hoc** patch on
+    `summary.per_scenario` only -- any caller that recomputes
+    `candidate["summary"]` afterwards (`bench.summarize(...)`) must call this
+    again, since that recompute derives fresh from `candidate["runs"]` and
+    would otherwise silently drop the patch. T-V170-BEN-04/-05's own tests
+    override this back down deliberately, by not calling it (or by
+    overwriting it after)."""
+    for scenario_id in bench.GATE_REQUIRED_FULL_SCENARIOS:
+        if scenario_id in candidate["summary"]["per_scenario"]:
+            candidate["summary"]["per_scenario"][scenario_id]["success"] = 3
+            candidate["summary"]["per_scenario"][scenario_id]["of"] = 3
+
+
 def _pair(*, candidate_prompt=600, candidate_completion=60, repeats=1,
           candidate_extra_rows=(), candidate_success=True):
     baseline = fake_doc(repeats=repeats)
@@ -1099,6 +1121,8 @@ def _pair(*, candidate_prompt=600, candidate_completion=60, repeats=1,
             runs.append(fake_run(scenario.id, repeat, llm_rows=rows,
                                  success=candidate_success))
     candidate = fake_doc(runs, repeats=repeats, flags=CANDIDATE_FLAGS, tag="optimized")
+    if candidate_success:
+        _force_full_gate_scenarios(candidate)
     return baseline, candidate
 
 
@@ -1234,7 +1258,7 @@ def test_gate_refuses_a_changed_request_default(tmp_path):
     ("candidate", "LLM_FAILOVER", "auto", "LLM_FAILOVER"),
     ("baseline", "LLM_SUMMARY_MODEL", "openrouter:x", "LLM_SUMMARY_MODEL"),
     ("baseline", "LLM_MAX_TOKENS", 1024, "LLM_MAX_TOKENS"),
-    ("baseline", "HISTORY_TOOL_STUB", "on", "HISTORY_TOOL_STUB"),
+    ("baseline", "HISTORY_TOOL_STUB", "off", "HISTORY_TOOL_STUB"),
     ("candidate", "HISTORY_TOOL_STUB", "off", "HISTORY_TOOL_STUB"),
     ("candidate", "EXEC_OUTPUT_DEFAULT_CHARS", 1000, "EXEC_OUTPUT_DEFAULT_CHARS"),
     ("candidate", "LLM_REASONING", "off", "LLM_REASONING"),
@@ -1266,7 +1290,11 @@ def test_gate_accepts_every_empty_summary_model_shape(base_value, cand_value):
 @pytest.mark.parametrize("side", ["baseline", "candidate"])
 def test_gate_refuses_a_routed_summary_model_on_either_side(side, tmp_path, capsys):
     """The purpose of the clause survives E.6: routing is never benchmarked."""
-    baseline, candidate = _pair()
+    # repeats=3: this goes through the CLI's --gate path, which validates
+    # each document internally (check_document) before comparability() ever
+    # runs -- unlike verdict()-only tests, a genuinely 3/3 candidate is
+    # required, not just a patched summary (REQ-V170-BEN-06).
+    baseline, candidate = _pair(repeats=3)
     baseline["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = None
     document = baseline if side == "baseline" else candidate
     document["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = "openrouter:cheap/model"
@@ -1354,6 +1382,11 @@ def test_the_quality_gate_allows_no_lost_run():
     candidate["runs"][0] = fake_run(lost["scenario"], lost["repeat"],
                                     llm_rows=lost["llm_calls"], success=False)
     candidate["summary"] = bench.summarize(candidate["runs"], [], 2)
+    # bench.summarize() derives per_scenario fresh from candidate["runs"], which
+    # wipes _pair()'s GATE_REQUIRED_FULL_SCENARIOS patch (real repeats=2 here, so
+    # the recompute legitimately shows of:2). Re-apply it so this assertion keeps
+    # isolating the QUALITY_GATE_SLACK boundary, not a BEN-06 3/3 shortfall.
+    _force_full_gate_scenarios(candidate)
     decision = bench.verdict(baseline, candidate)
     assert decision.passed is False
     assert "quality gate: FAIL" in "\n".join(decision.lines)
@@ -1422,7 +1455,9 @@ def test_cli_check_exit_codes(tmp_path, capsys):
 
 
 def test_cli_report_gate_exit_codes(tmp_path):
-    baseline, candidate = _pair()
+    # repeats=3: the CLI's --gate path runs check_document first, which needs
+    # a genuinely 3/3 candidate, not a patched summary (REQ-V170-BEN-06).
+    baseline, candidate = _pair(repeats=3)
     base_path = _write(tmp_path, "baseline.json", baseline)
     cand_path = _write(tmp_path, "optimized.json", candidate)
     out = tmp_path / "report.md"
