@@ -1,13 +1,16 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T9 complete — the nine `v170-*` mutation entries landed (92/92
-killed), `mutation-v170` wired into `pre-push` with a measured timeout,
-`mutation-all`'s timeout re-measured at 92 entries. The T9 blocker
-(gate-matrix test vs. a table missing from `spec-v1.7.0.md`) was resolved
-by operator authorisation, option 1: the amended gate-matrix table was
-written into the spec itself — see the spec `sha256` values below and
-"Blocker at T9" / "## T9" further down for the full record. Run continues
-to T10.**
+**Status: T10 complete — the clean-context review found two 🔴 findings
+(four tests hard-pinned the pre-T12 reasoning-policy default, which would
+have broken gate 3 the moment T12 lands; `T-V170-POL-07` was missing
+entirely) and one 🟡 (only one of three mandated test files existed); all
+fixed and re-verified, including a hand-simulated T12-style default flip.
+Every gate green: the six-gate sequence, `checks.py run --profile full`
+(15/15), `checks.py replay` (12/12). The T9 blocker (gate-matrix table
+added to `spec-v1.7.0.md` under operator authorisation) stands as
+recorded. Run continues to T11 — Stage C, the live candidate benchmark —
+pending the operator's separate check-in (a multi-hour undertaking against
+the GPU-hosted LM Studio server).**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -1401,6 +1404,123 @@ still skip). `lint-docs`: 0. `bot.py --selftest`: 0.
 confirmed twice (once before the blocker-resolution edits, once after,
 per REQ-V170-TST-04's own "before the gate is trusted" rule applied at
 every point the tree changed).
+
+## T10 — clean-context review, then every gate (REQ-V170-REV-01)
+
+### Review findings and disposition
+
+The `code-reviewer` subagent reviewed the full `<base>..HEAD` diff (T0–T9,
+nine task commits plus two blocker-resolution commits) in its own clean
+context, against `AGENTS.md`, `docs/spec/spec-v1.7.0.md` in full, and the
+eight specific checks REQ-V170-REV-01 names.
+
+**🔴 Fixed — four tests hard-pinned the pre-T12 compatibility default as an
+absolute literal**, which would break gate 3 the moment T12's selection
+commit lands (T12's five-file allowlist does not include test files, so no
+commit could then repair them):
+`test_t_v170_pol_01_policy_defaults_to_model_default_when_absent`,
+`test_t_v170_pol_01_purposes_absent_defaults_to_tool_round`,
+`test_t_v170_pol_01_both_absent_safe` (all three previously asserted
+`cfg.llm_reasoning_policy == "model-default"` / `frozenset({"tool-round"})`
+directly), and a fourth, now-removed test that asserted `.env.example`'s
+parsed pair against the same hardcoded literal. Fixed by comparing
+`load_config()`'s actual absent-env resolution against `.env.example`'s own
+parsed values instead — never a literal of either test's own. **First fix
+attempt was itself wrong** and caught by hand-simulation before landing:
+deriving the expected value from `Config`'s bare dataclass field default
+(`dataclasses.fields(Config)`) does not track what `load_config()` actually
+returns for an absent key, because `_parse_choice`/`_parse_purposes` carry
+their **own** separate hardcoded fallback literal at the call site
+(`config.py:308-313`) — the dataclass annotation is not the operative
+default at all. Simulating a full T12-style flip (changing all three real
+sync points together — the dataclass field, the two parser call-site
+literals, and `.env.example`) proved the dataclass-based fix still failed;
+switching the oracle to `.env.example` (comparing `load_config()`'s result
+against `_env_example_reasoning_defaults()`, matching what
+`T-V170-ACC-03`'s own equivalence half already does) passed the same
+simulation cleanly, confirmed by a second full-suite run under the
+simulation before it was reverted.
+
+**🔴 Fixed — `T-V170-POL-07` did not exist.** Section 14.2 and Appendix A
+both name it as required ("the shipped defaults of both variables equal
+the literals `.env.example` documents — the single permitted pin"); it was
+never written. Added as `test_t_v170_pol_07_shipped_default_matches_env_example`
+in `tests/test_v170_reasoning.py`, replacing the fourth hardcoded-literal
+test above with the correctly-relative version of the same check.
+
+**🟡 Fixed — REQ-V170-TREE-01 only partially satisfied.** The spec names
+three required new test files (`tests/test_v170_reasoning.py` for
+RSN-*/POL-*/OBS-*, `tests/test_v170_summary_budget.py` for SUM-*,
+`tests/test_v170_bench.py` for BEN-*/CAR-*/VER-*/RPT-02/ACC-03); only the
+first was ever created, with everything folded into it across T4–T9. Split
+mechanically along the spec's own grouping — no test's assertions, fixtures
+or intent changed, and the collected count is unchanged before and after
+(1133 collected, 1131 passed, 2 skipped).
+
+**Eight REQ-V170-REV-01 checklist items, explicit disposition:** items 1–7
+PASS as implemented (frozen-all-the-way-down mechanism table with no
+duplicated literal and no provider reading `.tag`; all five `complete()`
+sites carrying `reasoning`/`timeout_s` in order with identity-preserved
+failover forwarding; no mechanism string reaching the prompt, tool schema,
+`REQUEST_DEFAULTS` or `bench.constants()`; the summary deadline taken once
+with every request deriving its timeout from the remaining budget and no
+path raising out of `summarize_conversation`; `--tag` validated before any
+path is built; every `v170-*` mutation's `find` string matching exactly
+once, confirmed by the self-check test inside the full green mutation run;
+the S13…S18 rule enforced inside `verdict()` itself with
+`bench_scenarios.py` byte-unchanged). Item 8 (prospective: the machinery
+that must let T12 land without a test edit) **initially FAILED** on the
+two 🔴 findings above and now PASSES with them fixed — re-verified live via
+the hand-simulated T12 flip described above.
+
+Also independently re-verified during the review: the T9 blocker's
+spec-`sha256` disclosure (the added gate-matrix table is byte-identical to
+`spec-v1.6.0.md`'s except the one new row, confirmed by diff); the storage
+schema 4→5 migration chain (every starting version reaches 5 correctly and
+idempotently); the new `reasoning_requested`/`reasoning_honored` fields and
+`meta.reasoning` block carry no content/PII, only closed-vocabulary
+strings and small ints.
+
+### Two things handled without a full stop
+
+1. **The GPU box's LM Studio floating IP moved again** (third occurrence
+   this run): re-probed the three known addresses per PRE-03's own
+   procedure; `192.168.0.145` answered (serving `qwen/qwen3.8-27b`, the
+   pinned model, confirmed via `/v1/models`); `LMSTUDIO_BASE_URL`
+   re-pinned via the single permitted `sed -i` idiom; gate 5 reconfirmed
+   green.
+2. **A stale figure in `docs/spec/spec-v1.7.0.md`'s own REQ-V170-NG-12
+   clause**: it restates "the 19 skylos shadow findings in
+   `dashboard_server.py` carried from v1.6.0". A direct re-measurement of
+   the full-profile run's own `skylos.json` artefact (`devtools.checks.skylos_json`,
+   filtered to `dashboard_server.py`) shows **8**, not 19, today.
+   `dashboard_server.py` is confirmed byte-unchanged since `<base>`
+   (`git diff --stat <base>..HEAD -- dashboard_server.py` empty), and an
+   artefact saved during this run's own earlier pre-push hooks (well
+   before T10) already shows 8 — so the discrepancy predates this task
+   entirely and is not something T0–T9 caused. Left unresolved (not a
+   spec edit this task is authorized to make, and NG-12's disposition —
+   informational, not refactored — is unaffected by the exact count);
+   disclosed here for the final report to carry forward accurately.
+
+### Gates
+
+`ruff check .`: 0. `pytest`: 1133 collected, 1131 passed, 2 skipped
+(unchanged by the file split). `bot.py --selftest`: 0.
+`bot.py --selftest-live`: 0 (after the LM Studio address re-pin).
+`bench.py check baseline-v1.6.0.json`: 0. `mutation_check.py`: 0 — 92/92
+killed, 0 survived/errored/drifted (re-confirmed after the review fixes
+landed).
+
+`checks.py run --profile full --since <base>`: 0 — all 15 gates PASS
+(`uv-sync`, `ruff-check-all`, `ruff-format`, `branch-name`, `pytest`,
+`selftest`, `selftest-live`, `mutation-all`, `gitleaks-tree` 0 findings,
+`trivy` 0 findings, `semgrep` 0 findings, `skylos` 13 in-scope/13
+out-of-scope shadow findings — see the stale-NG-12-figure note above,
+`hooks-installed`, `doctor`, `lint-docs`).
+
+`checks.py replay --range <base>..<tip>`: 0 — 12/12 commits PASS clean, no
+exceptions.
 
 ## Ledger row (paste into `economics.md`)
 

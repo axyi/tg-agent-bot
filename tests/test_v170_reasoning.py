@@ -1,13 +1,22 @@
-"""spec-v1.7.0 T4/T5: the reasoning-policy vocabulary (POL-01…-06), the
-storage migration (OBS-01…-04) and the summary-budget config check (SUM-05).
+"""spec-v1.7.0: the reasoning-policy vocabulary (RSN/POL-01…-07) and the
+storage migration (OBS-01…-04).
 
 Offline and deterministic (REQ-V170-TST-01): no network, no Docker, no
 `.env`, no live LLM. Every clock and every LLM in a test is a fake.
+
+REQ-V170-TREE-01 splits this release's tests three ways by requirement
+group; `tests/test_v170_summary_budget.py` (SUM-*) and
+`tests/test_v170_bench.py` (BEN-*, CAR-*, VER-*, RPT-02, ACC-03) hold the
+other two.
 """
+
+from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
+import dotenv
 import httpx
 import pytest
 
@@ -36,6 +45,23 @@ from tests.fakes import FakeLLM, RecordingRunner
 from tests.test_config import base_env
 from tests.test_summary import VALID_SUMMARY
 
+_REAL_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _env_example_reasoning_defaults(root: Path = _REAL_PROJECT_ROOT) -> tuple[str, list[str]]:
+    """The pair `.env.example`'s active lines document, parsed the same way
+    `load_dotenv` would parse `.env` itself -- never a hand-rolled reader."""
+    values = dotenv.dotenv_values(root / ".env.example")
+    policy = values.get("LLM_REASONING_POLICY") or "model-default"
+    raw_purposes = values.get("LLM_REASONING_ON_PURPOSES")
+    purposes = (
+        ["tool-round"]
+        if raw_purposes is None
+        else sorted(item.strip() for item in raw_purposes.split(",") if item.strip())
+    )
+    return policy, purposes
+
+
 # --------------------------------------------------------------------------
 # T-V170-POL-01 -- the two environment variables
 # --------------------------------------------------------------------------
@@ -55,8 +81,12 @@ def test_t_v170_pol_01_policy_rejects_an_unknown_value_naming_it():
 
 
 def test_t_v170_pol_01_policy_defaults_to_model_default_when_absent():
+    # Compared against .env.example's own documented value, not a literal of
+    # this test's own -- REQ-V170-POL-01's active line always carries the
+    # *current shipped* default, and T12 moves both together, so this must
+    # keep passing across that move (same discipline as T-V170-POL-07 below).
     cfg = load_config(env=base_env(), load_env_file=False)
-    assert cfg.llm_reasoning_policy == "model-default"
+    assert cfg.llm_reasoning_policy == _env_example_reasoning_defaults()[0]
 
 
 def test_t_v170_pol_01_purposes_parses_order_insensitively_and_trims():
@@ -74,7 +104,7 @@ def test_t_v170_pol_01_purposes_empty_string_is_the_empty_set():
 
 def test_t_v170_pol_01_purposes_absent_defaults_to_tool_round():
     cfg = load_config(env=base_env(), load_env_file=False)
-    assert cfg.llm_reasoning_on_purposes == frozenset({"tool-round"})
+    assert cfg.llm_reasoning_on_purposes == frozenset(_env_example_reasoning_defaults()[1])
 
 
 def test_t_v170_pol_01_purposes_rejects_an_unknown_tag_naming_it():
@@ -89,8 +119,9 @@ def test_t_v170_pol_01_purposes_rejects_an_unknown_tag_naming_it():
 
 def test_t_v170_pol_01_both_absent_safe():
     cfg = load_config(env=base_env(), load_env_file=False)
-    assert cfg.llm_reasoning_policy == "model-default"
-    assert cfg.llm_reasoning_on_purposes == frozenset({"tool-round"})
+    policy, purposes = _env_example_reasoning_defaults()
+    assert cfg.llm_reasoning_policy == policy
+    assert cfg.llm_reasoning_on_purposes == frozenset(purposes)
 
 
 # N1, N2, N3 --------------------------------------------------------------
@@ -229,198 +260,6 @@ def test_t_v170_pol_03_the_shipped_table_matches_stage_a():
 
 def test_t_v170_pol_03_reasoning_default_constant():
     assert REASONING_DEFAULT == ReasoningRequest("default", None, "final")
-
-
-# --------------------------------------------------------------------------
-# T-V170-OBS-01 -- schema 4 -> 5
-# --------------------------------------------------------------------------
-
-_V1_SCHEMA = """
-CREATE TABLE schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
-INSERT INTO schema_version (id, version) VALUES (1, 1);
-CREATE TABLE conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, tg_user_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
-);
-CREATE UNIQUE INDEX idx_conversations_one_active ON conversations (tg_user_id) WHERE active = 1;
-CREATE TABLE messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL, turn_id INTEGER NOT NULL,
-    role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', tool_calls_json TEXT,
-    tool_call_id TEXT, created_at TEXT NOT NULL
-);
-CREATE TABLE bot_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-"""
-
-
-def _seed(path, schema: str):
-    legacy = sqlite3.connect(str(path), isolation_level=None)
-    legacy.executescript(schema)
-    legacy.close()
-
-
-def _v3_schema() -> str:
-    # v3: llm_calls/tool_calls exist, without trace_id/span_id.
-    return _V1_SCHEMA.replace(
-        "INSERT INTO schema_version (id, version) VALUES (1, 1);",
-        "INSERT INTO schema_version (id, version) VALUES (1, 3);",
-    ) + """
-CREATE TABLE summaries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL UNIQUE,
-    tg_user_id INTEGER NOT NULL, goal TEXT NOT NULL DEFAULT '',
-    facts_json TEXT NOT NULL DEFAULT '[]', recent_json TEXT NOT NULL DEFAULT '[]',
-    updated_at TEXT NOT NULL
-);
-CREATE TABLE llm_calls (
-    id INTEGER PRIMARY KEY, conv_id INTEGER NOT NULL, turn_id INTEGER,
-    purpose TEXT NOT NULL, round INTEGER NOT NULL, attempt INTEGER NOT NULL,
-    ts TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
-    prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
-    cached_tokens INTEGER, reasoning_tokens INTEGER, reasoning_chars INTEGER NOT NULL DEFAULT 0,
-    prompt_chars INTEGER NOT NULL, prompt_chars_by_role TEXT NOT NULL,
-    messages_n INTEGER NOT NULL, tools_exposed INTEGER NOT NULL, latency_ms INTEGER NOT NULL,
-    finish_reason TEXT, tool_calls_n INTEGER NOT NULL DEFAULT 0, error_kind TEXT,
-    cost_usd REAL, cost_basis TEXT
-);
-CREATE TABLE tool_calls (
-    id INTEGER PRIMARY KEY, conv_id INTEGER NOT NULL, turn_id INTEGER NOT NULL,
-    tool_call_id TEXT NOT NULL, tool TEXT NOT NULL, ts TEXT NOT NULL,
-    input_chars INTEGER NOT NULL, raw_output_chars INTEGER NOT NULL,
-    output_chars INTEGER NOT NULL, output_tokens_est INTEGER NOT NULL,
-    duration_ms INTEGER NOT NULL, outcome TEXT NOT NULL
-);
-"""
-
-
-def _v2_schema() -> str:
-    return _V1_SCHEMA.replace(
-        "INSERT INTO schema_version (id, version) VALUES (1, 1);",
-        "INSERT INTO schema_version (id, version) VALUES (1, 2);",
-    ) + """
-CREATE TABLE summaries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL UNIQUE,
-    tg_user_id INTEGER NOT NULL, goal TEXT NOT NULL DEFAULT '',
-    facts_json TEXT NOT NULL DEFAULT '[]', recent_json TEXT NOT NULL DEFAULT '[]',
-    updated_at TEXT NOT NULL
-);
-"""
-
-
-@pytest.mark.parametrize("schema_fn,start_version", [
-    (lambda: _V1_SCHEMA, 1),
-    (_v2_schema, 2),
-    (_v3_schema, 3),
-])
-def test_t_v170_obs_01_chains_to_5(tmp_path, schema_fn, start_version):
-    path = tmp_path / f"v{start_version}.db"
-    _seed(path, schema_fn())
-    conn = storage.connect(path)
-    storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
-    row = conn.execute("PRAGMA table_info(llm_calls)").fetchall()
-    names = {r[1] for r in row}
-    assert {"reasoning_requested", "reasoning_honored"} <= names
-    conn.close()
-
-
-def test_t_v170_obs_01_migration_4_to_5_on_populated_db(tmp_path):
-    """A genuine on-disk v4 database (pre-v1.7.0 shape): both new columns
-    appear nullable, a pre-existing row reads NULL in both, version reads 5."""
-    path = tmp_path / "v4.db"
-    conn = storage.connect(path)
-    storage.init_schema(conn)  # today's code -> lands at 5 directly; force back to 4 to simulate
-    conn.execute("ALTER TABLE llm_calls RENAME TO llm_calls_v5")
-    conn.execute("UPDATE schema_version SET version = 4 WHERE id = 1")
-    conn.execute("""
-        CREATE TABLE llm_calls (
-            id INTEGER PRIMARY KEY, conv_id INTEGER NOT NULL, turn_id INTEGER,
-            purpose TEXT NOT NULL, round INTEGER NOT NULL, attempt INTEGER NOT NULL,
-            ts TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
-            prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
-            cached_tokens INTEGER, reasoning_tokens INTEGER,
-            reasoning_chars INTEGER NOT NULL DEFAULT 0, prompt_chars INTEGER NOT NULL,
-            prompt_chars_by_role TEXT NOT NULL, messages_n INTEGER NOT NULL,
-            tools_exposed INTEGER NOT NULL, latency_ms INTEGER NOT NULL,
-            finish_reason TEXT, tool_calls_n INTEGER NOT NULL DEFAULT 0, error_kind TEXT,
-            cost_usd REAL, cost_basis TEXT, trace_id TEXT, span_id TEXT
-        )
-    """)
-    conn.execute("DROP TABLE llm_calls_v5")
-    conn.execute(
-        "INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)"
-    )
-    conn.execute(
-        "INSERT INTO llm_calls (conv_id, turn_id, purpose, round, attempt, ts, provider, "
-        "model, prompt_chars, prompt_chars_by_role, messages_n, tools_exposed, latency_ms) "
-        "VALUES (1, 1, 'agent', 1, 1, 'x', 'lmstudio', 'small', 10, '{}', 2, 3, 5)"
-    )
-
-    storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
-    row = conn.execute("SELECT reasoning_requested, reasoning_honored FROM llm_calls").fetchone()
-    assert row[0] is None and row[1] is None
-
-    # idempotent
-    storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
-    assert conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 1
-    conn.close()
-
-
-@pytest.mark.parametrize("bad", [0, "x"])
-def test_t_v170_obs_01_unsupported_version_still_raises(conn, bad):
-    conn.execute("UPDATE schema_version SET version = ? WHERE id = 1", (bad,))
-    with pytest.raises(RuntimeError) as raised:
-        storage.init_schema(conn)
-    assert str(bad) in str(raised.value)
-
-
-def test_n8_schema_version_6_raises(conn):
-    conn.execute("UPDATE schema_version SET version = 6 WHERE id = 1")
-    with pytest.raises(RuntimeError) as raised:
-        storage.init_schema(conn)
-    assert "6" in str(raised.value)
-
-
-# --------------------------------------------------------------------------
-# T-V170-SUM-05
-# --------------------------------------------------------------------------
-
-
-def test_t_v170_sum_05_raises_below_the_summary_floor():
-    # Discriminates the new check from the pre-existing `_check_timeout_budget`
-    # (REQ-V14-REL-01): with LLM_MAX_TOKENS == LLM_SUMMARY_MAX_TOKENS == 1536,
-    # the pre-existing check's own floor is 21.1 + 0.093*1536 = 163.948s --
-    # 180s clears it -- while this check's floor adds the 30s rescue-retry
-    # floor on top (193.948s), which 180s does not clear. A timeout that
-    # merely satisfies the older check must not also satisfy this one.
-    with pytest.raises(ConfigError) as exc:
-        load_config(
-            env=base_env(
-                LLM_TIMEOUT_S="180", LLM_MAX_TOKENS="1536", LLM_SUMMARY_MAX_TOKENS="1536"
-            ),
-            load_env_file=False,
-        )
-    message = str(exc.value)
-    assert "LLM_TIMEOUT_S" in message and "LLM_SUMMARY_MAX_TOKENS" in message
-
-
-def test_t_v170_sum_05_does_not_raise_at_shipped_defaults():
-    cfg = load_config(env=base_env(LLM_TIMEOUT_S="240"), load_env_file=False)
-    assert cfg.llm_timeout_s == 240.0 and cfg.llm_summary_max_tokens == 1536
-
-
-def test_t_v170_sum_05_does_not_raise_at_the_1_7_0_instrument():
-    cfg = load_config(
-        env=base_env(LLM_TIMEOUT_S="600", LLM_MAX_TOKENS="4096"), load_env_file=False
-    )
-    assert cfg.llm_timeout_s == 600.0
-
-
-def test_t_v170_sum_05_preexisting_check_message_unchanged():
-    with pytest.raises(ConfigError) as exc:
-        load_config(env=base_env(LLM_TIMEOUT_S="120"), load_env_file=False)
-    message = str(exc.value)
-    assert "LLM_TIMEOUT_S" in message and "LLM_MAX_TOKENS" in message
 
 
 # --------------------------------------------------------------------------
@@ -681,6 +520,177 @@ def test_t_v170_pol_06_message_patch_never_mutates_the_callers_list():
 
 
 # --------------------------------------------------------------------------
+# T-V170-POL-07 -- the single permitted literal pin (REQ-V170-POL-01)
+# --------------------------------------------------------------------------
+
+
+def test_t_v170_pol_07_shipped_default_matches_env_example():
+    """The one test allowed to pin the pre-/post-T12 default -- but even it
+    pins `load_config()`'s own actual absent-env resolution only against
+    `.env.example`'s documented value, never a literal of its own, so it
+    needs no edit when T12's selection commit moves both together
+    (REQ-V170-POL-01, REQ-V170-POL-07). `Config`'s bare dataclass field
+    default is deliberately NOT the oracle here: `load_config` resolves
+    an absent key through its own `_parse_choice`/`_parse_purposes`
+    call-site literal, not through the dataclass annotation, and T12
+    moves both of those together with `.env.example` -- never the
+    dataclass default in isolation."""
+    cfg = load_config(env=base_env(), load_env_file=False)
+    resolved = (cfg.llm_reasoning_policy, sorted(cfg.llm_reasoning_on_purposes))
+    assert resolved == _env_example_reasoning_defaults()
+
+
+# --------------------------------------------------------------------------
+# T-V170-OBS-01 -- schema 4 -> 5
+# --------------------------------------------------------------------------
+
+_V1_SCHEMA = """
+CREATE TABLE schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
+INSERT INTO schema_version (id, version) VALUES (1, 1);
+CREATE TABLE conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tg_user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+);
+CREATE UNIQUE INDEX idx_conversations_one_active ON conversations (tg_user_id) WHERE active = 1;
+CREATE TABLE messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL, turn_id INTEGER NOT NULL,
+    role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', tool_calls_json TEXT,
+    tool_call_id TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE bot_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+"""
+
+
+def _seed(path, schema: str):
+    legacy = sqlite3.connect(str(path), isolation_level=None)
+    legacy.executescript(schema)
+    legacy.close()
+
+
+def _v3_schema() -> str:
+    # v3: llm_calls/tool_calls exist, without trace_id/span_id.
+    return _V1_SCHEMA.replace(
+        "INSERT INTO schema_version (id, version) VALUES (1, 1);",
+        "INSERT INTO schema_version (id, version) VALUES (1, 3);",
+    ) + """
+CREATE TABLE summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL UNIQUE,
+    tg_user_id INTEGER NOT NULL, goal TEXT NOT NULL DEFAULT '',
+    facts_json TEXT NOT NULL DEFAULT '[]', recent_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE llm_calls (
+    id INTEGER PRIMARY KEY, conv_id INTEGER NOT NULL, turn_id INTEGER,
+    purpose TEXT NOT NULL, round INTEGER NOT NULL, attempt INTEGER NOT NULL,
+    ts TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+    prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
+    cached_tokens INTEGER, reasoning_tokens INTEGER, reasoning_chars INTEGER NOT NULL DEFAULT 0,
+    prompt_chars INTEGER NOT NULL, prompt_chars_by_role TEXT NOT NULL,
+    messages_n INTEGER NOT NULL, tools_exposed INTEGER NOT NULL, latency_ms INTEGER NOT NULL,
+    finish_reason TEXT, tool_calls_n INTEGER NOT NULL DEFAULT 0, error_kind TEXT,
+    cost_usd REAL, cost_basis TEXT
+);
+CREATE TABLE tool_calls (
+    id INTEGER PRIMARY KEY, conv_id INTEGER NOT NULL, turn_id INTEGER NOT NULL,
+    tool_call_id TEXT NOT NULL, tool TEXT NOT NULL, ts TEXT NOT NULL,
+    input_chars INTEGER NOT NULL, raw_output_chars INTEGER NOT NULL,
+    output_chars INTEGER NOT NULL, output_tokens_est INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL, outcome TEXT NOT NULL
+);
+"""
+
+
+def _v2_schema() -> str:
+    return _V1_SCHEMA.replace(
+        "INSERT INTO schema_version (id, version) VALUES (1, 1);",
+        "INSERT INTO schema_version (id, version) VALUES (1, 2);",
+    ) + """
+CREATE TABLE summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL UNIQUE,
+    tg_user_id INTEGER NOT NULL, goal TEXT NOT NULL DEFAULT '',
+    facts_json TEXT NOT NULL DEFAULT '[]', recent_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
+"""
+
+
+@pytest.mark.parametrize("schema_fn,start_version", [
+    (lambda: _V1_SCHEMA, 1),
+    (_v2_schema, 2),
+    (_v3_schema, 3),
+])
+def test_t_v170_obs_01_chains_to_5(tmp_path, schema_fn, start_version):
+    path = tmp_path / f"v{start_version}.db"
+    _seed(path, schema_fn())
+    conn = storage.connect(path)
+    storage.init_schema(conn)
+    assert storage.schema_version(conn) == 5
+    row = conn.execute("PRAGMA table_info(llm_calls)").fetchall()
+    names = {r[1] for r in row}
+    assert {"reasoning_requested", "reasoning_honored"} <= names
+    conn.close()
+
+
+def test_t_v170_obs_01_migration_4_to_5_on_populated_db(tmp_path):
+    """A genuine on-disk v4 database (pre-v1.7.0 shape): both new columns
+    appear nullable, a pre-existing row reads NULL in both, version reads 5."""
+    path = tmp_path / "v4.db"
+    conn = storage.connect(path)
+    storage.init_schema(conn)  # today's code -> lands at 5 directly; force back to 4 to simulate
+    conn.execute("ALTER TABLE llm_calls RENAME TO llm_calls_v5")
+    conn.execute("UPDATE schema_version SET version = 4 WHERE id = 1")
+    conn.execute("""
+        CREATE TABLE llm_calls (
+            id INTEGER PRIMARY KEY, conv_id INTEGER NOT NULL, turn_id INTEGER,
+            purpose TEXT NOT NULL, round INTEGER NOT NULL, attempt INTEGER NOT NULL,
+            ts TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+            prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
+            cached_tokens INTEGER, reasoning_tokens INTEGER,
+            reasoning_chars INTEGER NOT NULL DEFAULT 0, prompt_chars INTEGER NOT NULL,
+            prompt_chars_by_role TEXT NOT NULL, messages_n INTEGER NOT NULL,
+            tools_exposed INTEGER NOT NULL, latency_ms INTEGER NOT NULL,
+            finish_reason TEXT, tool_calls_n INTEGER NOT NULL DEFAULT 0, error_kind TEXT,
+            cost_usd REAL, cost_basis TEXT, trace_id TEXT, span_id TEXT
+        )
+    """)
+    conn.execute("DROP TABLE llm_calls_v5")
+    conn.execute(
+        "INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)"
+    )
+    conn.execute(
+        "INSERT INTO llm_calls (conv_id, turn_id, purpose, round, attempt, ts, provider, "
+        "model, prompt_chars, prompt_chars_by_role, messages_n, tools_exposed, latency_ms) "
+        "VALUES (1, 1, 'agent', 1, 1, 'x', 'lmstudio', 'small', 10, '{}', 2, 3, 5)"
+    )
+
+    storage.init_schema(conn)
+    assert storage.schema_version(conn) == 5
+    row = conn.execute("SELECT reasoning_requested, reasoning_honored FROM llm_calls").fetchone()
+    assert row[0] is None and row[1] is None
+
+    # idempotent
+    storage.init_schema(conn)
+    assert storage.schema_version(conn) == 5
+    assert conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 1
+    conn.close()
+
+
+@pytest.mark.parametrize("bad", [0, "x"])
+def test_t_v170_obs_01_unsupported_version_still_raises(conn, bad):
+    conn.execute("UPDATE schema_version SET version = ? WHERE id = 1", (bad,))
+    with pytest.raises(RuntimeError) as raised:
+        storage.init_schema(conn)
+    assert str(bad) in str(raised.value)
+
+
+def test_n8_schema_version_6_raises(conn):
+    conn.execute("UPDATE schema_version SET version = 6 WHERE id = 1")
+    with pytest.raises(RuntimeError) as raised:
+        storage.init_schema(conn)
+    assert "6" in str(raised.value)
+
+
+# --------------------------------------------------------------------------
 # T-V170-OBS-02 -- storage/tracing shape
 # --------------------------------------------------------------------------
 
@@ -804,712 +814,3 @@ def test_t_v170_obs_04_a_failover_inside_one_call_adds_no_extra_row(conn):
     columns = storage.LLM_CALL_COLUMNS
     for row in rows:
         assert row[columns.index("provider")] == "openrouter"
-
-
-# --------------------------------------------------------------------------
-# T-V170-SUM-01…-04, N5 -- the summary wall-clock budget
-# --------------------------------------------------------------------------
-
-
-class _FakeClock:
-    """A stateful, injectable clock. `t` is advanced by the fake LLM below,
-    simulating the wall-clock time one `complete()` call actually consumed --
-    the only realistic place to inject that, since `summarize_conversation`
-    itself calls the clock only around request decisions, never mid-request.
-    """
-
-    def __init__(self, start: float = 0.0):
-        self.t = start
-
-    def __call__(self) -> float:
-        return self.t
-
-
-class _ClockAdvancingLLM:
-    """Each scripted item is `(advance_seconds, response_or_error)`. Records
-    every `(reasoning, timeout_s)` pair it actually receives."""
-
-    def __init__(self, clock: _FakeClock, script):
-        self.clock = clock
-        self.script = list(script)
-        self.calls: list[tuple[ReasoningRequest, float | None]] = []
-
-    def describe(self):
-        return ("fake", "fake-model")
-
-    def complete(self, messages, tools, *, max_tokens=None, reasoning=REASONING_DEFAULT,
-                 timeout_s=None):
-        self.calls.append((reasoning, timeout_s))
-        advance, item = self.script.pop(0)
-        self.clock.t += advance
-        if isinstance(item, LLMError):
-            raise item
-        return item
-
-
-def _summary_conn_with_content(conn):
-    conv = storage.get_or_create_active_conversation(conn, 7)
-    storage.add_user_message(conn, conv, "hello")
-    storage.add_assistant_message(conn, conv, "hi")
-    return conv
-
-
-def test_t_v170_sum_01_deadline_taken_once_both_requests_issued(conn):
-    clock = _FakeClock(0.0)
-    conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (40.0, LLMResponse("cut off", [], "length")),
-        (50.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-    ])
-    result = summarize_conversation(
-        conn, conv, llm, None, budget_s=100.0, clock=clock,
-    )
-    assert result is not None
-    assert len(llm.calls) == 2  # both issued: 100 - 40 = 60 >= 30 floor
-
-
-def test_t_v170_sum_01_budget_s_none_is_byte_identical_to_todays_behaviour(conn):
-    conv = _summary_conn_with_content(conn)
-    llm = FakeLLM([LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")])
-    result = summarize_conversation(conn, conv, llm, None)
-    assert result is not None
-    assert llm.timeout_s_calls == [None]
-
-
-def test_t_v170_sum_02_retry_skipped_below_floor_returns_none_one_row(conn, caplog):
-    clock = _FakeClock(0.0)
-    conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (80.0, LLMResponse("cut off", [], "length")),
-    ])
-    with caplog.at_level("WARNING"):
-        result = summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
-    assert result is None
-    assert len(llm.calls) == 1  # the retry was never issued
-    assert len(_llm_rows(conn)) == 1
-    assert any("budget exhausted" in r.message for r in caplog.records)
-
-
-def test_t_v170_sum_02_repair_skipped_below_floor_returns_none_one_row(conn, caplog):
-    clock = _FakeClock(0.0)
-    conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (80.0, LLMResponse("not json at all", [], "stop")),
-    ])
-    with caplog.at_level("WARNING"):
-        result = summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
-    assert result is None
-    assert len(llm.calls) == 1
-    assert len(_llm_rows(conn)) == 1
-    assert any("budget exhausted" in r.message for r in caplog.records)
-
-
-def test_t_v170_sum_03_attempt_1_timeout_is_the_remaining_budget_not_none_not_client_own(conn):
-    clock = _FakeClock(0.0)
-    conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-    ])
-    summarize_conversation(conn, conv, llm, None, budget_s=10.0, clock=clock)
-    assert len(llm.calls) == 1
-    _, timeout_s = llm.calls[0]
-    assert timeout_s == 10.0  # not None, and not the client's own (irrelevant) 600
-
-
-def test_t_v170_sum_03_retrys_timeout_equals_the_budget_remaining_then(conn):
-    clock = _FakeClock(0.0)
-    conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (40.0, LLMResponse("cut off", [], "length")),
-        (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-    ])
-    summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
-    assert len(llm.calls) == 2
-    _, second_timeout = llm.calls[1]
-    assert second_timeout == 60.0  # 100 - 40
-
-
-def test_n5_attempt_1_issued_at_10s_no_retry_below_floor(conn, caplog):
-    clock = _FakeClock(0.0)
-    conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (0.0, LLMResponse("cut off", [], "length")),
-    ])
-    with caplog.at_level("WARNING"):
-        result = summarize_conversation(conn, conv, llm, None, budget_s=10.0, clock=clock)
-    assert len(llm.calls) == 1  # attempt 1 WAS issued -- 10s remain, positive
-    _, timeout_s = llm.calls[0]
-    assert timeout_s == 10.0
-    assert result is None  # no retry: remaining is still 10s < 30s floor
-
-
-def test_t_v170_sum_04_retry_and_repair_forced_off_under_every_policy(conn):
-    for policy, on_purposes in [
-        ("model-default", frozenset()),
-        ("off", frozenset()),
-        ("by-purpose", frozenset({"summary"})),
-    ]:
-        conv = storage.get_or_create_active_conversation(conn, 42)
-        storage.add_user_message(conn, conv, "hello")
-        clock = _FakeClock(0.0)
-        llm = _ClockAdvancingLLM(clock, [
-            (0.0, LLMResponse("cut off", [], "length")),
-            (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-        ])
-        cfg_stub = type("Cfg", (), {
-            "obs_capture_content": False,
-            "llm_reasoning_policy": policy,
-            "llm_reasoning_on_purposes": on_purposes,
-        })()
-        summarize_conversation(conn, conv, llm, cfg_stub, budget_s=1000.0, clock=clock)
-        assert len(llm.calls) == 2
-        attempt1_reasoning, _ = llm.calls[0]
-        retry_reasoning, _ = llm.calls[1]
-        assert retry_reasoning.value == "off" and retry_reasoning.tag == "summary"
-        if policy == "by-purpose":
-            assert attempt1_reasoning.value == "on"  # summary is in on_purposes here
-
-
-def test_t_v170_sum_05_module_constant_matches_config_local_copy():
-    from agent import SUMMARY_BUDGET_FLOOR_S
-    from config import _SUMMARY_BUDGET_FLOOR_S
-    assert SUMMARY_BUDGET_FLOOR_S == _SUMMARY_BUDGET_FLOOR_S == 30.0
-
-
-# --------------------------------------------------------------------------
-# T-V170-BEN-01…-05, CAR-01, N6, N7 -- devtools/bench.py
-# --------------------------------------------------------------------------
-
-import dataclasses  # noqa: E402
-import shutil  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-from devtools import bench  # noqa: E402
-
-_REAL_BASELINE_PATH = (
-    Path(__file__).resolve().parents[1] / "docs" / "assets" / "bench" / "baseline-v1.6.0.json"
-)
-
-
-def _load_real_baseline() -> dict:
-    with open(_REAL_BASELINE_PATH) as f:
-        return json.load(f)
-
-
-def _candidate_from_real_baseline(baseline: dict, *, scale: float = 1.0,
-                                   fix_failures: bool = True, tag: str = "cand-test") -> dict:
-    """A copy of the real, committed baseline: `meta.reasoning` and the two
-    new `llm_calls` fields added (T-V170-BEN-01's "candidate-shaped
-    document"); costs/tokens optionally scaled and failing repeats optionally
-    fixed, entirely through the real `totals_from_rows`/`summarize` so the
-    result stays internally consistent for `check_document`."""
-    candidate = json.loads(json.dumps(baseline))  # a plain, dict-only deep copy
-    candidate["meta"]["tag"] = tag
-    candidate["meta"]["git_commit"] = "b" * 40
-    candidate["meta"]["reasoning"] = {
-        "policy": "by-purpose", "on_purposes": ["tool-round"],
-        "mechanism": {"tool-round": None, "final": None, "summary": "c:assistant-prefill"},
-        "provider_form": "lmstudio",
-    }
-    for run in candidate["runs"]:
-        if fix_failures:
-            run["success"] = True
-            run["failure"] = None
-            for check in run.get("checks", []):
-                check["ok"] = True
-                check["detail"] = "ok"
-        for call in run["llm_calls"]:
-            call["reasoning_requested"] = "default"
-            call["reasoning_honored"] = None
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                if call.get(key) is not None:
-                    call[key] = int(call[key] * scale)
-            if call.get("cost_usd") is not None:
-                call["cost_usd"] = call["cost_usd"] * scale
-        run["totals"] = bench.totals_from_rows(
-            run["llm_calls"], run["tool_calls"], run["totals"]["wall_ms"]
-        )
-    candidate["summary"] = bench.summarize(
-        candidate["runs"], candidate["meta"]["skipped_scenarios"], candidate["meta"]["repeats"]
-    )
-    return candidate
-
-
-def test_t_v170_ben_01_meta_reasoning_shape_and_additive_optionality():
-    real_baseline = _load_real_baseline()
-    # The real, committed baseline carries neither field -- frozen, never
-    # back-filled (REQ-V170-NG-03).
-    assert "reasoning" not in real_baseline["meta"]
-    for run in real_baseline["runs"]:
-        for call in run["llm_calls"]:
-            assert "reasoning_requested" not in call
-            assert "reasoning_honored" not in call
-    # bench.py check still exits 0 on it after LLM_CALL_COLUMNS widened.
-    code, reason = bench.check_document(real_baseline, mode="strict")
-    assert (code, reason) == (0, "valid")
-    assert "reasoning" not in bench.LOCKED_META_FIELDS
-
-    # A candidate-shaped document carrying both also passes check.
-    candidate = _candidate_from_real_baseline(real_baseline)
-    code, reason = bench.check_document(candidate, mode="strict")
-    assert (code, reason) == (0, "valid")
-
-    for policy in ("model-default", "off", "by-purpose"):
-        cfg_stub = type("Cfg", (), {
-            "llm_reasoning_policy": policy,
-            "llm_reasoning_on_purposes": frozenset({"final", "tool-round"}),
-        })()
-        meta = bench.reasoning_meta(cfg_stub, "lmstudio")
-        assert meta["policy"] == policy  # present on every run, model-default included
-        assert meta["on_purposes"] == ["final", "tool-round"]  # sorted
-        assert meta["mechanism"]["tool-round"] is None  # no off-mechanism -> null
-        assert meta["mechanism"]["summary"] is not None
-
-
-def test_t_v170_ben_02_comparability_against_the_real_baseline():
-    real_baseline = _load_real_baseline()
-    # The baseline compares clean with itself -- previously impossible
-    # (measured refusal: "env_flags.HISTORY_TOOL_STUB must be null on the
-    # baseline side"), which is why REQ-V170-BEN-02 exists at all.
-    assert bench.comparability(real_baseline, real_baseline) is None
-
-    # A treatment-only pair (only env_flags.LLM_REASONING_POLICY/_ON_PURPOSES
-    # and git_commit differ) compares clean too.
-    treated = _candidate_from_real_baseline(real_baseline)
-    treated["meta"]["env_flags"]["LLM_REASONING_POLICY"] = "off"
-    treated["meta"]["env_flags"]["LLM_REASONING_ON_PURPOSES"] = ""
-    assert bench.comparability(real_baseline, treated) is None
-
-    generation_changed = _candidate_from_real_baseline(real_baseline)
-    generation_changed["meta"]["generation_settings"] = dict(
-        generation_changed["meta"]["generation_settings"], agent={"temperature": 1}
-    )
-    reason = bench.comparability(real_baseline, generation_changed)
-    assert reason is not None and "locked meta field differs" in reason
-
-    stub_changed = _candidate_from_real_baseline(real_baseline)
-    stub_changed["meta"]["env_flags"]["HISTORY_TOOL_STUB"] = "off"
-    assert bench.comparability(real_baseline, stub_changed) == (
-        "env_flags.HISTORY_TOOL_STUB differs"
-    )
-
-    failover_changed = _candidate_from_real_baseline(real_baseline)
-    failover_changed["meta"]["env_flags"]["LLM_FAILOVER"] = "auto"
-    reason = bench.comparability(real_baseline, failover_changed)
-    assert reason is not None and "LLM_FAILOVER" in reason
-
-    routed = _candidate_from_real_baseline(real_baseline)
-    routed["meta"]["env_flags"]["LLM_SUMMARY_MODEL"] = "openrouter:cheap/model"
-    reason = bench.comparability(real_baseline, routed)
-    assert reason is not None and "LLM_SUMMARY_MODEL" in reason
-
-
-def test_t_v170_ben_03_config_sha256_excludes_only_the_treatment():
-    base = load_config(env=base_env(), load_env_file=False)
-    treated = dataclasses.replace(
-        base, llm_reasoning_policy="off", llm_reasoning_on_purposes=frozenset()
-    )
-    assert bench.config_sha256(base) == bench.config_sha256(treated)
-
-    non_excluded_changed = dataclasses.replace(base, llm_max_tokens=base.llm_max_tokens + 1)
-    assert bench.config_sha256(base) != bench.config_sha256(non_excluded_changed)
-
-
-def test_t_v170_ben_04_and_ben_06_gate_verdicts_against_the_real_baseline(tmp_path):
-    real_baseline = _load_real_baseline()
-    base_path = tmp_path / "baseline.json"
-    base_path.write_text(json.dumps(real_baseline), encoding="utf-8")
-
-    def _report(candidate: dict) -> int:
-        cand_path = tmp_path / "candidate.json"
-        cand_path.write_text(json.dumps(candidate), encoding="utf-8")
-        return bench.main([
-            "report", "--baseline", str(base_path), "--candidate", str(cand_path),
-            "--gate", "--out", str(tmp_path / "report.md"),
-        ])
-
-    both_pass = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
-    assert _report(both_pass) == 0
-
-    cost_fails = _candidate_from_real_baseline(real_baseline, scale=1.0, fix_failures=True)
-    assert _report(cost_fails) == 1
-
-    s18_stays_2_of_3 = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=False)
-    assert s18_stays_2_of_3["summary"]["per_scenario"]["S18"] == {
-        **s18_stays_2_of_3["summary"]["per_scenario"]["S18"], "success": 2, "of": 3,
-    }
-    v = bench.verdict(real_baseline, s18_stays_2_of_3)
-    assert v.passed is False
-    assert any("S18 2/3" in line for line in v.lines)
-    # item 2 (two-repeat-loss) does NOT catch a 2-of-3 alone -- prove the new
-    # rule is the one doing the work, not the old one.
-    assert not any("regressed scenarios" in line and "S18" in line for line in v.lines)
-    assert _report(s18_stays_2_of_3) == 1
-
-    two_repeat_loss = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
-    s01_runs = [r for r in two_repeat_loss["runs"] if r["scenario"] == "S01"]
-    for run in s01_runs[:2]:
-        run["success"] = False
-        run["failure"] = "checks"
-    two_repeat_loss["summary"] = bench.summarize(
-        two_repeat_loss["runs"], two_repeat_loss["meta"]["skipped_scenarios"],
-        two_repeat_loss["meta"]["repeats"],
-    )
-    assert _report(two_repeat_loss) == 1
-
-    timeout_trap = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
-    timeout_trap["meta"]["timeout_s"] = 600.0
-    assert _report(timeout_trap) == 2
-
-
-def test_n6_aborted_candidate_refused_before_per_scenario():
-    real_baseline = _load_real_baseline()
-    candidate = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
-    candidate["meta"]["aborted"] = "timeout:S05-2"
-    code, reason = bench.check_document(candidate, mode="strict")
-    assert code == bench.EXIT_NOT_COMPARABLE
-    assert "aborted" in reason
-    v = bench.verdict(real_baseline, candidate)
-    assert v.passed is False
-
-
-def test_t_v170_ben_05_gate_required_full_scenarios_shape():
-    assert bench.GATE_REQUIRED_FULL_SCENARIOS == ("S13", "S14", "S15", "S16", "S17", "S18")
-    from llm.base import REQUEST_DEFAULTS
-    assert "GATE_REQUIRED_FULL_SCENARIOS" not in bench.constants()
-    assert "GATE_REQUIRED_FULL_SCENARIOS" not in REQUEST_DEFAULTS
-    real_baseline = _load_real_baseline()
-    assert bench.scenarios_sha256() == real_baseline["meta"]["scenarios_sha256"]
-
-
-# --------------------------------------------------------------------------
-# T-V170-CAR-01, N7 -- the --tag sanitiser
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("tag", [
-    "baseline-v1.6.0", "cand-v170-off", "a", "a" * 64,
-])
-def test_t_v170_car_01_tag_accepts(tag):
-    assert bench._TAG_RE.match(tag) is not None
-    assert tag not in (".", "..")
-
-
-@pytest.mark.parametrize("tag", [
-    "..", ".", "a/b", "../x", "a\\b", "", "a" * 65, "a b",
-])
-def test_t_v170_car_01_tag_rejects(tag):
-    assert tag in (".", "..") or bench._TAG_RE.match(tag) is None
-
-
-def test_n7_tag_escape_refused_before_any_filesystem_write(monkeypatch, capsys):
-    def _forbidden(*args, **kwargs):
-        raise AssertionError("shutil.rmtree must not be called")
-
-    monkeypatch.setattr(shutil, "rmtree", _forbidden)
-    code = bench.main(["run", "--tag", "../escape"])
-    assert code == bench.EXIT_ERROR
-    err = capsys.readouterr().err
-    assert "--tag" in err and "[A-Za-z0-9._-]" in err
-
-
-# --------------------------------------------------------------------------
-# T-V170-VER-01, T-V170-RPT-02, T-V170-ACC-03 -- written at T8, before the
-# candidate freeze (REQ-V170-ACC-03), because no test may change after it.
-# `_REAL_PROJECT_ROOT` (not `config.PROJECT_ROOT`, which the autouse
-# `isolated_project_root` fixture patches to a `tmp_path`) is required for
-# every one of these: they inspect the real committed tree, never a fixture.
-# --------------------------------------------------------------------------
-
-import re  # noqa: E402
-import subprocess  # noqa: E402
-import tomllib  # noqa: E402
-
-import dotenv  # noqa: E402
-
-import bot as bot_module  # noqa: E402
-
-_REAL_PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_ACC03_ALLOWED_SELECTION_FILES = frozenset(
-    {"config.py", "pyproject.toml", ".env.example", "README.md", "AGENTS.md"}
-)
-
-
-def test_t_v170_ver_01_version_matches_independent_tomllib_read(capsys):
-    with open(_REAL_PROJECT_ROOT / "pyproject.toml", "rb") as handle:
-        expected = tomllib.load(handle)["project"]["version"]
-    assert bot_module.main(["--version"]) == 0
-    assert capsys.readouterr().out == f"tg-agent-bot {expected}\n"
-
-
-def test_t_v170_rpt_02_lint_docs_repointed_to_this_release():
-    from devtools.checks import DEFAULT_CONFIG_PATH, load_gate_config
-
-    raw = load_gate_config(DEFAULT_CONFIG_PATH)
-    lint_docs = raw["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.7.0.md"
-    assert lint_docs["ledger_header"] == (
-        "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | "
-        "Tokens ↑/↓ | Cost | Model | Harness |"
-    )
-
-
-def _acc03_cand_v170_documents(root: Path = _REAL_PROJECT_ROOT) -> list[tuple[str, dict]]:
-    """(tag, doc) for every committed `cand-v170-*.json`, sorted by tag so the
-    result is deterministic; empty before T11/T12 land any."""
-    bench_dir = root / "docs" / "assets" / "bench"
-    docs = []
-    for path in sorted(bench_dir.glob("cand-v170-*.json")):
-        with open(path, encoding="utf-8") as handle:
-            docs.append((path.stem, json.load(handle)))
-    return docs
-
-
-def _acc03_find_matching_candidates(
-    cand_docs: list[tuple[str, dict]], resolved: tuple[str, list[str]]
-) -> list[str]:
-    """Tags of every candidate whose `meta.reasoning` (policy,
-    sorted(on_purposes)) equals `resolved`; REQ-V170-ACC-03 needs this list to
-    hold exactly one entry, never a policy literal of its own."""
-    return [
-        tag
-        for tag, doc in cand_docs
-        if (doc["meta"]["reasoning"]["policy"], sorted(doc["meta"]["reasoning"]["on_purposes"]))
-        == resolved
-    ]
-
-
-def _acc03_env_example_reasoning_defaults(root: Path = _REAL_PROJECT_ROOT) -> tuple[str, list[str]]:
-    """The pair `.env.example`'s active lines document, parsed the same way
-    `load_dotenv` would parse `.env` itself -- never a hand-rolled reader."""
-    values = dotenv.dotenv_values(root / ".env.example")
-    policy = values.get("LLM_REASONING_POLICY") or "model-default"
-    raw_purposes = values.get("LLM_REASONING_ON_PURPOSES")
-    purposes = (
-        ["tool-round"]
-        if raw_purposes is None
-        else sorted(item.strip() for item in raw_purposes.split(",") if item.strip())
-    )
-    return policy, purposes
-
-
-def _acc03_final_tree_reasoning_pair() -> tuple[str, list[str]]:
-    """`load_config()` with no `LLM_REASONING_*` in the process environment and
-    without the deployment `.env` (REQ-V170-ACC-03's own precondition)."""
-    cfg = load_config(env=base_env(), load_env_file=False)
-    return cfg.llm_reasoning_policy, sorted(cfg.llm_reasoning_on_purposes)
-
-
-def test_t_v170_acc_03_find_matching_candidates_synthetic():
-    docs = [
-        ("cand-v170-off", {"meta": {"reasoning": {"policy": "off", "on_purposes": []}}}),
-        (
-            "cand-v170-by-purpose",
-            {"meta": {"reasoning": {"policy": "by-purpose", "on_purposes": ["summary"]}}},
-        ),
-    ]
-    assert _acc03_find_matching_candidates(docs, ("off", [])) == ["cand-v170-off"]
-    assert _acc03_find_matching_candidates(docs, ("model-default", ["tool-round"])) == []
-    extra = {"meta": {"reasoning": {"policy": "off", "on_purposes": []}}}
-    dup = docs + [("cand-v170-off-2", extra)]
-    assert _acc03_find_matching_candidates(dup, ("off", [])) == ["cand-v170-off", "cand-v170-off-2"]
-
-
-def test_t_v170_acc_03_cand_v170_documents_reads_the_committed_shape(tmp_path):
-    bench_dir = tmp_path / "docs" / "assets" / "bench"
-    bench_dir.mkdir(parents=True)
-    (bench_dir / "cand-v170-off.json").write_text(
-        json.dumps({"meta": {"reasoning": {"policy": "off", "on_purposes": []}}}), encoding="utf-8"
-    )
-    (bench_dir / "cand-v170-by-purpose.json").write_text(
-        json.dumps({"meta": {"reasoning": {"policy": "by-purpose", "on_purposes": ["summary"]}}}),
-        encoding="utf-8",
-    )
-    (bench_dir / "baseline-v1.6.0.json").write_text("{}", encoding="utf-8")
-    docs = _acc03_cand_v170_documents(root=tmp_path)
-    assert {tag for tag, _ in docs} == {"cand-v170-off", "cand-v170-by-purpose"}
-
-
-def test_t_v170_acc_03_env_example_documents_the_compatibility_default():
-    # REQ-V170-POL-01: the active line always carries the *current shipped*
-    # default -- at T8, that is still the pre-T12 compatibility pair.
-    assert _acc03_env_example_reasoning_defaults() == ("model-default", ["tool-round"])
-
-
-def test_t_v170_acc_03_equivalence_half():
-    cand_docs = _acc03_cand_v170_documents()
-    if not cand_docs:
-        pytest.skip("no cand-v170-*.json candidate document committed yet (pre-T11/T12)")
-    resolved = _acc03_final_tree_reasoning_pair()
-    matches = _acc03_find_matching_candidates(cand_docs, resolved)
-    assert len(matches) == 1, f"expected exactly one matching candidate, found {matches}"
-    assert resolved == _acc03_env_example_reasoning_defaults()
-
-
-def test_t_v170_acc_03_version_half():
-    with open(_REAL_PROJECT_ROOT / "pyproject.toml", "rb") as handle:
-        version = tomllib.load(handle)["project"]["version"]
-    cand_docs = _acc03_cand_v170_documents()
-    resolved = _acc03_final_tree_reasoning_pair()
-    has_match = len(_acc03_find_matching_candidates(cand_docs, resolved)) == 1
-    assert version == ("1.7.0" if has_match else "1.6.0")
-
-
-def _acc03_run_git_readonly(args: list[str], root: Path) -> subprocess.CompletedProcess:
-    """Read-only against `root` -- `devtools/checks.py:677`'s plain
-    `subprocess.run` precedent; no `GIT_*` scrubbing needed, unlike
-    `tests/test_v15_standards.py`'s fixtures, which *write* into a throwaway
-    repo and must guard against a leaked `GIT_DIR`."""
-    return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=False
-    )
-
-
-_ACC03_T12_PROMPT_RE = re.compile(r"docs/prompts/\d+-v170-t12-[\w.-]*\.md")
-
-
-def _acc03_find_selection_commit(root: Path = _REAL_PROJECT_ROOT) -> str | None:
-    """REQ-V170-REV-01 item 8: the single commit whose body cites T12's
-    prompt file. `None` (a recorded skip, never a hard failure) when zero or
-    more than one commit matches."""
-    result = _acc03_run_git_readonly(["log", "--format=%H%x00%B%x03"], root)
-    if result.returncode != 0:
-        return None
-    matches = []
-    for chunk in result.stdout.split("\x03"):
-        chunk = chunk.strip("\n")
-        if not chunk:
-            continue
-        sha, _, body = chunk.partition("\x00")
-        if _ACC03_T12_PROMPT_RE.search(body):
-            matches.append(sha)
-    return matches[0] if len(matches) == 1 else None
-
-
-def _acc03_selection_commit_diff(sha: str, root: Path = _REAL_PROJECT_ROOT) -> dict[str, list[str]]:
-    """path -> the hunk body's changed lines (the `+++`/`---` file headers
-    excluded, the leading `+`/`-` stripped) for `git diff <sha>^..<sha>`."""
-    names = _acc03_run_git_readonly(["diff", "--name-only", f"{sha}^", sha], root)
-    per_file: dict[str, list[str]] = {}
-    for path in (line for line in names.stdout.splitlines() if line):
-        diff = _acc03_run_git_readonly(["diff", f"{sha}^", sha, "--", path], root)
-        per_file[path] = [
-            line[1:]
-            for line in diff.stdout.splitlines()
-            if line[:1] in ("+", "-") and not line.startswith(("+++", "---"))
-        ]
-    return per_file
-
-
-def _acc03_validate_selection_commit_hunks(per_file: dict[str, list[str]]) -> list[str]:
-    """Structural check of REQ-V170-REV-01 item 8: every changed line in
-    `config.py` names one of the two variables, `pyproject.toml`'s diff
-    touches only its `version` line, and the three documentation files' diffs
-    touch only lines naming a variable or a version string. Returns the list
-    of problems found -- empty means clean. Names no policy or version
-    literal of its own."""
-    version_re = re.compile(r"\d+\.\d+\.\d+")
-    problems = []
-    for path, lines in per_file.items():
-        if path not in _ACC03_ALLOWED_SELECTION_FILES:
-            problems.append(f"disallowed path in the selection commit: {path}")
-            continue
-        if path == "config.py":
-            for line in lines:
-                if "llm_reasoning_policy" not in line and "llm_reasoning_on_purposes" not in line:
-                    problems.append(f"config.py hunk names neither variable: {line!r}")
-        elif path == "pyproject.toml":
-            for line in lines:
-                if "version" not in line:
-                    problems.append(f"pyproject.toml hunk outside the version line: {line!r}")
-        else:  # .env.example, README.md, AGENTS.md
-            for line in lines:
-                names_variable = (
-                    "LLM_REASONING_POLICY" in line or "LLM_REASONING_ON_PURPOSES" in line
-                )
-                if not names_variable and not version_re.search(line):
-                    problems.append(
-                        f"{path} hunk names neither variable nor a version string: {line!r}"
-                    )
-    return problems
-
-
-def test_t_v170_acc_03_selection_commit_locator_and_hunks_synthetic(tmp_path):
-    from tests.test_v15_standards import _git
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(["init", "-q"], repo)
-    _git(["config", "user.email", "test@example.invalid"], repo)
-    _git(["config", "user.name", "Test"], repo)
-    seed = {
-        "config.py": "llm_reasoning_policy = 'model-default'\n",
-        "pyproject.toml": '[project]\nversion = "1.6.0"\n',
-        ".env.example": "LLM_REASONING_POLICY=model-default\n",
-        "README.md": "LLM_REASONING_POLICY docs\n",
-        "AGENTS.md": "LLM_REASONING_POLICY docs\n",
-        "unrelated.py": "x = 1\n",
-    }
-    for name, content in seed.items():
-        (repo / name).write_text(content, encoding="utf-8")
-    _git(["add", "-A"], repo)
-    _git(["commit", "-q", "-m", "seed"], repo)
-
-    clean = {
-        "config.py": "llm_reasoning_policy = 'off'\n",
-        "pyproject.toml": '[project]\nversion = "1.7.0"\n',
-        ".env.example": "LLM_REASONING_POLICY=off\n",
-        "README.md": "LLM_REASONING_POLICY=off now\n",
-        "AGENTS.md": "LLM_REASONING_POLICY=off now\n",
-    }
-    for name, content in clean.items():
-        (repo / name).write_text(content, encoding="utf-8")
-    _git(["add", "-A"], repo)
-    _git(
-        ["commit", "-q", "-m",
-         "feat: selection\n\n(prompt: docs/prompts/999-v170-t12-selection.md)"],
-        repo,
-    )
-
-    sha = _acc03_find_selection_commit(root=repo)
-    assert sha is not None
-    per_file = _acc03_selection_commit_diff(sha, root=repo)
-    assert set(per_file) == _ACC03_ALLOWED_SELECTION_FILES
-    assert _acc03_validate_selection_commit_hunks(per_file) == []
-
-    # a second commit citing the same T12 prompt makes the locator ambiguous
-    (repo / "unrelated.py").write_text("x = 2\n", encoding="utf-8")
-    (repo / "config.py").write_text("llm_reasoning_policy = 'by-purpose'\n", encoding="utf-8")
-    _git(["add", "-A"], repo)
-    _git(
-        ["commit", "-q", "-m", "feat: bad\n\n(prompt: docs/prompts/999-v170-t12-selection.md)"],
-        repo,
-    )
-    assert _acc03_find_selection_commit(root=repo) is None
-
-
-def test_t_v170_acc_03_selection_commit_hunk_validator_rejects_a_sixth_path():
-    per_file = {
-        "config.py": ["    llm_reasoning_policy = 'off'"],
-        "pyproject.toml": ['version = "1.7.0"'],
-        "unrelated.py": ["x = 2"],
-    }
-    problems = _acc03_validate_selection_commit_hunks(per_file)
-    assert any("unrelated.py" in problem for problem in problems)
-
-
-def test_t_v170_acc_03_selection_commit_hunk_validator_rejects_an_off_topic_line():
-    per_file = {"README.md": ["some unrelated documentation change"]}
-    problems = _acc03_validate_selection_commit_hunks(per_file)
-    assert len(problems) == 1 and "README.md" in problems[0]
-
-
-def test_t_v170_acc_03_selection_commit_allowlist_half():
-    sha = _acc03_find_selection_commit()
-    if sha is None:
-        pytest.skip("no T12 selection commit exists yet (pre-T12)")
-    per_file = _acc03_selection_commit_diff(sha)
-    disallowed = set(per_file) - _ACC03_ALLOWED_SELECTION_FILES
-    assert not disallowed, f"selection commit touched disallowed paths: {sorted(disallowed)}"
-    problems = _acc03_validate_selection_commit_hunks(per_file)
-    assert problems == [], problems
