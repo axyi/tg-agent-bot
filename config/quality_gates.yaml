@@ -8,7 +8,7 @@ profiles:
   pre-commit: [ruff-check, ruff-format, gitleaks-staged, branch-name]
   pre-push:   [ruff-check-all, ruff-format, branch-name, pytest, selftest,
                gitleaks-tree, trivy, semgrep, skylos, mutation-v15, mutation-v160,
-               hooks-installed, doctor]
+               mutation-v170, hooks-installed, doctor]
   full:       [uv-sync, ruff-check-all, ruff-format, branch-name, pytest,
                selftest, selftest-live, mutation-all, gitleaks-tree, trivy,
                semgrep, skylos, hooks-installed, doctor, lint-docs]
@@ -245,6 +245,20 @@ gates:
     diff_scoped: false
     timeout_seconds: 1190
 
+  # spec-v1.7.0 T9 (REQ-V170-GATE-02): the nine v170-* entries of section
+  # 14.4. Measured directly 2026-09-07 (`time uv run --locked python
+  # devtools/mutation_check.py --select v170-`, this tree, 9/9 killed):
+  # real=8m53.680s (533.680s) -> 2x ~1067.36s, rounded up to 1070s.
+  mutation-v170:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, "v170-"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 1070
+
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
   # directly on 2026-09-05 (`time uv run --locked python
@@ -257,6 +271,15 @@ gates:
   # rather than a change in the mutation set itself -- the 2x safety
   # margin exists precisely to absorb this kind of run-to-run variance, so
   # the fresh measurement is used as-is rather than adjusted.
+  #
+  # spec-v1.7.0 T9: nine v170-* entries added (92 total). Re-measured
+  # directly 2026-09-07 (`time uv run --locked python
+  # devtools/mutation_check.py`, no --select, this tree, 92/92 killed):
+  # real=39m3.796s (2343.796s) -> 2x ~4687.592s, rounded up to 4690s. Down
+  # from 5040s at 83 entries despite nine more entries and a larger suite
+  # per rerun -- consistent with the same shared-machine variance noted
+  # above (this run happened to land on a quieter stretch); used as
+  # measured, per the same rationale.
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -265,7 +288,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 5040
+    timeout_seconds: 4690
 
   hooks-installed:
     kind: command

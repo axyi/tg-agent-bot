@@ -387,9 +387,17 @@ def test_n8_schema_version_6_raises(conn):
 
 
 def test_t_v170_sum_05_raises_below_the_summary_floor():
+    # Discriminates the new check from the pre-existing `_check_timeout_budget`
+    # (REQ-V14-REL-01): with LLM_MAX_TOKENS == LLM_SUMMARY_MAX_TOKENS == 1536,
+    # the pre-existing check's own floor is 21.1 + 0.093*1536 = 163.948s --
+    # 180s clears it -- while this check's floor adds the 30s rescue-retry
+    # floor on top (193.948s), which 180s does not clear. A timeout that
+    # merely satisfies the older check must not also satisfy this one.
     with pytest.raises(ConfigError) as exc:
         load_config(
-            env=base_env(LLM_TIMEOUT_S="240", LLM_SUMMARY_MAX_TOKENS="8000"),
+            env=base_env(
+                LLM_TIMEOUT_S="180", LLM_MAX_TOKENS="1536", LLM_SUMMARY_MAX_TOKENS="1536"
+            ),
             load_env_file=False,
         )
     message = str(exc.value)

@@ -905,6 +905,114 @@ MUTATIONS = [
         "why": "REQ-V160-SRV-10: a request whose Host header does not match "
         "must be rejected with 400, never let through",
     },
+    # -------------------------------------------------------------------
+    # spec-v1.7.0 (REQ-V170-TST-03): nine entries, each breaking a
+    # security- or correctness-critical mechanism of the reasoning policy,
+    # the summary budget or bench.py's new gate/tag-safety checks.
+    # -------------------------------------------------------------------
+    {
+        "id": "v170-failover-drops-reasoning",
+        "path": "llm/failover.py",
+        # `reasoning=reasoning, timeout_s=timeout_s` appears identically at
+        # both call sites (the primary path and `_try_other`'s fallback);
+        # `self._clients[other].complete(` disambiguates to the fallback
+        # one -- the path T-V170-POL-04's failover-triggering test drives.
+        "find": (
+            "            response = self._clients[other].complete(\n"
+            "                messages, tools, max_tokens=max_tokens, reasoning=reasoning, "
+            "timeout_s=timeout_s\n"
+            "            )\n"
+        ),
+        "replace": (
+            "            response = self._clients[other].complete(\n"
+            "                messages, tools, max_tokens=max_tokens, timeout_s=timeout_s\n"
+            "            )\n"
+        ),
+        "why": "REQ-V170-POL-04: the failover fallback must forward the "
+        "caller's ReasoningRequest unchanged, never silently drop back to "
+        "REASONING_DEFAULT",
+    },
+    {
+        "id": "v170-summary-retry-ignores-budget",
+        "path": "agent.py",
+        "find": (
+            "                llm, messages, record, attempt=2, max_tokens=retry_max_tokens,\n"
+            "                reasoning=rescue_reasoning, timeout_s=timeout_s,\n"
+        ),
+        "replace": (
+            "                llm, messages, record, attempt=2, max_tokens=retry_max_tokens,\n"
+            "                reasoning=rescue_reasoning, timeout_s=None,\n"
+        ),
+        "why": "REQ-V170-SUM-03: the truncation retry must derive its HTTP "
+        "timeout from the remaining budget, never re-send the original, "
+        "already-partially-spent timeout",
+    },
+    {
+        "id": "v170-summary-floor-ignored",
+        "path": "agent.py",
+        "find": "SUMMARY_BUDGET_FLOOR_S = 30.0\n",
+        "replace": "SUMMARY_BUDGET_FLOOR_S = 0.0\n",
+        "why": "REQ-V170-SUM-02: below this floor the retry/repair must be "
+        "skipped rather than issued on an unusably short remaining budget",
+    },
+    {
+        "id": "v170-summary-floor-check-removed",
+        "path": "config.py",
+        "find": "    _check_summary_floor_budget(llm_timeout_s, llm_summary_max_tokens)\n",
+        "replace": "",
+        "why": "REQ-V170-SUM-05: load_config must refuse a "
+        "LLM_TIMEOUT_S/LLM_SUMMARY_MAX_TOKENS pair that leaves no room for "
+        "the rescue-retry floor, not just the existing per-request timeout "
+        "check",
+    },
+    {
+        "id": "v170-rescue-retry-keeps-reasoning",
+        "path": "agent.py",
+        "find": '    rescue_reasoning = resolve_reasoning("off", frozenset(), "summary")\n',
+        "replace": "    rescue_reasoning = reasoning\n",
+        "why": "REQ-V170-SUM-04: the rescue retry and the JSON-repair call "
+        "must always resolve reasoning off, regardless of the configured "
+        "policy -- reusing attempt 1's own resolution defeats the rescue",
+    },
+    {
+        "id": "v170-honored-treats-null-as-positive",
+        "path": "agent.py",
+        "find": (
+            "    if reasoning_tokens is None and reasoning_chars == 0:\n"
+            "        return None\n"
+        ),
+        "replace": "",
+        "why": "REQ-V170-OBS-01 rule 2: absent evidence (no reasoning-token "
+        "count and no reasoning text) must record NULL, never a concrete "
+        "0/1 verdict manufactured from a missing measurement",
+    },
+    {
+        "id": "v170-tag-sanitiser-removed",
+        "path": "devtools/bench.py",
+        "find": '    if arguments.tag in (".", "..") or not _TAG_RE.match(arguments.tag):\n',
+        "replace": "    if False:\n",
+        "why": "REQ-V170-CAR-01 / N7: a malicious --tag (e.g. `..`) must be "
+        "refused before any path is built from it, never reach "
+        "shutil.rmtree",
+    },
+    {
+        "id": "v170-config-hash-includes-treatment",
+        "path": "devtools/bench.py",
+        "find": '    "llm_reasoning_policy", "llm_reasoning_on_purposes",\n',
+        "replace": '    "llm_reasoning_on_purposes",\n',
+        "why": "REQ-V170-BEN-03: the reasoning policy is the treatment under "
+        "test, not part of the locked instrument -- hashing it would make "
+        "config_sha256 unstable across a policy-only candidate pair",
+    },
+    {
+        "id": "v170-gate-ignores-3of3",
+        "path": "devtools/bench.py",
+        "find": "    for scenario_id in GATE_REQUIRED_FULL_SCENARIOS:\n",
+        "replace": "    for scenario_id in ():\n",
+        "why": "REQ-V170-BEN-06 item 3: report --gate must refuse a candidate "
+        "where any of S13..S18 is not a clean 3/3, e.g. S18 at 2/3, never "
+        "exit 0 on it",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

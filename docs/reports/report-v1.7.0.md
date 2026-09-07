@@ -1,19 +1,25 @@
 # Implementation report — spec-v1.7.0
 
-**Status: BLOCKED at T9 — docs and gate config landed (T8); the nine
-`v170-*` mutation entries are authored, tested and confirmed (92/92 killed
-full-suite), but wiring `mutation-v170` into the `pre-push` profile
-conflicts with a pre-existing gate-matrix test and REQ-V170-RPT-03 item 4's
-spec-`sha256`-frozen invariant — see "Blocker at T9" below. Awaiting
-operator authorisation of one of three proposed resolutions.**
+**Status: T9 complete — the nine `v170-*` mutation entries landed (92/92
+killed), `mutation-v170` wired into `pre-push` with a measured timeout,
+`mutation-all`'s timeout re-measured at 92 entries. The T9 blocker
+(gate-matrix test vs. a table missing from `spec-v1.7.0.md`) was resolved
+by operator authorisation, option 1: the amended gate-matrix table was
+written into the spec itself — see the spec `sha256` values below and
+"Blocker at T9" / "## T9" further down for the full record. Run continues
+to T10.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
 (`tool-round`, `final`); at most `summary` may ship one.**
 
 - **Spec:** `docs/spec/spec-v1.7.0.md`
-- **Spec `sha256`** (recorded at T0, MUST NOT change during the run):
+- **Spec `sha256` at T0** (REQ-V170-RPT-03 item 4 required this unchanged
+  through T14; it did not stay unchanged — see the deviation note below):
   `d6ad4a4a05859883f6f6cde4466512b2fa980767df6b9ab82d778a0ae32c263a`
+- **Spec `sha256` after the T9 deviation** (current, from
+  `sha256sum docs/spec/spec-v1.7.0.md`):
+  `16fa1361122c11e14ab37bbb45abfb855efef7c8fc715247a4d741fc3952f7c8`
 - **Executor:** claude-sonnet-5 (Claude Code)
 - **`<base>`** (HEAD before this run's first commit): `706c690d35f34d96d1ee0fbcb8e9be08bafa30e7`
 - **`<implementation-tip>`**: not reached yet.
@@ -1308,6 +1314,93 @@ named for. Re-verified by hand (manually deleting the call site, confirming
 the test now fails with `DID NOT RAISE ConfigError`, then restoring via
 `git checkout`) and by a full clean 9-entry `--select v170-` re-run
 (9/9 killed) before the 92-entry full run.
+
+## T9 — mutation entries and gate config (REQ-V170-TST-03/-04, GATE-02/-03)
+
+### The nine `v170-*` entries (REQ-V170-TST-03)
+
+| id | what it breaks | killed by |
+|---|---|---|
+| `v170-failover-drops-reasoning` | `llm/failover.py`'s fallback path stops forwarding the caller's `ReasoningRequest`, silently reverting to `REASONING_DEFAULT` | `T-V170-POL-04` |
+| `v170-summary-retry-ignores-budget` | the truncation retry sends `timeout_s=None` instead of the remaining budget | `T-V170-SUM-03` |
+| `v170-summary-floor-ignored` | `SUMMARY_BUDGET_FLOOR_S` 30.0 → 0.0 | `T-V170-SUM-02` |
+| `v170-summary-floor-check-removed` | `config.py`'s `_check_summary_floor_budget` call site is deleted | `T-V170-SUM-05` |
+| `v170-rescue-retry-keeps-reasoning` | the rescue retry reuses attempt 1's own resolved reasoning instead of a forced `"off"` | `T-V170-SUM-04` |
+| `v170-honored-treats-null-as-positive` | `_reasoning_honored`'s absent-evidence guard is removed | `T-V170-OBS-03` |
+| `v170-tag-sanitiser-removed` | `bench.py`'s `--tag` validity check is replaced with `if False:` | `T-V170-CAR-01`, `N7` |
+| `v170-config-hash-includes-treatment` | `llm_reasoning_policy` is removed from `CONFIG_HASH_EXCLUDED` | `T-V170-BEN-03` |
+| `v170-gate-ignores-3of3` | the `GATE_REQUIRED_FULL_SCENARIOS` loop inside `verdict()` is neutralized | `T-V170-BEN-04`, `T-V170-BEN-05` |
+
+Every `find` string was verified byte-exact against its real target
+(`sed -n ... \| cat -A`) before being added, and
+`mutation_check.py --list` was run and its output inspected before the
+gate was trusted (REQ-V170-TST-04) — the one design defect this surfaced
+(`v170-summary-floor-check-removed`'s original killer-test input) is the
+self-caught survivor documented above, found and fixed before the entries
+were ever committed.
+
+### Blocker resolution (`docs/prompts/113-...`, operator-authorized)
+
+The T9 blocker recorded above — wiring `mutation-v170` into `pre-push`
+broke `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`, and
+section 14.1's one authorized repair (repoint the test's spec-file read at
+`spec-v1.7.0.md`) could not succeed because that file carried no
+gate-matrix table at all — was resolved by the operator authorizing
+resolution option 1: the amended gate-matrix table was written directly
+into `docs/spec/spec-v1.7.0.md`, restated byte-identical to
+`spec-v1.6.0.md:2146-2167` except one new row
+(`` `mutation_check.py --select v170-` | — | yes | — | **new**, 9 entries ``),
+confirmed by `diff` before landing. `tests/test_v15_standards.py`'s
+`_GATE_MATRIX_LABEL_TO_NAME` gained the matching label and the matrix
+test's `spec_text` read was repointed from `spec-v1.6.0.md` to
+`spec-v1.7.0.md`, exactly as section 14.1 lines 1998–1999 specify;
+`test_v15_gate_04` is green against the amended file.
+
+**Deviation, disclosed against REQ-V170-RPT-03 item 4** ("the committed
+spec's T0 `sha256`, unchanged at T14"): it did **not** stay unchanged.
+
+- T0-recorded: `d6ad4a4a05859883f6f6cde4466512b2fa980767df6b9ab82d778a0ae32c263a`
+- Post-T9 (current): `16fa1361122c11e14ab37bbb45abfb855efef7c8fc715247a4d741fc3952f7c8`
+
+The change is exactly the one authorized table addition — no other byte
+of `spec-v1.7.0.md` differs (confirmed by the `diff` above, run against
+`spec-v1.6.0.md`'s table, and by inspection of `git diff` for this
+commit, which touches only the one inserted block). REQ-V170-RPT-03 item
+4's underlying purpose — proving the spec was not quietly rewritten to
+match the implementation after the fact — is served here by disclosure
+(both hashes recorded, the diff shown, the operator's explicit
+authorization referenced) rather than by the hash staying literally
+frozen through what turned out to be a spec-authoring gap.
+
+### Gate config (REQ-V170-GATE-02)
+
+`config/quality_gates.yaml` gained the `mutation-v170` gate (`--select
+v170-`, `pre-push` profile, timeout `1070s` — 2× a real, `time`-wrapped
+9-entry run at `533.680s`) and a re-measured `mutation-all` timeout
+(`4690s` — 2× a real, `time`-wrapped 92-entry run at `2343.796s`,
+confirmed by a second full run afterward once the blocker-resolution
+edits landed). `AGENTS.md`'s Gates section now reads 92 entries (up from
+83), attributed to spec-v1.7.0 T9.
+
+### Tests
+
+One existing test's input corrected (`T-V170-SUM-05`'s
+`test_t_v170_sum_05_raises_below_the_summary_floor`, the self-caught fix
+above); no new test functions — the nine mutation entries are proven by
+the existing `T-V170-*` suite, per REQ-V170-TST-03's own design (every
+entry names a pre-existing killer test rather than requiring a new one).
+
+### Gates
+
+`ruff check .`: 0. `pytest`: 1133 collected, 1131 passed, 2 skipped
+(unchanged from T8's close — no new tests, `T-V170-ACC-03`'s two halves
+still skip). `lint-docs`: 0. `bot.py --selftest`: 0.
+`bot.py --selftest-live`: 0. `bench.py check baseline-v1.6.0.json`: 0.
+`mutation_check.py --select v170-`: 0 — 9/9 killed (after the fix).
+`mutation_check.py` (full): 0 — 92/92 killed, 0 survived/errored/drifted,
+confirmed twice (once before the blocker-resolution edits, once after,
+per REQ-V170-TST-04's own "before the gate is trusted" rule applied at
+every point the tree changed).
 
 ## Ledger row (paste into `economics.md`)
 

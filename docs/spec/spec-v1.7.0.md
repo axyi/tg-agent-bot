@@ -1932,6 +1932,44 @@ column, and `checks.py lint-docs` now points at this release's report
 **this** file (§14.1) and `_GATE_MATRIX_LABEL_TO_NAME` gains the new label.
 Every other row stands.
 
+**This table supersedes REQ-V160-GATE-03's, which becomes a frozen historical
+record** (mirroring how that table itself superseded REQ-V15-GATE-11's).
+Restated in full here, byte-identical to `spec-v1.6.0.md:2146-2167` except the
+one new row this release adds — because
+`tests/test_v15_standards.py:1726`'s matrix test parses the gate-matrix table
+of the file it is pointed at, and §14.1 line 1999 repoints it at **this**
+file; a table that existed only in prose (as drafted through the T9
+blocker of `docs/reports/report-v1.7.0.md`) left that test unsatisfiable by
+any edit §14.1 authorizes. Added under the operator's explicit T9
+authorization (the blocker's resolution option 1); the spec's `sha256`
+changes as a direct, disclosed consequence — recorded, with both the T0
+and post-amendment hashes, against REQ-V170-RPT-03 item 4 in
+`docs/reports/report-v1.7.0.md`.
+
+| gate | pre-commit | pre-push | full | note |
+|---|:---:|:---:|:---:|---|
+| `ruff check` (staged) | yes | — | — | `--force-exclude` |
+| `ruff check .` (tree) | — | yes | yes | gate 2 |
+| `ruff format --check` | yes | yes | yes | blocking on new files only, shadow elsewhere |
+| branch-name check | yes | yes | yes | warn-only on `main` |
+| commit-msg checks | own hook | — | via `replay` | REQ-V15-CC-01…03 |
+| `gitleaks git --staged` | yes | — | — | staged secrets |
+| `gitleaks dir` (tree) | — | yes | yes | tracked set, any severity, not diff-scoped |
+| `uv sync --locked` | — | — | yes | gate 1 |
+| `pytest` | — | yes | yes | gate 3 |
+| `bot.py --selftest` | — | yes | yes | gate 4, offline, binds no port |
+| `bot.py --selftest-live` | — | — | yes | gate 5; needs `.env`, Docker, LM Studio |
+| `mutation_check.py --select v15-` | — | yes | — | 4 entries |
+| `mutation_check.py --select v160-` | — | yes | — | **new**, ≥ 7 entries |
+| `mutation_check.py --select v170-` | — | yes | — | **new**, 9 entries |
+| `mutation_check.py` (all) | — | — | yes | gate 6, timeout re-measured |
+| `trivy fs` | — | yes | yes | diff-scoped, HIGH/CRITICAL |
+| `semgrep scan` | — | yes | yes | diff-scoped, ERROR |
+| `skylos` | — | yes | yes | shadow |
+| `install_hooks.py --check` | — | yes | yes | hook chain installed |
+| `checks.py doctor` | — | yes | yes | pinned versions |
+| `checks.py lint-docs` | — | — | yes | prompts + ledger row |
+
 Any new gitleaks, trivy, semgrep or skylos finding introduced by this release is
 **fixed**. A suppression requires a code comment on the suppressing line citing
 the REQ id that justifies it, and the report quotes both. The 19 pre-existing
