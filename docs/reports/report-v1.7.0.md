@@ -1,6 +1,8 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T2 scratch-harness design complete (no commit of the patch itself, per the task's own rule); run continues to T3.**
+**Status: T3 stage A complete — a summary-shippable mechanism was found
+(candidate c, assistant prefill). No STOP; the run continues to T4 (stage
+B).**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -104,6 +106,7 @@ No further benchmark-affecting change discovered yet at T0.
 | T0 | no | — |
 | T1 | no | — (small over-map reads noted in T1's own RLM note, above) |
 | T2 | no | — scratch patch only, `devtools/bench_scenarios.py:204-212`/`:262-270` and `llm/lmstudio.py:35-53` read-only, per the map |
+| T3 | no | — only commands run, under the scratch patch of T2, per the map |
 
 (extended per task as the run proceeds)
 
@@ -415,6 +418,129 @@ full sidecar FAIL fixture: calibration.warm_proof=False -> rate/predicted/measur
 
 ALL DRY-RUN ASSERTIONS PASSED -- zero live calls, zero network.
 ```
+
+## Stage A execution (T3 — REQ-V170-RSN-01…-07)
+
+Real live pairs, against the resolved instrument
+(`192.168.0.145`, `Bionic v1.1.1`, `qwen/qwen3.8-27b`, context `42496`).
+Fixed order **a → b → c → d → e**; **b** already `unsupported` (T1, VERIFY
+1, consumes no pair). Probing **stopped at c** — the first candidate honored
+and shippable for `summary` — so **d is not probed**. **e** is
+environmental/informational only and was not exercised (no wire mechanism,
+never a candidate).
+
+### Empirical finding, ahead of the pair table: S05 never emits a `final`-tagged call
+
+Both `llm_calls` rows of every S05 pair carry `tools_exposed: 3` — the
+second (answering) round never withholds tools. `agent.py`'s round loop
+(`expose_tools = round_no <= TOOL_ROUND_LIMIT and tools_used <
+TOOL_EXECUTION_LIMIT`, `TOOL_ROUND_LIMIT = 7`, `TOOL_EXECUTION_LIMIT = 12`)
+only withholds tools once those limits are exceeded; S05 finishes in two
+rounds, well inside both, so the model is simply choosing not to call a
+second tool rather than being denied one. Under REQ-V170-POL-02's
+`reasoning_tag(purpose, request_tools)`, a call with non-empty
+`request_tools` tags `"tool-round"` regardless of whether the model chooses
+to use it — so **every S05 call observed this run tags `tool-round`, never
+`final`**. REQ-V170-RSN-01's own citation ("S05 … one turn, one tool round,
+then a final tools-withheld round — both agent tags in one cheap run")
+does not hold empirically on Bionic 1.1.1/this instrument at the current
+round/tool limits. Consequence: **no pair this run can establish `honored`
+for the `final` tag** — RSN-03's rule operates over rows of a given purpose,
+and zero rows exist for `final`. This is recorded as "no evidence", treated
+exactly like `unknown` (never `honored`), independently of and consistent
+with RSN-07's separate agent-tag fallback below. It does not change the
+budget or any candidate's verdict, since `final` was already going to read
+`none` in the mechanism table for the fallback reason alone.
+
+### Pair table (one row per member)
+
+| letter | pair | purpose group | member | mechanism | Σ reasoning_tokens | max reasoning_chars | reasoning share | resent tokens | new tokens | scenario result | file |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a | 1 | tool-round | default | — (untreated) | 345 | 1102 | 0.777 | 917 | 5182 | 1/1 | `rsn17-a-1-tool-round-final-default.json` |
+| a | 1 | tool-round | off | a: `chat_template_kwargs.enable_thinking=false` | 345 | 1102 | 0.777 | 917 | 5182 | 1/1 | `rsn17-a-1-tool-round-final-off.json` |
+| a | 2 | summary | default | — (untreated) | 517 | 1421 | 0.754 | 1138 | 950 | 1/1 | `rsn17-a-2-summary-default.json` |
+| a | 2 | summary | off | a: `chat_template_kwargs.enable_thinking=false` | 532 | 1411 | 0.830 | 1134 | 946 | 1/1 | `rsn17-a-2-summary-off.json` |
+| c | 1 | tool-round | default | — (untreated) | 345 | 1101 | 0.772 | 917 | 5182 | 1/1 | `rsn17-c-1-tool-round-final-default.json` |
+| c | 1 | tool-round | off | c: `assistant-prefill` (`<think>\n\n</think>\n\n`, last element) | **0** | **0** | 0.0 | 921 | 1256 | 1/1 | `rsn17-c-1-tool-round-final-off.json` |
+| c | 2 | summary | default | — (untreated) | 1060 | 1822 | 0.802 | 1389 | 946 | 1/1 | `rsn17-c-2-summary-default.json` |
+| c | 2 | summary | off | c: `assistant-prefill` | **0** | **0** | 0.0 | 3830 | 1319 | 1/1 | `rsn17-c-2-summary-off.json` |
+| c | 3 (confirming) | summary | default | — (untreated) | 474 | 1191 | 0.749 | 1134 | 946 | 1/1 | `rsn17-c-3-summary-default.json` |
+| c | 3 (confirming) | summary | off | c: `assistant-prefill` | **0** | **0** | 0.0 | 3833 | 1321 | 1/1 | `rsn17-c-3-summary-off.json` |
+
+All ten calls' `error_kind` is `None` (one transient `truncated` retry inside
+`c-2-default`'s summary attempt, per REQ-V160-TQ-01 — resolved on the second
+attempt within the same run, both attempts' rows counted). `git diff` proved
+empty (`llm/lmstudio.py` reverted via `git checkout --`) before every next
+member/pair began — recorded per-step during execution, restated here as a
+single line since all ten checks passed identically.
+
+**REQ-V170-RSN-04's own measured evidence** — candidate c's message-array
+disturbance, exactly the phenomenon v1.4 measured on candidate d
+(`338 → 634`, quoted in the spec): on S05 (agent rounds only, no `/new`)
+resent tokens are unaffected (917 → 921, noise-level) since the prefill is
+appended once per already-short round; on S12 (which *also* carries agent
+rounds before `/new`) resent tokens roughly **triple** (1134-1389 → 3830-3833)
+and the off member picked up two spurious tool calls the default member
+never made (`tools 2` vs `tools 0` in the bench summary line) — the
+candidate's prefill visibly disturbs the growing agent-round prefix, which
+is exactly why REQ-V170-RSN-04's own table already marks candidate c "not
+shippable" for `tool-round`/`final` (breaks CCH-02(a)), independent of and
+consistent with RSN-07's separate TTFT-based fallback.
+
+### Honored decision, per candidate and purpose (REQ-V170-RSN-03)
+
+| candidate | purpose | off: Σrt=0 ∧ max rc=0? | default: rt>0 ∨ rc>0? | checks pass both members? | verdict |
+|---|---|---|---|---|---|
+| a | tool-round | no (345/1102, unchanged) | yes | yes | **not honored** |
+| a | summary | no (532/1411, unchanged) | yes | yes | **not honored** |
+| c | tool-round | **yes** (0/0) | yes (345/1101) | yes | **honored** |
+| c | summary | **yes** (0/0, confirmed twice: pair 2 and pair 3) | yes (1060/1822 and 474/1191) | yes | **honored** |
+| c | final | — | — | — | **no evidence** (S05 never emits a `final`-tagged call this run, above) |
+
+### Shippability (REQ-V170-RSN-04, RSN-07)
+
+- **c / summary**: honored (above) **and** shippable per RSN-04's own
+  table — the prefill sits in a one-shot message list with no shared
+  growing prefix (`_ask_for_summary` builds `load_context_messages(...) +
+  [...]` fresh, `tools=None`), so CCH-02(a)'s concern does not apply.
+  **RSN-07's confirming mixed-policy pair is not required for a
+  summary-only-shippable candidate** (RSN-05: pair 3 is "a repeat of pair 2
+  for a candidate that would ship only for summary") — satisfied above by
+  the pair-3 confirming repeat.
+- **c / tool-round, final**: honored (`tool-round`) or no-evidence
+  (`final`), but **not shippable either way**: RSN-04's own message-array
+  judgement already forbids it (breaks CCH-02(a), confirmed by the measured
+  resent-token blow-up above), and independently RSN-07's fallback (T1:
+  `stats.time_to_first_token` absent/empty on the OpenAI-compatible route —
+  trigger 1) forbids **any** candidate from being agent-shippable this run.
+  **The mixed-policy pair (`rsn17-c-mixed-{control,mixed}.json` and its
+  `-ttft.json` sidecar) was never spent** — decided before stage A began, at
+  T1 — consistent with T2's documented design.
+- **a / tool-round, summary**: not honored (above) — the question of
+  shippability does not arise.
+
+### Per-purpose mechanism table (REQ-V170-RSN-06)
+
+| purpose | mechanism | evidence |
+|---|---|---|
+| `tool-round` | `none` | candidate c honored but unshippable (message-array + RSN-07 fallback); candidate a not honored; d not probed (probing stopped at c) |
+| `final` | `none` | no purpose-tagged evidence this run (S05 never withholds tools at these round/tool limits); would be unshippable for the same reasons as `tool-round` regardless |
+| `summary` | **c** — assistant prefill, `{"role": "assistant", "content": "<think>\n\n</think>\n\n"}`, appended as the last message | honored and shippable, confirmed across two independent pairs (2 and 3, the confirming repeat) |
+
+**A summary-shippable mechanism was found. REQ-V170-RSN-06's STOP does
+NOT fire.** The run continues to stage B (T4).
+
+### Budget arithmetic (REQ-V170-RSN-05)
+
+Candidate **a**: pair 1 (S05) + pair 2 (S12) = 2 pairs, both "not honored",
+no pair 3 (nothing to confirm). Candidate **b**: 0 pairs (`unsupported`,
+T1). Candidate **c**: pair 1 (S05) + pair 2 (S12) + pair 3 (confirming
+repeat of S12) = 3 pairs. Candidate **d**: 0 pairs (not probed — probing
+stopped at c per RSN-02). Candidate **e**: 0 pairs (informational only, no
+wire mechanism; no `rsn17-e-info` note filed — the mechanism table already
+records it as never entering the wire). **Total: 5 of the 15-pair ceiling.**
+No re-run was needed for a scenario failure unrelated to reasoning (RSN-05's
+one-re-run allowance), and the mixed-policy pair was never spent (above).
 
 ## Ledger row (paste into `economics.md`)
 

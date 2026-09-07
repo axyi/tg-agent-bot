@@ -1,0 +1,422 @@
+{
+  "bench_schema": 2,
+  "meta": {
+    "tag": "rsn17-a-2-off",
+    "started_at": "2026-09-07T05:29:09Z",
+    "finished_at": "2026-09-07T05:31:22Z",
+    "git_commit": "4380b4e488442d33b02820738f49bec19051c468",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.8-27b",
+    "context_length": 42496,
+    "repeats": 1,
+    "only": [
+      "S12"
+    ],
+    "timeout_s": 600,
+    "prefix_tokens": 842,
+    "scenarios_sha256": "f2b6c41c344b537fd370e839669fe2274d3b01810a5c450083a6dc399b391972",
+    "pricing": {
+      "basis": "reference:qwen/qwen3.8-27b",
+      "model": "qwen/qwen3.8-27b",
+      "input_usd_per_mtok": 0.42,
+      "output_usd_per_mtok": 3.0,
+      "cached_input_usd_per_mtok": 0.08499999999999999,
+      "fetched_at": "2026-09-07T05:29:09Z"
+    },
+    "skipped_scenarios": [],
+    "env_flags": {
+      "HISTORY_TOOL_STUB": "on",
+      "EXEC_OUTPUT_DEFAULT_CHARS": 1500,
+      "FETCH_INLINE_DEFAULT_CHARS": 5000,
+      "LLM_REASONING": null,
+      "LLM_SUMMARY_MODEL": "",
+      "LLM_FAILOVER": "off",
+      "LLM_MAX_TOKENS": 4096,
+      "LLM_REASONING_POLICY": null,
+      "LLM_REASONING_ON_PURPOSES": null
+    },
+    "config_sha256": "1f32efc222f526a5a911f199f0c06e96f9f24ba81309c96b770dd8cd45f7eff1",
+    "constants": {
+      "CONTEXT_WINDOW_MESSAGES": 30,
+      "EXEC_MAX_STREAM_BYTES": 4096,
+      "FETCH_MAX_BYTES": 65536,
+      "ROUND_LIMIT": 8,
+      "TOOL_ROUND_LIMIT": 7,
+      "TOOL_EXECUTION_LIMIT": 12,
+      "HTTP_ATTEMPT_LIMIT": 9,
+      "REQUEST_DEFAULTS": {
+        "temperature": 0,
+        "stream": false,
+        "tool_choice": "auto"
+      }
+    },
+    "lmstudio_version": "Bionic v1.1.1",
+    "served_model_id": "qwen/qwen3.8-27b",
+    "lmstudio_context_length": 42496,
+    "generation_settings": {
+      "agent": {
+        "temperature": 0,
+        "max_tokens": 4096,
+        "stream": false,
+        "tool_choice": "auto"
+      },
+      "summary_initial": {
+        "temperature": 0,
+        "max_tokens": 512,
+        "stream": false
+      },
+      "summary_retry": {
+        "temperature": 0,
+        "max_tokens": 1536,
+        "stream": false
+      },
+      "provider_defaults": [
+        "seed",
+        "stop",
+        "top_p"
+      ]
+    },
+    "prompt_tools_sha256": "748fa855c27a583a9ded6a1ba62b49158786a39bc7ccecef96be7052de6500e3",
+    "obs_capture_content": false
+  },
+  "runs": [
+    {
+      "scenario": "S12",
+      "repeat": 1,
+      "success": true,
+      "failure": null,
+      "checks": [
+        {
+          "kind": "answer_regex",
+          "ok": true,
+          "detail": "ok"
+        },
+        {
+          "kind": "summary_exists",
+          "ok": true,
+          "detail": "ok"
+        }
+      ],
+      "answers": [
+        "\n\nЗаписал: проект Orion, дедлайн 15 октября. Учту в рамках нашего разговора, но между сессиями память не сохраняю — напоминай, если нужно.",
+        "\n\nПроект Orion, дедлайн 15 октября."
+      ],
+      "llm_calls": [
+        {
+          "id": 1,
+          "turn_id": 2,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-07T05:29:13Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 879,
+          "completion_tokens": 171,
+          "total_tokens": 1050,
+          "cached_tokens": null,
+          "reasoning_tokens": 127,
+          "reasoning_chars": 541,
+          "prompt_chars": 2447,
+          "prompt_chars_by_role": "{\"assistant\": 0, \"system\": 946, \"tool\": 0, \"tools\": 1388, \"user\": 113}",
+          "messages_n": 2,
+          "tools_exposed": 3,
+          "latency_ms": 33778,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.0008821800000000001,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "trace_id": "bd17f82f7ed677b61ca691b95737ad6f",
+          "span_id": "ef0d70023a78e1eb",
+          "conv_seq": 1
+        },
+        {
+          "id": 2,
+          "turn_id": 4,
+          "purpose": "agent",
+          "round": 1,
+          "attempt": 1,
+          "ts": "2026-09-07T05:29:47Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 946,
+          "completion_tokens": 85,
+          "total_tokens": 1031,
+          "cached_tokens": null,
+          "reasoning_tokens": 69,
+          "reasoning_chars": 275,
+          "prompt_chars": 2692,
+          "prompt_chars_by_role": "{\"assistant\": 176, \"system\": 946, \"tool\": 0, \"tools\": 1388, \"user\": 182}",
+          "messages_n": 4,
+          "tools_exposed": 3,
+          "latency_ms": 20807,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.00065232,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "trace_id": "07103834705adf0440718c9c224ddb09",
+          "span_id": "ce4fc85ab0b731b1",
+          "conv_seq": 1
+        },
+        {
+          "id": 3,
+          "turn_id": null,
+          "purpose": "summary",
+          "round": 0,
+          "attempt": 1,
+          "ts": "2026-09-07T05:30:08Z",
+          "provider": "lmstudio",
+          "model": "qwen/qwen3.8-27b",
+          "prompt_tokens": 255,
+          "completion_tokens": 385,
+          "total_tokens": 640,
+          "cached_tokens": null,
+          "reasoning_tokens": 336,
+          "reasoning_chars": 1411,
+          "prompt_chars": 829,
+          "prompt_chars_by_role": "{\"assistant\": 249, \"system\": 0, \"tool\": 0, \"tools\": 0, \"user\": 580}",
+          "messages_n": 5,
+          "tools_exposed": 0,
+          "latency_ms": 74159,
+          "finish_reason": "stop",
+          "tool_calls_n": 0,
+          "error_kind": null,
+          "cost_usd": 0.0012621,
+          "cost_basis": "reference:qwen/qwen3.8-27b",
+          "trace_id": "3983c7a2244878e290becc0a2e6be151",
+          "span_id": "f30b257c20de0d30",
+          "conv_seq": 1
+        }
+      ],
+      "tool_calls": [],
+      "spans": [
+        {
+          "id": 1,
+          "trace_id": "bd17f82f7ed677b61ca691b95737ad6f",
+          "span_id": "ef0d70023a78e1eb",
+          "parent_span_id": "f868dd208648598f",
+          "turn_id": 2,
+          "name": "chat qwen/qwen3.8-27b",
+          "kind": "CLIENT",
+          "ts": "2026-09-07T05:29:13Z",
+          "start_ns": 516742141578231,
+          "duration_ms": 33778,
+          "status": "ok",
+          "status_message": null,
+          "conv_seq": 1,
+          "attributes": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "lmstudio",
+            "gen_ai.request.model": "qwen/qwen3.8-27b",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "qwen/qwen3.8-27b",
+            "gen_ai.usage.input_tokens": 879,
+            "gen_ai.usage.output_tokens": 171,
+            "gen_ai.usage.reasoning.output_tokens": 127,
+            "tg_agent.attempt": 1,
+            "tg_agent.cost_basis": "reference:qwen/qwen3.8-27b",
+            "tg_agent.cost_usd": 0.0008821800000000001,
+            "tg_agent.purpose": "agent",
+            "tg_agent.round": 1
+          }
+        },
+        {
+          "id": 2,
+          "trace_id": "bd17f82f7ed677b61ca691b95737ad6f",
+          "span_id": "f868dd208648598f",
+          "parent_span_id": null,
+          "turn_id": null,
+          "name": "invoke_agent tg-agent-bot",
+          "kind": "INTERNAL",
+          "ts": "2026-09-07T05:29:13Z",
+          "start_ns": 516742141388492,
+          "duration_ms": 33790,
+          "status": "ok",
+          "status_message": null,
+          "conv_seq": 1,
+          "attributes": {
+            "gen_ai.agent.name": "tg-agent-bot",
+            "gen_ai.conversation.id": 1,
+            "gen_ai.operation.name": "invoke_agent",
+            "tg_agent.bench_tag": "rsn17-a-2-off",
+            "tg_agent.scenario_id": "S12"
+          }
+        },
+        {
+          "id": 3,
+          "trace_id": "07103834705adf0440718c9c224ddb09",
+          "span_id": "ce4fc85ab0b731b1",
+          "parent_span_id": "916857c6db05bf20",
+          "turn_id": 4,
+          "name": "chat qwen/qwen3.8-27b",
+          "kind": "CLIENT",
+          "ts": "2026-09-07T05:29:47Z",
+          "start_ns": 516775937099274,
+          "duration_ms": 20807,
+          "status": "ok",
+          "status_message": null,
+          "conv_seq": 1,
+          "attributes": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "lmstudio",
+            "gen_ai.request.model": "qwen/qwen3.8-27b",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "qwen/qwen3.8-27b",
+            "gen_ai.usage.input_tokens": 946,
+            "gen_ai.usage.output_tokens": 85,
+            "gen_ai.usage.reasoning.output_tokens": 69,
+            "tg_agent.attempt": 1,
+            "tg_agent.cost_basis": "reference:qwen/qwen3.8-27b",
+            "tg_agent.cost_usd": 0.00065232,
+            "tg_agent.purpose": "agent",
+            "tg_agent.round": 1
+          }
+        },
+        {
+          "id": 4,
+          "trace_id": "07103834705adf0440718c9c224ddb09",
+          "span_id": "916857c6db05bf20",
+          "parent_span_id": null,
+          "turn_id": null,
+          "name": "invoke_agent tg-agent-bot",
+          "kind": "INTERNAL",
+          "ts": "2026-09-07T05:29:47Z",
+          "start_ns": 516775936690481,
+          "duration_ms": 20818,
+          "status": "ok",
+          "status_message": null,
+          "conv_seq": 1,
+          "attributes": {
+            "gen_ai.agent.name": "tg-agent-bot",
+            "gen_ai.conversation.id": 1,
+            "gen_ai.operation.name": "invoke_agent",
+            "tg_agent.bench_tag": "rsn17-a-2-off",
+            "tg_agent.scenario_id": "S12"
+          }
+        },
+        {
+          "id": 5,
+          "trace_id": "3983c7a2244878e290becc0a2e6be151",
+          "span_id": "f30b257c20de0d30",
+          "parent_span_id": null,
+          "turn_id": null,
+          "name": "chat qwen/qwen3.8-27b",
+          "kind": "CLIENT",
+          "ts": "2026-09-07T05:30:08Z",
+          "start_ns": 516796759589013,
+          "duration_ms": 74159,
+          "status": "ok",
+          "status_message": null,
+          "conv_seq": 1,
+          "attributes": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "lmstudio",
+            "gen_ai.request.model": "qwen/qwen3.8-27b",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "qwen/qwen3.8-27b",
+            "gen_ai.usage.input_tokens": 255,
+            "gen_ai.usage.output_tokens": 385,
+            "gen_ai.usage.reasoning.output_tokens": 336,
+            "tg_agent.attempt": 1,
+            "tg_agent.bench_tag": "rsn17-a-2-off",
+            "tg_agent.cost_basis": "reference:qwen/qwen3.8-27b",
+            "tg_agent.cost_usd": 0.0012621,
+            "tg_agent.purpose": "summary",
+            "tg_agent.round": 0,
+            "tg_agent.scenario_id": "S12"
+          }
+        }
+      ],
+      "totals": {
+        "calls": 3,
+        "failed_calls": 0,
+        "prompt_tokens": 2080,
+        "completion_tokens": 641,
+        "cached_tokens": 0,
+        "reasoning_tokens": 532,
+        "tool_calls": 0,
+        "tool_output_tokens_est": 0,
+        "latency_ms": 128744,
+        "cost_usd": 0.0027965999999999998,
+        "resent_tokens": 1134,
+        "new_tokens": 946,
+        "wall_ms": 129058
+      }
+    }
+  ],
+  "summary": {
+    "runs": 1,
+    "skipped": 0,
+    "successes": 1,
+    "success_rate": 1.0,
+    "per_scenario": {
+      "S12": {
+        "success": 1,
+        "of": 1,
+        "median": {
+          "calls": 3,
+          "failed_calls": 0,
+          "prompt_tokens": 2080,
+          "completion_tokens": 641,
+          "cached_tokens": 0,
+          "reasoning_tokens": 532,
+          "tool_calls": 0,
+          "tool_output_tokens_est": 0,
+          "latency_ms": 128744,
+          "cost_usd": 0.0027965999999999998,
+          "resent_tokens": 1134,
+          "new_tokens": 946,
+          "wall_ms": 129058
+        }
+      }
+    },
+    "totals": {
+      "calls": 3,
+      "failed_calls": 0,
+      "prompt_tokens": 2080,
+      "completion_tokens": 641,
+      "cached_tokens": 0,
+      "reasoning_tokens": 532,
+      "tool_calls": 0,
+      "tool_output_tokens_est": 0,
+      "latency_ms": 128744,
+      "cost_usd": 0.0027965999999999998,
+      "resent_tokens": 1134,
+      "new_tokens": 946,
+      "wall_ms": 129058
+    },
+    "avg_per_task": {
+      "tokens": 2721.0,
+      "rounds": 2.0,
+      "tool_calls": 0.0,
+      "latency_ms": 128744.0
+    },
+    "cost_per_success": 0.0027965999999999998,
+    "tokens_per_success": 2721.0,
+    "resent_share": 0.5451923076923076,
+    "cache_hit_rate": null,
+    "top_tools": [],
+    "top_turn": {
+      "scenario": "S12",
+      "repeat": 1,
+      "turn": 4,
+      "round": 1,
+      "prompt_tokens": 946
+    },
+    "context_growth": {
+      "system": 0.0,
+      "tools": 0.0,
+      "user": 69.0,
+      "assistant": 176.0,
+      "tool": 0.0
+    }
+  }
+}
