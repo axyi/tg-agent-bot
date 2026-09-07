@@ -1,16 +1,18 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T10 complete — the clean-context review found two 🔴 findings
-(four tests hard-pinned the pre-T12 reasoning-policy default, which would
-have broken gate 3 the moment T12 lands; `T-V170-POL-07` was missing
-entirely) and one 🟡 (only one of three mandated test files existed); all
-fixed and re-verified, including a hand-simulated T12-style default flip.
-Every gate green: the six-gate sequence, `checks.py run --profile full`
-(15/15), `checks.py replay` (12/12). The T9 blocker (gate-matrix table
-added to `spec-v1.7.0.md` under operator authorisation) stands as
-recorded. Run continues to T11 — Stage C, the live candidate benchmark —
-pending the operator's separate check-in (a multi-hour undertaking against
-the GPU-hosted LM Studio server).**
+**Status: T11 complete — Stage C ran C1 (`by-purpose`/`tool-round`) and C2
+(`off`/explicit-empty) unconditionally; C3 not run (two independent
+grounds, see T11). C1 is the sole quality-passing candidate (54/54,
+S13-S18 all 3/3) but misses the cost gate (0.908x baseline, threshold
+0.70x); C2 fails both gates. Verdict: **FAIL, cost gate** —
+`docs/reports/bench-v1.7.0.md` records it. Per REQ-V170-BEN-07 row 2 the
+code still merges: T12 runs next with C1 (`by-purpose`/`tool-round`) as
+the shipped default, `pyproject.toml` moves to `1.7.0` inside that commit,
+and the run **stops before tagging** — no `v1.7.0` tag this run. A
+documentation defect (found under freeze, fixed in T12): `.env.example`
+and `README.md`, both authored at T8, describe
+`LLM_REASONING_ON_PURPOSES` backwards from what `llm/base.py` and the
+spec's own POL-03 prose implement.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -1521,6 +1523,223 @@ out-of-scope shadow findings — see the stale-NG-12-figure note above,
 
 `checks.py replay --range <base>..<tip>`: 0 — 12/12 commits PASS clean, no
 exceptions.
+
+## T11 — Stage C candidates (REQ-V170-BEN-01…-08)
+
+### Leading finding: the catalogue collapses to one wire treatment
+
+Before any result is read, the mechanism table this release actually ships
+(`llm/base.py:116-123`, frozen from T3's stage-A findings) makes C1, C2 and
+C3 **byte-identical on the wire**. `resolve_reasoning` (`llm/base.py:126-156`):
+under `by-purpose`, a tag **in** `on_purposes` resolves to `"on"` (untouched,
+`mechanism=None`) and a tag **not** listed resolves to `"off"`, degrading to
+`("default", None, tag)` whenever `mechanisms.get(tag)` is `None` — which it
+is for both `tool-round` and `final` this run. Only `summary` carries a real
+mechanism (`c: assistant-prefill`). Consequence, confirmed empirically below,
+not just read from source:
+
+- **C1** (`by-purpose`/`tool-round`): `tool-round` listed → `"on"`,
+  `mechanism=None`. `final` and `summary` unlisted → `"off"` attempted;
+  `final` has no mechanism (degrades to default, `mechanism=None`); `summary`
+  gets `c`.
+- **C2** (`off`/``): every tag → `"off"`; `tool-round`/`final` still degrade
+  to `mechanism=None` (no entry); `summary` still gets `c`.
+- **C3** (`by-purpose`/`tool-round,final`): identical to C1 for every tag —
+  listing `final` in `on_purposes` changes nothing, since its mechanism is
+  `None` either way (`"on"` and a degraded `"off"` both carry `mechanism=None`,
+  and `llm/lmstudio.py:47-56` builds the request from `reasoning.mechanism`
+  alone, never `.value`).
+
+So **every agent call in this run sends the identical request regardless of
+which candidate is active, and every summary call gets the identical `c`
+mechanism regardless of which candidate is active.** The three-candidate
+budget could not have discriminated between C1/C2/C3 this run; it would take
+a different instrument (one where `tool-round`/`final` had a shippable
+off-mechanism) to separate them. Confirmed from the committed documents
+themselves, not inferred: every `llm_calls` row of both C1 and C2 was
+grouped by `(purpose, tools_exposed>0, reasoning_requested, reasoning_honored)`:
+
+```
+cand-v170-by-purpose-tool: meta.reasoning.on_purposes=["tool-round"]
+  (agent, True, "on", 1)   x140
+  (summary, False, "off", 1) x6
+cand-v170-off: meta.reasoning.on_purposes=[]
+  (agent, True, "default", None) x143
+  (summary, False, "off", 1) x6
+```
+
+No `final`-tagged row exists in either document — S05's own finding from T3
+(agent rounds never withhold tools at these round/tool limits) holds at
+full-catalogue scale too.
+
+**A documentation defect this discovery surfaced, found under freeze and not
+fixed under freeze.** Both `.env.example`'s comment and `README.md`'s
+Reasoning-policy table (§"Configure", §"Reasoning policy" — both authored at
+T8) describe `LLM_REASONING_ON_PURPOSES` **backwards**: "which purposes get
+reasoning turned off" / "ask only the tags listed … to turn reasoning off; the
+rest get the provider's default". The code (above) and the spec's own POL-03
+prose (`spec-v1.7.0.md:962`, "`by-purpose` → `\"on\"` when `tag in
+on_purposes`") agree with each other and disagree with T8's prose: listed
+purposes are **kept on**, unlisted purposes get the off attempt. This is the
+inversion that shaped an incorrect prediction earlier in this run's own
+working notes (expecting C1 to be wire-identical to *baseline*, not to C2) —
+corrected here against the actual code and the actual measured
+`reasoning_requested` column before being written into this report.
+REQ-V170-ACC-03's freeze forbids editing either file now; both are in T12's
+five-file allowlist, and T12 already touches both for the shipped default —
+the wording correction rides in the same commit.
+
+### Instrument re-verification before C1
+
+Before the first Stage-C inference: address re-probed (`192.168.0.145`
+answered, matching the address already pinned since T10's own gate-5 re-run);
+`data[].id` held exactly one entry equal to `qwen/qwen3.8-27b`
+(`cfg.lmstudio_model`); `.env`'s `LLM_MAX_TOKENS=4096` and `LLM_TIMEOUT_S=600`
+confirmed by grep; `OBS_CAPTURE_CONTENT` absent from `.env`, so `False` by
+`Config`'s own default (re-confirmed at T10). LM Studio version
+(`Bionic v1.1.1`) and loaded context length (`42496`) are the T1
+operator-typed values, unchanged since T1 — no live endpoint exists to
+re-read them (T1's own VERIFY 3 finding stands). Tree clean except this run's
+own new files (`docs/prompts/116-...md`) before C1's first process started.
+
+### C1 — `cand-v170-by-purpose-tool` (one invocation)
+
+`LLM_REASONING_POLICY=by-purpose LLM_REASONING_ON_PURPOSES=tool-round`,
+`--repeats 3 --timeout-s 1800`, full catalogue, one invocation, no abort.
+**54/54 successes (100.0%)**, S13…S18 all 3/3, cost $0.17189, wall 4549s
+(~76 min).
+
+### C2 — `cand-v170-off` (three invocations, reassembled)
+
+`LLM_REASONING_POLICY=off LLM_REASONING_ON_PURPOSES=""` (explicit empty).
+Invocation 1 (full catalogue) ran S01…S14 clean, then **S13 repeat 2 failed
+a real `tool_calls_max` check** (6 > 5 — a genuine model-behaviour failure,
+not a harness artefact), then **S15 repeat 1 timed out at 1800s** (`exec` not
+called, no answer), tripping `meta.aborted` and stopping the run before
+S16…S18 were ever attempted (`run_bench` breaks both loops on the first
+aborted run, `devtools/bench.py:756-764`). Invocation 2, `--only S15` alone
+(isolated per memory `feedback_bench_py_shared_root_and_timeouts`): repeat 1
+succeeded, **repeat 2 timed out again at 1800s**, same shape as before —
+S15 is genuinely, repeatedly slow-or-stuck under this treatment on this
+instrument, not a one-off fluke. Invocation 3, `--only S16,S17,S18`: 9/9
+clean. Reassembled per REQ-V170-BEN-04's "aborts, and the merge" procedure —
+every `LOCKED_META_FIELDS` entry but `repeats`/`only` verified byte-identical
+across all three parts; S15's three repeats relabelled 1/2/3 from the two
+invocations that produced them (invocation-1 attempt, invocation-2's two
+attempts); merged `runs` re-summarised via `bench.summarize()`, never by
+hand; `meta.only` set to `null`, `meta.aborted` dropped; `bench.py check`
+exits 0 on the merged document. Result: **51/54 successes (94.4%)**, `S13`
+2/3, `S15` 1/3 — both below REQ-V170-BEN-06 item 3's required 3/3, cost
+$0.14612.
+
+**C2's failures are read as residual instrument variance, not a treatment
+effect, and reported as both.** Given the wire-identity finding above, C1 and
+C2 send identical requests for every purpose; the gate does not adjudicate
+cause, so both statements stand side by side: **mechanically, C2 fails the
+quality gate** (S13 2/3, S15 1/3, exactly REQ-V170-BEN-06 item 3's
+cause-blind design working as intended), and **empirically, this looks like
+the same variance the spec already documents for this instrument**
+(`baseline-v1.6.0` itself recorded S15 at 3/3 but with wall times spanning
+212–393s, and S18 at 2/3) rather than something C1 avoided and C2
+introduced — C1 simply did not happen to roll a bad S15 this run. The
+release's fix (turning summary reasoning off) did not remove this
+instrument's variance on S15; the gate exists exactly to catch that,
+cause-blind, and it did.
+
+**A second variance data point, in scenarios the treatment never touches:**
+`S01` (single-turn, no tools, no summary — every call resolves `"on"`/
+`mechanism=None` in C1, identical to baseline) shows reasoning-token counts
+of 217/217/225 on the baseline's three repeats against 618/306/751 on C1's —
+a 1.4×–3.5× swing on a scenario where the wire request is provably
+unchanged. This is the same class of finding as S15's flakiness: this
+instrument's own reasoning-chain length is not tightly reproducible run to
+run even at `temperature=0`, independent of any policy under test here. It
+inflates S01's own cost delta (+96.7%) in the per-scenario table below and
+is named here so that number is not misread as a regression the treatment
+caused.
+
+### C3 — not run
+
+Two independent grounds, either sufficient alone:
+
+1. **Procedural** (REQ-V170-BEN-05's sequencing rule): "run C3 only if
+   neither C1 nor C2 passes quality." C1 passes quality (54/54, S13…S18 all
+   3/3) — the condition is false, so C3 is not run, independent of C2's
+   result.
+2. **Mechanistic**: C3's `on_purposes` (`tool-round,final`) differs from
+   C1's (`tool-round`) only in explicitly listing `final` — and `final`'s
+   mechanism is `None` regardless, so C1 and C3 resolve to the same
+   `mechanism=None` for every agent call either way. C3 would have spent a
+   full 3-repeat run to reproduce C1's document byte-for-byte on the wire.
+
+### Gate verdicts (`docs/reports/bench-v1.7.0.md`, C1 as candidate)
+
+| | C1 (shipped candidate) | C2 |
+|---|---|---|
+| success rate | 54/54 (100.0%) | 51/54 (94.4%) |
+| S13…S18 3/3? | yes | no — S13 2/3, S15 1/3 |
+| quality gate | **pass** | **FAIL** |
+| C_plain | $0.003183 (0.908× baseline) | $0.002865 (0.817× baseline) |
+| C_conservative | $0.003183 | $0.002944 |
+| cost gate (≤0.70×) | **FAIL** | **FAIL** |
+| verdict | **FAIL** | **FAIL** |
+
+Neither candidate clears the 30% cost-reduction threshold: the only real
+wire change either produces is turning off reasoning on `summary` calls
+(6 of 150+ calls per full run), which is not enough volume to move the
+aggregate cost 30%, however completely it eliminates reasoning on the calls
+it does touch (Σ`reasoning_tokens` = 0 on every treated summary call, both
+candidates — the mechanism itself works exactly as designed where it
+applies; BEN-08's own latency figures below show summary median latency
+dropping from 53629ms to 12720ms under C1, a real, large, working effect,
+just on too small a share of total calls to clear the aggregate cost
+threshold).
+
+**REQ-V170-BEN-07 verdict: FAIL, cost gate.** A quality-passing candidate
+exists (C1), so per row 2 of BEN-07's table: **the code still merges — T12
+runs**, with C1 (`by-purpose`/`tool-round`) as the shipped default and
+`pyproject.toml` bumped to `1.7.0` inside that same commit. **The run stops
+before tagging — no `v1.7.0` tag this run.** The shortfall: C1's
+`C_conservative` ($0.003183) needs to reach ≤$0.002454 (0.70× baseline) and
+does not; the gap is 0.908× vs the 0.70× threshold.
+
+### BEN-08 — latency (reported, not gated)
+
+Baseline totals: 54 runs, 53 successes, 93m16s, $0.185776 (from
+`report-v1.6.0.md`). C1: 54 runs, 54 successes, 4549s (75m49s), $0.17189.
+Per-purpose median `chat`-span latency (from the gated report's own Latency
+table): median per call 17289ms → 17029ms; agent 16720.5ms → 17763.0ms
+(essentially flat, consistent with the wire-identity finding — agent calls
+are untouched); **summary 53629ms → 12720.5ms**, a 76% latency reduction —
+the one place the mechanism has room to act and does.
+
+### Invocation count, per candidate
+
+C1: 1 invocation, no abort. C2: 3 invocations (1 full-catalogue run aborted
+at S15, 1 isolated `--only S15` re-run also aborted mid-way, 1 `--only
+S16,S17,S18` clean), reassembled per REQ-V170-BEN-04. C3: 0 invocations
+(not run, two grounds above).
+
+### Gates
+
+No source, test or config file changed at T11 (candidate documents and
+report/prompt docs only), so `ruff check .` (0), `pytest` collection count
+and `bot.py --selftest` (0) are unaffected. **One test reads red, by its own
+design**: `test_t_v170_acc_03_equivalence_half` skips only while
+`docs/assets/bench/cand-v170-*.json` is empty (its own docstring: "empty
+before T11/T12 land any"); now that C1's and C2's documents are committed,
+it asserts `load_config()`'s current (pre-T12) resolution matches exactly
+one of them — and neither does, since the shipped default is still
+`model-default` until T12 moves it. `test_t_v170_acc_03_version_half`
+already tolerates this exact state (`has_match == False` ⇒ asserts `1.6.0`,
+which holds). This is the transition the test was written for, not a
+discovered defect — T12 (next, its trigger condition already met by C1's
+existence) resolves it by moving the shipped default to `by-purpose`/
+`tool-round`, at which point the equivalence half's single match is
+`cand-v170-by-purpose-tool`. `bench.py check` exits 0 on all three
+documents touched (`baseline-v1.6.0.json`, both candidates). Mutation gates
+and the live gates (5, `checks.py run --profile full`, `replay`) are
+deferred to after T12, which is the next commit and touches source.
 
 ## Ledger row (paste into `economics.md`)
 
