@@ -1,8 +1,7 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T3 stage A complete — a summary-shippable mechanism was found
-(candidate c, assistant prefill). No STOP; the run continues to T4 (stage
-B).**
+**Status: BLOCKED at T4 — operator decision needed before any implementation
+code is written. See "Blocker at T4", below. T0-T3 stand as recorded.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -541,6 +540,73 @@ wire mechanism; no `rsn17-e-info` note filed — the mechanism table already
 records it as never entering the wire). **Total: 5 of the 15-pair ceiling.**
 No re-run was needed for a scenario failure unrelated to reasoning (RSN-05's
 one-re-run allowance), and the mixed-policy pair was never spent (above).
+
+## Blocker at T4 (v0 §7.2 template, adapted — not a failing gate, a discovered spec conflict)
+
+```
+BLOCKED: bumping storage.SCHEMA_VERSION to 5 (REQ-V170-OBS-01) makes two
+pre-existing, UNLISTED tests fail, and REQ-V170-EC-03 forbids editing any
+test not named in §14.1's exhaustive amendment list.
+
+Conflicting requirements: REQ-V170-OBS-01 (MUST bump SCHEMA_VERSION 4 -> 5)
+vs. REQ-V170-EC-03 (MUST NOT edit an unlisted test; "a change making an
+unlisted test fail means the change is wrong -- stop and reconsider, do not
+edit the test").
+
+Affected tests (neither in §14.1's amendment list; tests/test_summary.py is
+explicitly in that section's "Explicitly NOT amended" list):
+  - tests/test_observability.py:462-471 (test_obs03_a_future_version_is_still_refused)
+  - tests/test_summary.py:150-161 (inside test_t_v1_sum_02_migration_from_v0_...,
+    the "ahead" / future-version block)
+
+Both hardcode `UPDATE schema_version SET version = 5` and assert
+`storage.init_schema` raises RuntimeError naming "5" -- i.e. both encode
+"5 is an unknown future version" as a literal. Once SCHEMA_VERSION becomes
+5, that premise is structurally false for any implementation: a
+`schema_version` row is a bare integer, so init_schema cannot distinguish
+"5 forced by the test" from "5 written by the real migration" once 5 is a
+supported version. No design choice in how the 4->5 migration is written
+changes this -- it is inherent to the version bump itself, not an artefact
+of a particular implementation.
+
+Evidence the spec anticipated this partway without closing the loop: N8
+("a database at schema version 6") already uses 6, not 5, as its
+unsupported-version probe for this release -- consistent with 5 being the
+new supported ceiling, but the two pre-existing tests using the OLD
+literal (5) were not added to the amendment list or the "explicitly not
+amended" verification list.
+
+Exit code: N/A -- no gate has run red; this is a pre-implementation
+conflict found while planning T4's storage.py migration, before any source
+edit.
+
+Fix cycles used: 0/5 -- this is not a gate failure the repair budget covers.
+
+Suspected spec defect: REQ-V170-EC-03's §14.1 amendment list is not
+exhaustive as written -- it omits the two future-boundary tests that
+REQ-V170-OBS-01's version bump structurally invalidates.
+
+Proposed erratum (not yet applied -- awaiting operator authorisation):
+  - tests/test_observability.py:467: `version = 5` -> `version = 6`;
+    :463's comment reworded to name schema 5 as current, 6 as the new
+    future boundary.
+  - tests/test_summary.py:152: `version = 5` -> `version = 6`; :151's
+    comment reworded identically.
+  - No other line in either file changes; both tests' assertions
+    (`assert "5" in str(raised.value)`) become `assert "6" in
+    str(raised.value)` accordingly -- still asserting the same property
+    (a future version is refused, named in the error), against the new
+    correct boundary.
+```
+
+**What is NOT blocked and stands as recorded:** T0-T3 (preconditions, live
+preflight, the stage-A scratch harness design, and stage A's real pairs —
+candidate c found honored and shippable for `summary`). The migration
+design itself (chain `_MIGRATION_2_TO_4`/`_MIGRATION_3_TO_4` unchanged, add
+a new `_MIGRATION_4_TO_5` applied unconditionally whenever the tree reaches
+version 4 — verified by hand-trace against fresh/1/2/3/4/5-idempotent
+starting points, all correct and duplicate-column-safe) is ready to apply
+the moment this is resolved. No implementation file has been touched.
 
 ## Ledger row (paste into `economics.md`)
 
