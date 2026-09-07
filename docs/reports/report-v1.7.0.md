@@ -1,8 +1,11 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T7 complete — `devtools/bench.py`'s comparability rule, `meta.reasoning`,
-the S13…S18 executable 3/3 gate and the `--tag` sanitiser all landed. Gates
-1-4-5 green; mutation gate running. Run continues to T8.**
+**Status: BLOCKED at T9 — docs and gate config landed (T8); the nine
+`v170-*` mutation entries are authored, tested and confirmed (92/92 killed
+full-suite), but wiring `mutation-v170` into the `pre-push` profile
+conflicts with a pre-existing gate-matrix test and REQ-V170-RPT-03 item 4's
+spec-`sha256`-frozen invariant — see "Blocker at T9" below. Awaiting
+operator authorisation of one of three proposed resolutions.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -1168,6 +1171,143 @@ allowlist halves, both with a recorded skip reason). `lint-docs`: 0.
 `bot.py --selftest`: 0. `bot.py --selftest-live`: 0. `bench.py check
 baseline-v1.6.0.json`: 0. `mutation_check.py`: 0 — 83/83 killed, 0
 survived/errored/drifted. `git diff --stat pyproject.toml`: empty.
+
+## Blocker at T9 (v0 §7.2 template, adapted — not a failing gate, a discovered spec conflict)
+
+```
+BLOCKED: wiring the mutation-v170 gate into the pre-push profile
+(REQ-V170-GATE-02) makes tests/test_v15_standards.py::
+test_v15_gate_04_profile_matrix_agrees_with_the_spec_table fail, and the
+only repair §14.1's exhaustive amendment list permits -- repointing that
+test's spec_text read from spec-v1.6.0.md to spec-v1.7.0.md
+(tests/test_v15_standards.py:1726, per REQ-V170-GATE-03) -- cannot restore
+it, because spec-v1.7.0.md carries no `| gate | pre-commit | pre-push |
+full |` table for the test to parse at all.
+
+Conflicting requirements: REQ-V170-GATE-02 (MUST place mutation-v170 in
+the pre-push profile) vs. the test's own self-consistency, which
+REQ-V170-GATE-03 / section 14.1 line 1999 direct to be restored by a
+one-line file-path swap that the actual file content cannot satisfy.
+
+Confirmed empirically -- the test fails BEFORE any test-file edit, from
+the profile-line change alone:
+
+  $ uv run --locked pytest tests/test_v15_standards.py -k gate_04 -v
+  FAILED test_v15_gate_04_profile_matrix_agrees_with_the_spec_table
+  AssertionError: pre-push
+  assert {'branch-name...on-v160', ...} == {'branch-name...on-v160', ...}
+    Extra items in the right set:
+    'mutation-v170'
+
+Confirmed spec-v1.7.0.md carries no gate-matrix table at all:
+
+  $ grep -n "| gate | pre-commit" docs/spec/spec-v1.7.0.md
+  (no output)
+  $ grep -n "^| gate | pre-commit" docs/spec/spec-v1.6.0.md docs/spec/spec-v1.7.0.md
+  docs/spec/spec-v1.6.0.md:2146:| gate | pre-commit | pre-push | full | note |
+
+Three ways to make _GATE_MATRIX_LABEL_TO_NAME's new
+"`mutation_check.py --select v170-`": "mutation-v170" entry (mandated by
+section 14.1 line 1998) self-consistent were checked; each violates a
+separate MUST:
+  1. Don't add the label to the dict -- REQ-V170-GATE-02's own mandated
+     profile membership then has no counterpart in `expected`, and the
+     test fails exactly as shown above (this is the failure already
+     reproduced, not a hypothetical).
+  2. Add the label, keep reading spec-v1.6.0.md -- line 1732's own
+     `assert label in matrix` fails; v1.6.0's table cannot contain a
+     `v170-` row (it predates this release).
+  3. Add the label, repoint to spec-v1.7.0.md as section 14.1 literally
+     says -- `_parse_gate_matrix`'s unguarded `next(...)` over the missing
+     header raises StopIteration; the test errors, it does not merely
+     fail.
+
+The only repair that keeps the test's *logic* within section 14.1's
+"complete" amendment list is authoring the amended matrix table into
+spec-v1.7.0.md itself (restating spec-v1.6.0.md's table, with exactly the
+two cells REQ-V170-GATE-03 names changed: mutation-v170 added at
+pre-push=yes, and the lint-docs row's note pointing at this release's
+report). That is evidently the spec author's intent -- section 14.1 line
+1999 only makes sense if the table exists there. But it edits the frozen
+spec body mid-run, and REQ-V170-RPT-03 item 4 separately requires
+"the committed spec's T0 sha256, unchanged at T14". Confirmed today's
+spec file still matches the T0-recorded hash exactly:
+
+  $ sha256sum docs/spec/spec-v1.7.0.md
+  d6ad4a4a05859883f6f6cde4466512b2fa980767df6b9ab82d778a0ae32c263a
+  (matches docs/reports/report-v1.7.0.md's T0-recorded value, unchanged)
+
+Note what is NOT the blocking constraint: REQ-V170-ACC-03's post-candidate
+freeze has not armed yet (it arms at the first candidate run, T11), so
+nothing here is forbidden by the freeze -- the conflict is between
+REQ-V170-GATE-02/-03 and REQ-V170-RPT-03 item 4, not the freeze.
+
+Exit code: N/A -- no gate has run red as part of a gate sequence; this was
+found while finishing T9's own work, before its commit.
+
+Fix cycles used: 0/5 -- not a gate-failure the repair budget covers.
+
+Proposed resolutions (not yet applied -- awaiting operator authorisation):
+
+  1. RECOMMENDED. Author the amended gate-matrix table into
+     spec-v1.7.0.md (a new section restating spec-v1.6.0.md's table with
+     the two REQ-V170-GATE-03 cells changed), accept that the spec's
+     sha256 changes, and record both the old and new hash plus this
+     deviation explicitly against REQ-V170-RPT-03 item 4 in the final
+     report -- disclosed, not silently reconciled. This is what section
+     14.1 line 1999 evidently assumes exists, and RPT-03 item 4's purpose
+     (proving the spec was not quietly rewritten to match the
+     implementation after the fact) is served by disclosing the edit and
+     both hashes, not by the hash being literally frozen through a
+     mid-run spec-authoring gap.
+  2. Extend section 14.1's "complete" amendment list with a fourth test
+     edit: change test_v15_gate_04's parsing logic itself (e.g. merge
+     spec-v1.6.0.md's table with a small delta list read from
+     spec-v1.7.0.md, rather than a full table there) -- keeps the spec
+     body untouched at the cost of an edit section 14.1 does not
+     currently authorise, recorded as an operator-approved extension of
+     that "complete" list.
+  3. Leave mutation-v170 out of the pre-push profile (gate defined in
+     mutation_check.py and quality_gates.yaml, wired into no profile),
+     recording REQ-V170-GATE-02's profile-membership clause as
+     deliberately not executed. Cheapest to the documents, weakens the
+     actual guarantee (mutation-v170 would run only via `--select` by
+     hand, never automatically on push).
+```
+
+**What is NOT blocked and stands as recorded:** T0–T8 (fully committed).
+The nine `v170-*` mutation entries are correctly authored (each verified
+byte-exact against its target before being added, one self-caught survivor
+found and fixed — see below), the full 92-entry `mutation_check.py` run
+confirms 92/92 killed, and both timeouts (`mutation-v170`: 1070s from a
+real 533.680s run; `mutation-all`: 4690s from a real 2343.796s 92-entry
+run) are measured and recorded. `AGENTS.md`'s mutation-entry count fix
+(83 → 92) is written. All of this sits ready, uncommitted, in the working
+tree — not reverted, not discarded — to be committed the moment this
+blocker resolves.
+
+### Self-caught: a survived mutation, `v170-summary-floor-check-removed` (fixed)
+
+The 9-entry `--select v170-` run's first pass showed 8/9 killed:
+`v170-summary-floor-check-removed` (the removal of
+`config.py`'s `_check_summary_floor_budget(...)` call site) SURVIVED.
+Root cause: the killer test's chosen input
+(`LLM_TIMEOUT_S=240, LLM_SUMMARY_MAX_TOKENS=8000`) already trips the
+**pre-existing** `_check_timeout_budget` check on its own (floor
+`21.1 + 0.093×8000 = 765.1s`, far above 240s) — and that check's own error
+message already contains the substring `LLM_SUMMARY_MAX_TOKENS` (inside
+`"...LLM_MAX_TOKENS/LLM_SUMMARY_MAX_TOKENS..."`), so the test's assertion
+(`"LLM_TIMEOUT_S" in message and "LLM_SUMMARY_MAX_TOKENS" in message`)
+passed regardless of whether the new, second check ever ran. Fixed by
+choosing an input that discriminates the two checks: with
+`LLM_MAX_TOKENS == LLM_SUMMARY_MAX_TOKENS == 1536`, the pre-existing
+check's own floor is `163.948s` while the new check's floor (which adds
+the 30s rescue-retry floor on top) is `193.948s` — `LLM_TIMEOUT_S=180`
+clears the first and not the second, isolating the property the test is
+named for. Re-verified by hand (manually deleting the call site, confirming
+the test now fails with `DID NOT RAISE ConfigError`, then restoring via
+`git checkout`) and by a full clean 9-entry `--select v170-` re-run
+(9/9 killed) before the 92-entry full run.
 
 ## Ledger row (paste into `economics.md`)
 
