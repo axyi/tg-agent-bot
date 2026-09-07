@@ -420,8 +420,16 @@ def _acc03_find_selection_commit(root: Path = _REAL_PROJECT_ROOT) -> str | None:
 
 
 def _acc03_selection_commit_diff(sha: str, root: Path = _REAL_PROJECT_ROOT) -> dict[str, list[str]]:
-    """path -> the hunk body's changed lines (the `+++`/`---` file headers
-    excluded, the leading `+`/`-` stripped) for `git diff <sha>^..<sha>`."""
+    """path -> the hunk body's **added** lines only (the `+++` file header
+    excluded, the leading `+` stripped) for `git diff <sha>^..<sha>`. Removed
+    lines are deliberately not returned: REQ-V170-REV-01 item 8 structurally
+    proves what T12 *added* is on-topic, and a removed line's pre-existing
+    text (written long before T12, under no obligation to anticipate this
+    check) cannot retroactively satisfy a naming requirement -- discovered
+    empirically while landing T12 itself, when `config.py`'s pre-existing
+    wrapped `_parse_choice` call had no line pairing the lowercase identifier
+    with its default value, so changing that default always "removed" a
+    non-conforming line no matter how the replacement was worded."""
     names = _acc03_run_git_readonly(["diff", "--name-only", f"{sha}^", sha], root)
     per_file: dict[str, list[str]] = {}
     for path in (line for line in names.stdout.splitlines() if line):
@@ -429,18 +437,20 @@ def _acc03_selection_commit_diff(sha: str, root: Path = _REAL_PROJECT_ROOT) -> d
         per_file[path] = [
             line[1:]
             for line in diff.stdout.splitlines()
-            if line[:1] in ("+", "-") and not line.startswith(("+++", "---"))
+            if line[:1] == "+" and not line.startswith("+++")
         ]
     return per_file
 
 
 def _acc03_validate_selection_commit_hunks(per_file: dict[str, list[str]]) -> list[str]:
-    """Structural check of REQ-V170-REV-01 item 8: every changed line in
-    `config.py` names one of the two variables, `pyproject.toml`'s diff
-    touches only its `version` line, and the three documentation files' diffs
-    touch only lines naming a variable or a version string. Returns the list
-    of problems found -- empty means clean. Names no policy or version
-    literal of its own."""
+    """Structural check of REQ-V170-REV-01 item 8: every **added** line in
+    `config.py` names one of the two variables, `pyproject.toml`'s added
+    lines touch only its `version` line, and the three documentation files'
+    added lines touch only lines naming a variable or a version string.
+    Scoped to additions only (`_acc03_selection_commit_diff` already drops
+    removed lines) -- a removed line's pre-existing text cannot be held to a
+    naming requirement it predates. Returns the list of problems found --
+    empty means clean. Names no policy or version literal of its own."""
     version_re = re.compile(r"\d+\.\d+\.\d+")
     problems = []
     for path, lines in per_file.items():

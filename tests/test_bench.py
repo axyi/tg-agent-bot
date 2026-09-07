@@ -654,7 +654,14 @@ def test_env_flags_are_exactly_the_nine_keys_with_null_for_absent_fields(tmp_pat
     # documented never fired); env_flags() reports their T4 compatibility
     # defaults, the frozenset serialized as a sorted list (REQ-V170-BEN-03's
     # own convention).
-    assert flags["LLM_REASONING_POLICY"] == "model-default"
+    # second erratum: spec-v1.7.0 T12, REQ-V170-POL-07 vs. REQ-V170-EC-03 --
+    # authorised by the operator, prompt 118. T12 moved the shipped default;
+    # read from Config's own field default rather than a literal so this
+    # assertion cannot go stale again on a future default change.
+    default_policy = next(
+        f.default for f in dataclasses.fields(config.Config) if f.name == "llm_reasoning_policy"
+    )
+    assert flags["LLM_REASONING_POLICY"] == default_policy
     assert flags["LLM_REASONING_ON_PURPOSES"] == ["tool-round"]
 
 

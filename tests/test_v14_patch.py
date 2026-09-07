@@ -5,12 +5,13 @@ One test per T-V14-* id of section 12.2. Offline discipline unchanged
 every LLM interaction is faked.
 """
 
+import dataclasses
 import json
 import re
 
 import pytest
 
-from config import ConfigError, load_config
+from config import Config, ConfigError, load_config
 from devtools import bench, bench_scenarios
 from tests.test_bench import fake_doc, fake_run, make_config
 from tests.test_config import base_env
@@ -69,6 +70,11 @@ def test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config(tmp_pa
     stage-A-STOP hypothetical (both policy fields absent); spec-v1.7.0's
     stage A found a summary-shippable mechanism, so that branch never fired
     and both fields now carry their T4 compatibility defaults.
+
+    second erratum: spec-v1.7.0 T12, REQ-V170-POL-07 vs. REQ-V170-EC-03 --
+    authorised by the operator, prompt 118. T12 moved the shipped default;
+    the assertion below reads it from Config's own field default rather than
+    a literal so it cannot go stale again on a future default change.
     """
     flags = bench.env_flags(make_config(tmp_path))
     assert len(flags) == 9
@@ -78,7 +84,10 @@ def test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config(tmp_pa
         "LLM_FAILOVER", "LLM_MAX_TOKENS", "LLM_REASONING_POLICY",
         "LLM_REASONING_ON_PURPOSES",
     }
-    assert flags["LLM_REASONING_POLICY"] == "model-default"
+    default_policy = next(
+        f.default for f in dataclasses.fields(Config) if f.name == "llm_reasoning_policy"
+    )
+    assert flags["LLM_REASONING_POLICY"] == default_policy
     assert flags["LLM_REASONING_ON_PURPOSES"] == ["tool-round"]
 
 
