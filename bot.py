@@ -731,7 +731,7 @@ def _handle_new(
                 # REQ-V13-RTE-01: the summary purpose, and only it, may run on
                 # the routed client; `summary_llm` is None unless it is configured.
                 conn, conv_id, summary_llm or llm, cfg, resolve_cost=resolve_cost,
-                retry_max_tokens=cfg.llm_summary_max_tokens,
+                retry_max_tokens=cfg.llm_summary_max_tokens, budget_s=cfg.llm_timeout_s,
             )
             if summary is not None:
                 storage.add_summary(conn, conv_id, from_id, summary)
@@ -752,7 +752,7 @@ def _handle_summary(
     try:
         summary = agent.summarize_conversation(
             conn, conv_id, summary_llm or llm, cfg, resolve_cost=resolve_cost,
-            retry_max_tokens=cfg.llm_summary_max_tokens,
+            retry_max_tokens=cfg.llm_summary_max_tokens, budget_s=cfg.llm_timeout_s,
         )
     except Exception as exc:
         log.warning("summarizing on request failed: %s", redact(str(exc)))

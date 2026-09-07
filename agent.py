@@ -55,6 +55,11 @@ TOKEN_BUDGET_MARGIN = 512     # slack over the estimator's own over-estimation
 STUB_HEAD_CHARS = 120
 STUB_HASH_CHARS = 16
 SUMMARY_MAX_TOKENS = 512
+# v1.7.0 addition (REQ-V170-SUM-02): the binding condition for every summary
+# request AFTER the first -- attempt 1 is governed by the non-positive-budget
+# rule instead. Duplicated in config.py as `_SUMMARY_BUDGET_FLOOR_S` (that
+# module cannot import this one -- see its own comment).
+SUMMARY_BUDGET_FLOOR_S = 30.0
 SUMMARY_KEYS = ("goal", "files", "decisions", "errors", "next_action")
 
 # REQ-V160-TQ-03: the closed vocabulary `_record_tool_call` writes to
@@ -1077,6 +1082,8 @@ def summarize_conversation(
     resolve_cost: CostResolver | None = None,
     max_tokens: int = SUMMARY_MAX_TOKENS,
     retry_max_tokens: int = SUMMARY_MAX_TOKENS,
+    budget_s: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> str | None:
     """At most two calls on the golden path: one ask, one repair. A truncated
     first attempt (REQ-V160-TQ-01) adds a third, at `retry_max_tokens`; there
@@ -1089,36 +1096,77 @@ def summarize_conversation(
     every caller that does not pass them keeps today's behaviour
     (REQ-V160-TQ-02); `bot.py` passes `retry_max_tokens=cfg.llm_summary_max_tokens`
     and nothing else.
+
+    `budget_s is None` means today's behaviour exactly (REQ-V170-SUM-01): no
+    deadline, no per-request timeout override, unbounded like every existing
+    caller and fake. When it is not `None` the deadline `clock() + budget_s`
+    is taken **once**, before attempt 1, and covers the whole path: attempt 1
+    is skipped only when the remaining budget is already non-positive
+    (REQ-V170-SUM-03); the retry or the repair call is additionally skipped
+    when the remaining budget is below `SUMMARY_BUDGET_FLOOR_S`
+    (REQ-V170-SUM-02). A skipped request writes no `llm_calls` row -- no
+    request was made -- and is recorded only as one redacted `log.warning`
+    line naming the elapsed and remaining seconds; the turn then completes
+    with no exception, exactly as REQ-V160-TQ-01 item 3 already specifies.
     """
     base = storage.load_context_messages(conn, conv_id, CONTEXT_WINDOW_MESSAGES)
     messages = base + [{"role": "user", "content": SUMMARY_PROMPT}]
 
     capture_content = cfg is not None and cfg.obs_capture_content
     record = (conn, conv_id, resolve_cost, capture_content)
-    # REQ-V170-POL-04: resolved once, from the summary purpose tag. SUM-04's
-    # "the retry and the repair call are forced off regardless of policy" is
-    # T6's own requirement; this is attempt 1's own resolution only.
     reasoning = resolve_reasoning(
         cfg.llm_reasoning_policy if cfg is not None else "model-default",
         cfg.llm_reasoning_on_purposes if cfg is not None else frozenset(),
         reasoning_tag("summary", None),
     )
+    # REQ-V170-SUM-04: the rescue retry and the JSON-repair call are forced
+    # off, regardless of policy -- the retry exists precisely because attempt
+    # 1 spent its whole budget on reasoning, so repeating it with reasoning
+    # enabled is the one configuration known to fail. Never hand-built.
+    rescue_reasoning = resolve_reasoning("off", frozenset(), "summary")
+
+    deadline = None if budget_s is None else clock() + budget_s
+
+    def remaining_budget() -> float | None:
+        return None if deadline is None else deadline - clock()
+
+    def log_exhausted(remaining: float) -> None:
+        elapsed = budget_s - remaining  # budget_s is not None whenever this runs
+        log.warning(
+            "summary budget exhausted before a request: elapsed=%.1fs remaining=%.1fs",
+            elapsed, remaining,
+        )
+
+    remaining = remaining_budget()
+    if remaining is not None and remaining <= 0:
+        log_exhausted(remaining)
+        return None
+    timeout_s = None if remaining is None else max(0.0, remaining)
     parsed, reason, truncated = _ask_for_summary(
-        llm, messages, record, attempt=1, max_tokens=max_tokens, reasoning=reasoning
+        llm, messages, record, attempt=1, max_tokens=max_tokens, reasoning=reasoning,
+        timeout_s=timeout_s,
     )
-    if truncated:
-        parsed, reason, truncated = _ask_for_summary(
-            llm, messages, record, attempt=2, max_tokens=retry_max_tokens, reasoning=reasoning
-        )
-    elif parsed is None and reason is not None:
-        repair = messages + [{
-            "role": "user",
-            "content": f"Your reply was not valid JSON ({reason}). "
-                       "Return only the JSON object.",
-        }]
-        parsed, _, _ = _ask_for_summary(
-            llm, repair, record, attempt=1, max_tokens=max_tokens, reasoning=reasoning
-        )
+    if truncated or (parsed is None and reason is not None):
+        remaining = remaining_budget()
+        if remaining is not None and remaining < SUMMARY_BUDGET_FLOOR_S:
+            log_exhausted(remaining)
+            return None
+        timeout_s = None if remaining is None else max(0.0, remaining)
+        if truncated:
+            parsed, reason, truncated = _ask_for_summary(
+                llm, messages, record, attempt=2, max_tokens=retry_max_tokens,
+                reasoning=rescue_reasoning, timeout_s=timeout_s,
+            )
+        else:
+            repair = messages + [{
+                "role": "user",
+                "content": f"Your reply was not valid JSON ({reason}). "
+                           "Return only the JSON object.",
+            }]
+            parsed, _, _ = _ask_for_summary(
+                llm, repair, record, attempt=1, max_tokens=max_tokens,
+                reasoning=rescue_reasoning, timeout_s=timeout_s,
+            )
     if parsed is None:
         return None
     # The summary is model output on its way to SQLite, so it takes the same
@@ -1130,6 +1178,7 @@ def _ask_for_summary(
     llm: LLMClient, messages: list[dict], record: tuple, *,
     attempt: int = 1, max_tokens: int = SUMMARY_MAX_TOKENS,
     reasoning: ReasoningRequest = REASONING_DEFAULT,
+    timeout_s: float | None = None,
 ) -> tuple[dict | None, str | None, bool]:
     """Returns `(parsed, reason, truncated)`. `truncated` is REQ-V160-TQ-01's
     signal: a `finish_reason == "length"` response is rejected without
@@ -1152,7 +1201,9 @@ def _ask_for_summary(
     # span) -- `start_span` already resolves this from `current_span()`.
     with tracing.start_span("chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id) as span:
         try:
-            response = llm.complete(messages, None, max_tokens=max_tokens, reasoning=reasoning)
+            response = llm.complete(
+                messages, None, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s
+            )
         except LLMError as exc:
             span.set_error(exc)
             _record_llm_call(

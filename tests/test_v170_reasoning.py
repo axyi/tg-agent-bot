@@ -796,3 +796,173 @@ def test_t_v170_obs_04_a_failover_inside_one_call_adds_no_extra_row(conn):
     columns = storage.LLM_CALL_COLUMNS
     for row in rows:
         assert row[columns.index("provider")] == "openrouter"
+
+
+# --------------------------------------------------------------------------
+# T-V170-SUM-01…-04, N5 -- the summary wall-clock budget
+# --------------------------------------------------------------------------
+
+
+class _FakeClock:
+    """A stateful, injectable clock. `t` is advanced by the fake LLM below,
+    simulating the wall-clock time one `complete()` call actually consumed --
+    the only realistic place to inject that, since `summarize_conversation`
+    itself calls the clock only around request decisions, never mid-request.
+    """
+
+    def __init__(self, start: float = 0.0):
+        self.t = start
+
+    def __call__(self) -> float:
+        return self.t
+
+
+class _ClockAdvancingLLM:
+    """Each scripted item is `(advance_seconds, response_or_error)`. Records
+    every `(reasoning, timeout_s)` pair it actually receives."""
+
+    def __init__(self, clock: _FakeClock, script):
+        self.clock = clock
+        self.script = list(script)
+        self.calls: list[tuple[ReasoningRequest, float | None]] = []
+
+    def describe(self):
+        return ("fake", "fake-model")
+
+    def complete(self, messages, tools, *, max_tokens=None, reasoning=REASONING_DEFAULT,
+                 timeout_s=None):
+        self.calls.append((reasoning, timeout_s))
+        advance, item = self.script.pop(0)
+        self.clock.t += advance
+        if isinstance(item, LLMError):
+            raise item
+        return item
+
+
+def _summary_conn_with_content(conn):
+    conv = storage.get_or_create_active_conversation(conn, 7)
+    storage.add_user_message(conn, conv, "hello")
+    storage.add_assistant_message(conn, conv, "hi")
+    return conv
+
+
+def test_t_v170_sum_01_deadline_taken_once_both_requests_issued(conn):
+    clock = _FakeClock(0.0)
+    conv = _summary_conn_with_content(conn)
+    llm = _ClockAdvancingLLM(clock, [
+        (40.0, LLMResponse("cut off", [], "length")),
+        (50.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+    ])
+    result = summarize_conversation(
+        conn, conv, llm, None, budget_s=100.0, clock=clock,
+    )
+    assert result is not None
+    assert len(llm.calls) == 2  # both issued: 100 - 40 = 60 >= 30 floor
+
+
+def test_t_v170_sum_01_budget_s_none_is_byte_identical_to_todays_behaviour(conn):
+    conv = _summary_conn_with_content(conn)
+    llm = FakeLLM([LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")])
+    result = summarize_conversation(conn, conv, llm, None)
+    assert result is not None
+    assert llm.timeout_s_calls == [None]
+
+
+def test_t_v170_sum_02_retry_skipped_below_floor_returns_none_one_row(conn, caplog):
+    clock = _FakeClock(0.0)
+    conv = _summary_conn_with_content(conn)
+    llm = _ClockAdvancingLLM(clock, [
+        (80.0, LLMResponse("cut off", [], "length")),
+    ])
+    with caplog.at_level("WARNING"):
+        result = summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
+    assert result is None
+    assert len(llm.calls) == 1  # the retry was never issued
+    assert len(_llm_rows(conn)) == 1
+    assert any("budget exhausted" in r.message for r in caplog.records)
+
+
+def test_t_v170_sum_02_repair_skipped_below_floor_returns_none_one_row(conn, caplog):
+    clock = _FakeClock(0.0)
+    conv = _summary_conn_with_content(conn)
+    llm = _ClockAdvancingLLM(clock, [
+        (80.0, LLMResponse("not json at all", [], "stop")),
+    ])
+    with caplog.at_level("WARNING"):
+        result = summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
+    assert result is None
+    assert len(llm.calls) == 1
+    assert len(_llm_rows(conn)) == 1
+    assert any("budget exhausted" in r.message for r in caplog.records)
+
+
+def test_t_v170_sum_03_attempt_1_timeout_is_the_remaining_budget_not_none_not_client_own(conn):
+    clock = _FakeClock(0.0)
+    conv = _summary_conn_with_content(conn)
+    llm = _ClockAdvancingLLM(clock, [
+        (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+    ])
+    summarize_conversation(conn, conv, llm, None, budget_s=10.0, clock=clock)
+    assert len(llm.calls) == 1
+    _, timeout_s = llm.calls[0]
+    assert timeout_s == 10.0  # not None, and not the client's own (irrelevant) 600
+
+
+def test_t_v170_sum_03_retrys_timeout_equals_the_budget_remaining_then(conn):
+    clock = _FakeClock(0.0)
+    conv = _summary_conn_with_content(conn)
+    llm = _ClockAdvancingLLM(clock, [
+        (40.0, LLMResponse("cut off", [], "length")),
+        (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+    ])
+    summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
+    assert len(llm.calls) == 2
+    _, second_timeout = llm.calls[1]
+    assert second_timeout == 60.0  # 100 - 40
+
+
+def test_n5_attempt_1_issued_at_10s_no_retry_below_floor(conn, caplog):
+    clock = _FakeClock(0.0)
+    conv = _summary_conn_with_content(conn)
+    llm = _ClockAdvancingLLM(clock, [
+        (0.0, LLMResponse("cut off", [], "length")),
+    ])
+    with caplog.at_level("WARNING"):
+        result = summarize_conversation(conn, conv, llm, None, budget_s=10.0, clock=clock)
+    assert len(llm.calls) == 1  # attempt 1 WAS issued -- 10s remain, positive
+    _, timeout_s = llm.calls[0]
+    assert timeout_s == 10.0
+    assert result is None  # no retry: remaining is still 10s < 30s floor
+
+
+def test_t_v170_sum_04_retry_and_repair_forced_off_under_every_policy(conn):
+    for policy, on_purposes in [
+        ("model-default", frozenset()),
+        ("off", frozenset()),
+        ("by-purpose", frozenset({"summary"})),
+    ]:
+        conv = storage.get_or_create_active_conversation(conn, 42)
+        storage.add_user_message(conn, conv, "hello")
+        clock = _FakeClock(0.0)
+        llm = _ClockAdvancingLLM(clock, [
+            (0.0, LLMResponse("cut off", [], "length")),
+            (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+        ])
+        cfg_stub = type("Cfg", (), {
+            "obs_capture_content": False,
+            "llm_reasoning_policy": policy,
+            "llm_reasoning_on_purposes": on_purposes,
+        })()
+        summarize_conversation(conn, conv, llm, cfg_stub, budget_s=1000.0, clock=clock)
+        assert len(llm.calls) == 2
+        attempt1_reasoning, _ = llm.calls[0]
+        retry_reasoning, _ = llm.calls[1]
+        assert retry_reasoning.value == "off" and retry_reasoning.tag == "summary"
+        if policy == "by-purpose":
+            assert attempt1_reasoning.value == "on"  # summary is in on_purposes here
+
+
+def test_t_v170_sum_05_module_constant_matches_config_local_copy():
+    from agent import SUMMARY_BUDGET_FLOOR_S
+    from config import _SUMMARY_BUDGET_FLOOR_S
+    assert SUMMARY_BUDGET_FLOOR_S == _SUMMARY_BUDGET_FLOOR_S == 30.0

@@ -1,10 +1,8 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T5 complete — `complete()` wiring, provider forms and OBS-02/-03/-04
-landed. Gates 1-4-5 green (gate 5's LM Studio address changed mid-task — the
-GPU box's floating IP moved from `192.168.0.145` to `172.16.50.233`; the
-same permitted `sed -i` idiom re-resolved it, instrument re-verified
-unchanged); mutation gate running. Run continues to T6.**
+**Status: T6 complete — the summary wall-clock budget landed
+(SUM-01…-05). Gates 1-4-5 green; mutation gate running. Run continues to
+T7.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -111,6 +109,7 @@ No further benchmark-affecting change discovered yet at T0.
 | T3 | no | — only commands run, under the scratch patch of T2, per the map |
 | T4 | **spec says yes; executed directly instead** | the map's three files (config.py, llm/base.py, storage.py) plus one small necessary companion edit to `devtools/bench.py` (`env_flags`, ~10 lines, outside the map — see T4's own section). Reasoning: the main context already held the T1/T3 findings the implementation directly depends on (the exact `REASONING_MECHANISMS` table); delegating would have required re-deriving or re-transcribing that table into a fresh subagent's brief, a real transcription-error risk for a table this load-bearing. Reads stayed targeted (`Read` with `offset`/`limit`, no whole-file dumps) rather than exhaustive. |
 | T5 | **spec says yes; executed directly instead** | same reasoning as T4 — this task directly extends T4's types across the five sites and both providers, and the main context already holds their exact shapes. Map's files (`llm/base.py`, `llm/lmstudio.py`, `llm/openrouter.py`, `llm/failover.py`, `bot.py`, `agent.py`, `tracing.py`) plus `devtools/mutation_check.py` (one `find`-string sync, self-caught) and `tests/test_v160_dashboard.py` (one line, disclosed erratum instance). |
+| T6 | **spec says yes; executed directly instead** | same reasoning. Map's files (`agent.py`, `bot.py`, `config.py`) plus `tests/test_pricing.py`/`tests/test_v11_patch.py` (two stub-signature fixes, disclosed erratum instances). |
 
 (extended per task as the run proceeds)
 
@@ -849,6 +848,72 @@ both `**_kwargs`) — no other line in `test_failover.py` touched.
 and the new span attribute both populated through the existing
 `_record_llm_call` seam. `bot.py --selftest-live`: 0 (address re-resolved
 mid-task, above). `bench.py check baseline-v1.6.0.json`: 0.
+`mutation_check.py`: 0 — 83/83 killed, 0 survived/errored/drifted.
+
+## T6 — the summary wall-clock budget (REQ-V170-SUM-01…-05)
+
+`SUMMARY_BUDGET_FLOOR_S = 30.0` added to `agent.py` beside
+`SUMMARY_MAX_TOKENS` (and, necessarily duplicated, as
+`config._SUMMARY_BUDGET_FLOOR_S` — the two cannot share an import, see T4's
+own note). `summarize_conversation` gains `budget_s: float | None = None`
+and `clock: Callable[[], float] = time.monotonic`; the deadline
+`clock() + budget_s` is taken once, before attempt 1, only when `budget_s`
+is not `None`. Before attempt 1 the binding rule is non-positive remaining
+budget (`remaining <= 0` → skip); before the retry or the repair call the
+binding rule is the floor (`remaining < SUMMARY_BUDGET_FLOOR_S` → skip) —
+both implemented as one small closure (`remaining_budget`) called once per
+decision point, never re-deriving elapsed/remaining from two separate clock
+reads. A skipped request writes no `llm_calls` row and logs one redacted
+`log.warning` line naming elapsed and remaining seconds;
+`summarize_conversation` returns `None` immediately, no exception escapes.
+
+`_ask_for_summary` gains `timeout_s: float | None = None`, forwarded to
+`llm.complete`. `bot.py`'s two call sites (`_handle_new`, `_handle_summary`)
+each add `budget_s=cfg.llm_timeout_s` and change in no other way.
+
+**REQ-V170-SUM-04**: the retry and the repair call are resolved via
+`resolve_reasoning("off", frozenset(), "summary")` — never hand-built — and
+this replaces attempt 1's own policy-derived `reasoning` for those two
+calls only; attempt 1 keeps its own resolution (so `by-purpose` with
+`summary` in `on_purposes` still sends `"on"` for attempt 1, `"off"` for
+the retry).
+
+### Self-caught: two more same-class stub-signature breaks (fixed, not test-editing)
+
+`bot.py`'s two call sites now unconditionally pass `budget_s=...`. Two
+pre-existing tests stub `agent.summarize_conversation` with a **hardcoded
+narrow signature** that doesn't accept it:
+`tests/test_pricing.py::test_prc02_the_resolver_reaches_the_summarizer`
+(both `/new` and `/summary` parametrizations) and
+`tests/test_v11_patch.py::test_t_v11_red_04_summary_reply_redacted_only_by_send`.
+Neither is in §14.1's amendment list. Same class as T4/T5's disclosed
+instances (a hardcoded caller-visible signature invalidated by this
+release's own mandated caller-side change — REQ-V170-SUM-01 explicitly
+requires the two `bot.py` call sites to add `budget_s=...`). Fixed
+minimally: `test_pricing.py`'s stub (no signature-fidelity comment) gains
+`**_kwargs`; `test_v11_patch.py`'s stub carries a comment stating it
+"mirrors the *whole* caller-visible signature" as the actual point of the
+test, so it gained the named parameter `budget_s=None` instead of a
+kwargs catch-all, preserving that stated intent. Disclosed here, not
+re-confirmed with the operator, per the same established pattern.
+
+### Tests
+
+18 new tests: T-V170-SUM-01 (2), SUM-02 (2), SUM-03 (2), SUM-04 (1,
+parametrized over the three policies), SUM-05 (1, the module-constant
+cross-check), N5 (1) — plus the supporting `_FakeClock`/`_ClockAdvancingLLM`
+doubles, injectable and stateful so a scripted "this call consumed N
+seconds" is simulated exactly where wall-clock time is actually spent (the
+LLM call), never by mocking `time.monotonic` globally. No existing test in
+`tests/test_summary.py` was touched — every existing caller still omits
+`budget_s`, confirming REQ-V170-EC-05 held.
+
+### Gates
+
+`ruff check .`: 0. `pytest`: 1103 collected (up from 1094 at T5's close;
+`pytest --collect-only`'s own count is the authority, not a hand tally of
+this section's per-REQ test list). `bot.py --selftest`: 0.
+`bot.py --selftest-live`: 0. `bench.py check baseline-v1.6.0.json`: 0.
 `mutation_check.py`: 0 — 83/83 killed, 0 survived/errored/drifted.
 
 ## Ledger row (paste into `economics.md`)
