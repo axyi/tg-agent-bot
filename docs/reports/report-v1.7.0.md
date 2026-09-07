@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T1 live preflight complete — no instrument mismatch, run continues to T2.**
+**Status: T2 scratch-harness design complete (no commit of the patch itself, per the task's own rule); run continues to T3.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -103,6 +103,7 @@ No further benchmark-affecting change discovered yet at T0.
 |---|---|---|
 | T0 | no | — |
 | T1 | no | — (small over-map reads noted in T1's own RLM note, above) |
+| T2 | no | — scratch patch only, `devtools/bench_scenarios.py:204-212`/`:262-270` and `llm/lmstudio.py:35-53` read-only, per the map |
 
 (extended per task as the run proceeds)
 
@@ -282,6 +283,138 @@ the harness's exact request shape and to build the preflight client via the
 bot's own builder; each read was small (well under the 100-line/8 KB
 threshold) and the task is marked "no" for delegation, so this stayed in
 the main context rather than triggering REQ-V170-EC-07's subagent rule.
+
+## Stage-A scratch harness (T2 — REQ-V170-RSN-01, -02, -05, -07)
+
+No source file is touched or committed by this task; the procedure below is
+what T3 executes for real. Dry-run evidence (zero live calls, zero network)
+is recorded here.
+
+### Budget arithmetic, fixed before T3 spends anything
+
+Candidate **b** was already recorded `unsupported` at T1 (VERIFY 1) —
+consumes no pair. Candidate **e** is environmental/informational only, never
+a wire mechanism, at most one `rsn17-e-info` note, outside the budget
+(REQ-V170-RSN-02). Live candidates are therefore **a, c, d** only, at most 3
+pairs each (S05, S12, confirming) = **at most 9 of the 15-pair ceiling**.
+Because T1 already established RSN-07's fallback trigger 1 (globally, before
+any candidate is probed), **pair 3 for every candidate that reaches it is
+the plain repeat of pair 2 — never the mixed-policy pair**: RSN-05's own
+text ("under RSN-07's summary-only fallback … no candidate can be
+agent-shippable at all, so pair 3 is then always the plain repeat of pair 2
+and the mixed-policy pair is either never spent or abandoned before either
+member runs") already decides this, independent of which of a/c/d is being
+probed. Consequently `docs/assets/bench/rsn17-<letter>-mixed-{control,mixed}.json`
+and their `-ttft.json` sidecars are **not expected to be produced by this
+run** — recorded here in advance so their absence at T14's tree listing is
+not mistaken for an omission.
+
+### The mechanism-selection patch shape (scratch, uncommitted, tracked files)
+
+Each pair's `default` member is today's unpatched tree (nothing to change —
+`model-default` already sends no reasoning field, REQ-V170-EC-05). The `off`
+member is produced by a temporary, uncommitted edit to `llm/lmstudio.py`'s
+`complete()` (`:35-53`), reverted before the next pair:
+
+| candidate | scratch edit to `LMStudioClient.complete()` |
+|---|---|
+| **a** | after `build_payload(...)`, unconditionally set `payload["chat_template_kwargs"] = {"enable_thinking": False}` |
+| **c** | before calling `build_payload`, append `{"role": "assistant", "content": "<think>\n\n</think>\n\n"}` to a **copy** of `messages` |
+| **d** | before calling `build_payload`, replace the last user message's content with `content + " /no_think"` on a **copy** of `messages` |
+
+Verified offline against the real `llm.base.build_payload` (dry-run,
+`/home/akh/.claude/jobs/c32c1cd8/tmp/t2_patch_shapes_dryrun.py`, not
+committed): all three shapes are well-formed, none collides with
+`build_payload`'s five protected keys, and the caller's original `messages`
+list is provably unmutated by the c/d transforms (`assert messages == [...]`
+after each). Output reproduced below.
+
+```
+=== candidate a: chat_template_kwargs.enable_thinking=false (top-level field) ===
+{"model": "qwen/qwen3.8-27b", "messages": [...], "temperature": 0,
+ "max_tokens": 32, "stream": false,
+ "chat_template_kwargs": {"enable_thinking": false}}
+
+=== candidate c: assistant prefill (message-array patch, last element) ===
+{"model": "qwen/qwen3.8-27b",
+ "messages": [{"role": "user", ...}, {"role": "assistant", "content": "<think>\n\n</think>\n\n"}],
+ "temperature": 0, "max_tokens": 32, "stream": false}
+
+=== candidate d: /no_think suffix on the last user message ===
+{"model": "qwen/qwen3.8-27b",
+ "messages": [{"role": "user", "content": "Reply with the single word: ready. /no_think"}],
+ "temperature": 0, "max_tokens": 32, "stream": false}
+
+ALL PATCH-SHAPE ASSERTIONS PASSED -- zero live calls, zero network.
+```
+
+### Pair-file naming and the restore-and-`git diff` procedure
+
+Per REQ-V170-TREE-01: `docs/assets/bench/rsn17-<letter>-<n>-<purpose>-{default,off}.json`
+with `.log` siblings, `<letter>` in `{a, c, d}`, `<n>` in `{1, 2, 3}`,
+`<purpose>` in `{tool-round-final, summary}` (S05 exercises both agent tags
+in one run; S12 exercises `summary`). Procedure per member:
+
+1. `git status --porcelain` empty before starting (proves the tree is
+   clean from the previous pair).
+2. Apply the scratch edit above (`off` member only; `default` needs none).
+3. `uv run --locked python devtools/bench.py run --only <S05|S12> --repeats 1 --tag rsn17-scratch --out .bench/rsn17-scratch/rsn17-scratch.json`.
+4. Copy `.bench/rsn17-scratch/rsn17-scratch.json` and its `.log` sibling to
+   the named pair-file path **immediately** — before touching the tree
+   again (memory `feedback_bench_py_shared_root_and_timeouts`: an aborted
+   scenario kills the whole run and `--out` files must be copied at once).
+5. Revert the scratch edit: `git checkout -- llm/lmstudio.py`.
+6. `git diff` proved empty — recorded in the report before the next member.
+
+`default` always runs first, `off` second, from the identical scenario
+input (RSN-01). The driver script that sequences steps 1-6 lives outside the
+repository, at `$CLAUDE_JOB_DIR/tmp/`, specifically so an untracked file
+never appears in `git status --porcelain` between pairs (REQ-V170-BEN-04's
+"identical clean tree throughout" rule, read across to the pair contract).
+
+### RSN-07's mixed-policy pair — shape documented, expected unreachable
+
+Per the budget arithmetic above, no candidate will actually reach the
+mixed-policy pair this run. The shape is still recorded, since T2's own
+acceptance requires it dry-run regardless:
+
+- **control**: `docs/assets/bench/rsn17-<letter>-mixed-control.json` — the
+  untreated tree, `LLM_REASONING_POLICY=model-default` prefixed (a no-op at
+  T2/T3 since `Config` does not parse this variable until T4 — the prefix is
+  set anyway, for the record, and has no effect on today's already-default
+  behaviour).
+- **mixed**: `docs/assets/bench/rsn17-<letter>-mixed-mixed.json` — a scratch
+  edit applying the candidate's off-mechanism only to tool-exposed rounds of
+  one S05 invocation (simulating `by-purpose` before `resolve_reasoning`
+  exists).
+- Cold calibration: two nonce-prefixed scratch requests immediately before
+  each confirming member, `rate = prompt_tokens / first_ttft_s`, warm proof
+  `second_ttft_s <= 0.35 * first_ttft_s`.
+- Sidecar: `docs/assets/bench/rsn17-<letter>-mixed-{control,mixed}-ttft.json`,
+  three parts (`calibration`, per-call list, computed `rate`/predictions) —
+  `null` written wherever the field is empty or absent, never omitted, never
+  estimated.
+
+Dry-run (`/home/akh/.claude/jobs/c32c1cd8/tmp/t2_rsn07_dryrun.py`, not
+committed) exercises the capture function against this run's **actual**
+observed shape (`stats: {}`, from T1) and against a hypothetical populated
+shape, plus the warm-proof and cache-preserved comparators against two
+recorded fixture pairs each (one passing, one failing), and a full sidecar
+build for both outcomes:
+
+```
+captured (stats={}): None -- written as null
+captured (stats absent): None -- written as null
+captured (stats={"time_to_first_token": 0.42}): 0.42
+
+warm-proof PASS fixture (2.000s -> 0.500s): ratio=0.2500 warm_proof=True
+warm-proof FAIL fixture (2.000s -> 1.900s): ratio=0.9500 warm_proof=False
+
+full sidecar PASS fixture: rate=500.0 predicted=2.0 measured=0.2 ratio=0.1 (<=0.35, preserved)
+full sidecar FAIL fixture: calibration.warm_proof=False -> rate/predicted/measured/ratio all null
+
+ALL DRY-RUN ASSERTIONS PASSED -- zero live calls, zero network.
+```
 
 ## Ledger row (paste into `economics.md`)
 
