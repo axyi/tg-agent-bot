@@ -5,7 +5,9 @@ import httpx
 from llm.base import (
     DEFAULT_CONTEXT_LENGTH,
     DEFAULT_MAX_TOKENS,
+    REASONING_DEFAULT,
     LLMResponse,
+    ReasoningRequest,
     build_payload,
     post_completion,
 )
@@ -75,6 +77,8 @@ class OpenRouterClient:
         tools: list[dict] | None,
         *,
         max_tokens: int | None = None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s: float | None = None,
     ) -> LLMResponse:
         if self.model.startswith(ANTHROPIC_PREFIX):
             messages = cache_system_prompt(messages)
@@ -85,6 +89,10 @@ class OpenRouterClient:
             max_tokens=self.max_tokens if max_tokens is None else max_tokens,
         )
         payload["usage"] = dict(USAGE_ACCOUNTING)
+        # REQ-V170-POL-05: `request.value` alone, never `request.mechanism`
+        # (LM Studio's forms) and never `request.tag`.
+        if reasoning.value == "off":
+            payload["reasoning"] = {"enabled": False}
         return post_completion(
             client=self._client,
             url=OPENROUTER_URL,
@@ -94,5 +102,5 @@ class OpenRouterClient:
                 "X-Title": "tg-agent-bot",
             },
             payload=payload,
-            timeout_s=self.timeout_s,
+            timeout_s=self.timeout_s if timeout_s is None else timeout_s,
         )

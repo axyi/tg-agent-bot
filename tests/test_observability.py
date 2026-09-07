@@ -17,9 +17,11 @@ import config
 import metrics
 import storage
 from llm.base import (
+    REASONING_DEFAULT,
     REQUEST_DEFAULTS,
     LLMError,
     LLMResponse,
+    ReasoningRequest,
     ToolCall,
     Usage,
     build_payload,
@@ -110,9 +112,16 @@ class NamedLLM:
         self.model = model
         self.script = list(script)
         self.calls = []
+        self.reasoning_calls = []
+        self.timeout_s_calls = []
 
-    def complete(self, messages, tools, *, max_tokens=None):
+    def complete(
+        self, messages, tools, *, max_tokens=None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT, timeout_s=None,
+    ):
         self.calls.append((list(messages), tools))
+        self.reasoning_calls.append(reasoning)
+        self.timeout_s_calls.append(timeout_s)
         item = self.script.pop(0) if self.script else LLMResponse("ok", [], "stop")
         if isinstance(item, LLMError):
             raise item
@@ -638,7 +647,7 @@ def test_obs04_the_resolver_runs_for_a_failed_invocation_too(conn):
 
 def test_obs04_a_client_without_describe_still_records_provider_and_model(conn):
     class Bare:
-        def complete(self, messages, tools, *, max_tokens=None):
+        def complete(self, messages, tools, *, max_tokens=None, **_kwargs):
             return LLMResponse("done", [], "stop")
 
     run(conn, [], llm=Bare())

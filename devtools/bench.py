@@ -2188,7 +2188,13 @@ def _prefix_tokens(client, skills: dict) -> int | None:
         {"role": "user", "content": PREFIX_PROBE_MESSAGE},
     ]
     try:
-        response = client.complete(messages, tools.tool_specs(), max_tokens=1)
+        # REQ-V170-POL-04: explicit, not relied-on defaults -- a future
+        # signature change must not silently give the probe a different
+        # treatment from the run it warms up.
+        response = client.complete(
+            messages, tools.tool_specs(), max_tokens=1,
+            reasoning=llm_base.REASONING_DEFAULT, timeout_s=None,
+        )
     except Exception as exc:
         log.warning("prefix calibration failed: %s", config.redact(str(exc)))
         return None

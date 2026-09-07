@@ -179,6 +179,8 @@ class LLMClient(Protocol):
         tools: list[dict] | None,
         *,
         max_tokens: int | None = None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s: float | None = None,
     ) -> LLMResponse: ...
 
     def describe(self) -> tuple[str, str]:
@@ -218,12 +220,18 @@ def describe_client(client: object) -> tuple[str, str]:
     return UNKNOWN_CLIENT, str(getattr(client, "model", "") or UNKNOWN_CLIENT)
 
 
+_PROTECTED_PAYLOAD_KEYS = frozenset({
+    "model", "messages", "temperature", "max_tokens", "stream", "tools", "tool_choice",
+})
+
+
 def build_payload(
     model: str,
     messages: list[dict],
     tools: list[dict] | None,
     *,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    reasoning_fields: dict | None = None,
 ) -> dict:
     payload = {
         "model": model,
@@ -235,6 +243,14 @@ def build_payload(
     if tools is not None:
         payload["tools"] = tools
         payload["tool_choice"] = REQUEST_DEFAULTS["tool_choice"]
+    if reasoning_fields is not None:
+        # REQ-V170-POL-06: merged after every existing key, so a mechanism
+        # can never overwrite one of the seven protected keys.
+        collision = _PROTECTED_PAYLOAD_KEYS & reasoning_fields.keys()
+        if collision:
+            key = sorted(collision)[0]
+            raise ValueError(f"reasoning_fields collides with a protected key: {key}")
+        payload.update(reasoning_fields)
     return payload
 
 

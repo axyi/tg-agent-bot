@@ -28,7 +28,7 @@ class StubClient:
         self.calls = 0
         self._error = error
 
-    def complete(self, messages, tools, *, max_tokens=None):
+    def complete(self, messages, tools, *, max_tokens=None, **_kwargs):
         self.calls += 1
         if self.remaining_failures > 0:
             self.remaining_failures -= 1
@@ -273,9 +273,9 @@ def test_max_tokens_is_forwarded_to_the_active_side():
             super().__init__(name)
             self.max_tokens_calls = []
 
-        def complete(self, messages, tools, *, max_tokens=None):
+        def complete(self, messages, tools, *, max_tokens=None, **kwargs):
             self.max_tokens_calls.append(max_tokens)
-            return super().complete(messages, tools, max_tokens=max_tokens)
+            return super().complete(messages, tools, max_tokens=max_tokens, **kwargs)
 
     primary = Recorder("lmstudio")
     client = wrapper(primary, StubClient("openrouter"))

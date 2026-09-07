@@ -158,7 +158,7 @@ class ScriptedLLM:
     def describe(self):
         return ("fake", "fake-model")
 
-    def complete(self, messages, tool_definitions, *, max_tokens=None):
+    def complete(self, messages, tool_definitions, *, max_tokens=None, **_kwargs):
         self.calls += 1
         if self.script:
             item = self.script.pop(0)
@@ -180,7 +180,7 @@ class BlockingLLM:
     def describe(self):
         return ("fake", "fake-model")
 
-    def complete(self, messages, tool_definitions, *, max_tokens=None):
+    def complete(self, messages, tool_definitions, *, max_tokens=None, **_kwargs):
         self.calls += 1
         if self.calls <= self.before:
             calls = [ToolCall("raw", "exec", json.dumps({"argv": ["echo", "hi"]}))]

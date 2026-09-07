@@ -536,7 +536,11 @@ def test_t_v160_dsh_09_served_span_attribute_keys_is_the_allowlist_minus_four():
         - {"gen_ai.tool.call.id", "tg_agent.tool.fingerprint"}
     )
     assert dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS == expected
-    assert len(dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS) == 23
+    # erratum: spec-v1.7.0 T5, REQ-V170-OBS-02 vs. REQ-V170-EC-03 -- same
+    # authorised class as prompt 107's blocker (a pinned count invalidated by
+    # this release's own mandated addition, tg_agent.reasoning.requested).
+    # 23 -> 24, one new key.
+    assert len(dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS) == 24
 
 
 def test_t_v160_dsh_09_served_span_has_no_status_message_field():

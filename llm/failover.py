@@ -9,7 +9,15 @@ import logging
 import time
 from collections.abc import Callable
 
-from llm.base import DEFAULT_CONTEXT_LENGTH, LLMClient, LLMError, LLMResponse, describe_client
+from llm.base import (
+    DEFAULT_CONTEXT_LENGTH,
+    REASONING_DEFAULT,
+    LLMClient,
+    LLMError,
+    LLMResponse,
+    ReasoningRequest,
+    describe_client,
+)
 
 FAILOVER_THRESHOLD = 3        # consecutive failures before the other side is tried
 FAILOVER_COOLDOWN_S = 300.0   # how long a demoted provider stays out of the way
@@ -53,11 +61,15 @@ class FailoverLLMClient:
         tools: list[dict] | None,
         *,
         max_tokens: int | None = None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s: float | None = None,
     ) -> LLMResponse:
         self._restore_primary_after_cooldown()
         active = self.active_provider_name
         try:
-            response = self._clients[active].complete(messages, tools, max_tokens=max_tokens)
+            response = self._clients[active].complete(
+                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s
+            )
         except LLMError as exc:
             self.failure_counts[active] += 1
             other = self._other_name(active)
@@ -65,7 +77,9 @@ class FailoverLLMClient:
                 self.failure_counts[active] >= FAILOVER_THRESHOLD
                 and self._clock() >= self._cooldown_until[other]
             ):
-                return self._try_other(messages, tools, max_tokens, active, other, exc)
+                return self._try_other(
+                    messages, tools, max_tokens, reasoning, timeout_s, active, other, exc
+                )
             raise
         self.failure_counts[active] = 0
         return response
@@ -75,12 +89,16 @@ class FailoverLLMClient:
         messages: list[dict],
         tools: list[dict] | None,
         max_tokens: int | None,
+        reasoning: ReasoningRequest,
+        timeout_s: float | None,
         active: str,
         other: str,
         first_error: LLMError,
     ) -> LLMResponse:
         try:
-            response = self._clients[other].complete(messages, tools, max_tokens=max_tokens)
+            response = self._clients[other].complete(
+                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s
+            )
         except LLMError:
             self.failure_counts[other] += 1
             raise                              # the last error reaches the caller

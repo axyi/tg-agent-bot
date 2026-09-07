@@ -76,6 +76,10 @@ _TG_AGENT_ATTRIBUTE_KEYS = frozenset(
         "tg_agent.cost_basis",
         "tg_agent.scenario_id",
         "tg_agent.bench_tag",
+        # v1.7.0 addition (REQ-V170-OBS-02): `ReasoningRequest.value`. The
+        # honored verdict is derivable from the existing
+        # gen_ai.usage.reasoning.output_tokens -- no second key.
+        "tg_agent.reasoning.requested",
     }
 )
 

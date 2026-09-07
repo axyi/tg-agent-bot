@@ -4,7 +4,7 @@ import subprocess
 
 import httpx
 
-from llm.base import LLMError
+from llm.base import REASONING_DEFAULT, LLMError, ReasoningRequest
 
 _DEFAULT_ENVELOPE = {
     "exit_code": 0,
@@ -41,15 +41,29 @@ class FakeLLM:
         # unpacks `self.calls` entries as pairs and section 9.1 does not license
         # touching that test.
         self.max_tokens_calls = []
+        # REQ-V170-POL-04, §14.1: recorded in their own parallel lists, same
+        # reason as `max_tokens_calls` above.
+        self.reasoning_calls = []
+        self.timeout_s_calls = []
 
     def describe(self):
         """REQ-V13-OBS-04: `provider`/`model` are NOT NULL columns."""
         return ("fake", "fake-model")
 
-    def complete(self, messages, tool_definitions, *, max_tokens=None):
+    def complete(
+        self,
+        messages,
+        tool_definitions,
+        *,
+        max_tokens=None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s=None,
+    ):
         # The agent reuses one `messages` list, so snapshot it before it grows.
         self.calls.append((list(messages), tool_definitions))
         self.max_tokens_calls.append(max_tokens)
+        self.reasoning_calls.append(reasoning)
+        self.timeout_s_calls.append(timeout_s)
         if not self.script:
             raise AssertionError("FakeLLM script exhausted")
         item = self.script.pop(0)

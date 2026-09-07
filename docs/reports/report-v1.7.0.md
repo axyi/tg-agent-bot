@@ -1,9 +1,10 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T4 complete (unblocked — operator authorised the SCHEMA_VERSION
-erratum, extended once to a full 6-location audit, plus a second class of
-the same conflict found and authorised during implementation). Gates 1-4
-green; mutation gate running. Run continues to T5.**
+**Status: T5 complete — `complete()` wiring, provider forms and OBS-02/-03/-04
+landed. Gates 1-4-5 green (gate 5's LM Studio address changed mid-task — the
+GPU box's floating IP moved from `192.168.0.145` to `172.16.50.233`; the
+same permitted `sed -i` idiom re-resolved it, instrument re-verified
+unchanged); mutation gate running. Run continues to T6.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -109,6 +110,7 @@ No further benchmark-affecting change discovered yet at T0.
 | T2 | no | — scratch patch only, `devtools/bench_scenarios.py:204-212`/`:262-270` and `llm/lmstudio.py:35-53` read-only, per the map |
 | T3 | no | — only commands run, under the scratch patch of T2, per the map |
 | T4 | **spec says yes; executed directly instead** | the map's three files (config.py, llm/base.py, storage.py) plus one small necessary companion edit to `devtools/bench.py` (`env_flags`, ~10 lines, outside the map — see T4's own section). Reasoning: the main context already held the T1/T3 findings the implementation directly depends on (the exact `REASONING_MECHANISMS` table); delegating would have required re-deriving or re-transcribing that table into a fresh subagent's brief, a real transcription-error risk for a table this load-bearing. Reads stayed targeted (`Read` with `offset`/`limit`, no whole-file dumps) rather than exhaustive. |
+| T5 | **spec says yes; executed directly instead** | same reasoning as T4 — this task directly extends T4's types across the five sites and both providers, and the main context already holds their exact shapes. Map's files (`llm/base.py`, `llm/lmstudio.py`, `llm/openrouter.py`, `llm/failover.py`, `bot.py`, `agent.py`, `tracing.py`) plus `devtools/mutation_check.py` (one `find`-string sync, self-caught) and `tests/test_v160_dashboard.py` (one line, disclosed erratum instance). |
 
 (extended per task as the run proceeds)
 
@@ -724,6 +726,130 @@ requires until T5 wires real values. `mutation_check.py`: 0 — all mutations ki
 was caught and fixed before this run (verified via the targeted
 `find`-string-uniqueness test above; the full mutation gate confirms it and
 every other pre-existing mutation is still killed after this task's edits).
+
+## T5 — `complete()` wiring, provider forms, OBS-02/-03/-04
+
+### The five definitions / five invocations (REQ-V170-POL-04)
+
+`reasoning: ReasoningRequest = REASONING_DEFAULT` then `timeout_s: float |
+None = None`, in order, at: `llm/base.py` (`LLMClient` Protocol),
+`llm/lmstudio.py`, `llm/openrouter.py`, `llm/failover.py`, `bot.py`'s
+`_SelftestLLM`. Forwarded at: `llm/failover.py`'s `complete` (active client)
+and `_try_other` (secondary, both parameters carried **positionally** through
+`_try_other`'s own signature, exactly as `max_tokens` already was);
+`agent.py:335`'s agent-round call (`_run_agent_turn`); `agent.py`'s
+`_ask_for_summary` call (the summary path, resolved once per
+`summarize_conversation` invocation — **not yet** SUM-04's per-request
+force-off, which is T6's own requirement and will revisit this exact site);
+`devtools/bench.py`'s warm-up probe, both defaults passed **explicitly**.
+
+### Provider forms (REQ-V170-POL-05)
+
+`llm/lmstudio.py`: `request.mechanism` alone. `fields` become
+`build_payload(reasoning_fields=json_fields(mechanism.fields))`;
+`message_patch` applied to a **copy** of the caller's `messages` —
+`append_assistant` as the last element, `suffix_last_user` extending the
+last user message's content. `mechanism is None` → nothing added, nothing
+patched. `request.tag` is read **nowhere** in this client (asserted with a
+tag outside `REASONING_TAGS`, same outcome). `llm/openrouter.py`:
+`request.value` alone — `"off"` → `{"reasoning": {"enabled": false}}`,
+`"on"`/`"default"` add nothing; `request.mechanism` is never read.
+
+### `build_payload`'s `reasoning_fields` (REQ-V170-POL-06)
+
+Merged after all five existing keys and after the `tools`/`tool_choice`
+branch; a collision with any of the seven protected keys
+(`model`/`messages`/`temperature`/`max_tokens`/`stream`/`tools`/`tool_choice`)
+raises `ValueError` naming the key (N4). `None` is byte-identical to
+today's output for both the `tools is None` and `tools is not None`
+branches.
+
+### OBS-01/-02/-03 wiring (agent.py)
+
+`_record_llm_call` gains `reasoning: ReasoningRequest = REASONING_DEFAULT`,
+sets the `tg_agent.reasoning.requested` span attribute
+(`tracing._TG_AGENT_ATTRIBUTE_KEYS` gains exactly this one member) and
+passes `reasoning_requested`/`reasoning_honored` to `storage.add_llm_call`
+(which gains the two matching keyword-only parameters, both `None`-default —
+a companion edit inside T5's own scope, since the columns exist from T4 but
+nothing wrote them until this task). `_reasoning_honored(value,
+reasoning_tokens, reasoning_chars)` implements REQ-V170-OBS-01's exact
+three-valued rule; the eleven-row truth table is asserted directly
+(`T-V170-OBS-03`), each checked with `is`, not `==`, so a `None`-read-as-`0`
+regression cannot pass.
+
+### OBS-04: exactly six rows, live-verified against the real agent loop and summarizer
+
+One tool-round + one final round (2 rows) via `agent.run_agent`; one
+`summarize_conversation` call whose attempt 1 truncates and whose retry
+succeeds (2 rows); a second `summarize_conversation` call whose attempt 1
+returns invalid JSON and whose repair call succeeds (2 rows) — six total,
+every one's `reasoning_requested` non-`NULL`. A separate test wraps one
+call in a real `FailoverLLMClient` with a failing primary: still exactly
+two rows for that agent turn, both naming the secondary as `provider` — no
+attempt-level row is created, confirming REQ-V170-OBS-03's "the wrapper
+offers no such seam" claim empirically rather than by inspection alone.
+
+### Self-caught, fixed without a test edit
+
+- `llm/base.py`'s new `_PROTECTED_PAYLOAD_KEYS` line exceeded ruff's
+  100-column limit; split.
+- `devtools/mutation_check.py`'s `v13-llm-call-not-recorded-on-error` `find`
+  string stopped matching once `_record_llm_call`'s call site gained a
+  `reasoning=reasoning,` line; the mutation's `find` string updated to match
+  (production tooling, not a test — no operator authorisation needed, same
+  reasoning as T4's `v14-rel-01` collision).
+
+### A second erratum instance, found and fixed the same way as T4's (disclosed, not re-asked)
+
+`tests/test_v160_dashboard.py:539`
+(`test_t_v160_dsh_09_served_span_attribute_keys_is_the_allowlist_minus_four`)
+hardcoded `len(dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS) == 23`; adding
+`tg_agent.reasoning.requested` (REQ-V170-OBS-02, explicitly mandated) grows
+it to 24. The file's **own first assertion**, three lines above, is already
+fully dynamic (`SERVED_SPAN_ATTRIBUTE_KEYS == tracing.ATTRIBUTE_KEYS -
+CONTENT_ATTRIBUTE_KEYS - {...}`) and needed no change — only the redundant
+literal count broke. Same class as T4's authorised errata (a pinned
+snapshot invalidated by this release's own mandated addition), same
+mechanical fix (one literal), disclosed here rather than re-confirmed,
+consistent with how T4's third instance (`test_bench.py`/`test_v14_patch.py`)
+was handled.
+
+### Mid-task infrastructure event: the GPU box's floating IP moved
+
+Between T1 (`192.168.0.145`) and T5, gate 5 started failing
+(`ConnectTimeout`). Re-probed the same three fixed addresses from
+REQ-V170-PRE-03: `172.16.50.233` answered. Re-applied the same permitted
+`sed -i 's|^LMSTUDIO_BASE_URL=.*|...|' .env` idiom (REQ-V170-EC-04 idiom 4),
+confirmed by `grep -q`, and re-verified the served-model-id uniqueness
+before trusting gate 5 green again — the instrument itself (`Bionic
+v1.1.1`, `qwen/qwen3.8-27b`) is unchanged, only its network address moved,
+which is not one of REQ-V170-BEN-01's six locked instrument values.
+
+### Tests
+
+39 new tests appended to `tests/test_v170_reasoning.py` (78 total in that
+file): T-V170-POL-04 (2), POL-05 (10), POL-06 (10, including the 7
+parametrized protected-key cases and N4), OBS-02 (2), OBS-03 (12, the full
+truth table parametrized plus the raise-before-response check), OBS-04 (2,
+against the real agent loop / summarizer / failover, not fakes-of-fakes).
+Amended (§14.1, exhaustive): the seven test-double signatures —
+`tests/fakes.py:49` (`FakeLLM`, records the full `ReasoningRequest` and
+`timeout_s` in parallel lists, same pattern as the existing
+`max_tokens_calls`), `tests/test_observability.py:114` (`NamedLLM`, same
+treatment) and `:650`/`Bare` (`**_kwargs`, ignores them),
+`tests/test_bench.py:161`/`:183` (`ScriptedLLM`, `BlockingLLM`, both
+`**_kwargs`), `tests/test_failover.py:31`/`:276` (`StubClient`, `Recorder`,
+both `**_kwargs`) — no other line in `test_failover.py` touched.
+
+### Gates
+
+`ruff check .`: 0. `pytest`: 1094 collected (1055 + 39), all green.
+`bot.py --selftest`: 0, log line confirms `reasoning_requested: "default"`
+and the new span attribute both populated through the existing
+`_record_llm_call` seam. `bot.py --selftest-live`: 0 (address re-resolved
+mid-task, above). `bench.py check baseline-v1.6.0.json`: 0.
+`mutation_check.py`: 0 — 83/83 killed, 0 survived/errored/drifted.
 
 ## Ledger row (paste into `economics.md`)
 

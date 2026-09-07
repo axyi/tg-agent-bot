@@ -16,7 +16,18 @@ import config
 import storage
 import tracing
 from config import Config
-from llm.base import CostResolver, LLMClient, LLMError, LLMResponse, ToolCall, describe_client
+from llm.base import (
+    REASONING_DEFAULT,
+    CostResolver,
+    LLMClient,
+    LLMError,
+    LLMResponse,
+    ReasoningRequest,
+    ToolCall,
+    describe_client,
+    reasoning_tag,
+    resolve_reasoning,
+)
 from tools import (
     AuditHook,
     CommandRunner,
@@ -332,7 +343,16 @@ def _run_agent_turn(
         ) as span:
             try:
                 attempts += 1
-                response = llm.complete(request_messages, request_tools, max_tokens=max_tokens)
+                # REQ-V170-POL-04: resolved once per request, from the purpose
+                # tag the round actually exposes (POL-02).
+                reasoning = resolve_reasoning(
+                    cfg.llm_reasoning_policy if cfg is not None else "model-default",
+                    cfg.llm_reasoning_on_purposes if cfg is not None else frozenset(),
+                    reasoning_tag("agent", request_tools),
+                )
+                response = llm.complete(
+                    request_messages, request_tools, max_tokens=max_tokens, reasoning=reasoning
+                )
             except LLMError as exc:
                 span.set_error(exc)
                 failure = exc
@@ -346,6 +366,7 @@ def _run_agent_turn(
                 response=response,
                 error_kind=None if failure is None else getattr(failure, "kind", "http"),
                 capture_content=cfg is not None and cfg.obs_capture_content,
+                reasoning=reasoning,
             )
 
         if failure is not None:
@@ -827,6 +848,24 @@ def _prompt_chars_by_role(
     return sum(by_role.values()), by_role
 
 
+def _reasoning_honored(
+    value: str, reasoning_tokens: int | None, reasoning_chars: int
+) -> int | None:
+    """REQ-V170-OBS-01: three-valued, `NULL` meaning "no evidence" and never
+    read as `0` downstream. `'default'`, or reasoning tokens unavailable
+    *and* zero reasoning chars (a call that raised before a response lands
+    here too, since both are then `None`/`0`), is unconditionally unknown --
+    this release specifies no per-row fallback for that case."""
+    if value == "default":
+        return None
+    if reasoning_tokens is None and reasoning_chars == 0:
+        return None
+    if value == "off":
+        return 1 if (reasoning_tokens == 0 and reasoning_chars == 0) else 0
+    tokens_positive = reasoning_tokens is not None and reasoning_tokens > 0
+    return 1 if (tokens_positive or reasoning_chars > 0) else 0
+
+
 def _record_llm_call(
     conn: sqlite3.Connection,
     conv_id: int,
@@ -845,6 +884,7 @@ def _record_llm_call(
     response: LLMResponse | None,
     error_kind: str | None,
     capture_content: bool = False,
+    reasoning: ReasoningRequest = REASONING_DEFAULT,
 ) -> None:
     """One row per `llm.complete` invocation (REQ-V13-OBS-04), plus the `chat`
     span that owns it (REQ-V160-TRC-04, -07): both land in one transaction, or
@@ -864,6 +904,9 @@ def _record_llm_call(
     span.set_attribute("tg_agent.purpose", purpose)
     span.set_attribute("tg_agent.round", round_no)
     span.set_attribute("tg_agent.attempt", attempt)
+    # REQ-V170-OBS-02: the resolution, not the wire form -- 'on'/'default' send
+    # no reasoning field at all, only 'off' carries a mechanism.
+    span.set_attribute("tg_agent.reasoning.requested", reasoning.value)
     usage = response.usage if response is not None else None
     cost_usd, cost_basis = (None, None)
     if resolve_cost is not None:
@@ -954,6 +997,12 @@ def _record_llm_call(
             cost_basis=cost_basis,
             trace_id=span.trace_id,
             span_id=span.span_id,
+            reasoning_requested=reasoning.value,
+            reasoning_honored=_reasoning_honored(
+                reasoning.value,
+                None if usage is None else usage.reasoning_tokens,
+                0 if response is None else response.reasoning_chars,
+            ),
         )
         conn.execute("COMMIT")
     except BaseException:
@@ -1046,12 +1095,20 @@ def summarize_conversation(
 
     capture_content = cfg is not None and cfg.obs_capture_content
     record = (conn, conv_id, resolve_cost, capture_content)
+    # REQ-V170-POL-04: resolved once, from the summary purpose tag. SUM-04's
+    # "the retry and the repair call are forced off regardless of policy" is
+    # T6's own requirement; this is attempt 1's own resolution only.
+    reasoning = resolve_reasoning(
+        cfg.llm_reasoning_policy if cfg is not None else "model-default",
+        cfg.llm_reasoning_on_purposes if cfg is not None else frozenset(),
+        reasoning_tag("summary", None),
+    )
     parsed, reason, truncated = _ask_for_summary(
-        llm, messages, record, attempt=1, max_tokens=max_tokens
+        llm, messages, record, attempt=1, max_tokens=max_tokens, reasoning=reasoning
     )
     if truncated:
         parsed, reason, truncated = _ask_for_summary(
-            llm, messages, record, attempt=2, max_tokens=retry_max_tokens
+            llm, messages, record, attempt=2, max_tokens=retry_max_tokens, reasoning=reasoning
         )
     elif parsed is None and reason is not None:
         repair = messages + [{
@@ -1059,7 +1116,9 @@ def summarize_conversation(
             "content": f"Your reply was not valid JSON ({reason}). "
                        "Return only the JSON object.",
         }]
-        parsed, _, _ = _ask_for_summary(llm, repair, record, attempt=1, max_tokens=max_tokens)
+        parsed, _, _ = _ask_for_summary(
+            llm, repair, record, attempt=1, max_tokens=max_tokens, reasoning=reasoning
+        )
     if parsed is None:
         return None
     # The summary is model output on its way to SQLite, so it takes the same
@@ -1070,6 +1129,7 @@ def summarize_conversation(
 def _ask_for_summary(
     llm: LLMClient, messages: list[dict], record: tuple, *,
     attempt: int = 1, max_tokens: int = SUMMARY_MAX_TOKENS,
+    reasoning: ReasoningRequest = REASONING_DEFAULT,
 ) -> tuple[dict | None, str | None, bool]:
     """Returns `(parsed, reason, truncated)`. `truncated` is REQ-V160-TQ-01's
     signal: a `finish_reason == "length"` response is rejected without
@@ -1083,6 +1143,7 @@ def _ask_for_summary(
     common = {
         "purpose": "summary", "round_no": 0, "attempt": attempt, "ts": ts, "turn_id": None,
         "messages": messages, "tools": None, "capture_content": capture_content,
+        "reasoning": reasoning,
     }
     sink = tracing.SqliteSpanSink(conn)
     # REQ-V160-TRC-04 item 4: nests under the active root when one exists
@@ -1091,7 +1152,7 @@ def _ask_for_summary(
     # span) -- `start_span` already resolves this from `current_span()`.
     with tracing.start_span("chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id) as span:
         try:
-            response = llm.complete(messages, None, max_tokens=max_tokens)
+            response = llm.complete(messages, None, max_tokens=max_tokens, reasoning=reasoning)
         except LLMError as exc:
             span.set_error(exc)
             _record_llm_call(

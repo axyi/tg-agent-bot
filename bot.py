@@ -33,7 +33,7 @@ import storage
 import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
 from llm import build_llm_client, pricing, provider_is_configured
-from llm.base import CostResolver, LLMResponse, ToolCall
+from llm.base import REASONING_DEFAULT, CostResolver, LLMResponse, ReasoningRequest, ToolCall
 
 TELEGRAM_API_HOST = "https://api.telegram.org"
 LONG_POLL_TIMEOUT_S = 50
@@ -1068,7 +1068,15 @@ class _SelftestLLM:
     def describe(self) -> tuple[str, str]:
         return ("selftest", "selftest")
 
-    def complete(self, messages, tool_definitions, *, max_tokens=None) -> LLMResponse:
+    def complete(
+        self,
+        messages,
+        tool_definitions,
+        *,
+        max_tokens=None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s=None,
+    ) -> LLMResponse:
         response = self._script[min(self.calls, len(self._script) - 1)]
         self.calls += 1
         return response

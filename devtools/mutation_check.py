@@ -379,6 +379,7 @@ MUTATIONS = [
             "                error_kind=None if failure is None else "
             'getattr(failure, "kind", "http"),\n'
             "                capture_content=cfg is not None and cfg.obs_capture_content,\n"
+            "                reasoning=reasoning,\n"
             "            )\n"
         ),
         "replace": "",

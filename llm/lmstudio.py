@@ -5,8 +5,11 @@ import httpx
 from llm.base import (
     DEFAULT_CONTEXT_LENGTH,
     DEFAULT_MAX_TOKENS,
+    REASONING_DEFAULT,
     LLMResponse,
+    ReasoningRequest,
     build_payload,
+    json_fields,
     post_completion,
 )
 
@@ -38,7 +41,25 @@ class LMStudioClient:
         tools: list[dict] | None,
         *,
         max_tokens: int | None = None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s: float | None = None,
     ) -> LLMResponse:
+        # REQ-V170-POL-05: `request.mechanism` alone, never `request.tag` --
+        # the per-purpose lookup already happened in `resolve_reasoning`.
+        mechanism = reasoning.mechanism
+        reasoning_fields = None
+        if mechanism is not None:
+            if mechanism.fields:
+                reasoning_fields = json_fields(mechanism.fields)
+            if mechanism.message_patch is not None:
+                kind, text = mechanism.message_patch
+                messages = list(messages)
+                if kind == "append_assistant":
+                    messages.append({"role": "assistant", "content": text})
+                elif kind == "suffix_last_user":
+                    last = dict(messages[-1])
+                    last["content"] = last["content"] + text
+                    messages[-1] = last
         return post_completion(
             client=self._client,
             url=f"{self.base_url}/chat/completions",
@@ -48,6 +69,7 @@ class LMStudioClient:
                 messages,
                 tools,
                 max_tokens=self.max_tokens if max_tokens is None else max_tokens,
+                reasoning_fields=reasoning_fields,
             ),
-            timeout_s=self.timeout_s,
+            timeout_s=self.timeout_s if timeout_s is None else timeout_s,
         )
