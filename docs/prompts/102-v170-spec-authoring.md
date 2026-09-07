@@ -6,7 +6,7 @@
 - **Harness:** Claude Code (lab session) with OpenAI Codex `gpt-5.6-sol` as the cross-review challenger
 - **Stage:** spec authoring, before `go`
 - **Owner of:** `docs/spec/spec-v1.7.0.md`, `docs/prompts/102-v170-spec-authoring.md`
-- **REQ ids:** none implemented; this prompt defines REQ-V170-* (68 MUST, 15 NON-GOAL)
+- **REQ ids:** none implemented; this prompt defines REQ-V170-* (69 MUST, 15 NON-GOAL)
 
 ## Goal
 

@@ -194,7 +194,7 @@ force verbatim.
 | id | Status | Change |
 |---|---|---|
 | `llm.base.LLMClient.complete` (llm/base.py:67-73) | extended | gains **two** keyword-only parameters, `reasoning: ReasoningRequest = REASONING_DEFAULT` (REQ-V170-POL-04) and, second, `timeout_s: float \| None = None` (REQ-V170-SUM-03); both default to today's behaviour |
-| `llm.base.ReasoningMechanism`, `llm.base.ReasoningRequest`, `llm.base.REASONING_MECHANISMS`, `llm.base.REASONING_DEFAULT` | new | two frozen dataclasses, the per-purpose mechanism table stage A fills, and the neutral request object every existing caller keeps sending (REQ-V170-POL-03). `MappingProxyType` comes from the stdlib `types` module — no new dependency (REQ-V170-NG-06) |
+| `llm.base.ReasoningMechanism`, `llm.base.ReasoningRequest`, `llm.base.REASONING_MECHANISMS`, `llm.base.REASONING_DEFAULT` | new | two frozen dataclasses over an **immutable recursive JSON** representation (`FrozenJSON`: tuples of key/value tuples, never a `dict`), the per-purpose table stage A fills — **keyed by tag and holding off mechanisms only** — and the neutral request object every existing caller keeps sending (REQ-V170-POL-03). `MappingProxyType` comes from the stdlib `types` module — no new dependency (REQ-V170-NG-06) |
 | `llm/lmstudio.py:35`, `llm/openrouter.py:72`, `llm/failover.py:50`, `bot.py:1071` (`_SelftestLLM`) `complete`; `llm/failover.py:73` `_try_other` | extended | the same two parameters, forwarded at the **five** invocation sites `llm/failover.py:60`, `:83`, `agent.py:335`, `agent.py:1094`, `devtools/bench.py:2186`. `_try_other` carries the `ReasoningRequest` positionally, exactly as it already carries `max_tokens`. The last site is the bench warm-up probe (`max_tokens=1`) and passes the defaults explicitly (REQ-V170-POL-04) |
 | `llm.base.build_payload` (llm/base.py:112-129) | extended | gains keyword-only `reasoning_fields: dict \| None = None`, merged into the payload **after** the existing keys and **only** when not `None`; the `tools`/`tool_choice` branch is untouched |
 | `llm.base.REQUEST_DEFAULTS` (llm/base.py:85-89) | unchanged | stays exactly `{"temperature": 0, "stream": False, "tool_choice": "auto"}`. It is embedded verbatim in `meta.constants`, which is a **locked** meta field (`devtools/bench.py:151`), and `tests/test_v14_patch.py:89-92` asserts no `reasoning` key in either. Adding one voids every baseline **and** fails gate 3 (REQ-V170-NG-05) |
@@ -272,7 +272,7 @@ skeleton's `## Operator inputs` section:
 |---|---|
 | LM Studio version | a non-empty string. It MUST equal `meta.lmstudio_version` of the baseline, `"Bionic v1.1.1"`, or REQ-V170-BEN-01's STOP fires |
 | loaded context length | a **positive integer**. It MUST equal `42496` |
-| current LM Studio address | one of `192.168.0.145`, `172.16.50.233`, `192.168.178.170`, or another the operator names; PRE-03 probes in that order regardless |
+| current LM Studio address | one of `192.168.0.145`, `172.16.50.233`, `192.168.178.170`, or another the operator names. A named address MUST be a **literal IPv4 address** matching `^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$` with every octet ≤ 255 — no hostname, no scheme, no port, no path; anything else is rejected at T0 with the blocker template rather than interpolated. PRE-03 probes the three fixed addresses first, in the order written here, and the operator's address last if it is distinct from all three |
 
 A missing version, or a context length that is not a positive integer, **stops
 the executor at T0** — blocker template, no T1. A value that is present but
@@ -283,10 +283,25 @@ instrument STOP at T1, which is a different, reported outcome.
 one live documentation read.** Probe, in order, until one answers:
 
 ```bash
-for h in 192.168.0.145 172.16.50.233 192.168.178.170; do
+for h in 192.168.0.145 172.16.50.233 192.168.178.170 <operator-ip-if-distinct>; do
   curl -sS -m 3 "http://$h:1234/v1/models" >/dev/null && echo "$h" && break
 done
 ```
+
+**The probe list is ordered and deduplicated, and it is built before the loop
+runs.** It is the three fixed addresses in the order written above, followed by
+the address REQ-V170-PRE-02's operator input names **only when that address is
+distinct from all three** — so a repeat of a fixed address is probed once, not
+twice, and an operator address the round-1 spec would have ignored is now
+reached. **Only a literal IP accepted by PRE-02's pattern may be interpolated
+into the loop**: the value is validated against that pattern *before* the
+command is built, and a value failing it is a T0 blocker, never a probed string.
+When the operator named no address, or named one already in the fixed three, the
+`<operator-ip-if-distinct>` placeholder is **dropped from the list** rather than
+passed to `curl` as written.
+Nothing else — no hostname, no operator-supplied scheme, port or path — is ever
+substituted. Every address in the list is probed in order until one answers; all
+of them failing is the T1 blocker of REQ-V170-GATE-01.
 
 The winning address is written into `.env` by a **single-line rewrite only**:
 
@@ -298,7 +313,9 @@ confirmed by `grep -q '^LMSTUDIO_BASE_URL=http://<addr>:1234/v1$' .env`; a
 non-zero status is a blocker, `sed -i` being silent when the key is absent
 (REQ-V170-EC-04). The served model id is read from `GET
 <LMSTUDIO_BASE_URL>/models`, field `data[].id`, exactly the read `_live_lmstudio`
-already performs (bot.py:1308-1318); the list MUST contain `cfg.lmstudio_model`.
+already performs (bot.py:1308-1318); **exactly one** entry of that list MUST
+equal `cfg.lmstudio_model` — see REQ-V170-PRE-04 item 3, which owns the rule and
+the STOP that an ambiguous or duplicated match triggers.
 
 In the same task the executor performs the **documentation read** stage A
 candidate **b** depends on and records, in the report, the URL, the date and the
@@ -318,6 +335,26 @@ The executor MUST NOT substitute a remembered spelling for the read.]]`
 against OpenRouter's live documentation in the same read, with URL and date in
 the report. It is never exercised live in this release (REQ-V170-NG-08).]]`
 
+`[[VERIFY: whether LM Studio Bionic 1.1.x populates the non-standard response
+field **`stats.time_to_first_token`** (TTFT) on the **OpenAI-compatible**
+`POST <LMSTUDIO_BASE_URL>/chat/completions` route — the only route the bot's
+client uses (`llm/lmstudio.py:35-53`) and therefore the only one stage A's
+scratch harness sends through. LM Studio documents the populated `stats` object
+(`tokens_per_second`, `time_to_first_token`, `generation_time`, `stop_reason`)
+on its **native** `POST /api/v0/chat/completions`; on the OpenAI-compatible
+route it has been reported as an empty `"stats": {}` (lmstudio-bug-tracker issue
+#601). The check is therefore **live and shape-specific, not documentary**:
+issue one completion through the bot's own client, with the harness's own
+request shape, against `/v1/chat/completions`, and record whether
+`stats.time_to_first_token` returns a positive number, an empty object, or
+nothing at all. **The harness MUST NOT switch to the native endpoint** for this
+probe or for any pair member: a different request shape, with unverified support
+for the mechanism fields of REQ-V170-RSN-02, would measure a different
+instrument (REQ-V170-BEN-01). Absent or empty on that route ⇒ REQ-V170-RSN-07's
+conservative fallback binds the whole run — no agent-tag cache evidence exists
+and any mechanism found ships for `summary` only. The verdict, the route, the
+exact field path and the date go in the report.]]`
+
 `[[VERIFY: an LM Studio Bionic 1.1.x REST endpoint exposing the application
 version and the loaded context length. Carried unresolved from
 REQ-V160-PRE-04: if the executor finds one, the API value is recorded alongside
@@ -326,14 +363,33 @@ disagreement the operator value wins** and both are recorded.]]`
 
 **REQ-V170-PRE-04 (MUST) — the instrument is proved before it is used, and it
 is proved without disclosure.** Before the first inference of stage A the
-executor establishes all six of these, and records each in the report:
+executor establishes all **seven** of these, and records each in the report. The
+first six are REQ-V170-BEN-01's six instrument values and every one of them is
+established **before** item 7, the first live inference of the run: an
+instrument that cannot be compared must never consume a pair of stage A's
+budget, and a mismatch discovered at T11 instead has already spent it.
 
 1. `grep -q '^LLM_MAX_TOKENS=4096$' .env` exits 0;
 2. `grep -q '^LLM_TIMEOUT_S=600$' .env` exits 0;
-3. the served model id contains `LMSTUDIO_MODEL`;
+3. **the uniquely selected served model id equals exactly `qwen/qwen3.8-27b` and
+   `cfg.lmstudio_model`; substring matching is insufficient.** The comparison is
+   string equality against both, not `in`, not `startswith`, not a case-folded
+   or slash-trimmed form: `qwen/qwen3.8-27b-mlx` and `qwen/qwen3.8-27b@q4` each
+   *contain* the baseline's id and are each a different instrument. If the
+   `data[].id` list holds **no** exact match, or **more than one** entry that
+   compares equal, or the exact match is not the id `cfg.lmstudio_model` names,
+   the selection is ambiguous and the run **STOPS** here with
+   REQ-V170-BEN-01's instrument STOP — before the preflight of item 7 completes
+   and therefore before any inference is spent;
 4. the operator's LM Studio version string equals `"Bionic v1.1.1"`;
 5. the operator's loaded context length equals `42496`;
-6. the **inference preflight** — one chat completion against the resolved
+6. `cfg.obs_capture_content is False`, read from the loaded `Config` and not
+   from `.env`, **and** the bench metadata producer is dry-run — or its emitting
+   line asserted offline — to prove it writes `meta.obs_capture_content: false`.
+   The baseline pins `false` (REQ-V170-BEN-01) and it is a locked meta field, so
+   a `true` here makes every candidate non-comparable; establishing it at T11,
+   after three 3-repeat runs, wastes the whole of stage C;
+7. the **inference preflight** — one chat completion against the resolved
    address with the resolved model, **no tools**, a fixed one-line prompt and
    `max_tokens = cfg.llm_max_tokens` (production's own budget; a fixed small
    literal is unsafe on a reasoning model, REQ-V160-PRE-04's erratum) returns a
@@ -341,8 +397,10 @@ executor establishes all six of these, and records each in the report:
 
 Reads 1 and 2 emit nothing but an exit status and are the second permitted
 `.env` idiom of REQ-V170-EC-04; a `4096`/`600` mismatch is the instrument STOP
-of REQ-V170-BEN-01, not a silent adjustment. Nothing here rewrites `.env` except
-PRE-03's `LMSTUDIO_BASE_URL` line.
+of REQ-V170-BEN-01, not a silent adjustment, and so is a failure of item 3, 4, 5
+or 6. Items 1–6 are **all** evaluated before item 7 runs, and item 7 is the only
+one that costs inference; a STOP therefore leaves the live budget untouched.
+Nothing here rewrites `.env` except PRE-03's `LMSTUDIO_BASE_URL` line.
 
 ---
 
@@ -361,14 +419,19 @@ docs/reports/tg-post-v1.7.0.md
 docs/reports/bench-v1.7.0.md              # §9, the gated comparison
 docs/assets/bench/rsn17-<letter>-<n>-<purpose>-{default,off}.json   # §5 pairs
 docs/assets/bench/rsn17-<letter>-mixed-{control,mixed}.json         # §5 RSN-07
+docs/assets/bench/rsn17-<letter>-mixed-{control,mixed}-ttft.json    # §5 RSN-07 sidecar
 docs/assets/bench/cand-v170-<c>.json      # §9, one per candidate run
 ```
 
 **REQ-V170-TREE-02 (MUST)** Changed files: `llm/base.py`, `llm/lmstudio.py`,
 `llm/openrouter.py`, `llm/failover.py`, `agent.py`, `config.py`, `bot.py`,
 `storage.py`, `tracing.py`, `devtools/bench.py`, `devtools/mutation_check.py`,
-`config/quality_gates.yaml`, `pyproject.toml`, `.env.example`, `README.md`,
+`config/quality_gates.yaml`, `.env.example`, `README.md`,
 `AGENTS.md`, `docs/plan.md`, plus exactly the test files named in §14.1.
+`pyproject.toml` is listed too, but it is **conditional**: its `project.version`
+changes in the post-measurement selection commit of REQ-V170-POL-07 (T12) and
+nowhere else, so on every branch that skips T12 the file is unchanged at the tip
+(REQ-V170-VER-01).
 `devtools/bench_scenarios.py` is **frozen** (REQ-V170-AMEND-01); `metrics.py`,
 `dashboard_render.py`, `dashboard_server.py` and `devtools/dashboard.py` are
 **not** changed — the existing per-purpose `reasoning_share`
@@ -470,6 +533,14 @@ round, and never extended. Therefore:
 | **d** (`/no_think`, last user message) | not shippable under `by-purpose`; shippable only when the resolved value is identical for every call of one `run_agent` invocation | same | **shippable** |
 | **e** | never | never | never |
 
+**That table is the message-array judgement alone, and it is necessary, not
+sufficient.** A "shippable" cell for `tool-round` or `final` says only that the
+mechanism does not sit inside the growing message prefix; agent-tag shippability
+is established **additionally and only** by REQ-V170-RSN-07's confirming
+mixed-policy run. Under RSN-07's TTFT-absent fallback no mechanism is
+agent-shippable at all, whatever this table says, and the shipped mechanism table
+of REQ-V170-RSN-06 carries `none` for both agent tags.
+
 The pair contract measures the price of the disturbance rather than asserting
 it: for each pair the report records `totals.resent_tokens` and
 `totals.new_tokens` per member and per purpose, and v1.4's measured
@@ -484,7 +555,10 @@ budget. Per candidate the pairs are spent in this order and stop as soon as the
 candidate is decided: pair 1 on **S05**, pair 2 on **S12**, pair 3 the
 **confirming** pair — a repeat of pair 2 for a candidate that would ship only
 for `summary`, and the **mixed-policy pair of REQ-V170-RSN-07** for a candidate
-that would ship for either agent tag. The mixed-policy pair replaces the plain
+that would ship for either agent tag. **Under RSN-07's TTFT-absent fallback no
+candidate can be agent-shippable at all**, so pair 3 is then always the plain
+repeat of pair 2 and the mixed-policy pair is never spent — which is why the
+fallback costs no budget and changes no count here. The mixed-policy pair replaces the plain
 repeat in that one slot, so neither the three-per-candidate nor the fifteen-total
 budget moves. The report
 carries one table row **per pair member** — letter, ordinal, purpose group,
@@ -502,7 +576,9 @@ the pair verdict stated once, on the `off` row, from the vocabulary `honored` /
 | `final` | one of a, b, or `none` | the pair files |
 | `summary` | one of a, b, c, d, or `none` | the pair files |
 
-**If no mechanism is shippable for `summary`, the run STOPS after stage A.**
+**If no mechanism is shippable for `summary`, the run STOPS after stage A**, and
+it finalises through the shared `T-STOP` procedure of REQ-V170-ORD-02, which is
+what makes the promises below executable rather than aspirational.
 The `summary` purpose is the concrete target of this release — S18's lost run
 was a starved, then timed-out summary, and S15's smoke failures were the same
 reasoning-exhaustion family on the agent path — and a policy that cannot switch
@@ -545,37 +621,107 @@ pair contract: scratch patch, uncommitted, tree restored and `git diff` empty
 afterwards, `meta.only` set and therefore never a candidate or a baseline.
 
 **The threshold, fixed in advance and derived from how `bench.py` computes these
-numbers.** `runs[].totals.resent_tokens` and `new_tokens` come from
+numbers.** Two checks answer two different questions, and neither substitutes
+for the other: **check 1** catches *prompt-token inflation* — a re-rendered
+prefix the server had to re-read, which shows up in the token counts; **check 2**
+catches *cache-key damage* — a prefix identical in token count that the server
+nevertheless had to process cold, which shows up in nothing but time. A mixed
+member ships for an agent tag only when it passes both.
+
+**Check 1 — no prompt-token inflation.** `runs[].totals.resent_tokens` and `new_tokens` come from
 `metrics.resent_tokens` (`metrics.py:75-91`) through `bench.totals_from_rows`
 (`devtools/bench.py:461-482`): over the calls of one conversation ordered by
 `id`, `new₁ = prompt₁` and `newᵢ = max(0, promptᵢ − promptᵢ₋₁)`, with
 `resentᵢ = promptᵢ − newᵢ`. Both are a **pure function of the per-call
 `prompt_tokens` sequence**, so an undisturbed prefix reproduces the control's
 sequence and the only legitimate difference is the mechanism's own message-array
-cost — zero for **a** and **b**, under 32 tokens for **c** and **d**. The mixed
-member passes when **all three** hold, the first two on the run totals and the
-third on the final round of the S05 turn:
+cost — zero for **a** and **b**, under 32 tokens for **c** and **d**. Both of
+these hold, on the run totals:
 
 1. `resent_tokens(mixed) ≤ 1.05 × resent_tokens(control)`;
-2. `new_tokens(mixed) ≤ new_tokens(control) + 64`;
-3. final-round `latency_ms(mixed) ≤ 1.30 × latency_ms(control)`.
+2. `new_tokens(mixed) ≤ new_tokens(control) + 64`.
 
-The 5 %, the 64 tokens and the 1.30 are deliberately loose against the size of
-the failure they exist to catch: v1.4 measured a `338 → 634` resent-token
-blow-up on candidate **d**, **+87 %**, and a re-rendered prefix costs hundreds of
-tokens, not tens. A member missing any of the three is **not shippable for the
-agent tags** whatever the homogeneous pair said; it may still be shippable for
-`summary`, which is judged by REQ-V170-RSN-04. All three numbers and the verdict
-go in the report's pair table.
+The 5 % and the 64 tokens are deliberately loose against the size of the failure
+they exist to catch: v1.4 measured a `338 → 634` resent-token blow-up on
+candidate **d**, **+87 %**, and a re-rendered prefix costs hundreds of tokens,
+not tens.
+
+**Check 2 — the prefix cache survived, evidenced by time to first token.**
+Prompt-token counts cannot see this failure: a top-level reasoning or template
+field can change the server's cache key or its rendered-prefix identity while
+leaving every reported `prompt_tokens` exactly unchanged. **Latency *ratios*
+between the control and the mixed member are not evidence and are dropped** —
+one sample each passes through ordinary timing variance, so a ratio threshold
+distinguishes neither cache preservation nor a lucky run. The direct signal is
+LM Studio's own non-standard response field **`stats.time_to_first_token`**
+(TTFT), recorded per call by the scratch harness of §16's T2 and verified live
+at REQ-V170-PRE-03 **before** stage A spends a pair. TTFT is prompt-processing
+time, and a preserved prefix is precisely the difference between reading a
+prefix and re-reading it.
+
+The rule is computed **within** each confirming run, on that run's own numbers,
+so no cross-run timing comparison is made anywhere:
+
+- **the rate.** The run's *first* call has a cold prefix by construction —
+  nothing precedes it inside the invocation — so
+  `rate = prompt_tokens(first call) ÷ TTFT(first call)`, in prompt tokens per
+  second;
+- **the prediction.**
+  `predicted_cold_TTFT(final round) = prompt_tokens(final round) ÷ rate` — what
+  the final round would cost if its whole prefix had to be processed again;
+- **the verdict.** The cache is **preserved** iff the measured
+  `TTFT(final round) ≤ 0.35 × predicted_cold_TTFT(final round)`, and it MUST
+  hold on **each** confirming run, never on an average across them.
+
+`0.35` is fixed in advance and is not tuned at run time. It is loose in the safe
+direction: a preserved prefix processes only the round's own new tokens and
+lands one to two orders of magnitude under the prediction, while a prefix the
+server had to re-read lands at the prediction itself, near `1.0`. Anything
+between the two is a **fail** — the check refuses to call an ambiguous run
+shippable.
+
+**When the field is absent, the conservative rule applies verbatim.** If
+`stats.time_to_first_token` is not populated on the endpoint and request shape
+the harness actually uses — which REQ-V170-PRE-03's fourth `VERIFY` marker
+settles live at T1, before stage A spends anything — then, absent non-null
+cached-token data or a rendered-prefix/cache-key digest, **RSN-07 proves only
+absence of prompt-token inflation and MUST NOT establish agent-tag cache
+shippability. Such a mechanism may ship for `summary` only.** No latency
+measurement rescues it and no repeat of the pair rescues it; the fallback is
+recorded in the report as the reason the agent tags shipped no mechanism. It
+constrains **mechanisms**, not policy values: `"on"` and `"default"` send no
+field at all (REQ-V170-POL-03), so REQ-V170-BEN-05's catalogue still runs — see
+its C3 clause.
+
+A member missing check 1, or missing check 2 where check 2 is available, is
+**not shippable for the agent tags** whatever the homogeneous pair said; it may
+still be shippable for `summary`, which is judged by REQ-V170-RSN-04. Every
+measured number — both token figures, the per-run rate, the prediction, the
+measured final-round TTFT and their ratio — and the verdict go in the report's
+pair table.
+
+**The TTFT sidecar: committed evidence, and deliberately not a bench document.**
+`bench.py` records no TTFT field, so the scratch harness writes one sidecar per
+mixed-pair member,
+`docs/assets/bench/rsn17-<letter>-mixed-{control,mixed}-ttft.json`, holding one
+object per LLM call in call order —
+`{"index", "purpose", "prompt_tokens", "time_to_first_token_s"}` — followed by
+that member's computed `rate`, `predicted_cold_ttft_s`, `measured_ttft_s` and
+`ratio`. It carries **no `meta` block**, is never passed to `bench.py check`,
+never compared with `--gate`, and is never a candidate or a baseline; it changes
+not one byte of the pair documents beside it, so REQ-V170-RSN-01's `meta.only`
+reasoning is untouched. A missing or empty TTFT value is written as `null`,
+never omitted and never estimated.
 
 **Measured, and recorded rather than followed: `cache_hit_rate` cannot be the
 signal here.** All 153 `llm_calls` rows of `baseline-v1.6.0.json` carry
 `cached_tokens = null`, so `summary.cache_hit_rate` is `null` on this instrument
 and `bench.summarize` (`devtools/bench.py:527-533`) has nothing to divide. A
 rendered-prefix digest is not available either — no bench field carries one.
-Resent/new tokens and latency are the whole available evidence, which is exactly
-why the threshold is stated on them and not on a cache metric this instrument
-does not report.
+That is why the cache evidence is taken from `stats.time_to_first_token` when
+the OpenAI-compatible endpoint populates it, and why, when it does not, the
+conservative fallback above — `summary` only — is the whole answer rather than a
+latency ratio this instrument cannot make conclusive.
 
 ---
 
@@ -633,10 +779,16 @@ in `llm/base.py` beside `reasoning_tag`; nothing else in the tree defines a
 reasoning shape, and no provider ever looks a purpose up:
 
 ```python
+# An immutable, recursive JSON representation. An object is a tuple of
+# (key, value) tuples; a value is a scalar or, recursively, another such tuple.
+# `object` is never used: it would readmit a dict, and a dict inside a frozen
+# dataclass behind a MappingProxyType is still mutable shared state.
+FrozenJSON = str | int | float | bool | None | tuple[tuple[str, "FrozenJSON"], ...]
+
 @dataclass(frozen=True, slots=True)
 class ReasoningMechanism:
     label: str                                     # "<letter>:<payload summary>"
-    fields: tuple[tuple[str, object], ...] = ()    # → build_payload(reasoning_fields=…)
+    fields: tuple[tuple[str, FrozenJSON], ...] = ()   # → build_payload(reasoning_fields=…)
     message_patch: tuple[str, str] | None = None   # ("append_assistant"|"suffix_last_user", text)
 
 @dataclass(frozen=True, slots=True)
@@ -647,28 +799,65 @@ class ReasoningRequest:
 
 REASONING_DEFAULT = ReasoningRequest("default", None, "final")
 
-# Keyed by (tag, value); filled from stage A's per-purpose table (REQ-V170-RSN-06),
-# which is a known literal by the time stage B is written (REQ-V170-ORD-01).
-REASONING_MECHANISMS: Mapping[tuple[str, str], ReasoningMechanism | None] = MappingProxyType({…})
+# Keyed by TAG ALONE and holding OFF mechanisms only: stage A probes nothing but
+# forms that switch reasoning off (REQ-V170-RSN-02), so no "on" entry could ever be
+# filled. Values come from stage A's per-purpose table (REQ-V170-RSN-06), a known
+# literal by the time stage B is written (REQ-V170-ORD-01).
+REASONING_MECHANISMS: Mapping[str, ReasoningMechanism | None] = MappingProxyType({…})
 
 def resolve_reasoning(
     policy: str,
     on_purposes: frozenset[str],
     tag: str,
-    mechanisms: Mapping[tuple[str, str], ReasoningMechanism | None] = REASONING_MECHANISMS,
+    mechanisms: Mapping[str, ReasoningMechanism | None] = REASONING_MECHANISMS,
 ) -> ReasoningRequest
 ```
 
 The resolved **value** is v1.4's: `model-default` → `"default"` for every tag;
 `off` → `"off"` for every tag; `by-purpose` → `"on"` when `tag in on_purposes`
-else `"off"`. `"default"` looks nothing up and carries `mechanism = None`, so it
-MUST send **no** reasoning field at all and the request body stays
+else `"off"`.
+
+**The lookup rule, and it is deliberately asymmetric.** `"default"` returns
+`ReasoningRequest("default", None, tag)`. `"on"` returns
+`ReasoningRequest("on", None, tag)`, because retaining the provider's own
+reasoning requires **no** disabling mechanism: nothing is looked up and no field
+is sent. Only `"off"` looks the table up, at `mechanisms.get(tag)`; when that
+entry is `None` or absent — no **off** mechanism exists for that purpose — the
+request **degrades to `ReasoningRequest("default", None, tag)`** and the
+degradation is recorded in the report and is never silent.
+
+The asymmetry is forced by stage A, not chosen: REQ-V170-RSN-02 discovers only
+mechanisms that switch reasoning **off**, so an `"on"` key could never be filled,
+and a symmetric `(tag, value)` lookup would degrade every `by-purpose` "on" tag
+to `"default"`, record the wrong value in REQ-V170-OBS-01's column, and put C1
+and C3 (REQ-V170-BEN-05) on the wire as something other than their declared
+treatments. `"default"` and `"on"` therefore both carry `mechanism = None` and
+MUST send **no** reasoning field at all, so their request bodies stay
 byte-identical to v1.6.0's — that is what makes REQ-V170-EC-05 true and what
-lets `meta.generation_settings` stay locked and unchanged. For `"on"` and
-`"off"` the function reads `mechanisms.get((tag, value))`; when that entry is
-`None` — no mechanism exists for that purpose in that direction — the request
-**degrades to `ReasoningRequest("default", None, tag)`** and the degradation is
-recorded in the report and is never silent.
+lets `meta.generation_settings` stay locked and unchanged.
+
+**The mechanism is frozen all the way down, not one level deep.** Candidate
+**a**'s payload is nested — `{"chat_template_kwargs": {"enable_thinking":
+false}}` — and storing that inner mapping as a `dict` would leave mutable state
+inside a `frozen=True` dataclass behind a `MappingProxyType`: `REASONING_MECHANISMS`
+would be frozen in name only, and any caller holding a produced payload could
+mutate the global policy for every later call and every later test. So the whole
+value is `FrozenJSON`, and candidate **a** is stored as
+
+```python
+ReasoningMechanism("a:chat_template_kwargs.enable_thinking=false",
+                   fields=(("chat_template_kwargs",
+                            (("enable_thinking", False),)),))
+```
+
+with **no `dict` and no `list` anywhere in the table**. A single helper in
+`llm/base.py`, `json_fields(fields: tuple[tuple[str, FrozenJSON], ...]) -> dict`,
+converts a mechanism's fields into **fresh dictionaries at every level** on
+**every** call — a new `dict` per invocation, never a cached or shared one, and
+never `copy.copy`. It is the only bridge from the frozen table to a wire
+payload, and REQ-V170-POL-05's `lmstudio` client is its only caller. A mechanism
+whose `fields` contain a `dict`, a `list` or a `set` is a defect
+`T-V170-POL-05` catches.
 
 The function is pure: no I/O, no global state beyond the frozen default table,
 no `Config`. It is the **only** place a policy becomes a wire treatment, and the
@@ -735,10 +924,10 @@ already provider-ready.
 
 | provider | what it applies |
 |---|---|
-| `lmstudio` | `request.mechanism` and nothing else. `mechanism.fields` become `build_payload(reasoning_fields=dict(mechanism.fields))`; `mechanism.message_patch`, when present, is applied to a **copy** of the caller's message list — `("append_assistant", text)` appends `{"role": "assistant", "content": text}` as the last element (candidate **c**), `("suffix_last_user", text)` appends `text` to the last user message's content (candidate **d**). `mechanism is None` → nothing added, nothing patched |
+| `lmstudio` | `request.mechanism` and nothing else. `mechanism.fields` become `build_payload(reasoning_fields=json_fields(mechanism.fields))` — freshly built dictionaries at every nesting level, per call (REQ-V170-POL-03); `mechanism.message_patch`, when present, is applied to a **copy** of the caller's message list — `("append_assistant", text)` appends `{"role": "assistant", "content": text}` as the last element (candidate **c**), `("suffix_last_user", text)` appends `text` to the last user message's content (candidate **d**). `mechanism is None` → nothing added, nothing patched |
 | `openrouter` | `request.value` and nothing else: `"off"` → `"reasoning": {"enabled": false}` as a top-level key, subject to PRE-03's VERIFY; `"on"` and `"default"` → nothing added, i.e. the provider default. It ignores `request.mechanism`, whose forms are LM Studio's |
 
-Because the lookup is per `(tag, value)` inside `resolve_reasoning`, a mechanism
+Because the off-mechanism lookup is per **tag** inside `resolve_reasoning`, a mechanism
 that ships only for `summary` and not for the agent tags needs no provider-side
 branch at all: the agent rounds simply receive `mechanism = None`.
 
@@ -767,11 +956,26 @@ set to exactly the process-environment treatment the selected candidate
 candidate run, in the **single post-measurement selection commit** of
 REQ-V170-ACC-03.
 
-That commit changes **the two policy default literals in `config.py` and
-nothing else in the source, the tests or the configuration**, together with the
-documentation echoes of those literals in `.env.example`, `README.md` and
-`AGENTS.md`, which are the documentation-only corrections REQ-V170-ACC-03
-already permits. Any other source, test or config difference **voids stage C**.
+**That commit exists only when a quality-passing candidate exists**
+(REQ-V170-BEN-06). It changes **the two policy default literals in `config.py`,
+`pyproject.toml`'s `project.version` from `1.6.0` to `1.7.0` (REQ-V170-VER-01),
+and nothing else in the source, the tests or the configuration**, together with
+the documentation echoes of those literals and of the version in `.env.example`,
+`README.md` and `AGENTS.md`, which are the documentation-only corrections
+REQ-V170-ACC-03 already permits. The version bump rides **here**, in this one
+commit, rather than in T8, because REQ-V170-BEN-07 and REQ-V170-RSN-06 forbid it
+on four branches and REQ-V170-ACC-03's freeze would forbid reverting it after
+the first candidate; the exhaustive allowed-file list of the selection commit is
+therefore `config.py`, `pyproject.toml`, `.env.example`, `README.md`,
+`AGENTS.md` — five files, no more. Any other source, test or config difference
+**voids stage C**.
+
+**When no selection commit is made.** On the stage-A STOP (REQ-V170-RSN-06), on
+the instrument STOP (REQ-V170-BEN-01), on `EXIT_NOT_COMPARABLE` that cannot be
+resolved, and on the no-quality-passing-candidate verdict of REQ-V170-BEN-07,
+T12 is **skipped**: the shipped defaults stay `model-default` /
+`{"tool-round"}`, `pyproject.toml` stays at `1.6.0`, the failure report is
+finalised, and no tag is created (REQ-V170-ORD-01).
 The change is safe for the measurement because REQ-V170-BEN-02 puts both fields
 in `CONFIG_HASH_EXCLUDED` and neither is a locked meta field — but safe is
 **proved, not asserted**: `T-V170-ACC-03` proves the equivalence offline and
@@ -790,13 +994,31 @@ gains, appended to `storage.LLM_CALL_COLUMNS` after `span_id`:
 
 | column | type | value |
 |---|---|---|
-| `reasoning_requested` | `TEXT` | `'on'`, `'off'` or `'default'` — `ReasoningRequest.value`, the resolved value actually sent |
+| `reasoning_requested` | `TEXT` | `'on'`, `'off'` or `'default'` — `ReasoningRequest.value`, the value REQ-V170-POL-03 resolved. It records the **resolution**, not the wire form: `'on'` and `'default'` send no reasoning field at all, and only `'off'` carries a mechanism |
 | `reasoning_honored` | `INTEGER` | `1`, `0` or `NULL` |
 
-`reasoning_honored` is `NULL` when `reasoning_requested` is `'default'` or when
-the call failed before a response; `1` when `'off'` was requested and both
-`reasoning_tokens` (`NULL` read as 0) and `reasoning_chars` are 0, else `0`;
-when `'on'` was requested, `1` if either is positive, else `0`. The vocabulary is
+`reasoning_honored` is **three-valued, and `NULL` means "no evidence", never
+"honored"**. Evaluated in this order:
+
+1. `reasoning_requested` is `'default'`, or the call failed before a response →
+   `NULL`. Nothing was asked for, or nothing came back.
+2. reasoning **tokens are unavailable** — `usage.completion_tokens_details.
+   reasoning_tokens` absent or `NULL` — **and** reasoning **chars are 0** →
+   `NULL`. A provider that reports no reasoning usage and emits no visible
+   `<think>` text has supplied no evidence in either direction, and reading that
+   silence as success would let production metrics report policy compliance by
+   construction. This release specifies **no** per-row fallback that could
+   supply evidence in this case, so the `NULL` is unconditional at row level:
+   REQ-V14-RSN-03's 20 % completion-token-and-cost rule is stage-A **pair**
+   evidence over two whole runs (REQ-V170-RSN-03) and is never applied to a
+   single row.
+3. otherwise the truth table applies over the available positive-or-zero
+   evidence: `'off'` → `1` when both are 0, else `0`; `'on'` → `1` when either
+   is positive, else `0`.
+
+This is exactly REQ-V170-RSN-03's own position — "a provider that reports
+neither is not proof of anything" — carried into the column, and it is why
+`NULL` may never be read as `0` anywhere downstream. The vocabulary is
 REQ-V14-OBS-01's, unchanged.
 
 **No column carries the tag.** `ReasoningRequest.tag` is already recoverable
@@ -821,7 +1043,10 @@ recorded in the report, not deleted (REQ-V170-NG-14).
 `_TG_AGENT_ATTRIBUTE_KEYS` (`:65-80`) gains exactly one member,
 `tg_agent.reasoning.requested`, carrying `ReasoningRequest.value` — the same
 three-value string the column stores. No second key is added: the honored verdict is computed from
-`gen_ai.usage.reasoning.output_tokens`, which the span already carries.
+`gen_ai.usage.reasoning.output_tokens`, which the span already carries, under
+REQ-V170-OBS-01's own three-valued rule — an absent attribute is *unknown*, and
+a consumer that reads it as zero reproduces exactly the defect that rule exists
+to prevent.
 `set_attribute` rejects an unlisted key (`T-V160-TRC-09`), so the addition is
 what makes the write legal.
 
@@ -983,17 +1208,18 @@ MUST be killed by `T-V170-SUM-05`.
 STOPS.** `docs/assets/bench/baseline-v1.6.0.json` **is** the baseline: not
 re-recorded, not regenerated, not superseded — a candidate measured against a
 baseline recorded in the same run proves nothing, which is why REQ-V160-NG-02
-handed this gate here. Six instrument values MUST match, checked before any
-inference is spent:
+handed this gate here. Six instrument values MUST match, and REQ-V170-PRE-04
+items 1–6 establish **every one of them before the first live inference of the
+run** — its own preflight included, so a mismatch costs no tokens at all:
 
 | field | required value |
 |---|---|
 | `meta.lmstudio_version` | `"Bionic v1.1.1"` |
-| `meta.served_model_id` | `"qwen/qwen3.8-27b"` |
+| `meta.served_model_id` | `"qwen/qwen3.8-27b"` — **exact string equality** with the uniquely selected served id and with `cfg.lmstudio_model`; a substring match, or two entries matching, is a STOP (REQ-V170-PRE-04 item 3) |
 | `meta.lmstudio_context_length` | `42496` |
 | `.env` `LLM_MAX_TOKENS` | `4096` (proved by REQ-V170-PRE-04's grep) |
 | `.env` `LLM_TIMEOUT_S` | `600` (same) |
-| `meta.obs_capture_content` | `false` |
+| `meta.obs_capture_content` | `false` — `cfg.obs_capture_content is False` **and** the metadata producer proved to emit `false` (REQ-V170-PRE-04 item 6) |
 
 Any mismatch is a **STOP with a report**, not an adjustment: re-baselining costs
 93 minutes of inference and is the operator's decision. What merges depends on
@@ -1006,7 +1232,10 @@ Any mismatch is a **STOP with a report**, not an adjustment: re-baselining costs
   `EXIT_NOT_COMPARABLE` routing back here — the code of §§6–8 **still merges**,
   having already passed T10's gates.
 
-In both cases `pyproject.toml` is **not** bumped and **no tag is created**.
+In both cases `pyproject.toml` is **not** bumped — T12 is skipped, so the version
+literal is never touched — and **no tag is created**. The first case is a
+`T-STOP` branch (REQ-V170-ORD-02); the second finalises through T13 and T14 with
+the failure report, since the code has already merged.
 
 Three consequences of the locked fields, to be stated in the report as
 constraints the run obeyed:
@@ -1068,7 +1297,10 @@ gains one key, `reasoning`, and it does **not** join `LOCKED_META_FIELDS`:
 
 `policy` and `on_purposes` come from `Config` (`on_purposes` serialised as a
 **sorted list**, so equal sets serialise equally); `mechanism` is stage A's
-per-purpose table, each value a short stable label `<letter>:<payload summary>`
+per-purpose **off-mechanism** table — what REQ-V170-POL-03 would apply if a
+purpose resolved to `"off"`, not what each call actually sent, so the example
+above stays truthful on C1, where `tool-round` resolves to `"on"` and sends
+nothing at all; each value a short stable label `<letter>:<payload summary>`
 and `null` for a purpose with no mechanism; `provider_form` names the provider
 whose form was used. On a `model-default` run **produced by this release** the
 block is present with empty values, never omitted.
@@ -1142,8 +1374,19 @@ runs, no fourth candidate.
 | **C2** | `cand-v170-off` | `off` | *(unset)* | the maximum saving, and the only way to establish that C1 is the cheaper of the two — which is why it is not conditional |
 | **C3** | `cand-v170-by-purpose-tool-final` | `by-purpose` | `tool-round,final` | the fallback: summary-only off |
 
+**C3 is skipped when it is C1 on the wire.** Under REQ-V170-RSN-07's
+TTFT-absent fallback — and in any other outcome leaving no `final` off
+mechanism — C1 resolves `final` to `"off"`, finds no mechanism and degrades to
+`"default"` (REQ-V170-POL-03), while C3 resolves `final` to `"on"`, which also
+sends no field: the two treatments are then **byte-identical on every call**,
+and running C3 would spend a full 3-repeat run for no information. In that case
+C3 is **not run**, the report records the resolved treatments side by side as
+the reason, and the budget of three candidate runs is not otherwise re-spent.
+The catalogue is still not swept and no fourth candidate exists.
+
 **The sequence, which is not a judgement call.** Run C1, then C2
-unconditionally. Run C3 only if neither C1 nor C2 passes quality. Among all
+unconditionally. Run C3 only if neither C1 nor C2 passes quality **and** C3's
+resolved treatment differs from C1's. Among all
 candidates actually run that pass quality, ship the lowest `C_conservative`,
 breaking ties by `C_plain`, then catalogue order.
 
@@ -1220,10 +1463,10 @@ uv run --locked python devtools/bench.py report \
 
 | outcome | meaning | what happens |
 |---|---|---|
-| **PASS** | the shipped candidate passes the quality gate **and** the cost gate; exit 0 | the release completes: `pyproject.toml` → `1.7.0`, and the annotated tag `v1.7.0` is created on the evidence-only commit (REQ-V170-VER-02) |
-| **FAIL** | a quality-passing candidate exists but misses the cost gate; exit 1 | the code **still merges**, with the **cheapest** quality-passing candidate as the shipped default (REQ-V170-BEN-05's definition, REQ-V170-POL-07), `pyproject.toml` **is** bumped to `1.7.0`, and the run **STOPS before tagging**. No tag. The report states the shortfall as a number and the operator decides |
-| **FAIL** | no candidate passes the quality gate | the shipped default stays `model-default`, `pyproject.toml` is **not** bumped, no tag, verdict `FAIL, cause: no reasoning policy satisfied the quality gate` |
-| **exit 2** | `EXIT_NOT_COMPARABLE` | a **process** failure, never a verdict. Fix the comparability cause and re-run the comparison; if the cause is an instrument difference, REQ-V170-BEN-01's STOP applies |
+| **PASS** | the shipped candidate passes the quality gate **and** the cost gate; exit 0 | the release completes: T12 lands the selection commit, which is where `pyproject.toml` moves `1.6.0` → `1.7.0` (REQ-V170-POL-07, REQ-V170-VER-01), and the annotated tag `v1.7.0` is then created on the evidence-only commit (REQ-V170-VER-02) |
+| **FAIL** | a quality-passing candidate exists but misses the cost gate; exit 1 | the code **still merges**: T12 runs, with the **cheapest** quality-passing candidate as the shipped default (REQ-V170-BEN-05's definition, REQ-V170-POL-07), and `pyproject.toml` **is** bumped to `1.7.0` inside that same selection commit. The run **STOPS before tagging**. No tag. The report states the shortfall as a number and the operator decides |
+| **FAIL** | no candidate passes the quality gate | there is no candidate to select, so **T12 is skipped entirely**: the shipped default stays `model-default`, `pyproject.toml` stays at `1.6.0`, no tag, verdict `FAIL, cause: no reasoning policy satisfied the quality gate`. T13 and T14 still run and finalise the failure report |
+| **exit 2** | `EXIT_NOT_COMPARABLE` | a **process** failure, never a verdict. Fix the comparability cause and re-run the comparison; if the cause is an instrument difference, REQ-V170-BEN-01's STOP applies. While it stands unresolved there is no comparable candidate and therefore no selection: **T12 is skipped**, `pyproject.toml` stays at `1.6.0`, no tag is created, and T13/T14 finalise the failure report naming the comparability message verbatim |
 
 **REQ-V170-BEN-08 (MUST) — latency is reported, never gated.** For the baseline
 and for each candidate the report carries, from the `spans` rows the documents
@@ -1279,20 +1522,30 @@ figures.
 
 ## 11. Semantic versioning and the release (VER)
 
-**REQ-V170-VER-01 (MUST) — a MINOR release.** `pyproject.toml`'s
-`project.version` moves from `"1.6.0"` to `"1.7.0"` and remains the single source
-of truth; `bot.py`'s `_read_version` (REQ-V160-VER-01) reads it at call time and
-`--version` prints exactly `tg-agent-bot 1.7.0`. MINOR is the right bump under
+**REQ-V170-VER-01 (MUST) — a MINOR release, bumped in exactly one place.**
+`pyproject.toml`'s `project.version` moves from `"1.6.0"` to `"1.7.0"` and
+remains the single source of truth; `bot.py`'s `_read_version`
+(REQ-V160-VER-01) reads it at call time, so `--version` prints
+`tg-agent-bot 1.6.0` until the bump lands and `tg-agent-bot 1.7.0` after it.
+MINOR is the right bump under
 REQ-V160-VER-02's own table: new capability, two new environment variables, an
 additive schema migration, no removed command and no incompatible semantics. The
 version test compares the printed string against an independent `tomllib` read,
 not a literal.
 
-**The bump is conditional.** It lands only on the branches REQ-V170-BEN-07 and
-REQ-V170-RSN-06 permit: not on the stage-A STOP, not on the
-no-quality-passing-candidate branch, and not on the instrument STOP of
-REQ-V170-BEN-01. It **does** land on the cost-gate-FAIL branch, where the code
-ships and only the tag is withheld.
+**The bump is conditional, and therefore it does not happen at T8.** It rides in
+the **single post-measurement selection commit** of REQ-V170-POL-07 (T12), the
+one commit that already exists only when a quality-passing candidate does, and
+it is one of that commit's five permitted files. It lands only on the branches
+REQ-V170-BEN-07 and REQ-V170-RSN-06 permit: **not** on the stage-A STOP, **not**
+on the no-quality-passing-candidate branch, **not** on an unresolved
+`EXIT_NOT_COMPARABLE`, and **not** on the instrument STOP of REQ-V170-BEN-01 —
+each of those keeps `1.6.0` at the tip, skips T12 and finalises its failure
+report without a tag. It **does** land on the cost-gate-FAIL branch, where the
+code ships, a quality-passing candidate was selected, and only the tag is
+withheld. Bumping at T8 instead would be unimplementable: T8 is before the
+candidates, and REQ-V170-ACC-03's freeze permits no commit that could revert the
+version afterwards.
 
 **REQ-V170-VER-02 (MUST) — the tag is created last, on the evidence-only commit,
 and only on PASS.** The order of REQ-V160-VER-04 is unchanged: T14 runs every
@@ -1382,9 +1635,12 @@ on the following line is unchanged. `T-V170-RPT-02` asserts the configured
    the verdict;
 7. **stage A**: the full pair table of REQ-V170-RSN-05, the per-purpose mechanism
    table of REQ-V170-RSN-06, the mixed-policy confirming pair of REQ-V170-RSN-07
-   with its three measured numbers against the three thresholds, the resolved
-   values of §3's three VERIFY markers with URLs and dates, and the `git
-   diff`-empty check after each candidate;
+   with check 1's two token figures against their two thresholds and check 2's
+   per-run rate, predicted cold TTFT, measured final-round TTFT and their ratio
+   against `0.35` — or, where the TTFT field was absent, the explicit statement
+   that RSN-07's conservative fallback bound the run and the agent tags shipped
+   no mechanism; the resolved values of §3's **four** VERIFY markers with URLs,
+   routes and dates; and the `git diff`-empty check after each candidate;
 8. **stage C**: the six instrument values of REQ-V170-BEN-01 with their sources;
    per candidate, the tag, the treatment, the invocation count and why, the
    per-scenario successes with S13…S18 called out individually, tokens, cost and
@@ -1437,8 +1693,16 @@ Gates 1–4 and 6 are unconditional and offline. Gate 5 requires the §3
 preconditions and is executed at **T1** — the live preflight, against the
 still-unchanged tree — again at **T10** once every source change has landed, and
 again at **T14**; never at T0. An unreachable LM Studio at T1 is a **blocked
-run**. The test count MUST exceed the
-number measured at T0 (floor 1016); state the exact number in the report.
+run**. The T10 and T14 runs belong to a code path a `T-STOP` branch never
+enters: on the STOPs of REQ-V170-BEN-01 and REQ-V170-RSN-06 gate 5 is **not
+required** after T1 and is recorded `N/A` with that reason, exactly as
+REQ-V170-ORD-02 item 5 states; that is the only exception to this requirement,
+and it removes no gate from any branch that reaches T10 — gates 1–4 and 6 stay
+unconditional on every branch. The test count MUST exceed the
+number measured at T0 (floor 1016); state the exact number in the report. **On a
+`T-STOP` branch it MUST *equal* that number instead** — no test was added because
+no code was written, and REQ-V170-EC-03's "no test may be deleted" makes the
+equality the assertion.
 
 **REQ-V170-GATE-02 (MUST) — one new gate, and two re-measured timeouts.**
 `config/quality_gates.yaml` gains exactly one gate:
@@ -1484,18 +1748,18 @@ not repeated per line.
 | T | spec sections | repository files and ranges | delegate? |
 |---|---|---|---|
 | **T0** | §3, §13 | `AGENTS.md:90-120`, `config/quality_gates.yaml:280-317` | no |
-| **T1** | §3 (PRE-03, -04), §9 (BEN-01), §13 | none — only commands run | no |
-| **T2** | §5 (RSN-01…05, -07) | the scratch patch only; `devtools/bench_scenarios.py:204-212`, `:262-270` read-only | no |
+| **T1** | §3 (PRE-03, -04), §9 (BEN-01), §13 | `llm/lmstudio.py:35-53` read-only — the request shape and route the TTFT `VERIFY` marker must probe through; otherwise only commands run | no |
+| **T2** | §5 (RSN-01…05, -07) | the scratch patch only; `devtools/bench_scenarios.py:204-212`, `:262-270` and `llm/lmstudio.py:35-53` read-only — the latter is where the TTFT capture reads `stats.time_to_first_token` off the OpenAI-compatible response | no |
 | **T3** | §5 (RSN-01…07) | none — only commands run, under the scratch patch of T2 | no |
 | **T4** | §6 (POL-01…03), §7 (OBS-01) | `config.py:280-300`, `:341-400`; `llm/base.py:60-130`; `storage.py:16-46`, `:180-230`, `:284-301` | **yes** |
 | **T5** | §6 (POL-04…06), §7 (OBS-02, -03) | `llm/base.py:66-130`, `llm/lmstudio.py:30-53`, `llm/openrouter.py:66-98`, `llm/failover.py:44-95`, `bot.py:1065-1080`, `agent.py:325-350`, `:830-960`, `tracing.py:60-100` | **yes** |
 | **T6** | §8 (SUM-01…05) | `agent.py:40-50`, `:1022-1115`; `bot.py:720-760`; `config.py:280-300`, `:363-400` | **yes** |
 | **T7** | §9 (BEN-02, -03, -06), §10 (CAR-01) | `devtools/bench.py:105-200`, `:225-280`, `:660-740`, `:1430-1470`, `:1520-1580`, `:1950-1990`, `:2260-2290`, `:2310-2330` | **yes** |
-| **T8** | §11, §12 (RPT-02, -04), §15 (ACC-03) | `pyproject.toml`, `.env.example`, `README.md`, `AGENTS.md`, `docs/plan.md`, `config/quality_gates.yaml:288-317` | **yes** |
+| **T8** | §11, §12 (RPT-02, -04), §15 (ACC-03) | `.env.example`, `README.md`, `AGENTS.md`, `docs/plan.md`, `config/quality_gates.yaml:288-317` — **not** `pyproject.toml`, whose version moves only at T12 (REQ-V170-VER-01) | **yes** |
 | **T9** | §13, §14.4 | `devtools/mutation_check.py` **tail only** (`MUTATIONS` entries and `main()`), `config/quality_gates.yaml:200-235` | **yes** |
 | **T10** | §13, §15 (REV-01) | the review's own reading map; otherwise only commands run | no |
 | **T11** | §9 (BEN-01, -04…-08) | none — the tree is frozen; only commands run | no |
-| **T12** | §6 (POL-07), §15 (ACC-03) | `config.py` (the two default literals only), `.env.example`, `README.md`, `AGENTS.md` | no |
+| **T12** | §6 (POL-07), §11 (VER-01), §15 (ACC-03) | `config.py` (the two default literals only), `pyproject.toml` (`project.version` only), `.env.example`, `README.md`, `AGENTS.md` | no |
 | **T13** | §12, §15 | this run's own artefacts | no |
 | **T14** | §15 (ACC-03), Appendix B | this run's own artefacts | no |
 
@@ -1541,9 +1805,15 @@ unamended is the proof); `tests/test_v160_bench.py:170-240` (S13…S18 ids and
 ceilings — `bench_scenarios.py` is frozen); `tests/test_observability.py:593`
 (summary rows keep `turn_id is None`); `tests/test_bench.py:111` and
 `tests/test_dashboard.py:136` (`bench_schema` follows the constant, which does
-not move); `tests/test_failover.py` (the two new keyword-only parameters both
-default to today's behaviour); `tests/test_summary.py` (every existing caller
-omits `budget_s`, so the path is unchanged).
+not move); `tests/test_summary.py` (every existing caller omits `budget_s`, so
+the path is unchanged).
+
+**`tests/test_failover.py` is amended only at the test-double signatures listed
+in §14.1** — `:31` and `:276`, and nothing else in the file; all test behaviour
+and assertions otherwise remain unchanged. It is therefore neither in the
+not-amended list above nor open to any other edit: the round-1 spec said both
+that §14.1 required those two lines and that the file stayed unamended, which no
+executor could satisfy under REQ-V170-EC-03's ban on unlisted test edits.
 
 ### 14.2 New unit tests — the mechanisms
 
@@ -1551,14 +1821,14 @@ omits `budget_s`, so the path is unchanged).
 |---|---|
 | `T-V170-POL-01` | `LLM_REASONING_POLICY` accepts exactly `model-default`, `off`, `by-purpose` and raises `ConfigError` naming the variable **and** the token otherwise; `LLM_REASONING_ON_PURPOSES` parses a comma list order-insensitively into a `frozenset`, accepts the empty string as the empty set, rejects an unknown tag naming it, and defaults to `{"tool-round"}`; both are absent-safe |
 | `T-V170-POL-02` | `reasoning_tag` over the full cross product of `purpose ∈ {"agent","summary"}` and `request_tools ∈ {None, [], [spec]}`: `("agent", None) → "final"`, `("agent", []) → "final"`, `("agent", [spec]) → "tool-round"`, `("summary", *) → "summary"`; the function reads no `Config` and no module global |
-| `T-V170-POL-03` | `resolve_reasoning` over all 3 × 3 combinations of policy and tag, plus `on_purposes` empty and full: it returns a **frozen** `ReasoningRequest` (mutating a field raises), `.tag` always equals the tag argument, `model-default` yields `value == "default"` with `mechanism is None` for every tag and looks nothing up, and an `"on"` or `"off"` whose `(tag, value)` entry is `None` degrades to `("default", None, tag)`; a mechanism present for `("summary", "off")` but absent for `("tool-round", "off")` yields the mechanism only on the summary tag |
+| `T-V170-POL-03` | `resolve_reasoning` over all 3 × 3 combinations of policy and tag, plus `on_purposes` empty and full: it returns a **frozen** `ReasoningRequest` (mutating a field raises), `.tag` always equals the tag argument, `model-default` yields `value == "default"` with `mechanism is None` for every tag and looks nothing up; `"on"` yields `("on", None, tag)` for every tag and looks **nothing** up either — asserted against a mechanism table that would raise on any lookup, so a regression to a `(tag, value)` table is caught; only `"off"` reads `mechanisms.get(tag)`, and an `"off"` whose tag entry is `None` or absent degrades to `("default", None, tag)`; a table holding a mechanism for `"summary"` but not for `"tool-round"` yields the mechanism on the summary tag alone, and under `by-purpose` with `on_purposes == {"tool-round"}` yields `("on", None, "tool-round")` and `("off", <summary mechanism>, "summary")` |
 | `T-V170-POL-04` | with a fake primary raising a retryable `LLMError` and a recording secondary, the secondary receives the **same `ReasoningRequest` object** the caller passed — equal `value`, equal `mechanism`, equal `tag`, including a non-`default` tag such as `"summary"` — which is the `_try_other` forwarding at `llm/failover.py:83`; and `devtools/bench.py:2186`'s warm-up probe passes `reasoning=REASONING_DEFAULT` and `timeout_s=None` explicitly |
-| `T-V170-POL-05` | under every policy, neither the system prompt nor the `tools` JSON contains any mechanism string; `prompt_tools_sha256` computed over a treated tree equals the untreated value; the `lmstudio` client applies `request.mechanism` alone — `fields` reach the payload, `("append_assistant", …)` becomes the last message, `("suffix_last_user", …)` extends the last user message, `mechanism is None` adds nothing — and reads `request.tag` **nowhere** (asserted by passing a `ReasoningRequest` whose `tag` is a value outside `REASONING_TAGS` and getting the same payload); the `openrouter` client branches on `request.value` alone, its off form is exactly `{"reasoning": {"enabled": false}}`, and `"on"`/`"default"` add nothing |
+| `T-V170-POL-05` | under every policy, neither the system prompt nor the `tools` JSON contains any mechanism string; `prompt_tools_sha256` computed over a treated tree equals the untreated value; the `lmstudio` client applies `request.mechanism` alone — `fields` reach the payload, `("append_assistant", …)` becomes the last message, `("suffix_last_user", …)` extends the last user message, `mechanism is None` adds nothing — and reads `request.tag` **nowhere** (asserted by passing a `ReasoningRequest` whose `tag` is a value outside `REASONING_TAGS` and getting the same payload); the `openrouter` client branches on `request.value` alone, its off form is exactly `{"reasoning": {"enabled": false}}`, and `"on"`/`"default"` add nothing. **Deep immutability**: no value reachable from `REASONING_MECHANISMS` is a `dict`, `list` or `set` (asserted by a recursive walk); mutating a produced payload — including its **nested** `chat_template_kwargs` mapping — leaves `REASONING_MECHANISMS` byte-equal to its pre-call state **and** leaves a payload produced by a second, later call byte-equal to the first's original value; and two successive calls return payloads that are equal but not the same object at any nesting level |
 | `T-V170-POL-06` | `build_payload(reasoning_fields=None)` is byte-identical to today's output for both the `tools is None` and `tools is not None` branches; a mapping is merged after the existing keys; a mapping colliding with any of the seven protected keys raises `ValueError` naming it; neither `message_patch` form mutates the caller's `messages` list, and the list the caller still holds after the call compares equal to the one it passed |
 | `T-V170-POL-07` | the shipped defaults of both variables equal the literals `.env.example` documents — the single permitted pin |
 | `T-V170-OBS-01` | migration 4 → 5 on a populated v4 database: both columns appear nullable, pre-existing rows read `NULL`, the version reads 5; chained 1 → 5, 2 → 5 and 3 → 5; idempotent on re-`init_schema`; an unsupported version (0, 6, `"x"`) still raises the existing `RuntimeError` naming it |
 | `T-V170-OBS-02` | `storage.LLM_CALL_COLUMNS` equals `PRAGMA table_info(llm_calls)`; the `llm_call` log payload's key set equals it too; `tracing.ATTRIBUTE_KEYS` contains `tg_agent.reasoning.requested` and `set_attribute` still rejects an unlisted key |
-| `T-V170-OBS-03` | the honored truth table in full: `'default'` → `NULL`; `'off'` with (0, 0) → 1; `'off'` with (`NULL`, 0) → 1; `'off'` with (1, 0) → 0; `'off'` with (0, 5) → 0; `'on'` with (0, 0) → 0; `'on'` with (7, 0) → 1; a call raising before a response → the requested value and `NULL` |
+| `T-V170-OBS-03` | the three-valued honored table in full, as `(requested, reasoning_tokens, reasoning_chars) → honored`: `('default', *, *)` → `NULL`; `('off', NULL, 0)` → **`NULL`**, the unknown case, **not** `1`; `('on', NULL, 0)` → **`NULL`** for the same reason; `('off', 0, 0)` → 1; `('off', NULL, 5)` → 0; `('off', 1, 0)` → 0; `('off', 0, 5)` → 0; `('on', 0, 0)` → 0; `('on', 7, 0)` → 1; `('on', NULL, 5)` → 1; a call raising before a response → the requested value and `NULL`. The two `NULL` rows are asserted to be `NULL` and not falsy-equal to 0, so a `is None` regression cannot pass |
 | `T-V170-OBS-04` | every `llm.complete` invocation writes both columns — **exactly six rows** and six non-`NULL` `reasoning_requested` values, through `_record_llm_call` only (asserted by patching `storage.add_llm_call` to count calls). The six are derived from the call structure, not asserted from a number: one `run_agent` turn issues one invocation per round (`agent.py:335`), so the tools-exposed round and the tools-withheld final round are **two**; `summarize_conversation` issues attempt 1 and then **either** the truncation retry **or** the JSON-repair call — `if truncated:` / `elif parsed is None and reason is not None:` at `agent.py:1052-1062` are mutually exclusive and one invocation can never produce both — so the scenario drives **two** summary invocations, one truncating and one returning invalid JSON, for **four**. A failover inside any of the six adds **no** row (REQ-V170-OBS-03): the test wraps one of them in a `FailoverLLMClient` whose primary raises, and asserts the count is still six and that row's `provider` names the secondary |
 | `T-V170-SUM-01` | with a fake clock and `budget_s=100`, attempt 1 consuming 40 s and the retry 50 s, both are issued and the deadline is taken once, before attempt 1; with `budget_s=None` the behaviour is byte-identical to v1.6.0's, proved against a recorded call log |
 | `T-V170-SUM-02` | with `budget_s=100` and attempt 1 consuming 80 s, the truncation retry is **not issued** (remaining 20 s < 30 s floor), `summarize_conversation` returns `None`, no exception escapes, exactly **one** `llm_calls` row exists, and one redacted warning names the elapsed and remaining seconds; the same for the JSON-repair branch |
@@ -1573,7 +1843,7 @@ omits `budget_s`, so the path is unchanged).
 | `T-V170-CAR-01` | `--tag` accepts `baseline-v1.6.0`, `cand-v170-off`, `a`, and a 64-character name; rejects `..`, `.`, `a/b`, `../x`, `a\\b`, the empty string, a 65-character name and a name with a space — each with `EXIT_ERROR` and **no** filesystem write, asserted by patching `shutil.rmtree` to fail the test if called |
 | `T-V170-RPT-02` | `config/quality_gates.yaml`'s `lint-docs.report_path` names `docs/reports/report-v1.7.0.md` and its `ledger_header` is unchanged |
 | `T-V170-VER-01` | `bot.main(["--version"])` prints `tg-agent-bot <v>` where `<v>` equals an independent `tomllib` read of `pyproject.toml`, and returns 0 |
-| `T-V170-ACC-03` | the post-measurement selection commit is equivalent to the measured treatment: with no `LLM_REASONING_*` in the process environment, `load_config()` on the final tree yields `(llm_reasoning_policy, sorted(llm_reasoning_on_purposes))` equal to the `meta.reasoning` `policy`/`on_purposes` of **exactly one** committed `docs/assets/bench/cand-v170-*.json`; the same pair equals what `.env.example` documents; and the test names no policy literal of its own, so the selection commit never edits it. Skipped, with a recorded reason, when no candidate document exists — the stage-A STOP branch |
+| `T-V170-ACC-03` | the post-measurement selection commit is equivalent to the measured treatment: with no `LLM_REASONING_*` in the process environment, `load_config()` on the final tree yields `(llm_reasoning_policy, sorted(llm_reasoning_on_purposes))` equal to the `meta.reasoning` `policy`/`on_purposes` of **exactly one** committed `docs/assets/bench/cand-v170-*.json`; the same pair equals what `.env.example` documents; and the test names no policy literal of its own, so the selection commit never edits it. It additionally asserts the version invariant of REQ-V170-VER-01 **without a literal**: an independent `tomllib` read of `pyproject.toml` equals `1.7.0` exactly when such a matching candidate document exists and `1.6.0` when none does — the offline proof that the bump rode in T12's selection commit and in no other. The test is two halves: the **equivalence** half skips, with a recorded reason, while no candidate document exists (T8, and the stage-A / instrument-STOP branches); the **version** half never skips, so at T8 it asserts `1.6.0` and after T12 it asserts `1.7.0` |
 
 ### 14.3 Negative tests — the mechanisms must be able to fail
 
@@ -1602,7 +1872,7 @@ correctness-critical mechanism and killed by a named test:
 | `v170-summary-floor-ignored` | `SUMMARY_BUDGET_FLOOR_S = 30.0` → `0.0` | `T-V170-SUM-02` |
 | `v170-summary-floor-check-removed` | the second `load_config` check of REQ-V170-SUM-05 is deleted | `T-V170-SUM-05` |
 | `v170-rescue-retry-keeps-reasoning` | the retry's forced `"off"` becomes the policy's own resolution | `T-V170-SUM-04` |
-| `v170-honored-treats-null-as-positive` | `reasoning_tokens is None` is read as non-zero in the honored computation | `T-V170-OBS-03` |
+| `v170-honored-treats-null-as-positive` | the unknown case of REQ-V170-OBS-01 rule 2 is removed — `reasoning_tokens is None` is read as a known count instead of as absent evidence, so `('off', NULL, 0)` yields `1` and `('on', NULL, 0)` yields `0` where both MUST be `NULL` | `T-V170-OBS-03` |
 | `v170-tag-sanitiser-removed` | the `--tag` pattern check of REQ-V170-CAR-01 always returns `True` | `T-V170-CAR-01`, `N7` |
 | `v170-config-hash-includes-treatment` | `llm_reasoning_policy` is removed from `CONFIG_HASH_EXCLUDED` | `T-V170-BEN-03` |
 | `v170-gate-ignores-3of3` | the `report --gate` check over `GATE_REQUIRED_FULL_SCENARIOS` is skipped, so a candidate with S18 at 2/3 exits 0 | `T-V170-BEN-04`, `T-V170-BEN-05` |
@@ -1628,7 +1898,10 @@ domain allowlist, the loopback-only dashboard and the `.env` handling are
 untouched by this release.
 
 **REQ-V170-ACC-03 (MUST) — the final acceptance run, the frozen tip, and the
-freeze.** The v1.5/v1.6.0 machinery applies unchanged:
+freeze.** On a `T-STOP` branch (REQ-V170-ORD-02) this requirement is **not
+reached**: T13 and T14 are replaced by `T-STOP`'s own finalisation, there is no
+`<implementation-tip>`, no evidence-only commit and no tag, and the report says
+so. On every other branch the v1.5/v1.6.0 machinery applies unchanged:
 
 - **T13 lands a provisional `report-v1.7.0.md`** carrying every REQ-V170-RPT-03
   item except item 4's `<implementation-tip>` SHA and every T14 artefact. That
@@ -1649,9 +1922,15 @@ freeze.** The v1.5/v1.6.0 machinery applies unchanged:
 
   1. a **documentation-only** correction of the evidence the run produced;
   2. the **single post-measurement selection commit** of REQ-V170-POL-07,
-     changing only the two policy default literals in `config.py` to exactly the
-     selected candidate's process-environment treatment, plus their echoes in
-     `.env.example`, `README.md` and `AGENTS.md`.
+     which exists **only when a quality-passing candidate exists** and whose
+     allowed-file list is exhaustively `config.py` (the two policy default
+     literals, set to exactly the selected candidate's process-environment
+     treatment), `pyproject.toml` (`project.version` `1.6.0` → `1.7.0`,
+     REQ-V170-VER-01), and the documentation echoes of both in `.env.example`,
+     `README.md` and `AGENTS.md` — **five files, no sixth**. When no candidate
+     passes quality, when the comparison stays `EXIT_NOT_COMPARABLE`, or when
+     either STOP of REQ-V170-RSN-06 / REQ-V170-BEN-01 fired, this exception is
+     simply not taken: the version stays `1.6.0` and no tag is created.
 
   Exception 2 is admitted only against proof, produced **before** acceptance:
 
@@ -1661,7 +1940,11 @@ freeze.** The v1.5/v1.6.0 machinery applies unchanged:
     `(policy, sorted(on_purposes))` equal to **exactly one** of them. The three
     catalogue treatments of REQ-V170-BEN-05 are pairwise distinct, so "exactly
     one" pins the selection uniquely **without pinning a literal** — which is
-    why the selection commit never has to edit the test;
+    why the selection commit never has to edit the test. The same test asserts
+    the **version invariant** of REQ-V170-VER-01 in the same breath, and still
+    without a literal: `pyproject.toml`'s `project.version` reads `1.7.0` when a
+    committed `cand-v170-*.json` matches, and `1.6.0` when none does, so a bump
+    that escaped its one permitted commit fails offline;
   - a recorded **candidate-metadata check**: the report names the selected tag
     and prints its `meta.reasoning.policy` and `meta.reasoning.on_purposes`
     beside the final tree's resolved pair.
@@ -1684,9 +1967,13 @@ Findings are fixed or waived with a reason in the report; log the review prompt
 in `docs/prompts/`. Beyond the standard checklist the reviewer checks:
 
 1. `reasoning_tag`, `resolve_reasoning`, `ReasoningRequest`,
-   `ReasoningMechanism` and `REASONING_MECHANISMS` are pure and frozen, live
-   only in `llm/base.py`, and no purpose, policy or mechanism literal is
-   duplicated anywhere else; **no provider reads `request.tag`**;
+   `ReasoningMechanism` and `REASONING_MECHANISMS` are pure and frozen **all the
+   way down** — a recursive walk of the table reaches no `dict`, `list` or
+   `set`, and `json_fields` builds fresh dictionaries per call — they live only
+   in `llm/base.py`, and no purpose, policy or mechanism literal is duplicated
+   anywhere else; the table is keyed by tag and holds **off** mechanisms only,
+   `"on"` and `"default"` looking nothing up; **no provider reads
+   `request.tag`**;
 2. all five `complete()` definitions and all five invocation sites carry both
    new parameters in the documented order (`reasoning`, then `timeout_s`),
    `llm/failover.py:83` included, and `_try_other` forwards the
@@ -1702,9 +1989,13 @@ in `docs/prompts/`. Beyond the standard checklist the reviewer checks:
 6. each mechanism of §14.4 has a mutation entry whose `find` matches once;
 7. the S13…S18 3/3 rule is enforced by `report --gate` itself, not by a helper
    only a human runs, and `devtools/bench_scenarios.py` is byte-unchanged;
-8. the post-measurement selection commit touches only the two policy default
-   literals and their documentation echoes, and `T-V170-ACC-03` needs no edit to
-   pass.
+8. the post-measurement selection commit touches only its five permitted files —
+   `config.py`'s two policy default literals, `pyproject.toml`'s
+   `project.version`, and the documentation echoes of both in `.env.example`,
+   `README.md` and `AGENTS.md` — and `T-V170-ACC-03` needs no edit to pass. The
+   version bump inside that commit is **expected**, not a freeze violation
+   (REQ-V170-VER-01); a `1.7.0` appearing in `pyproject.toml` at T8 or in any
+   other commit **is** one.
 
 ---
 
@@ -1712,7 +2003,10 @@ in `docs/prompts/`. Beyond the standard checklist the reviewer checks:
 
 **REQ-V170-ORD-01 (MUST)** Work in this order; each task is one prompt and one
 commit, with the reading map of §13.1 and the delegation rule of
-REQ-V170-EC-07. Three tasks are **conditional exits** and are marked so.
+REQ-V170-EC-07. Three tasks are **conditional exits** and are marked so; T1's
+and T3's exits both finalise through the shared `T-STOP` procedure of
+REQ-V170-ORD-02, and T12 is additionally a **conditional task**, run only when a
+quality-passing candidate exists (REQ-V170-POL-07).
 
 **The order is measurement-first, and that is what makes §5's STOP branch
 truthful.** Stage A runs before one line of §§6–8 exists, so the "no
@@ -1728,20 +2022,68 @@ first Stage-C candidate.**
 | T | task | acceptance |
 |---|---|---|
 | **T0** | Preconditions (§3), **offline only**: `full` profile green with the live member deferred, hooks installed, `doctor` green, test count re-measured, docker, `bench.py check` on the baseline. **Record `<base>` and the spec's `sha256`**, create `docs/prompts/103-go-spec-v1.7.0.md` and the `report-v1.7.0.md` skeleton — its `## Operator inputs` section copied verbatim from the `go` request, and its "Ledger row (paste into `economics.md`)" section already carrying a structurally complete fenced row (REQ-V170-RPT-02). | every item recorded; `102` is the highest pre-existing prompt and the spec is present and unchanged; `<base>` written before the first commit; **a missing version or a non-positive-integer context length stops the run here** |
-| **T1** | **Live preflight — conditional exit.** PRE-03's address probe, the single-line `.env` rewrite and the three documentation reads; PRE-04's six instrument checks; gate 5 (`bot.py --selftest-live`) and the `full` profile's deferred live member, both against the still-unchanged tree. No source file is touched. | every check recorded; the three VERIFY markers resolved with URL and date; **an instrument mismatch STOPS the run here** (REQ-V170-BEN-01), before a line of code is written |
-| **T2** | The **stage-A scratch harness**: the mechanism-selection patch shape, the pair-file naming of REQ-V170-TREE-01, the restore-and-`git diff` procedure, and REQ-V170-RSN-07's mixed-policy pair. **No commit of the patch itself** — this task commits only its prompt and the report scaffolding. | the procedure is written down and dry-run against the stub client with zero live calls |
-| **T3** | **Stage A (§5) — conditional exit.** Candidates **a**…**e** in the fixed order under the pair contract and the budget; the honored decision per purpose; RSN-07's confirming mixed-policy pair for any mechanism proposed for an agent tag; the per-purpose mechanism table. | the mechanism table produced and every pair artefact committed; `git diff` empty after each candidate; **no summary-shippable mechanism STOPS the run here** (REQ-V170-RSN-06), with §6, §7, §8 and §9 declared not executed and no version bump |
+| **T1** | **Live preflight — conditional exit.** PRE-03's address probe, the single-line `.env` rewrite and the three documentation reads; PRE-04's seven instrument checks, the six comparability values all established before its own inference preflight; gate 5 (`bot.py --selftest-live`) and the `full` profile's deferred live member, both against the still-unchanged tree. No source file is touched. | every check recorded; the **four** VERIFY markers resolved with URL, route and date — the fourth deciding, live on the OpenAI-compatible endpoint, whether `stats.time_to_first_token` is available and therefore whether REQ-V170-RSN-07's conservative fallback binds the whole run; **an instrument mismatch STOPS the run here** (REQ-V170-BEN-01), before a line of code is written, and the run finalises through `T-STOP` (REQ-V170-ORD-02) |
+| **T2** | The **stage-A scratch harness**: the mechanism-selection patch shape, the pair-file naming of REQ-V170-TREE-01, the restore-and-`git diff` procedure, REQ-V170-RSN-07's mixed-policy pair, and — when T1 found the field — the per-call capture of `stats.time_to_first_token` from the OpenAI-compatible response into the TTFT sidecar, on that route only. **No commit of the patch itself** — this task commits only its prompt and the report scaffolding. | the procedure is written down and dry-run against the stub client with zero live calls; the sidecar shape exercised against a recorded response fixture, `null` written where the field is empty or absent |
+| **T3** | **Stage A (§5) — conditional exit.** Candidates **a**…**e** in the fixed order under the pair contract and the budget; the honored decision per purpose; RSN-07's confirming mixed-policy pair, with both checks, for any mechanism proposed for an agent tag — or, under the TTFT-absent fallback, `none` recorded for both agent tags without a pair being spent on them; the per-purpose mechanism table. | the mechanism table produced and every pair artefact committed, TTFT sidecars included where check 2 ran; `git diff` empty after each candidate; **no summary-shippable mechanism STOPS the run here** (REQ-V170-RSN-06), with §6, §7, §8 and §9 declared not executed, no version bump, and the run finalised through `T-STOP` (REQ-V170-ORD-02) |
 | **T4** | `config.py` (two fields, two parsers, the SUM-05 check), `llm/base.py` (`REASONING_TAGS`, `reasoning_tag`, the two frozen dataclasses, `REASONING_MECHANISMS` filled from **T3's** table, `resolve_reasoning`), `storage.py` (`SCHEMA_VERSION = 5`, the two columns, `_MIGRATION_4_TO_5`, the accepted tuple). Tests `T-V170-POL-01`, `-02`, `-03`, `T-V170-OBS-01`, `T-V170-SUM-05`, `N1`, `N2`, `N3`, `N8`; amends `tests/test_observability.py:431`. | those tests green; migration tests green from v1, v2, v3 and v4 databases; `test_v14_patch` green **unamended** |
-| **T5** | `llm/base.py` (`build_payload`'s `reasoning_fields`), the two new keyword-only parameters across five definitions (incl. `bot.py:1071`) and five invocations, the seven test doubles of §14.1, the two provider forms, `tracing.py`'s one new key, `agent.py`'s `_record_llm_call` wiring. Tests `T-V170-POL-04`, `-05`, `-06`, `T-V170-OBS-02`, `-03`, `-04`, `N4`. | those tests green; `tests/test_failover.py` green unamended; `prompt_tools_sha256` unchanged |
+| **T5** | `llm/base.py` (`build_payload`'s `reasoning_fields`), the two new keyword-only parameters across five definitions (incl. `bot.py:1071`) and five invocations, the seven test doubles of §14.1, the two provider forms, `tracing.py`'s one new key, `agent.py`'s `_record_llm_call` wiring. Tests `T-V170-POL-04`, `-05`, `-06`, `T-V170-OBS-02`, `-03`, `-04`, `N4`. | those tests green; `tests/test_failover.py` green with **only** the two test-double signature amendments §14.1 lists (`:31`, `:276`) and no behaviour or assertion changed; `prompt_tools_sha256` unchanged |
 | **T6** | `agent.py` summary budget (`budget_s`, `clock`, `SUMMARY_BUDGET_FLOOR_S`, the per-request timeout on **every** request, the rescue retry) and `bot.py`'s two call sites. Tests `T-V170-SUM-01`, `-02`, `-03`, `-04`, `N5`. | those tests green with a fake clock and no live call; `tests/test_summary.py` green unamended |
 | **T7** | `devtools/bench.py`: `meta.reasoning`, the `comparability` equality rule, the two `CONFIG_HASH_EXCLUDED` entries, `GATE_REQUIRED_FULL_SCENARIOS` and the `report --gate` check that reads it, the `--tag` sanitiser, the corrected `ENV_FLAG_FIELDS` comment. Tests `T-V170-BEN-01`, `-02`, `-03`, `-04`, `-05`, `T-V170-CAR-01`, `N6`, `N7`; amends `tests/test_bench.py`'s comparability cases. | those tests green, `T-V170-BEN-01`/`-02`/`-04` driven through the **real committed** baseline; `bench_scenarios.py` byte-unchanged (`git diff --stat` proves it) |
-| **T8** | Version and docs: `pyproject.toml` `1.7.0`, `.env.example`, `README.md`, `AGENTS.md` (gate, variables, corrected test and mutation counts), `docs/plan.md`, and `config/quality_gates.yaml`'s `report_path` — repointed **here**, before the freeze, because it is a config file (REQ-V170-RPT-02). Tests `T-V170-VER-01`, `T-V170-RPT-02`, `T-V170-ACC-03` (skipping, with its reason recorded, while no candidate document exists). | `lint-docs` green against the T0 skeleton's ledger section; docs match reality; the version bump is provisional until T11's verdict (REQ-V170-VER-01) |
+| **T8** | Docs and the gate config, **no version bump**: `.env.example`, `README.md`, `AGENTS.md` (gate, variables, corrected test and mutation counts), `docs/plan.md`, and `config/quality_gates.yaml`'s `report_path` — repointed **here**, before the freeze, because it is a config file (REQ-V170-RPT-02). `pyproject.toml` is **not** touched: the bump belongs to T12's selection commit alone (REQ-V170-VER-01). Tests `T-V170-VER-01`, `T-V170-RPT-02`, `T-V170-ACC-03` (its equivalence half skipping, with the reason recorded, while no candidate document exists; its version half asserting `1.6.0`). | `lint-docs` green against the T0 skeleton's ledger section; docs match reality; `pyproject.toml` byte-unchanged, proved by `git diff --stat` |
 | **T9** | `mutation_check.py`: the nine `v170-*` entries; `config/quality_gates.yaml`: the `mutation-v170` gate and both re-measured timeouts; `--list` recorded. | `--select v170-` green; `mutation-all` green inside its new timeout; the matrix test green |
 | **T10** | **Review (REQ-V170-REV-01) in a clean context, then every gate**: gates 1–4 and 6 verbatim, `checks.py run --profile full --since <base>`, and gate 5 re-run now that the source has changed. **Every source, test and config fix of this run lands here or earlier**; the single exception is T12. | findings closed or waived; every gate green; the tree entering stage C is final |
-| **T11** | **Stage C (§9) — conditional exit.** C1, then **C2 unconditionally**, then C3 only if neither passed the quality gate (REQ-V170-BEN-05); the gated comparison into `bench-v1.7.0.md`. **The tree is frozen from the first candidate.** | each candidate document `check`-valid, `meta.aborted` absent, comparability `None` against the baseline; the cheapest quality-passing candidate identified by REQ-V170-BEN-05's rule; **a FAIL verdict continues to T12 but forbids the tag** (REQ-V170-BEN-07) |
-| **T12** | **The selection commit (REQ-V170-POL-07, REQ-V170-ACC-03)**: the two policy default literals set to exactly the selected candidate's process-environment treatment, plus their documented echoes in `.env.example`, `README.md` and `AGENTS.md`. Nothing else. | `T-V170-ACC-03` green against the committed candidate documents; the candidate-metadata check recorded; `git diff` against T11's tip shows only those four files |
+| **T11** | **Stage C (§9) — conditional exit.** C1, then **C2 unconditionally**, then C3 only if neither passed the quality gate (REQ-V170-BEN-05); the gated comparison into `bench-v1.7.0.md`. **The tree is frozen from the first candidate.** | each candidate document `check`-valid, `meta.aborted` absent, comparability `None` against the baseline; the cheapest quality-passing candidate identified by REQ-V170-BEN-05's rule; **a cost-gate FAIL continues to T12 but forbids the tag**; **no quality-passing candidate, or an unresolved `EXIT_NOT_COMPARABLE`, skips T12 entirely** — version stays `1.6.0`, no tag, and T13/T14 finalise the failure report (REQ-V170-BEN-07); an instrument mismatch surfacing here is REQ-V170-BEN-01's STOP on the same routing |
+| **T12** | **The selection commit — conditional task, run only when a quality-passing candidate exists** (REQ-V170-POL-07, REQ-V170-VER-01, REQ-V170-ACC-03): the two policy default literals in `config.py` set to exactly the selected candidate's process-environment treatment, `pyproject.toml`'s `project.version` `1.6.0` → `1.7.0`, plus the documented echoes of both in `.env.example`, `README.md` and `AGENTS.md`. Nothing else. **Skipped whole** when no candidate passes quality, when the comparison stays `EXIT_NOT_COMPARABLE`, or when either STOP fired. | `T-V170-ACC-03` green against the committed candidate documents, its version half reading `1.7.0`; the candidate-metadata check recorded; `git diff` against T11's tip shows only those **five** files — or, on a skipped T12, the report records the skip and its cause and `pyproject.toml` still reads `1.6.0` |
 | **T13** | **Provisional** `report-v1.7.0.md` (RPT-03 minus item 4's tip SHA and T14 artefacts, ledger row included), `tg-post-v1.7.0.md` (RU, < 1500 chars), `docs/llm-usage.md` rows. | `lint-docs` green against the repointed `report_path`; `wc -m` recorded; no self-referential SHA claimed |
 | **T14** | **Final acceptance (REQ-V170-ACC-03)**: six verbatim gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the single evidence-only commit; then the annotated tag `v1.7.0` **on that commit, only on PASS**. | every gate green on the tree that ships; the tag recorded, or its deliberate absence recorded with the verdict that withheld it |
+
+**REQ-V170-ORD-02 (MUST) — `T-STOP`, the one finalisation procedure both early
+exits use.** T1's instrument STOP (REQ-V170-BEN-01) and T3's stage-A STOP
+(REQ-V170-RSN-06) each promise a finished deliverable — a report, a Russian
+tg-post, usage rows, a ledger row, committed evidence and a verdict — but
+neither reaches T13 or T14, which is where all of that is otherwise written. The
+round-1 spec said only "STOPS", leaving the prompt, the placeholder removal, the
+branch-appropriate gates and the closing commit undefined. **`T-STOP` is that
+missing tail. It is a procedure, not a numbered task** — §16 still has fifteen
+tasks — and it is invoked, identically, by whichever of T1 or T3 fired:
+
+1. **Finalise `docs/reports/report-v1.7.0.md`** from T0's skeleton: every
+   REQ-V170-RPT-03 item that the branch reached, and for every item it did not,
+   the explicit words *"not reached: <task> STOP"* — never a blank, never a
+   `TBD`. The verdict is stated in REQ-V170-RSN-06's or REQ-V170-BEN-01's own
+   vocabulary, with its cause.
+2. **Finalise `docs/reports/tg-post-v1.7.0.md`** — Russian, under 1500
+   characters by `wc -m` with the count quoted, per REQ-V170-RPT-04. A STOP is
+   reported, not omitted.
+3. **Append the usage rows** for every prompt of the run to
+   `docs/llm-usage.md`'s existing table, and fill the **ledger row** section of
+   REQ-V170-RPT-01 completely — `Ver` is `1.7.0`, the release identity, whatever
+   `pyproject.toml` reads; no cell is left provisional. The operator pastes it.
+4. **Run the branch-appropriate gates**: `checks.py lint-docs` against the
+   repointed `report_path`, and the secret scans — `gitleaks-tree` over the tree
+   and the run's own artefacts. Both MUST exit 0.
+5. **Account for every gate, one way or the other.** Gates 1–4 and 6 of §13 stay
+   **unconditional** (REQ-V170-GATE-01) and are recorded with their exit codes —
+   on both branches the tree is byte-identical to the one REQ-V170-PRE-01 item 3
+   already drove them green against at T0, so they are recorded from that run and
+   need no second execution. Only three things are recorded **`N/A`, each with
+   its reason**: live gate 5 (`bot.py --selftest-live`) after its T1 run,
+   `checks.py replay --range`, and the `mutation-v170` profile gate — the first
+   two because REQ-V170-GATE-01's T10 and T14 runs belong to a code path this
+   branch never enters, the third because T9 never created it. Nothing is
+   silently skipped.
+6. **Commit the permitted evidence artefacts and nothing else**: the report, the
+   tg-post, the usage rows, and — on a T3 STOP — every stage-A pair artefact and
+   TTFT sidecar, with `git diff` proved empty of the scratch patch first
+   (REQ-V170-RSN-01). No source, test or configuration file is in this commit.
+   `--no-verify` is forbidden here as everywhere (REQ-V170-EC-09).
+7. **Prove the negative**: `pyproject.toml` still reads `1.6.0`, `git tag -l`
+   still shows exactly `v1.3`, `v1.3-baseline` and `v1.6.0`, and the report says
+   so. **No bump, no tag, no evidence-only commit of REQ-V170-ACC-03** — that
+   commit exists only on a branch that reached T14.
+8. **Terminate.** No later task of §16 runs, and REQ-V170-CAR-01's carried
+   sanitiser goes to v1.8.0 with the rest of §§6–9, stated as such
+   (REQ-V170-RSN-06).
 
 ---
 
@@ -1771,8 +2113,8 @@ Implementing any of these is a defect.
 
 ## Appendix A — requirement traceability
 
-Every `MUST` appears exactly once; the sixty-eight rows below are in bijection
-with the sixty-eight `MUST` ids defined in §§1–16. NON-GOALs live in §17's table
+Every `MUST` appears exactly once; the sixty-nine rows below are in bijection
+with the sixty-nine `MUST` ids defined in §§1–16. NON-GOALs live in §17's table
 and are not repeated here. "Verified by" names a test id, a negative test, a
 Gherkin scenario or a recorded artefact — never "by inspection".
 
@@ -1789,9 +2131,9 @@ Gherkin scenario or a recorded artefact — never "by inspection".
 | `REQ-V170-EC-09` — `--no-verify` ban, one prompt one commit | REQ-V15-EC-09, REQ-V160-EC-10 | `replay --range <base>..<implementation-tip>`; the attestation sentence |
 | `REQ-V170-AMEND-01` — amendment table | this spec | §14.1's amended and not-amended lists |
 | `REQ-V170-PRE-01` — preconditions | REQ-V160-PRE-01 | the T0 record; the blocker template on failure |
-| `REQ-V170-PRE-02` — operator inputs block at T0 | REQ-V160-PRE-04, `AGENTS.md` `go` | the report's `## Operator inputs`; `E10` |
-| `REQ-V170-PRE-03` — LM Studio address and the documentation reads | REQ-V160-PRE-03 | the report's URLs, dates and resolved VERIFY values; `E10` |
-| `REQ-V170-PRE-04` — the instrument proved without disclosure | erratum 5; REQ-V160-PRE-04 | the six recorded checks; `E10` |
+| `REQ-V170-PRE-02` — operator inputs block at T0; a named address is a validated literal IP | REQ-V160-PRE-04, `AGENTS.md` `go`; round-2 critique | the report's `## Operator inputs`; `E10` |
+| `REQ-V170-PRE-03` — the deduplicated ordered address probe, the documentation reads and the live TTFT check | REQ-V160-PRE-03; round-2 critique | the report's URLs, routes, dates and the four resolved VERIFY values; `E10` |
+| `REQ-V170-PRE-04` — the instrument proved without disclosure, and proved before any inference | erratum 5; REQ-V160-PRE-04; round-2 critique | the seven recorded checks; `E9`, `E10` |
 | `REQ-V170-TREE-01` — new files | this spec | the T14 tree listing |
 | `REQ-V170-TREE-02` — changed files, `bench_scenarios.py` frozen | REQ-V170-NG-01 | `git diff --stat <base>..<tip>` |
 | `REQ-V170-RSN-01` — pair contract, S05 and S12 | REQ-V14-RSN-01 | the pair artefacts under `docs/assets/bench/`; the `git diff`-empty record |
@@ -1800,14 +2142,14 @@ Gherkin scenario or a recorded artefact — never "by inspection".
 | `REQ-V170-RSN-04` — shippability judged per purpose | REQ-V14-POL-05; agent.py:1045 | the per-purpose shippability table; the resent/new token record |
 | `REQ-V170-RSN-05` — budget, ≤ 3 per candidate, ≤ 15 total | REQ-V14-RSN-05 | the pair count in the report against the budget |
 | `REQ-V170-RSN-06` — mechanism table and the STOP rule | REQ-V14-RSN-06 | the per-purpose mechanism table; the STOP verdict if it fires |
-| `REQ-V170-RSN-07` — the confirming mixed-policy pair, under a stated threshold | round-1 critique; metrics.py:75-91 | the `rsn17-<letter>-mixed-{control,mixed}.json` artefacts; the three measured numbers in the pair table |
+| `REQ-V170-RSN-07` — the confirming mixed-policy pair: no token inflation, and a TTFT-evidenced cache, else `summary` only | round-1 critique; round-2 critique; metrics.py:75-91; LM Studio `stats.time_to_first_token` | the `rsn17-<letter>-mixed-{control,mixed}.json` artefacts and their `-ttft.json` sidecars; check 1's two figures and check 2's rate/prediction/measured/ratio in the pair table, or the recorded fallback |
 | `REQ-V170-POL-01` — two environment variables | REQ-V14-POL-01 | `T-V170-POL-01`, `N1`, `N2`, `N3` |
 | `REQ-V170-POL-02` — the purpose tag, pure, in `llm/base.py` | REQ-V14-POL-02 | `T-V170-POL-02` |
 | `REQ-V170-POL-03` — `resolve_reasoning` returns `ReasoningRequest` | REQ-V14-POL-03 | `T-V170-POL-03` |
 | `REQ-V170-POL-04` — one `ReasoningRequest` parameter, five definitions, five sites | REQ-V14-POL-04 | `T-V170-POL-04`; mutation `v170-failover-drops-reasoning` |
 | `REQ-V170-POL-05` — the two provider forms, applied from `mechanism`/`value` alone | REQ-V14-POL-07; PRE-03 | `T-V170-POL-05` |
 | `REQ-V170-POL-06` — `build_payload`'s `reasoning_fields` | this spec | `T-V170-POL-06`, `N4` |
-| `REQ-V170-POL-07` — the shipped default follows stage C, in one narrow commit | REQ-V14-BEN-09 | `T-V170-POL-07`, `T-V170-ACC-03`; the report's flipped-after-measurement sentence |
+| `REQ-V170-POL-07` — the shipped default and the version bump follow stage C, in one five-file commit | REQ-V14-BEN-09 | `T-V170-POL-07`, `T-V170-ACC-03`; the report's flipped-after-measurement sentence |
 | `REQ-V170-OBS-01` — two columns, schema 4 → 5 | REQ-V14-OBS-01 | `T-V170-OBS-01`, `N8`; `E3` |
 | `REQ-V170-OBS-02` — one span attribute | REQ-V160-TRC-09 | `T-V170-OBS-02` |
 | `REQ-V170-OBS-03` — one row per `llm.complete` invocation | REQ-V14-OBS-03; llm/failover.py at `054b103` | `T-V170-OBS-03`, `T-V170-OBS-04`; `E4` |
@@ -1826,7 +2168,7 @@ Gherkin scenario or a recorded artefact — never "by inspection".
 | `REQ-V170-BEN-08` — latency reported, never gated | REQ-V160-GATE-05 | the report's per-purpose p50/p95 and per-scenario wall-clock tables |
 | `REQ-V170-CAR-01` — `--tag` sanitised before any path | v1.6.0 review 🟡, waived | `T-V170-CAR-01`, `N7`; mutation `v170-tag-sanitiser-removed` |
 | `REQ-V170-CAR-02` — Appendix B refreshed for S15/S18 | spec-v1.6.0's stale Appendix B scenario 13 | Appendix B `E9` of this spec |
-| `REQ-V170-VER-01` — MINOR bump, conditional | REQ-V160-VER-02 | `T-V170-VER-01`; `pyproject.toml` at the tip |
+| `REQ-V170-VER-01` — MINOR bump, conditional, inside T12's selection commit alone | REQ-V160-VER-02 | `T-V170-VER-01`, `T-V170-ACC-03`'s version half; `pyproject.toml` at the tip; `E9` |
 | `REQ-V170-VER-02` — tag last, on the evidence commit, only on PASS | REQ-V160-VER-04 | `E12`; `git tag -l` and the annotated-tag message |
 | `REQ-V170-VER-03` — three-number naming | REQ-V160-VER-05 | the T14 tree listing |
 | `REQ-V170-RPT-01` — the ledger row | REQ-V160-RPT-01 | `checks.py lint-docs`; `E11` |
@@ -1838,14 +2180,15 @@ Gherkin scenario or a recorded artefact — never "by inspection".
 | `REQ-V170-GATE-03` — the profile matrix, findings fixed not suppressed | REQ-V160-GATE-03/-04 | `tests/test_v15_standards.py:1726`; the scanner summary |
 | `REQ-V170-TST-01` — offline, deterministic, no network | REQ-V12-OFF-01 | the `conftest.py` guard; the suite running with the network down |
 | `REQ-V170-TST-02` — test-first, independent expected values | `standards/workflow.md` §4 | the report's per-test record |
-| `REQ-V170-TST-03` — at least eight `v170-*` mutations | REQ-V160-TST-03 | `mutation_check.py --select v170-` |
+| `REQ-V170-TST-03` — at least nine `v170-*` mutations | REQ-V160-TST-03 | `mutation_check.py --select v170-` |
 | `REQ-V170-TST-04` — every `find` matches exactly once | REQ-V160-TST-04 | `mutation_check.py --list` output in the report |
 | `REQ-V170-ACC-01` — Appendix B executed | REQ-V160-ACC-01 | the per-scenario pass/fail record |
 | `REQ-V170-ACC-02` — regression check | REQ-V160-ACC-02 | the unamended-test list; gates 3 and 6 |
 | `REQ-V170-ACC-03` — provisional report, frozen tip, freeze, one selection commit | REQ-V160-ACC-03; round-1 critique | `T-V170-ACC-03`; the candidate-metadata check; the evidence-only commit; `replay --range` |
 | `REQ-V170-ACC-04` — the 5-cycle repair budget | REQ-V160-ACC-04 | the report's fix-cycle count |
 | `REQ-V170-REV-01` — clean-context review before measurement | `AGENTS.md:175-179` | the review prompt in `docs/prompts/`; the findings table |
-| `REQ-V170-ORD-01` — the measurement-first order, fifteen tasks, three conditional exits | this spec; round-1 critique | the commit sequence; `replay --range` |
+| `REQ-V170-ORD-01` — the measurement-first order, fifteen tasks, three conditional exits, one conditional task | this spec; round-1 critique; round-2 critique | the commit sequence; `replay --range` |
+| `REQ-V170-ORD-02` — `T-STOP`, the shared finalisation of both early exits | round-2 critique; REQ-V170-RSN-06, REQ-V170-BEN-01 | on a STOP: the finalised report and tg-post, the ledger row, `lint-docs` and `gitleaks-tree` exit 0, the evidence commit, and `pyproject.toml` at `1.6.0` with `git tag -l` unchanged |
 
 ---
 
@@ -1900,6 +2243,9 @@ Scenario: E4 — every invocation records what it asked for, and a failover is
       provider and model, describe() being read after the invocation
   And a row whose call raised before a response carries its requested value and
       NULL honored
+  And a row whose provider reported no reasoning tokens and produced no
+      reasoning characters carries NULL honored, never 1 — absent evidence is
+      never read as compliance
   And every row's reasoning tag is recoverable from its own purpose and
       tools_exposed columns, no column having been added for it
   And each row's span carries tg_agent.reasoning.requested with the same value
@@ -1950,9 +2296,15 @@ Scenario: E9 — a candidate is measured against a named, unchanged instrument
   And .env was updated by a single-line sed, confirmed by a grep -q that prints
       nothing, and its contents were never emitted
   And grep -q proved LLM_MAX_TOKENS=4096 and LLM_TIMEOUT_S=600 without printing
-  And the served model id contains LMSTUDIO_MODEL, the version reads
-      "Bionic v1.1.1" and the loaded context length reads 42496
-  And the one-completion preflight returns a non-empty assistant message
+  And exactly one served model id equals qwen/qwen3.8-27b and equals
+      cfg.lmstudio_model — an equality, never a substring, two matches or none
+      being a STOP — the version reads "Bionic v1.1.1" and the loaded context
+      length reads 42496
+  And cfg.obs_capture_content is False and the metadata producer is proved to
+      emit meta.obs_capture_content false
+  And all six of those instrument values were established before the first live
+      inference, the one-completion preflight included
+  And the one-completion preflight then returns a non-empty assistant message
   When a candidate is run with the treatment set by a process-environment
       prefix, --repeats 3, no --only and --timeout-s 1800
     Then its meta matches every locked field of baseline-v1.6.0.json but
@@ -1965,11 +2317,16 @@ Scenario: E9 — a candidate is measured against a named, unchanged instrument
   When C1 and C2 have both been run, and C3 only because neither passed quality
   Then the shipped candidate is the quality-passing one with the lowest
       C_conservative, ties broken by C_plain and then by catalogue order
-  When the selection commit changes only the two policy default literals and
-      their documented echoes
+  When the selection commit changes only the two policy default literals,
+      pyproject.toml's project.version and their documented echoes — five files
     Then an unprefixed load_config on the final tree resolves to the policy and
        the sorted purpose set of exactly one committed candidate's
        meta.reasoning
+  And pyproject.toml reads 1.7.0, bumped in that commit and in no earlier one
+  When no candidate passes quality instead, or the comparison stays
+      EXIT_NOT_COMPARABLE
+  Then the selection commit is never made, pyproject.toml still reads 1.6.0, no
+      tag exists, and the failure report is finalised
   When any other source, test or config file is then modified
   Then the candidate is void and stage C is repeated in full
 
@@ -2036,3 +2393,32 @@ or a fixed execution decision contradicted the premise, and one refused.
 added — **REQ-V170-RSN-07** — and one NON-GOAL, **REQ-V170-NG-15**; one test id,
 `T-V170-ACC-03`; one mutation entry, `v170-gate-ignores-3of3`. The `MUST` count
 moves 67 → 68, §14.4's entries 8 → 9, and §16's tasks 13 → 15.
+
+**Round 2 of at most 3, open** — same challenger, same seam, the round-1 spec
+(`8a87c75`) passed by file. Nine findings, all nine accepted, one of them
+adapted where the repository offered a stronger signal than the critique assumed
+was available.
+
+### Round 2 of at most 3 — against the round-1 spec (8a87c75); all nine accepted, one adapted
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R2-1 | Crit | POL-03, POL-05, OBS-01, BEN-05, `T-V170-POL-03`, AMEND-01 | accepted | `REASONING_MECHANISMS` is keyed by **tag alone** and holds **off** mechanisms only, so the lookup is asymmetric: `"default"` and `"on"` both return `ReasoningRequest(value, None, tag)` and send no field — `"on"` needs no disabling mechanism — and only `"off"` reads `mechanisms.get(tag)`, degrading to `("default", None, tag)` and reporting it when the entry is absent; the old symmetric `(tag, value)` lookup silently turned C1's and C3's declared `"on"` into `"default"` |
+| R2-2 | Crit | VER-01, POL-07, ACC-03, REV-01.8, TREE-02, BEN-01, BEN-07, ORD-01 T8/T11/T12, `T-V170-ACC-03`, §13.1, `E9` | accepted | The `pyproject.toml` bump leaves T8 entirely and rides in T12's post-measurement selection commit, whose exhaustive allowed-file list becomes five — `config.py`, `pyproject.toml`, `.env.example`, `README.md`, `AGENTS.md`; T12 itself runs only when a quality-passing candidate exists, and the no-candidate, `EXIT_NOT_COMPARABLE` and instrument-STOP branches now route explicitly: skip T12, keep `1.6.0`, finalise the failure report, no tag. `T-V170-ACC-03` gained a literal-free version half asserting `1.7.0` exactly when a matching candidate document exists |
+| R2-3 | Crit | PRE-03, PRE-04, BEN-01, `E9`, Appendix A | accepted | PRE-04 became **seven** checks whose first six are BEN-01's six instrument values, all established before its own inference preflight: the uniquely selected served id must **equal** `qwen/qwen3.8-27b` and `cfg.lmstudio_model` — substring matching is insufficient, and no match, two matches or a mismatch with `cfg.lmstudio_model` is an instrument STOP — and `cfg.obs_capture_content is False` with the metadata producer proved to emit `false`, so a non-comparable instrument can no longer consume stage A's budget |
+| R2-4 | High | RSN-04, RSN-07, PRE-03, TREE-01, BEN-05, RPT-03.7, ORD-01 T1/T2/T3, Appendix A | accepted, **adapted** | Latency ratios are dropped as evidence. The direct cache signal is LM Studio's non-standard `stats.time_to_first_token`, captured per call by the scratch harness into a committed `-ttft.json` sidecar that is never a bench document: within each confirming run, `rate = prompt_tokens ÷ TTFT` on the cold first call, `predicted_cold_TTFT = final-round prompt_tokens ÷ rate`, and the cache is preserved iff measured final-round TTFT `≤ 0.35 ×` that prediction, on **each** run. PRE-03's new fourth `VERIFY` marker settles the field's availability live on the **OpenAI-compatible** route the bot's client uses — LM Studio documents the populated `stats` object only on its native `/api/v0/` route, and issue #601 reports `"stats": {}` on `/v1/` — and forbids the harness from switching routes to obtain it. Absent or empty there, Codex's conservative rule binds verbatim: RSN-07 proves only the absence of prompt-token inflation, agent-tag shippability cannot be established, and the mechanism ships for `summary` only. BEN-05 gained the consequence: C3 is not run when its resolved treatment equals C1's |
+| R2-5 | High | OBS-01, OBS-02, `T-V170-OBS-03`, §14.4, `E4` | accepted | `reasoning_honored` became genuinely three-valued: `'default'` or a failed call → `NULL`; reasoning tokens unavailable **and** reasoning chars 0 → `NULL`, with this release specifying no per-row fallback, so the `NULL` is unconditional at row level; otherwise the truth table. `T-V170-OBS-03` now expects `('off', NULL, 0) → NULL` rather than `1` and adds the `('on', NULL, 0) → NULL` case, and the mutation entry was reworded to name exactly that removal |
+| R2-6 | High | POL-03, POL-05, `T-V170-POL-05`, AMEND-01, REV-01.1 | accepted | Mechanism fields carry an **immutable recursive JSON** representation, `FrozenJSON` — tuples of key/value tuples, no `dict`, `list` or `set` anywhere in the table — and a single `json_fields` helper builds fresh dictionaries at every nesting level on every call; `T-V170-POL-05` asserts that mutating a produced payload, its nested mapping included, alters neither `REASONING_MECHANISMS` nor a later payload |
+| R2-7 | High | §14.1, ORD-01 T5 | accepted | The contradiction is resolved in the critique's own words: `tests/test_failover.py` is amended **only** at the test-double signatures §14.1 lists (`:31`, `:276`), all other behaviour and assertions unchanged; it left the "explicitly NOT amended" list and T5's acceptance now reads "green with only the listed signature amendments" |
+| R2-8 | Med | PRE-02, PRE-03 | accepted | The probe list is ordered and deduplicated: the three fixed addresses in their stated order, then the operator's address only when distinct; a named address MUST be a literal IPv4 validated before the command is built, and only such a literal may be interpolated — a hostname, scheme, port or path is a T0 blocker, never a probed string |
+| R2-9 | Med | **ORD-02** (new), RSN-06, BEN-01, GATE-01, ACC-03, ORD-01 T1/T3 | accepted | One shared `T-STOP` procedure, invoked identically by T1's instrument STOP and T3's stage-A STOP: finalise the report and the Russian tg-post, append the usage rows, fill the ledger row completely, run `lint-docs` and the secret scans, record every omitted gate as `N/A` with its reason — live gate 5 and `replay --range` being explicitly not required on those branches — commit the permitted evidence artefacts only, prove `1.6.0` and an unchanged `git tag -l`, and terminate. ACC-03 is not reached on those branches and says so |
+
+**Round 2: 9 findings, 9 accepted (1 adapted), 0 rejected.** One requirement
+added — **REQ-V170-ORD-02** (`T-STOP`) — and no NON-GOAL; no new test id, no new
+negative test, no new mutation entry and no new Gherkin scenario, the round's
+work landing inside `T-V170-POL-03`, `-05`, `T-V170-OBS-03` and `T-V170-ACC-03`.
+One new artefact pattern, `rsn17-<letter>-mixed-{control,mixed}-ttft.json`, and
+one new `[[VERIFY]]` marker, taking §3's markers 3 → 4. The `MUST` count moves
+68 → 69 and Appendix A's rows with it; PRE-04's checks move 6 → 7; §14.4's nine
+entries, §16's fifteen tasks, the fifteen NON-GOALs, the twenty-five
+`T-V170-*` ids, `N1`…`N8` and `E1`…`E12` are all unchanged.
