@@ -15,7 +15,7 @@ from pathlib import Path
 import config
 
 WINDOW_TURNS = 40
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 RECENT_GOAL_CHARS = 200
 
 log = logging.getLogger("storage")
@@ -29,6 +29,8 @@ LLM_CALL_COLUMNS = (
     "reasoning_chars", "prompt_chars", "prompt_chars_by_role", "messages_n", "tools_exposed",
     "latency_ms", "finish_reason", "tool_calls_n", "error_kind", "cost_usd", "cost_basis",
     "trace_id", "span_id",
+    # v1.7.0 additions (REQ-V170-OBS-01), appended after span_id.
+    "reasoning_requested", "reasoning_honored",
 )
 TOOL_CALL_COLUMNS = (
     "id", "conv_id", "turn_id", "tool_call_id", "tool", "ts", "input_chars",
@@ -225,6 +227,25 @@ UPDATE schema_version SET version = 4 WHERE id = 1;
 COMMIT;
 """
 
+# REQ-V170-OBS-01: added and chained after `_MIGRATION_2_TO_4` /
+# `_MIGRATION_3_TO_4`, not folded into them or into `_OBSERVABILITY_DDL`.
+# `_OBSERVABILITY_DDL` deliberately stays v4-shaped (unlike the v3->v4 step,
+# which could embed the new columns straight into the fresh-table DDL because
+# a v2 database never had `llm_calls` at all): `_MIGRATION_2_TO_4` still
+# builds `llm_calls` via `CREATE TABLE IF NOT EXISTS` from that same DDL, so
+# embedding the two new columns there would make this migration's own
+# `ALTER TABLE ADD COLUMN` fail with "duplicate column name" on that path.
+# `init_schema` instead runs this step, unconditionally, whenever the tree has
+# just reached (or already sits at) version 4 -- covering the fresh-database
+# path too, which is why `_SCHEMA` below still inserts version 4, not 5.
+_MIGRATION_4_TO_5 = """
+BEGIN IMMEDIATE;
+ALTER TABLE llm_calls ADD COLUMN reasoning_requested TEXT;
+ALTER TABLE llm_calls ADD COLUMN reasoning_honored INTEGER;
+UPDATE schema_version SET version = 5 WHERE id = 1;
+COMMIT;
+"""
+
 _INSERT_MESSAGE = (
     "INSERT INTO messages "
     "(conv_id, turn_id, role, content, tool_calls_json, tool_call_id, created_at) "
@@ -286,7 +307,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # is refused untouched and the 1 -> 2 migration is the transaction the spec
     # describes rather than a no-op after the fact.
     existing = _existing_version(conn)
-    if existing is not None and existing not in (1, 2, 3, SCHEMA_VERSION):
+    if existing is not None and existing not in (1, 2, 3, 4, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported database schema version: {existing}")
     if existing == 1:
         conn.executescript(_MIGRATION_1_TO_2)
@@ -296,6 +317,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     elif existing == 3:
         conn.executescript(_MIGRATION_3_TO_4)
     conn.executescript(_SCHEMA)
+    # REQ-V170-OBS-01: the fresh-database path above still lands at version 4
+    # (`_SCHEMA`'s own INSERT), exactly like every migrated path that just
+    # reached 4 -- so this one further step, applied whenever the tree sits at
+    # 4, covers all of them uniformly and never double-adds a column.
+    if schema_version(conn) == 4:
+        conn.executescript(_MIGRATION_4_TO_5)
     version = schema_version(conn)
     if version != SCHEMA_VERSION:
         raise RuntimeError(f"unsupported database schema version: {version}")
@@ -535,11 +562,16 @@ def add_llm_call(
     cost_basis: str | None = None,
     trace_id: str | None = None,
     span_id: str | None = None,
+    reasoning_requested: str | None = None,
+    reasoning_honored: int | None = None,
 ) -> int:
     """One row per `llm.complete` invocation (REQ-V13-OBS-04). Sizes, counts and
     timings only — never a fragment of the prompt itself. `trace_id`/`span_id`
     default to `None` (REQ-V160-EC-05): the agent.py wiring that always
-    supplies them is T3's, not this function's, concern."""
+    supplies them is T3's, not this function's, concern. `reasoning_requested`/
+    `reasoning_honored` default to `None` the same way (REQ-V170-EC-05): the
+    `agent.py` wiring that computes and supplies them is T5's concern, not
+    this function's."""
     row = {
         "conv_id": conv_id,
         "turn_id": turn_id,
@@ -567,6 +599,8 @@ def add_llm_call(
         "cost_basis": cost_basis,
         "trace_id": trace_id,
         "span_id": span_id,
+        "reasoning_requested": reasoning_requested,
+        "reasoning_honored": reasoning_honored,
     }
     row_id = _insert_row(conn, "llm_calls", row)
     _log_row("llm_call", LLM_CALL_COLUMNS, row_id, row,

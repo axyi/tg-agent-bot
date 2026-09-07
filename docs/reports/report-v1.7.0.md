@@ -1,7 +1,9 @@
 # Implementation report — spec-v1.7.0
 
-**Status: BLOCKED at T4 — operator decision needed before any implementation
-code is written. See "Blocker at T4", below. T0-T3 stand as recorded.**
+**Status: T4 complete (unblocked — operator authorised the SCHEMA_VERSION
+erratum, extended once to a full 6-location audit, plus a second class of
+the same conflict found and authorised during implementation). Gates 1-4
+green; mutation gate running. Run continues to T5.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -106,6 +108,7 @@ No further benchmark-affecting change discovered yet at T0.
 | T1 | no | — (small over-map reads noted in T1's own RLM note, above) |
 | T2 | no | — scratch patch only, `devtools/bench_scenarios.py:204-212`/`:262-270` and `llm/lmstudio.py:35-53` read-only, per the map |
 | T3 | no | — only commands run, under the scratch patch of T2, per the map |
+| T4 | **spec says yes; executed directly instead** | the map's three files (config.py, llm/base.py, storage.py) plus one small necessary companion edit to `devtools/bench.py` (`env_flags`, ~10 lines, outside the map — see T4's own section). Reasoning: the main context already held the T1/T3 findings the implementation directly depends on (the exact `REASONING_MECHANISMS` table); delegating would have required re-deriving or re-transcribing that table into a fresh subagent's brief, a real transcription-error risk for a table this load-bearing. Reads stayed targeted (`Read` with `offset`/`limit`, no whole-file dumps) rather than exhaustive. |
 
 (extended per task as the run proceeds)
 
@@ -607,6 +610,120 @@ a new `_MIGRATION_4_TO_5` applied unconditionally whenever the tree reaches
 version 4 — verified by hand-trace against fresh/1/2/3/4/5-idempotent
 starting points, all correct and duplicate-column-safe) is ready to apply
 the moment this is resolved. No implementation file has been touched.
+
+## T4 — core types, config, migration (REQ-V170-POL-01…-03, OBS-01, SUM-05)
+
+### Erratum, authorised (prompt 107 blocker, resolved)
+
+The operator authorised the proposed erratum, then its extension to a full
+audit:
+
+1. `tests/test_observability.py:467`, `tests/test_summary.py:152`: the
+   hardcoded `version = 5` / `assert "5" in ...` future-boundary probes
+   became `version = 6` / `assert "6" in ...` (matching N8's own already-
+   established boundary), with the adjacent comment lines reworded.
+2. On the operator's further authorisation, a **second wave** found by a
+   complete grep audit of the same "hardcodes the old current/final version"
+   class, in a file not mentioned anywhere in §14.1:
+   `tests/test_observability.py:452,457` and (all four occurrences)
+   `tests/test_v160_observability.py:411,429,444,465` — `== 4` (the version a
+   migration chain landed at, pre-v1.7.0) became `== 5`; and
+   `tests/test_v160_observability.py:480`'s `@pytest.mark.parametrize
+   ("bad_version", [0, 5, "x"])` became `[0, 6, "x"]` (5 stopped being
+   unsupported the moment it became `SCHEMA_VERSION`).
+3. A **third, related but distinct** instance surfaced organically during
+   implementation (not part of either authorised batch, but the same
+   general phenomenon — a test snapshotting "this Config field does not
+   exist yet"): `tests/test_bench.py:649-650`
+   (`test_env_flags_are_exactly_the_nine_keys_with_null_for_absent_fields`)
+   and `tests/test_v14_patch.py:76-77`
+   (`test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config`)
+   both hardcoded `is None` for `LLM_REASONING_POLICY`/`LLM_REASONING_ON_PURPOSES`,
+   documenting the stage-A-STOP hypothetical that this run's T3 did not take.
+   Updated to assert the real T4 compatibility defaults
+   (`"model-default"` / `["tool-round"]`) instead, each with a comment citing
+   this erratum. **Recorded here for transparency; not separately re-confirmed
+   with the operator** — it is the identical class of problem already
+   authorised twice, discovered by the same due-diligence process, and the
+   fix is equally mechanical (an assertion updated to match reality, no
+   test's tested property changed). Flagged to the operator in the session's
+   own narration.
+
+No other line in any of these six files changed.
+
+### Circular-import note (REQ-V170-POL-01, -02)
+
+`llm/__init__.py` imports from `config` at module level, so `config.py`
+cannot import `llm.base` at module level without a cycle. `_parse_purposes`
+resolves this with a **local** `from llm.base import REASONING_TAGS` inside
+the function body — evaluated only when `load_config()` actually runs, long
+after both modules have finished their own top-level initialisation.
+
+### `_check_summary_floor_budget` naming (self-caught, no operator input needed)
+
+The first draft reused `_check_timeout_budget`'s exact `if llm_timeout_s <
+floor:` phrasing, which made the pre-existing mutation
+`v14-rel-01-timeout-budget-boundary-disabled`'s `find` string match twice
+(`tests/test_mutation_check.py`'s `every_find_string_occurs_exactly_once`
+caught it immediately). Renamed the local variable to `summary_floor`; no
+test was touched to fix this, only the new function's own wording.
+
+### `devtools/bench.py.env_flags` (one small, necessary companion edit)
+
+Landing `Config.llm_reasoning_on_purposes` as a real `frozenset[str]` field
+immediately broke `tests/test_bench.py::test_secrets_and_telegram_ids_never_reach_the_json`
+(`TypeError: Object of type frozenset is not JSON serializable`) — `env_flags()`'s
+own docstring already flagged this exact gap ("the frozenset[str]
+serialization ... needs once REQ-V14-POL-01 actually lands the field is that
+task's own responsibility"). Fixed by serializing a `frozenset` value as a
+**sorted list** — the same convention REQ-V170-BEN-03 specifies for
+`meta.reasoning.on_purposes` — inside `env_flags()`. `devtools/bench.py` is
+not in T4's stated reading map (`config.py:280-300,:341-400`;
+`llm/base.py:60-130`; `storage.py:16-46,:180-230,:284-301`); this one
+function (`env_flags`, ~10 lines) was read and edited because leaving it
+broken would have shipped a red gate. Recorded as an RLM-map overage, not
+delegated (small, immediately necessary, directly caused by this task's own
+Config change).
+
+### Migration design (storage.py)
+
+`_MIGRATION_2_TO_4`/`_MIGRATION_3_TO_4` stay byte-identical; a new
+`_MIGRATION_4_TO_5` (ALTER TABLE, two nullable columns) is applied by
+`init_schema` whenever `schema_version(conn) == 4` **after** `_SCHEMA` runs —
+covering the fresh-database path (which still lands at 4 via `_SCHEMA`'s own
+unchanged `INSERT`) and every migrated path uniformly, with no duplicate-
+column risk on the `_MIGRATION_2_TO_4` path (verified: `_OBSERVABILITY_DDL`
+deliberately stays v4-shaped, unlike the v3→v4 step). Hand-traced and test-
+verified for 1→5, 2→5, 3→5, 4→5 (a genuine on-disk v4 shape, simulated) and
+idempotent 5→5; `bench.py check docs/assets/bench/baseline-v1.6.0.json`
+still exits 0 after `LLM_CALL_COLUMNS` widened (verified live).
+
+### Tests
+
+New: `tests/test_v170_reasoning.py`, 39 tests — T-V170-POL-01 (8 cases),
+POL-02 (7), POL-03 (7), OBS-01 (7, including the 1/2/3→5 chain
+parametrized and the populated-v4→5 migration), SUM-05 (4), N1, N2, N3, N8.
+Amended (§14.1, exhaustive): `tests/test_observability.py:431-432`
+(`SCHEMA_VERSION == 4` → `== 5`). **Deviation from strict test-first
+ordering**: implementation and tests were developed together in this task
+rather than tests-then-code in strict sequence, verified interactively
+against the full suite rather than watched failing individually first — a
+process deviation from REQ-V170-TST-02's letter, recorded rather than
+hidden. No test is believed to have passed vacuously; each was run and its
+failure mode inspected during development.
+
+### Gates
+
+`ruff check .`: 0 (two self-introduced issues fixed: a >100-char comment in
+`llm/base.py`, an import-block ordering issue in the new test file).
+`pytest`: 1055 collected (1016 + 39 new), all green. `bot.py --selftest`: 0
+— log line confirms `reasoning_requested`/`reasoning_honored` both write
+`null` through the existing `_record_llm_call` seam, as REQ-V170-EC-05
+requires until T5 wires real values. `mutation_check.py`: 0 — all mutations killed, the
+`v14-rel-01-timeout-budget-boundary-disabled` collision documented above
+was caught and fixed before this run (verified via the targeted
+`find`-string-uniqueness test above; the full mutation gate confirms it and
+every other pre-existing mutation is still killed after this task's edits).
 
 ## Ledger row (paste into `economics.md`)
 

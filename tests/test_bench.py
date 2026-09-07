@@ -643,11 +643,14 @@ def test_env_flags_are_exactly_the_nine_keys_with_null_for_absent_fields(tmp_pat
             assert flags[key] is None, key
     assert flags["LLM_FAILOVER"] == "off"
     assert flags["LLM_MAX_TOKENS"] == 2048
-    # REQ-V14-BEN-05: at this commit neither Config field exists yet, so both
-    # new keys resolve to null with no code change (env_flags()'s existing
-    # absent-field fallback).
-    assert flags["LLM_REASONING_POLICY"] is None
-    assert flags["LLM_REASONING_ON_PURPOSES"] is None
+    # erratum: spec-v1.7.0 T4, REQ-V170-POL-01 vs. REQ-V170-EC-03 -- authorised
+    # by the operator, prompt 107. Both fields now exist (T3 found a
+    # summary-shippable mechanism, so the stage-A-STOP branch this assertion
+    # documented never fired); env_flags() reports their T4 compatibility
+    # defaults, the frozenset serialized as a sorted list (REQ-V170-BEN-03's
+    # own convention).
+    assert flags["LLM_REASONING_POLICY"] == "model-default"
+    assert flags["LLM_REASONING_ON_PURPOSES"] == ["tool-round"]
 
 
 def test_config_sha256_ignores_secrets_and_identifiers_but_not_the_treatment(tmp_path):

@@ -408,7 +408,7 @@ def test_t_v160_trc_07_migration_3_to_4_adds_spans_and_nullable_columns(tmp_path
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 4
+    assert storage.schema_version(conn) == 5
     assert (
         conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'spans'"
@@ -426,7 +426,7 @@ def test_t_v160_trc_07_migration_3_to_4_adds_spans_and_nullable_columns(tmp_path
 
     # Idempotence: a second init_schema changes nothing further.
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 4
+    assert storage.schema_version(conn) == 5
     assert conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0] == 1
     conn.close()
@@ -441,7 +441,7 @@ def test_t_v160_trc_07_migration_1_to_4_chains(tmp_path):
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 4
+    assert storage.schema_version(conn) == 5
     for table in ("summaries", "llm_calls", "tool_calls", "spans"):
         assert (
             conn.execute(
@@ -462,7 +462,7 @@ def test_t_v160_trc_07_migration_2_to_4_chains(tmp_path):
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 4
+    assert storage.schema_version(conn) == 5
     for table in ("llm_calls", "tool_calls", "spans"):
         assert (
             conn.execute(
@@ -477,7 +477,7 @@ def test_t_v160_trc_07_migration_2_to_4_chains(tmp_path):
 # --- T-V160-TRC-08 -- unsupported versions ----------------------------------
 
 
-@pytest.mark.parametrize("bad_version", [0, 5, "x"])
+@pytest.mark.parametrize("bad_version", [0, 6, "x"])
 def test_t_v160_trc_08_unsupported_version_raises(conn, bad_version):
     conn.execute("UPDATE schema_version SET version = ? WHERE id = 1", (bad_version,))
     with pytest.raises(RuntimeError) as raised:

@@ -62,9 +62,14 @@ def test_t_v14_ben_01_row_key_rule_accepts_a_v13_shaped_row():
 
 
 def test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config(tmp_path):
-    """T-V14-BEN-02 (BEN-05): `meta.env_flags` holds nine keys; a
-    stage-A-shaped `Config` (both policy fields absent — the running tree
-    has no such fields yet) yields `null` for both."""
+    """T-V14-BEN-02 (BEN-05): `meta.env_flags` holds nine keys.
+
+    erratum: spec-v1.7.0 T4, REQ-V170-POL-01 vs. REQ-V170-EC-03 -- authorised
+    by the operator, prompt 107. This test originally documented the
+    stage-A-STOP hypothetical (both policy fields absent); spec-v1.7.0's
+    stage A found a summary-shippable mechanism, so that branch never fired
+    and both fields now carry their T4 compatibility defaults.
+    """
     flags = bench.env_flags(make_config(tmp_path))
     assert len(flags) == 9
     assert set(flags) == {
@@ -73,8 +78,8 @@ def test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config(tmp_pa
         "LLM_FAILOVER", "LLM_MAX_TOKENS", "LLM_REASONING_POLICY",
         "LLM_REASONING_ON_PURPOSES",
     }
-    assert flags["LLM_REASONING_POLICY"] is None
-    assert flags["LLM_REASONING_ON_PURPOSES"] is None
+    assert flags["LLM_REASONING_POLICY"] == "model-default"
+    assert flags["LLM_REASONING_ON_PURPOSES"] == ["tool-round"]
 
 
 def test_t_v14_ben_03_constants_and_summarize_are_policy_independent():

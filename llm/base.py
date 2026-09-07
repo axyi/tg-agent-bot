@@ -6,8 +6,9 @@ mapping; only the URL and the headers differ.
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Protocol
 
 import httpx
@@ -61,6 +62,114 @@ class LLMError(Exception):
         super().__init__(message)
         self.retryable = retryable
         self.kind = kind
+
+
+# v1.7.0 additions (REQ-V170-POL-02, -03) -- the reasoning-policy vocabulary.
+# Lives here, and only here: no purpose, policy or mechanism literal is
+# duplicated in config.py, agent.py, devtools/ or a test.
+
+REASONING_TAGS = ("tool-round", "final", "summary")
+
+
+def reasoning_tag(purpose: str, request_tools: list[dict] | None) -> str:
+    """Pure: no I/O, no global state, no `Config`. `request_tools` being
+    `None` or empty means the round exposed no tool -- the `final` round
+    (`agent.py:322` passes `None`); `summary` wins over the tools test."""
+    if purpose == "summary":
+        return "summary"
+    return "tool-round" if request_tools else "final"
+
+
+# An immutable, recursive JSON representation. An object is a tuple of
+# (key, value) tuples; a value is a scalar or, recursively, another such
+# tuple. `object` is never used: it would readmit a dict, and a dict inside a
+# frozen dataclass behind a MappingProxyType is still mutable shared state.
+FrozenJSON = str | int | float | bool | None | tuple[tuple[str, "FrozenJSON"], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningMechanism:
+    label: str                                       # "<letter>:<payload summary>"
+    fields: tuple[tuple[str, FrozenJSON], ...] = ()   # -> build_payload(reasoning_fields=...)
+    message_patch: tuple[str, str] | None = None      # (patch kind, text) -- see POL-05
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningRequest:
+    value: str                                       # "on", "off" or "default"
+    mechanism: ReasoningMechanism | None             # None <=> send nothing, patch nothing
+    tag: str                                         # one of REASONING_TAGS
+
+
+REASONING_DEFAULT = ReasoningRequest("default", None, "final")
+
+# Keyed by TAG ALONE and holding OFF mechanisms only: stage A probes nothing
+# but forms that switch reasoning off (REQ-V170-RSN-02), so no "on" entry
+# could ever be filled. Values are stage A's per-purpose table
+# (docs/reports/report-v1.7.0.md, T3, REQ-V170-RSN-06): candidate a
+# (`chat_template_kwargs.enable_thinking=false`) was not honored on this
+# instrument (LM Studio ignores it for qwen/qwen3.8-27b -- a known upstream
+# bug, lmstudio-bug-tracker #2057); candidate c (assistant prefill) was
+# honored and shippable for `summary` only -- RSN-04's own message-array
+# judgement and, independently, RSN-07's TTFT fallback (the OpenAI-compatible
+# route reports `stats: {}`, absent, T1) both forbid it for the agent tags.
+REASONING_MECHANISMS: Mapping[str, "ReasoningMechanism | None"] = MappingProxyType({
+    "tool-round": None,
+    "final": None,
+    "summary": ReasoningMechanism(
+        "c:assistant-prefill",
+        message_patch=("append_assistant", "<think>\n\n</think>\n\n"),
+    ),
+})
+
+
+def resolve_reasoning(
+    policy: str,
+    on_purposes: frozenset[str],
+    tag: str,
+    mechanisms: Mapping[str, "ReasoningMechanism | None"] = REASONING_MECHANISMS,
+) -> ReasoningRequest:
+    """The only place a policy becomes a wire treatment. Pure: no I/O, no
+    global state beyond the frozen default table, no `Config`.
+
+    The lookup is deliberately asymmetric (REQ-V170-POL-03): `"default"` and
+    `"on"` both carry `mechanism = None` and look nothing up -- retaining the
+    provider's own reasoning requires no disabling mechanism, so their
+    request bodies stay byte-identical to v1.6.0's. Only `"off"` reads
+    `mechanisms.get(tag)`; when that entry is `None` or absent, the request
+    degrades to `("default", None, tag)` rather than sending a mechanism that
+    does not exist.
+    """
+    if policy == "off":
+        value = "off"
+    elif policy == "by-purpose":
+        value = "on" if tag in on_purposes else "off"
+    else:
+        value = "default"
+
+    if value != "off":
+        return ReasoningRequest(value, None, tag)
+
+    mechanism = mechanisms.get(tag)
+    if mechanism is None:
+        return ReasoningRequest("default", None, tag)
+    return ReasoningRequest("off", mechanism, tag)
+
+
+def json_fields(fields: tuple[tuple[str, FrozenJSON], ...]) -> dict:
+    """The only bridge from the frozen table to a wire payload: fresh
+    dictionaries at every nesting level, on every call -- never a cached or
+    shared one, never `copy.copy` (REQ-V170-POL-03)."""
+    return {key: _json_value(value) for key, value in fields}
+
+
+def _json_value(value: FrozenJSON) -> object:
+    # By FrozenJSON's own definition every tuple here is a tuple of
+    # (key, value) pairs -- never a plain scalar sequence -- so any tuple is
+    # unconditionally unpacked as a nested object.
+    if isinstance(value, tuple):
+        return {key: _json_value(sub) for key, sub in value}
+    return value
 
 
 class LLMClient(Protocol):

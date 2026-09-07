@@ -50,6 +50,18 @@ MAX_FETCH_INLINE_CHARS = 20000
 LATENCY_INTERCEPT_S = 21.1
 LATENCY_PER_TOKEN_S = 0.093
 
+# v1.7.0 addition (REQ-V170-SUM-05): mirrors agent.SUMMARY_BUDGET_FLOOR_S.
+# Duplicated here, not imported, because agent.py imports config.py and the
+# reverse would be a cycle; the two are kept in sync by review, not by import.
+_SUMMARY_BUDGET_FLOOR_S = 30.0
+
+# v1.7.0 addition (REQ-V170-POL-01): the two reasoning-policy env vars' legal
+# values. LLM_REASONING_ON_PURPOSES' tags are REQ-V170-POL-02's REASONING_TAGS,
+# read from llm.base at call time (a local import inside _parse_purposes) to
+# avoid a config.py <-> llm.base module-level import cycle: llm/__init__.py
+# imports from config at its own module level.
+REASONING_POLICIES = ("model-default", "off", "by-purpose")
+
 # v1.2 addition (REQ-V12-SSR-02): scopes `address_scope` can name, and the
 # backstop the six is_* flags alone would miss (finding W-6).
 FORBIDDEN_SCOPES = ("loopback", "private", "link-local", "multicast",
@@ -132,6 +144,12 @@ class Config:
     # times agent.py's SUMMARY_MAX_TOKENS (512) starving value, below
     # LLM_MAX_TOKENS's default, so the timeout floor is unchanged by default.
     llm_summary_max_tokens: int = 1536
+    # v1.7.0 additions (REQ-V170-POL-01): the reasoning policy. Both default to
+    # today's behaviour -- model-default sends no reasoning field at all -- so
+    # every existing caller and fake keeps passing (REQ-V170-EC-05). Binding
+    # until T12 (REQ-V170-POL-07 supersedes this compatibility default then).
+    llm_reasoning_policy: str = "model-default"
+    llm_reasoning_on_purposes: frozenset[str] = frozenset({"tool-round"})
 
 
 def register_secret(value: str) -> None:
@@ -285,6 +303,14 @@ def load_config(
     llm_max_tokens = _parse_int(source, "LLM_MAX_TOKENS", 2048, 1, 8192)
     llm_summary_max_tokens = _parse_int(source, "LLM_SUMMARY_MAX_TOKENS", 1536, 256, 8192)
     _check_timeout_budget(llm_timeout_s, max(llm_max_tokens, llm_summary_max_tokens))
+    _check_summary_floor_budget(llm_timeout_s, llm_summary_max_tokens)
+
+    llm_reasoning_policy = _parse_choice(
+        source, "LLM_REASONING_POLICY", "model-default", REASONING_POLICIES
+    )
+    llm_reasoning_on_purposes = _parse_purposes(
+        source, "LLM_REASONING_ON_PURPOSES", "tool-round"
+    )
 
     return Config(
         telegram_bot_token=token,
@@ -335,6 +361,8 @@ def load_config(
         dashboard_enabled=_parse_bool(source, "DASHBOARD_ENABLED", True),
         dashboard_port=_parse_int(source, "DASHBOARD_PORT", 8765, 1024, 65535),
         llm_summary_max_tokens=llm_summary_max_tokens,
+        llm_reasoning_policy=llm_reasoning_policy,
+        llm_reasoning_on_purposes=llm_reasoning_on_purposes,
     )
 
 
@@ -393,6 +421,60 @@ def _check_timeout_budget(llm_timeout_s: float, effective_max_tokens: int) -> No
             f"({LATENCY_INTERCEPT_S} + {LATENCY_PER_TOKEN_S} * tokens). "
             "Raise LLM_TIMEOUT_S or lower LLM_MAX_TOKENS/LLM_SUMMARY_MAX_TOKENS."
         )
+
+
+def _check_summary_floor_budget(llm_timeout_s: float, llm_summary_max_tokens: int) -> None:
+    """REQ-V170-SUM-05: appended after `_check_timeout_budget`, not replacing
+    it. The summary path's own rescue-retry floor (`agent.SUMMARY_BUDGET_FLOOR_S`,
+    duplicated here as `_SUMMARY_BUDGET_FLOOR_S`) must fit inside the timeout it
+    is given, or the truncation retry could never be attempted in production --
+    refuse that configuration at startup rather than discover it live."""
+    summary_floor = (
+        LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * llm_summary_max_tokens
+        + _SUMMARY_BUDGET_FLOOR_S
+    )
+    if llm_timeout_s < summary_floor:
+        raise ConfigError(
+            f"LLM_TIMEOUT_S ({llm_timeout_s}) is below the summary-budget floor "
+            f"for LLM_SUMMARY_MAX_TOKENS ({llm_summary_max_tokens}) plus the "
+            f"{_SUMMARY_BUDGET_FLOOR_S}s rescue-retry floor: needs at least "
+            f"{summary_floor:.3f}s ({LATENCY_INTERCEPT_S} + {LATENCY_PER_TOKEN_S} * tokens "
+            f"+ {_SUMMARY_BUDGET_FLOOR_S}). Raise LLM_TIMEOUT_S or lower "
+            "LLM_SUMMARY_MAX_TOKENS."
+        )
+
+
+def _parse_choice(
+    source: Mapping[str, str], key: str, default: str, choices: tuple[str, ...]
+) -> str:
+    raw = _value(source, key)
+    if not raw:
+        return default
+    if raw not in choices:
+        raise ConfigError(f"{key} must be one of {', '.join(choices)}, got: {raw}")
+    return raw
+
+
+def _parse_purposes(source: Mapping[str, str], key: str, default: str) -> frozenset[str]:
+    """REQ-V170-POL-01: absent -> `{default}`; present and empty -> the empty
+    set (legal, means "none"); present and non-empty -> a comma-separated,
+    whitespace-trimmed, order-insensitive set of REQ-V170-POL-02's tags.
+    `source.get` is used directly, not `_value`, because "absent" and
+    "present but empty" must be told apart -- `_value` collapses both to "".
+    """
+    raw = source.get(key)
+    if raw is None:
+        return frozenset({default})
+    raw = raw.strip()
+    if not raw:
+        return frozenset()
+    tags = frozenset(item.strip() for item in raw.split(",") if item.strip())
+    from llm.base import REASONING_TAGS  # local: see the REASONING_POLICIES comment
+
+    unknown = tags - set(REASONING_TAGS)
+    if unknown:
+        raise ConfigError(f"{key} contains an unknown tag: {sorted(unknown)[0]}")
+    return tags
 
 
 def _resolve(value: str) -> Path:
