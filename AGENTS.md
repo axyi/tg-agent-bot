@@ -100,8 +100,8 @@ uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1004 tests as of
-spec-v1.6.0 T12). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1133
+tests as of spec-v1.7.0 T8). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its
@@ -113,6 +113,12 @@ the test suite once per mutation) — 83 entries as of spec-v1.6.0 (T14 added
 one, `v160-content-redact-bypassed`, closing the T13-reported content-redact
 gap; see `docs/reports/report-v1.6.0.md`); `--select <prefix>` runs a named
 subset (mutually exclusive with `--only`).
+
+Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY`
+(`model-default` | `off` | `by-purpose`, default `model-default`) and
+`LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,
+default `tool-round`, read only under `by-purpose`) — see `.env.example` and
+`README.md`'s Reasoning policy section.
 
 ## Local quality gates (spec-v1.5)
 

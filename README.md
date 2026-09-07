@@ -79,6 +79,8 @@ lands — somewhere else inside the repository, git-ignore that name yourself.
 | `FETCH_INLINE_DEFAULT_CHARS` | `5000` | inline window for a `fetch` result, in characters (500–20000); the model can override it per call with `max_chars`. The full text of a truncated fetch is saved under `<EXEC_WORKDIR>/fetch/` |
 | `HISTORY_TOOL_STUB` | `on` | replace tool results of earlier turns with a short stub **in the request only**. `off` sends every tool result verbatim. The database, the audit trail and `/summary` always keep the full text |
 | `LLM_SUMMARY_MODEL` | empty | route `/summary` and the `/new` hand-off to a second model, written `<provider>:<model>` — `lmstudio` or `openrouter`, and that provider must be configured. Empty keeps the summary on the main client; no failover applies to the routed client |
+| `LLM_REASONING_POLICY` | `model-default` | `model-default` \| `off` \| `by-purpose` — see [Reasoning policy](#reasoning-policy) |
+| `LLM_REASONING_ON_PURPOSES` | `tool-round` | comma-separated tags (`tool-round`, `final`, `summary`), read only when the policy above is `by-purpose`; empty means none |
 | `LLM_SUMMARY_MAX_TOKENS` | `1536` | retry budget for a summary call truncated at its first attempt (`finish_reason == "length"`), range 256–8192, tried exactly once, after which the turn proceeds without a summary rather than blocking the user |
 | `LLM_PRICE_REF_MODEL` | empty | an OpenRouter model id whose list price is used as the **reference price** for local LM Studio calls. Empty leaves local calls unpriced. The resulting cost is an estimate — see [Observability](#observability) |
 | `LLM_PRICE_INPUT_USD_PER_MTOK` | empty | manual price in USD per million input tokens — the fallback when the OpenRouter price list is unreachable |
@@ -149,7 +151,9 @@ carries `error_kind` and `NULL` token columns): `conv_id`, `turn_id`, `purpose`
 `prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`,
 `reasoning_tokens`, `reasoning_chars`, `prompt_chars`, `prompt_chars_by_role`,
 `messages_n`, `tools_exposed`, `latency_ms`, `finish_reason`, `tool_calls_n`,
-`error_kind`, `cost_usd`, `cost_basis`.
+`error_kind`, `cost_usd`, `cost_basis`, `reasoning_requested`,
+`reasoning_honored` — the last two record what [Reasoning policy](#reasoning-policy)
+asked for and, where measurable, whether the provider actually complied.
 
 `tool_calls` — one row per tool call the agent decided on, whether it was
 executed, rejected or refused for budget: `conv_id`, `turn_id`, `tool_call_id`,
@@ -243,6 +247,37 @@ hides a failure. `/status` and `/model` show which side is answering.
 
 Each provider carries its own context length (`LMSTUDIO_CONTEXT_LENGTH`,
 `OPENROUTER_CONTEXT_LENGTH`); the history budget follows the active side.
+
+## Reasoning policy
+
+Every model call carries a **purpose tag** — `tool-round` (an agent round
+that exposes tools), `final` (an agent round that does not) or `summary`
+(the `/summary` and `/new` hand-off call) — and `LLM_REASONING_POLICY`
+decides what, if anything, is asked of the model's own reasoning for each
+tag:
+
+| `LLM_REASONING_POLICY` | effect |
+|---|---|
+| `model-default` (default) | send nothing extra; the provider's own default stands, for every tag |
+| `off` | ask every tag to turn reasoning off |
+| `by-purpose` | ask only the tags listed in `LLM_REASONING_ON_PURPOSES` to turn reasoning off; the rest get the provider's default |
+
+The two settings are inert together unless the policy is `by-purpose`, and
+neither is ever written into `.env` by the bot itself. What "off" actually
+sends is provider- and purpose-specific: OpenRouter sends
+`{"reasoning": {"enabled": false}}` outright; for LM Studio, only the
+`summary` tag has a mechanism proven to work on this project's own
+hardware (an empty `<think>` block appended as an assistant-prefill
+message) — `tool-round` and `final` currently have **no known working
+off-switch** on LM Studio, so asking for them changes nothing there. See
+`docs/reports/report-v1.7.0.md`'s stage-A section for the full
+candidate-by-candidate evidence.
+
+Each `llm_calls` row records what was requested (`reasoning_requested`:
+`default`, `on` or `off`) and, where the provider's response makes it
+measurable, whether the request was actually honored
+(`reasoning_honored`: `1`/`0`/`NULL` for "no evidence either way" — see
+[What is recorded](#what-is-recorded)).
 
 ## The fetch tool
 

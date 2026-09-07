@@ -1062,8 +1062,115 @@ killed, 0 survived/errored/drifted (first run surfaced the self-caught
 survivor above; the fix restored full kill coverage, confirmed by a second
 complete 83-mutation run).
 
+## T8 — docs and the gate config, no version bump (REQ-V170-RPT-02, -04, ACC-03)
+
+### The `lint-docs` repoint, and the ledger-row bug it found (REQ-V170-RPT-02)
+
+`config/quality_gates.yaml:313`'s `lint-docs.report_path` moved from
+`docs/reports/report-v1.5.md` to `docs/reports/report-v1.7.0.md` — the
+first time it has pointed at the release actually being written since
+v1.5 (REQ-V160-RPT-01's own claim that `lint-docs` enforced v1.6.0's
+ledger row was never true). Run immediately after the repoint, before any
+test or doc was written, `checks.py lint-docs` failed:
+`ledger row has 11 '|' but the header has 12` — the T0 skeleton's ledger
+row was one `TBD` cell short (`Spec (tokens)`/`Prompts`/`First run`/`Bugs`/
+`Tokens ↑/↓`/`Cost` is six columns; only five `TBD`s were present). Fixed
+by adding the missing cell. Not a freeze violation: T8 predates every
+candidate run. `lint-docs` also confirmed prompts 104–111 (never linted
+before, since the gate pointed elsewhere) all pass the header/block
+format.
+
+### Documentation (REQ-V170-RPT-04)
+
+`.env.example` gained `LLM_REASONING_POLICY=model-default` and
+`LLM_REASONING_ON_PURPOSES=tool-round` — the **pre-T12 compatibility**
+pair, per REQ-V170-POL-01's own rule that the active line always carries
+the *current shipped* default, with "empty means none" documented as a
+permitted-value note beside it, never as the active value.
+
+`README.md` gained a **Reasoning policy** section (the purpose-tag table,
+the per-provider "what off actually sends" honesty note — OpenRouter's
+literal payload key, LM Studio's summary-only mechanism, `tool-round`/
+`final` having no known working off-switch on this project's hardware),
+two `Configure` table rows for the new variables, and the two new
+`reasoning_requested`/`reasoning_honored` `llm_calls` columns appended to
+the "What is recorded" list. No version literal anywhere in it.
+
+`AGENTS.md`'s Gates section: the stale `1004` test count (spec-v1.6.0 T12)
+corrected to the real, measured HEAD count (**1133**, after this task's
+own tests landed — `pytest --collect-only` is the authority, not a hand
+tally), plus a new two-line note naming both environment variables and
+their compatibility defaults. The mutation-entry count at `:112` is left
+at 83 deliberately: it doesn't drift until T9 actually lands the nine
+`v170-*` entries (RPT-04's "same commit as the change it describes" rule)
+— T9's own prompt is written to also touch this line, since T9's
+implementation-order row does not name `AGENTS.md` among its owned files
+and this correction would otherwise fall through the cracks.
+
+`docs/plan.md`'s Status table gained a new row for
+`docs/spec/spec-v1.7.0.md`, **in progress**, summarizing the reasoning
+policy, the summary budget and the bench.py gate work landed through T7,
+naming stage A's finding (only the `summary` purpose has a shippable
+off-mechanism) and the measured test count. The pre-existing, now-stale
+`## v1.6.0 (in progress)` prose section further down the same file (a
+leftover draft written mid-v1.6.0-execution, contradicted by the Status
+table's own already-finalized "STOPPED at T15" row above it) is
+pre-existing drift from before this run and is left untouched — flagged
+here, not fixed, since fixing it is out of this task's scope.
+
+### `T-V170-ACC-03` — the freeze forces all three halves to be written now
+
+REQ-V170-ACC-03 permits no test edit after the first candidate run, so the
+equivalence half, the version half and the selection-commit allowlist half
+(REQ-V170-REV-01 item 8) are all written at T8, months before their
+non-skip branches can ever run for real (T11/T12). To avoid shipping that
+logic frozen and unexercised, every piece is factored into small, named,
+independently testable helpers
+(`_acc03_find_matching_candidates`, `_acc03_cand_v170_documents`,
+`_acc03_env_example_reasoning_defaults`, `_acc03_find_selection_commit`,
+`_acc03_selection_commit_diff`, `_acc03_validate_selection_commit_hunks`),
+each with its own companion test against synthetic fixtures — a throwaway
+git repo in `tmp_path` (reusing `tests/test_v15_standards.py`'s `_git`
+helper) for the selection-commit locator and hunk validator, since those
+can only be exercised against a real commit otherwise. The `.env.example`
+parser is checked directly against the real, committed file (asserting it
+still reads the compatibility pair) rather than only a synthetic one, so
+that check is live now, not dead until T12.
+
+At T8: the equivalence half and the allowlist half both skip (no
+`cand-v170-*.json` committed yet; no commit cites a `t12` prompt file
+yet) — the recorded reasons print in the skip trace, exactly as `pytest`'s
+own `-rs` summary would show. The version half never skips: it reads
+`pyproject.toml` via an independent `tomllib.load`, finds zero matching
+candidates, and asserts `1.6.0` — proving the bump has not (yet) escaped
+its one permitted commit. The selection-commit locator's prompt-file
+pattern is pinned to `docs/prompts/\d+-v170-t12-[\w.-]*\.md`; T12's own
+prompt file must be named to match it, or the third half silently skips
+forever instead of running for real once T12 lands.
+
+### Tests
+
+11 new tests: `T-V170-VER-01` (1, the independent `tomllib` cross-check
+against the real `pyproject.toml`), `T-V170-RPT-02` (1, the gate-config
+repoint), `T-V170-ACC-03`'s three halves (3, two skipping at T8 with a
+recorded reason, the version half asserting `1.6.0`), and six companion
+tests exercising the halves' otherwise-frozen non-skip logic against
+synthetic fixtures (the candidate-matcher, the candidate-document reader,
+the `.env.example` parser against the real file, the selection-commit
+locator/hunk-validator's clean and dirty paths, x2).
+
+### Gates
+
+`ruff check .`: 0 (four `E501`s found and fixed in the new test code
+before the run below). `pytest`: 1133 collected (up from 1122 at T7's
+close), 1131 passed, 2 skipped (`T-V170-ACC-03`'s equivalence and
+allowlist halves, both with a recorded skip reason). `lint-docs`: 0.
+`bot.py --selftest`: 0. `bot.py --selftest-live`: 0. `bench.py check
+baseline-v1.6.0.json`: 0. `mutation_check.py`: 0 — 83/83 killed, 0
+survived/errored/drifted. `git diff --stat pyproject.toml`: empty.
+
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.7.0 (T0 in progress) | 2026-09-07 | TBD | TBD | TBD | TBD | TBD | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.7.0 (T0 in progress) | 2026-09-07 | TBD | TBD | TBD | TBD | TBD | TBD | claude-sonnet-5 | Claude Code |
 ```
