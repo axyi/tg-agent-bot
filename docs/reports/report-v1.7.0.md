@@ -1,18 +1,20 @@
 # Implementation report — spec-v1.7.0
 
-**Status: T11 complete — Stage C ran C1 (`by-purpose`/`tool-round`) and C2
-(`off`/explicit-empty) unconditionally; C3 not run (two independent
-grounds, see T11). C1 is the sole quality-passing candidate (54/54,
-S13-S18 all 3/3) but misses the cost gate (0.908x baseline, threshold
-0.70x); C2 fails both gates. Verdict: **FAIL, cost gate** —
-`docs/reports/bench-v1.7.0.md` records it. Per REQ-V170-BEN-07 row 2 the
-code still merges: T12 runs next with C1 (`by-purpose`/`tool-round`) as
-the shipped default, `pyproject.toml` moves to `1.7.0` inside that commit,
-and the run **stops before tagging** — no `v1.7.0` tag this run. A
-documentation defect (found under freeze, fixed in T12): `.env.example`
-and `README.md`, both authored at T8, describe
-`LLM_REASONING_ON_PURPOSES` backwards from what `llm/base.py` and the
-spec's own POL-03 prose implement.**
+**Status: T12 complete — the selection commit landed. C1
+(`by-purpose`/`tool-round`), T11's sole quality-passing candidate, is now
+the shipped default (`config.py`), `pyproject.toml` is `1.7.0`; the
+`.env.example`/`README.md` documentation defect T11 found is corrected.
+**No tag this run** — BEN-07's cost-gate-FAIL row stops before tagging.
+Two blockers discovered and resolved under freeze, both operator-
+authorized: the ACC-03 hunk checker scoped to added lines only, and a
+second "T4-style" erratum fixing two more pre-existing tests to read
+`Config`'s default dynamically instead of a hardcoded literal. Three
+commits: `de0586f`, `17578b1`, `013694e`. A transient, external 1Password
+SSH-agent outage briefly broke git-commit-dependent tests mid-run
+(resolved, not a regression — confirmed reproducible outside the repo
+too). All six gates green (92/92 mutations killed), `checks.py run
+--profile full` 15/15, `checks.py replay` 18/18. Run continues to T13 —
+the provisional report, tg-post and usage-row accounting.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -1740,6 +1742,97 @@ existence) resolves it by moving the shipped default to `by-purpose`/
 documents touched (`baseline-v1.6.0.json`, both candidates). Mutation gates
 and the live gates (5, `checks.py run --profile full`, `replay`) are
 deferred to after T12, which is the next commit and touches source.
+
+## T12 — the selection commit (REQ-V170-POL-07, REQ-V170-VER-01, REQ-V170-ACC-03)
+
+C1 (`by-purpose`/`tool-round`) was the sole quality-passing candidate in
+T11's Stage C run, so per REQ-V170-BEN-07 row 2 the code still merges: T12
+runs, shipping C1 as the default, `pyproject.toml` bumped, **no tag**.
+
+### Two blockers, discovered and resolved under freeze
+
+Both were escalated to the operator via `AskUserQuestion` before any fix
+landed; both resolutions match the operator's selected option.
+
+**Blocker 1 — REQ-V170-REV-01 item 8's ACC-03 checker could not be
+satisfied by any wording of the required `config.py` edit.**
+`_acc03_validate_selection_commit_hunks` checked **every** changed line of
+the selection commit's `config.py` diff — added *and* removed — for one of
+the two lowercase identifiers. `config.py`'s pre-existing `_parse_choice`
+call site never paired the identifier with the default value on one
+physical line (`ruff format`'s 100-column wrap put them on separate
+lines), so changing the default to `"by-purpose"` always removed a
+non-conforming line, and a removed line's pre-existing text cannot
+retroactively satisfy a naming rule written after it existed — proven
+exhaustively against the real validator function across 7+ wording
+attempts before escalating, not by reasoning about the code in the
+abstract. The identical structural problem independently blocked
+correcting `AGENTS.md`'s stale default mention and `.env.example`'s
+inverted `LLM_REASONING_ON_PURPOSES` wording (T11's own discovered
+documentation defect — see T11's section above). **Resolution**:
+`_acc03_selection_commit_diff` now returns added lines only, matching the
+check's actual purpose (prove what T12 *adds* is on-topic). `config.py`'s
+edit itself uses a named `llm_reasoning_policy_default` local so the
+identifier and the literal share a line. Verified against the real,
+committed T12 commit (`17578b1`) after landing: `git diff --name-only`
+lists exactly the five allowed files, `_acc03_validate_selection_commit_hunks`
+returns `[]`, and all 8 `T-V170-ACC-03`-family tests pass, including the
+previously-skipping `selection_commit_allowlist_half`.
+
+**Blocker 2 — flipping the shipped default broke two more unlisted
+pre-existing tests.** `tests/test_bench.py::test_env_flags_are_exactly_the_nine_keys_with_null_for_absent_fields`
+and `tests/test_v14_patch.py::test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config`
+both hardcoded `flags["LLM_REASONING_POLICY"] == "model-default"`, read via
+a `Config` built by direct construction (bypassing `load_config()`) — i.e.
+`Config`'s dataclass field default, verbatim. Neither is in spec-v1.7.0
+§14.1's exhaustive amendment list; both already carried a "T4 erratum,
+authorised by the operator, prompt 107" comment from an earlier instance
+of this exact conflict shape (REQ-V170-POL-01 vs. REQ-V170-EC-03).
+**Resolution (second erratum, prompt 118)**: both assertions now read the
+expected value from `dataclasses.fields(config.Config)`'s own default
+instead of a literal, so neither goes stale on a future default change.
+
+### Commits
+
+Three, in order: `de0586f` (test: both blockers' fixes — citing prompt
+116, deliberately *not* a `v170-t12-`-matching path, to avoid ambiguating
+`_acc03_find_selection_commit`), `17578b1` (feat: the actual selection
+commit — exactly `config.py`, `pyproject.toml`, `.env.example`,
+`README.md`, `AGENTS.md`, citing prompt 117), `013694e` (chore: `uv.lock`
+resync — not in the five-file allowlist, so it lands immediately after
+rather than inside T12; citing prompt 119).
+
+### A transient, external interruption — not a regression
+
+The first `checks.py run --profile full` attempt after T12 showed
+`[FAIL] pytest`. Root cause, confirmed directly (`git init && git commit`
+in a scratch directory, outside the repo, failed identically):
+**1Password's SSH-agent-based git-commit signing was temporarily
+unavailable** (`error: 1Password: agent returned an error` / `fatal:
+failed to write commit object`), failing every test whose fixture commits
+to a throwaway git repo (`test_v15_standards.py`, `test_v170_bench.py`'s
+ACC-03 synthetic locator test). T12's own three commits had already landed
+successfully before the outage began. No workaround was applied (signing
+is never bypassed without explicit instruction); the operator restarted
+the agent, `git commit` was re-verified working, and the full run was
+re-executed clean.
+
+### Gates
+
+Six-gate sequence: `uv sync --locked` 0, `ruff check .` 0, `pytest` 0 (same
+collected count, 0 failures), `bot.py --selftest` 0, `bot.py
+--selftest-live` 0 (LM Studio still `192.168.0.145`), `mutation_check.py`
+0 — 92/92 killed, 0 survived/errored/drifted.
+
+`checks.py run --profile full --since <base>`: 0 — all 15 gates PASS
+(`uv-sync`, `ruff-check-all`, `ruff-format` — new files clean, 24 legacy
+would-reformat, non-blocking — `branch-name`, `pytest`, `selftest`,
+`selftest-live`, `mutation-all`, `gitleaks-tree` 0 findings, `trivy` 0
+findings, `semgrep` 0 findings, `skylos` 13 in-scope/13 out-of-scope
+shadow findings, `hooks-installed`, `doctor`, `lint-docs`).
+
+`checks.py replay --range <base>..<tip>`: 0 — 18/18 commits PASS clean, no
+exceptions.
 
 ## Ledger row (paste into `economics.md`)
 
