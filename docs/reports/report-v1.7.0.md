@@ -2221,6 +2221,28 @@ action of the run; the code ships on `main` at `48e9db2` (T13) with
 `0c3ae39` and this commit as trailing evidence, but v1.7.0 itself is not
 released.
 
+### Operator decision, post-run (2026-09-08, prompt 125)
+
+The run's verdict above stands unchanged: the cost gate failed and the
+executor correctly created no tag. **The operator then accepted the release
+as it is and authorised the tag.** This is a deliberate, disclosed
+deviation from `REQ-V170-VER-02`, which creates the tag only on a `PASS`
+verdict. It is an override of the spec's routing by the person the routing
+defers to — not a re-reading of the measurement, and not a correction to
+any number on this page.
+
+What was accepted: the reasoning mechanism was found and works, the
+by-purpose policy ships as the default, the quality gate is green, and the
+9.2 % saving is real but far short of the 30 % target — because reasoning
+can only be switched off on summary calls, six of more than 150 in a
+benchmark run. **The −30 % goal is not met and is not carried forward as
+met.** The next attempt at it has to attack prompt size and round count,
+not reasoning.
+
+The annotated tag `v1.7.0` carries this rationale in its own message, so a
+reader who finds the tag before this file still learns why it exists.
+`docs/reports/tg-post-v1.7.0.md` is updated to match.
+
 ## Ledger row (paste into `economics.md`)
 
 ```
