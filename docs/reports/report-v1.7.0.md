@@ -18,8 +18,19 @@ too). All six gates green (92/92 mutations killed), `checks.py run
 REQ-V170-RPT-03 items (item 4's tip `sha256`/`replay --range` output
 explicitly deferred to T14, the evidence-only commit); `docs/llm-usage.md`
 rows 58–59 appended; `docs/reports/tg-post-v1.7.0.md` written. Fix cycles
-used this entire run: 0 of 5. Run continues to T14 — final acceptance
-evidence, no tag.**
+used this entire run: 0 of 5.**
+**Status: T14 complete, run closed. `<implementation-tip>` = `48e9db2`
+(T13's commit). Six verbatim gates re-run clean against it (gate 5 needed
+one re-pin — the GPU box's floating IP moved a 4th time, same disposition
+as the three earlier occurrences); `checks.py run --profile full` 15/15;
+`checks.py replay --range <base>..<implementation-tip>` 21/21. Appendix B:
+12 PASS, 1 N/A (E13, trigger 1, not a failure). REQ-V170-ACC-02 regression
+check confirmed — `tools.py`/`dashboard_server.py`/`dashboard_render.py`
+byte-unchanged this release. **REQ-V170-BEN-07 verdict: FAIL, cost gate
+(0.908× vs. 0.70×) — no `v1.7.0` tag created, `git tag -l` unchanged,
+nothing pushed.** The evidence-only commit (this one) lands on
+`docs/reports/*` alone; its own prompt (123) is in a separate preceding
+commit (`0c3ae39`). Code ships on `main`; the release does not tag.**
 **Key finding: `stats.time_to_first_token` is present but empty (`{}`) on the
 OpenAI-compatible route — RSN-07's summary-only fallback (trigger 1) binds
 the whole run: no candidate can ship a mechanism for the agent tags
@@ -34,7 +45,7 @@ the whole run: no candidate can ship a mechanism for the agent tags
   `16fa1361122c11e14ab37bbb45abfb855efef7c8fc715247a4d741fc3952f7c8`
 - **Executor:** claude-sonnet-5 (Claude Code)
 - **`<base>`** (HEAD before this run's first commit): `706c690d35f34d96d1ee0fbcb8e9be08bafa30e7`
-- **`<implementation-tip>`**: not reached yet.
+- **`<implementation-tip>`**: `48e9db2f1848c3a38b4430f62a9ac5d045372e6f` (T13's own commit; see "T14 — final acceptance evidence" below for the full replay output and the no-tag verdict).
 
 ## Operator inputs
 
@@ -2067,13 +2078,151 @@ recorded in full where it happened; this section is the single index item
 | T12 | `ruff format config.py` (tested once, for a one-line call form) reformatted the whole pre-existing file | caught via `git diff`, fully reverted, redone as two targeted edits only |
 | T12 | The first `checks.py run --profile full` attempt failed `[FAIL] pytest` — 1Password's SSH-agent git-commit signing was transiently down | independently reproduced outside the repo; no workaround applied; operator restarted the agent; re-run clean |
 | T12 | Prompt 120's filename accidentally matched `_ACC03_T12_PROMPT_RE` despite its own Constraints section saying it should not, permanently ambiguating `_acc03_find_selection_commit()` (now always returns `None`) | disclosed (prompt 121), not fixable without rewriting immutable commit history; harmless — the real check ran and passed once, unambiguously, against `17578b1` alone, before the ambiguity existed |
+| T14 | Gate 5's first attempt failed — GPU box floating IP moved again (4th occurrence this run) | re-probed, re-pinned via the one permitted `sed -i` idiom, gate 5 reconfirmed — same disposition as T1/T5/T10's earlier occurrences |
+| T14 | Two background security-review notifications fired mid-gate, flagging `tools.py`/`bot.py` lines that read as security bypasses | both verified false positives — designed `mutation_check.py` catalogue entries mutating the tracked file in place mid-run; committed `HEAD` confirmed correct in each case; no fix applied |
+| T14 | Spec:2317 expects `T-V170-ACC-03`'s selection-commit half to stop skipping once T12 ran; it still skips (the permanent prompt-120 ambiguity from T12) | disclosed explicitly in T14's own section rather than left to read as an unnoticed gap; the check ran and passed once, for real, against `17578b1` alone, before the ambiguity existed |
 
 No deviation above was suppressed or fixed silently; each was fixed,
 waived with a stated reason, or left open and named as such — matching
 REQ-V12-REP-02's own standard applied throughout this report.
 
+## T14 — final acceptance evidence (REQ-V170-ACC-01, ACC-02, ACC-03)
+
+**`<implementation-tip>` = `48e9db2f1848c3a38b4430f62a9ac5d045372e6f`** (T13's own commit — its
+resulting SHA **is** `<implementation-tip>`, per REQ-V170-ACC-03). This
+section is the single evidence-only commit REQ-V170-ACC-03 calls for; it
+touches `docs/reports/*` only. Its own prompt file
+(`docs/prompts/123-v170-t14-final-acceptance.md`) landed in its own
+preceding commit (`0c3ae39`) for exactly that reason — kept out of this
+commit's diff so this commit stays evidence-only.
+
+### Six verbatim gates, re-run against `<implementation-tip>`
+
+| # | gate | command | exit |
+|---|---|---|---|
+| 1 | uv sync | `uv sync --locked` | 0 |
+| 2 | ruff check | `uv run --locked ruff check .` | 0 |
+| 3 | pytest | `uv run --locked pytest` | 0 — 1133 collected, 1131 passed, 2 skipped |
+| 4 | selftest | `uv run --locked python bot.py --selftest` | 0 |
+| 5 | selftest-live | `uv run --locked python bot.py --selftest-live` | **1 on first attempt**, 0 on retry (below) |
+| 6 | mutation | `uv run --locked python devtools/mutation_check.py` | 0 — 92/92 killed |
+
+**Gate 5's first attempt failed**: `live: FAIL lmstudio — ConnectTimeout:
+timed out`. Root cause, confirmed the same way as T1/T5/T10's three
+earlier occurrences: the GPU box's floating IP moved again — the
+**4th** occurrence this run. Re-probed the three fixed addresses of
+REQ-V170-PRE-03 (`curl -sS -m 3 http://<ip>:1234/v1/models`):
+`172.16.50.233` answered, serving `qwen/qwen3.8-27b`, the pinned model.
+`.env` re-pinned via the one permitted `sed -i
+'s|^LMSTUDIO_BASE_URL=.*|...|' .env` idiom (REQ-V170-EC-04 idiom 4),
+confirmed by `grep -q` without printing contents; gate 5 re-run clean
+(`live: OK lmstudio`, all six checks OK). The instrument itself
+(`Bionic v1.1.1`, `qwen/qwen3.8-27b`) is unchanged — only its network
+address moved, not one of REQ-V170-BEN-01's six locked instrument
+values, matching the disposition of the three earlier occurrences
+exactly.
+
+**Two background security-review notifications fired during gates 5 and
+6's runs, both verified false positives**: `tools.py`'s
+`if False and status == SCAN_INCOMPLETE:` and `record["sandbox_over_quota"]
+= payload.get(...)` (dropping `.pop`'s consuming semantics), plus
+`bot.py`'s redaction-stripped status line. Each is a designed
+`devtools/mutation_check.py` catalogue entry (lines 62–63, 100–105 and
+289–290 respectively) that mutates the real tracked file in place, runs
+the suite, then reverts — the scanner read the working tree mid-cycle.
+Confirmed for each: `git show HEAD:<file>` carries the correct, un-mutated
+code; `git status --short <file>` showed the file actively cycling (or
+already reverted) at the moment of the check. No fix applied — nothing is
+actually altered in committed code.
+
+### `checks.py run --profile full --since <base>`
+
+Exit 0, all 15 members PASS: `uv-sync`, `ruff-check-all`, `ruff-format`
+(1 new file clean, 24 legacy would-reformat, non-blocking), `branch-name`
+(warn-only on `main`), `pytest`, `selftest`, `selftest-live`,
+`mutation-all`, `gitleaks-tree` (0 findings), `trivy` (0), `semgrep` (0),
+`skylos` (13 in-scope/13 out-of-scope, unchanged from T12 — see T13's
+scanner-summary disclosure), `hooks-installed`, `doctor`, `lint-docs`.
+
+### `checks.py replay --range <base>..<implementation-tip>`
+
+Exit 0, **21/21 commits PASS clean**, no exceptions — the 20 commits of
+T0–T12 plus T13's own (`48e9db2`). This evidence-only commit and the
+prompt-only commit that precedes it (`0c3ae39`) are not included in this
+range and are "not recursively required to replay against" themselves,
+per REQ-V170-ACC-03's own text.
+
+### REQ-V170-ACC-02 — regression check
+
+`git diff --name-only <base>..<implementation-tip>` (the full file list
+for this entire run) contains no path under `tools.py`,
+`dashboard_server.py` or `dashboard_render.py` — the exec sandbox, the
+redaction choke points, the SSRF domain allowlist and the loopback-only
+dashboard are **byte-unchanged this release**. `.env` handling is
+unchanged in code (only its *value* was re-pinned four times this run,
+via the one permitted idiom, never its handling logic). spec-v1.2's D1/D2,
+spec-v1.4's S01 acceptance, spec-v1.5's freeze properties and
+spec-v1.6.0's tracing/dashboard/tool-quality properties all continue to
+pass inside this run's own green gate 3 (the relevant test files —
+`test_v11_patch.py`, `test_v14_patch.py`, `test_v15_standards.py`,
+`test_v160_dashboard.py`, `test_v160_observability.py` — are all in the
+1131-passed count above, each touched only for the disclosed erratum
+instances already recorded in the Deviations table, never for their own
+tested properties). No earlier security posture is weakened.
+
+### Appendix B — acceptance scenarios (REQ-V170-ACC-01)
+
+Executed against the repository, the running bot and the recorded
+documents, after the `full` profile above went green.
+
+| Scenario | Result | How driven |
+|---|---|---|
+| E1 — tag is a pure function of purpose/tools | PASS | `test_t_v170_pol_02_reasoning_tag_cross_product`, `test_t_v170_pol_02_reads_no_config_no_global` — offline, parametrized |
+| E2 — `model-default` is byte-identical to v1.6.0 | PASS | `test_t_v170_pol_06_none_is_byte_identical_to_today` plus `test_t_v170_ben_01_meta_reasoning_shape_and_additive_optionality` (no `reasoning` key in `REQUEST_DEFAULTS`/`bench.constants()`) — offline |
+| E3 — schema 4→5 migrates without losing a row | PASS | `test_t_v170_obs_01_chains_to_5` (1/2/3/4/5-idempotent), `test_t_v170_obs_01_migration_4_to_5_on_populated_db`, `test_t_v170_obs_01_unsupported_version_still_raises` — offline, `tmp_path` fixture |
+| E4 — six `llm_calls` rows, failover is one invocation | PASS | `test_t_v170_obs_04_exactly_six_rows_all_requested_non_null`, `test_t_v170_obs_04_a_failover_inside_one_call_adds_no_extra_row`, `test_t_v170_obs_03_honored_truth_table`, `test_t_v170_obs_03_a_call_that_raises_before_a_response_is_null` — offline, scripted turns |
+| E5 — summary spends one budget, not one per attempt | PASS | `test_t_v170_sum_01_deadline_taken_once_both_requests_issued`, `test_t_v170_sum_02_retry_skipped_below_floor_returns_none_one_row`, `test_t_v170_sum_03_attempt_1_timeout_is_the_remaining_budget_not_none_not_client_own` — offline, fake clock |
+| E6 — the rescue retry never reasons | PASS | `test_t_v170_sum_04_retry_and_repair_forced_off_under_every_policy` — offline, all three policies parametrized |
+| E7 — a tag cannot reach outside `.bench/` | PASS | `test_t_v170_car_01_tag_rejects`, `test_n7_tag_escape_refused_before_any_filesystem_write` (`shutil.rmtree` patched to fail the test if called) — offline |
+| E8 — baseline comparable with itself and a treatment | PASS | `test_t_v170_ben_02_comparability_against_the_real_baseline` — offline, against the real `baseline-v1.6.0.json` |
+| E9 — a candidate measured against a named, unchanged instrument | PASS | T1's live preflight (six instrument values, VERIFY 1–4), T3's stage-A pairs, T11's live C1/C2 runs against `192.168.0.145`/`Bionic v1.1.1`/`qwen/qwen3.8-27b`/`42496`, `docs/reports/bench-v1.7.0.md`'s gated comparison — live, this run's own recorded artefacts |
+| E10 — no secret disclosed, no instrument guessed | PASS | T0's `grep -q` by-key-name-only `.env` checks (no value printed), the four EC-04 idioms used throughout (all four `sed -i`/`grep -q` re-pins disclosed above and in the Deviations table), no `.env.bak` ever created (confirmed: `ls .env.bak 2>&1` — no such file), no credential/path-under-`data/` in any report/prompt/spec/commit (this report's own text, checked by inspection) |
+| E11 — the report carries a paste-ready, linted ledger row | PASS | `checks.py lint-docs` (above) plus a manual re-read of the Ledger row's eleven cells confirming none is empty or `TBD` |
+| E12 — the tag is created last, only when the gate passed | PASS (on the FAIL branch's own terms) | `bench.py report --gate` returned FAIL (cost gate, T11); this evidence-only commit records `<implementation-tip>`, the replay output and the intended name `v1.7.0` without claiming it exists; `git tag -a v1.7.0` is **not** run; `git tag -l` still shows only `v1.3`, `v1.3-baseline`, `v1.6.0` (checked below); nothing pushed |
+| E13 — cache evidence is calibrated cold, or not used | **N/A, recorded not applicable, trigger 1** | T3's VERIFY 4 finding: `stats.time_to_first_token` is absent (`{}`) on the OpenAI-compatible route this harness uses — the field-absent trigger fired before any confirming pair could run; RSN-07's summary-only fallback bound the whole run; recorded not applicable per the scenario's own closing line, never as a failure |
+
+`git tag -l` at T14: `v1.3`, `v1.3-baseline`, `v1.6.0` — unchanged.
+
+### `T-V170-ACC-03`'s selection-commit half: skips, not passes — disclosed
+
+Spec:2317 expects this half to be "no longer skipping when T12 ran." It
+still skips, and this is **not** an unnoticed gap: T12's own report
+section and prompt 121's disclosure already recorded that prompt 120's
+filename accidentally matched `_ACC03_T12_PROMPT_RE`, so
+`_acc03_find_selection_commit()` now sees two candidate commits
+(`17578b1` and `62cc364`) and returns `None` (ambiguous) permanently,
+since commit messages are never amended. The check **did** run and pass,
+once, unambiguously, against `17578b1` alone, before `62cc364` existed —
+recorded at T12 and reconfirmed by that commit's own state in this run's
+`checks.py replay` output above (`17578b1: clean`). The mismatch between
+the spec's expected end state and the tree's actual behavior is named
+here explicitly rather than left to read as an overlooked skip.
+
+### Verdict: no tag, this run
+
+**REQ-V170-BEN-07 verdict at T11: FAIL, cost gate** (C1's `C_conservative`
+$0.003183 is 0.908× baseline against a ≤0.70× threshold — shortfall
+0.208× of the threshold). Per REQ-V170-ACC-03's own routing: `git tag -a
+v1.7.0` is **not created** on this commit or any other. `pyproject.toml`
+still reads `1.7.0` (bumped at T12, per REQ-V170-VER-01 — the version bump
+and the tag are separate actions, and only the tag is gated on cost).
+`git tag -l` unchanged. Nothing is pushed to `origin`. This is the last
+action of the run; the code ships on `main` at `48e9db2` (T13) with
+`0c3ae39` and this commit as trailing evidence, but v1.7.0 itself is not
+released.
+
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.7.0 (T13 provisional; **no tag** — BEN-07 cost-gate FAIL) | 2026-09-08 | ≈222.3 KB | 103–122 | 0 of 5 repair cycles drawn on the actual codebase — every blocker was a discovered spec conflict fixed before any gate ran red, or a REQ-V170-REV-01 review finding (not ACC-04); the one genuine full-gate-run failure (T12's transient 1Password signing outage) was external, not a code or gate defect | Real findings, disclosed not hidden: T9's self-caught mutation-killer redesign; T10's 4 hard-pinned-default tests + 1 missing spec-mandated test (first fix attempt itself wrong, caught by hand-simulation); T11's on-purposes documentation defect and the instrument-metadata CLI-flag omission (patched pre-commit, corroborated); T12's ACC-03 hunk-checker impossibility and 2 more hard-pinned-default tests (both operator-authorized); a stale skylos NG-12 figure (spec says 19, measured 8, full-profile shows 13) predating this run; a permanent prompt-120 filename slip disclosed in prompt 121 | unknown (harness does not expose per-request agent-work tokens/cost — see `docs/llm-usage.md` rows 58–60) | live LM Studio inference measured directly by the benchmark harness: $0.17189 (C1) + $0.14612 (C2) = $0.31801, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.7.0 (T14 final acceptance complete; **no tag created** — BEN-07 cost-gate FAIL) | 2026-09-08 | ≈222.3 KB | 103–123 | 0 of 5 repair cycles drawn on the actual codebase across the whole run — every blocker was a discovered spec conflict fixed before any gate ran red, or a REQ-V170-REV-01 review finding (not ACC-04); the two genuine full-gate-run failures (T12's transient 1Password signing outage, T14's GPU-box IP move, 4th occurrence) were both external, not code or gate defects | Real findings, disclosed not hidden: T9's self-caught mutation-killer redesign; T10's 4 hard-pinned-default tests + 1 missing spec-mandated test (first fix attempt itself wrong, caught by hand-simulation); T11's on-purposes documentation defect and the instrument-metadata CLI-flag omission (patched pre-commit, corroborated); T12's ACC-03 hunk-checker impossibility and 2 more hard-pinned-default tests (both operator-authorized); a stale skylos NG-12 figure (spec says 19, measured 8, full-profile shows 13) predating this run; a permanent prompt-120 filename slip disclosed in prompt 121, whose effect on `T-V170-ACC-03`'s selection-commit half (a permanent skip) is disclosed again at T14; two background security-review false positives at T14, both verified against `mutation_check.py`'s own catalogue | unknown (harness does not expose per-request agent-work tokens/cost — see `docs/llm-usage.md` rows 58–60) | live LM Studio inference measured directly by the benchmark harness: $0.17189 (C1) + $0.14612 (C2) = $0.31801, all $0 marginal (local inference) | claude-sonnet-5 | Claude Code |
 ```
