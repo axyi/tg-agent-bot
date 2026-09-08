@@ -1794,13 +1794,32 @@ instead of a literal, so neither goes stale on a future default change.
 
 ### Commits
 
-Three, in order: `de0586f` (test: both blockers' fixes — citing prompt
-116, deliberately *not* a `v170-t12-`-matching path, to avoid ambiguating
-`_acc03_find_selection_commit`), `17578b1` (feat: the actual selection
-commit — exactly `config.py`, `pyproject.toml`, `.env.example`,
+Four, in order: `de0586f` (test: both blockers' fixes — citing prompt 118,
+deliberately named to avoid a `v170-t12-`-matching path, so as not to
+ambiguate `_acc03_find_selection_commit`), `17578b1` (feat: the actual
+selection commit — exactly `config.py`, `pyproject.toml`, `.env.example`,
 `README.md`, `AGENTS.md`, citing prompt 117), `013694e` (chore: `uv.lock`
 resync — not in the five-file allowlist, so it lands immediately after
-rather than inside T12; citing prompt 119).
+rather than inside T12; citing prompt 119), `62cc364` (this report
+write-up, citing prompt 120).
+
+**A naming slip in the last of these, disclosed rather than hidden**:
+prompt 120's filename, `120-v170-t12-report-writeup.md`, itself matches
+`_ACC03_T12_PROMPT_RE` (`docs/prompts/\d+-v170-t12-[\w.-]*\.md`) despite
+its own Constraints section stating it should not — the same mistake
+prompts 118/119 were written specifically to avoid. Once `62cc364` cited
+that path, `_acc03_find_selection_commit()` sees two matching commits
+(`17578b1` and `62cc364`) and returns `None` (ambiguous) rather than one —
+by the function's own documented contract, "a recorded skip, never a hard
+failure." Consequence: `test_t_v170_acc_03_selection_commit_allowlist_half`
+now (and permanently, since commit messages are immutable and never
+amended) skips instead of asserting. This does **not** reopen the
+question T12 answered: the check ran and passed once, for real, against
+`17578b1` alone, before `62cc364` existed (recorded above, and
+independently in this run's own `checks.py replay` — 18/18 clean at the
+time). No fix is possible short of rewriting history, which this project's
+git discipline forbids; harmless in outcome, worth naming so a future
+reader does not mistake the skip for the check never having run.
 
 ### A transient, external interruption — not a regression
 
