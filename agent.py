@@ -11,6 +11,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import config
 import storage
@@ -223,6 +224,13 @@ def normalize_tool_calls(calls: list[ToolCall], *, turn_id: int = 0) -> list[Too
     ]
 
 
+@dataclass(frozen=True)
+class AgentOutcome:
+    reply: str
+    failed: bool
+    kind: str | None    # "empty" | "no_answer" | "llm_error" | "interrupted" | None
+
+
 def run_agent(
     *,
     conn: sqlite3.Connection,
@@ -240,6 +248,30 @@ def run_agent(
     on_tool: Callable[[str, str], None] | None = None,
     resolve_cost: CostResolver | None = None,
 ) -> str:
+    return run_agent_outcome(
+        conn=conn, conv_id=conv_id, llm=llm, skills=skills, runner=runner, now=now,
+        sleep=sleep, cfg=cfg, fetcher=fetcher, audit=audit, recent_goals=recent_goals,
+        should_stop=should_stop, on_tool=on_tool, resolve_cost=resolve_cost,
+    ).reply
+
+
+def run_agent_outcome(
+    *,
+    conn: sqlite3.Connection,
+    conv_id: int,
+    llm: LLMClient,
+    skills: dict[str, Skill],
+    runner: CommandRunner,
+    now: str,
+    sleep: Callable[[float], None] = time.sleep,
+    cfg: Config | None = None,
+    fetcher: Fetcher | None = None,
+    audit: AuditHook | None = None,
+    recent_goals: list[str] | None = None,
+    should_stop: Callable[[], bool] = lambda: False,
+    on_tool: Callable[[str, str], None] | None = None,
+    resolve_cost: CostResolver | None = None,
+) -> AgentOutcome:
     sink = tracing.SqliteSpanSink(conn)
     with tracing.start_span(
         "invoke_agent tg-agent-bot", tracing.KIND_INTERNAL, sink=sink, conv_id=conv_id,
@@ -276,8 +308,8 @@ def _run_agent_turn(
     should_stop: Callable[[], bool],
     on_tool: Callable[[str, str], None] | None,
     resolve_cost: CostResolver | None,
-) -> str:
-    def finish(text: str) -> str:
+) -> AgentOutcome:
+    def finish(text: str, *, failed: bool = False, kind: str | None = None) -> AgentOutcome:
         # Defence in depth: model output and user input can quote a secret that
         # never travelled through a tool envelope (REQ-V1-SEC-06).
         text = config.redact(text)
@@ -294,7 +326,7 @@ def _run_agent_turn(
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
             raise
-        return text
+        return AgentOutcome(reply=text, failed=failed, kind=kind)
 
     max_tokens = cfg.llm_max_tokens if cfg is not None else None
     system_prompt, history = _assemble_context(
@@ -325,7 +357,7 @@ def _run_agent_turn(
 
     while round_no <= ROUND_LIMIT:
         if should_stop():
-            return finish(FALLBACK_INTERRUPTED)
+            return finish(FALLBACK_INTERRUPTED, failed=True, kind="interrupted")
 
         expose_tools = round_no <= TOOL_ROUND_LIMIT and tools_used < TOOL_EXECUTION_LIMIT
         if round_no > TOOL_ROUND_LIMIT:
@@ -395,26 +427,30 @@ def _run_agent_turn(
                 malformed_retries >= MALFORMED_RETRY_LIMIT
             ):
                 root_span.add_limit_hit("MALFORMED_RETRY_LIMIT")
-            return finish(FALLBACK_LLM_ERROR.format(reason=str(exc)))
+            return finish(
+                FALLBACK_LLM_ERROR.format(reason=str(exc)), failed=True, kind="llm_error"
+            )
 
         has_content = bool(response.content.strip())
         if not response.tool_calls:
             if has_content:
                 return finish(_with_truncation_notice(response))
             if not expose_tools:
-                return finish(FALLBACK_NO_ANSWER)
+                return finish(FALLBACK_NO_ANSWER, failed=True, kind="no_answer")
             if empty_repairs < EMPTY_REPAIR_LIMIT:
                 # A request-time nudge, never a stored message (REQ-V1-RP-03).
                 messages.append({"role": "system", "content": EMPTY_REPAIR_INSTRUCTION})
                 empty_repairs += 1
                 continue
             root_span.add_limit_hit("EMPTY_REPAIR_LIMIT")
-            return finish(FALLBACK_EMPTY)
+            return finish(FALLBACK_EMPTY, failed=True, kind="empty")
         if not expose_tools:
             # Tool calls are discarded unexecuted and never stored.
             log.info("discarded %d tool calls offered without tools", len(response.tool_calls))
             return finish(
-                _with_truncation_notice(response) if has_content else FALLBACK_NO_ANSWER
+                _with_truncation_notice(response) if has_content else FALLBACK_NO_ANSWER,
+                failed=not has_content,
+                kind=None if has_content else "no_answer",
             )
 
         # REQ-V12-ID-01 item 3: minted fresh, per round, immediately before use —
@@ -442,7 +478,7 @@ def _run_agent_turn(
         turn_id = storage.next_turn_id(conn, conv_id)
 
     root_span.add_limit_hit("ROUND_LIMIT")
-    return finish(FALLBACK_NO_ANSWER)         # defensive; normally unreachable
+    return finish(FALLBACK_NO_ANSWER, failed=True, kind="no_answer")  # defensive; unreachable
 
 
 def _with_truncation_notice(response) -> str:

@@ -60,7 +60,7 @@ SUMMARY_FAILED_REPLY = "Could not summarize this conversation right now."
 NOTHING_TO_SUMMARIZE_REPLY = "Nothing to summarize yet."
 MODEL_USAGE_REPLY = "Usage: /model [lmstudio|openrouter|auto]"
 STATUS_WORKING = "⚙️ working…"
-STATUS_DONE = "✅ done"
+STATUS_FAILED = "⚠️ failed"
 USAGE = "usage: bot.py [--selftest|--selftest-live|--version] [--no-dashboard]"
 
 log = logging.getLogger("bot")
@@ -139,7 +139,7 @@ class TelegramClient:
             )
         return data["result"]
 
-    def _call_with_retry(self, method: str, payload: dict) -> dict:
+    def _call_with_retry(self, method: str, payload: dict) -> dict | bool:
         """Bounded delivery retry (REQ-V1-SND-01). Only a rate limit or a transport
         hiccup is worth a second attempt; everything else raises straight away."""
         for attempt in range(1, SEND_ATTEMPT_LIMIT + 1):
@@ -172,6 +172,11 @@ class TelegramClient:
         return self._call_with_retry(
             "editMessageText",
             {"chat_id": chat_id, "message_id": message_id, "text": text},
+        )
+
+    def delete_message(self, chat_id: int, message_id: int) -> bool:
+        return self._call_with_retry(
+            "deleteMessage", {"chat_id": chat_id, "message_id": message_id}
         )
 
 
@@ -261,9 +266,27 @@ class _StatusMessage:
         if name in ("exec", "fetch"):
             self._edit(_status_line(name, first_argument))
 
-    def finish(self) -> None:
-        if self._message_id is not None and not self._disabled:
-            self._edit(STATUS_DONE)
+    def finish(self, *, ok: bool) -> None:
+        if self._message_id is None or self._disabled:
+            return
+        if ok:
+            self._delete()
+        else:
+            self._edit(STATUS_FAILED)
+
+    def _delete(self) -> None:
+        try:
+            result = self._tg.delete_message(self._chat_id, self._message_id)
+        except Exception as exc:
+            self._fail(exc)
+            return
+        if result is True:
+            self._message_id = None
+        else:
+            # A failed delete leaves the message and `_message_id` in place
+            # (CHAT-06): not an exception, so `_fail`'s wholesale disable does
+            # not apply here — only this one delete is given up on.
+            log.warning("status message delete failed: %s", redact(str(result)))
 
     def _start(self) -> None:
         try:
@@ -689,23 +712,27 @@ def process_update(
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     storage.add_user_message(conn, conv_id, redact(text))
     status = _StatusMessage(tg, chat_id)
-    reply = agent.run_agent(
-        conn=conn,
-        conv_id=conv_id,
-        llm=llm,
-        skills=skills,
-        runner=runner,
-        now=storage.utc_now_iso(),
-        cfg=cfg,
-        fetcher=fetcher,
-        audit=functools.partial(_write_audit, cfg.audit_log_path, from_id, conv_id),
-        recent_goals=storage.recent_goals(conn, from_id),
-        should_stop=lambda: _shutdown,
-        on_tool=status.on_tool,
-        resolve_cost=resolve_cost,
-    )
-    status.finish()
-    _send(tg, chat_id, split_message(reply))
+    try:
+        outcome = agent.run_agent_outcome(
+            conn=conn,
+            conv_id=conv_id,
+            llm=llm,
+            skills=skills,
+            runner=runner,
+            now=storage.utc_now_iso(),
+            cfg=cfg,
+            fetcher=fetcher,
+            audit=functools.partial(_write_audit, cfg.audit_log_path, from_id, conv_id),
+            recent_goals=storage.recent_goals(conn, from_id),
+            should_stop=lambda: _shutdown,
+            on_tool=status.on_tool,
+            resolve_cost=resolve_cost,
+        )
+    except Exception:
+        status.finish(ok=False)
+        raise
+    sent_ok = _send(tg, chat_id, split_message(outcome.reply))
+    status.finish(ok=sent_ok and not outcome.failed)
 
 
 def _write_audit(path: Path, tg_user_id: int, conv_id: int, record: dict) -> None:
@@ -961,14 +988,15 @@ def _handle_reload_skills(tg, skills: dict, chat_id: int) -> None:
     _send(tg, chat_id, [f"Skills reloaded: {len(skills)} ({names})."])
 
 
-def _send(tg, chat_id: int, parts: list[str]) -> None:
+def _send(tg, chat_id: int, parts: list[str]) -> bool:
     """Send the parts in order; stop at the first failure (at-most-once)."""
     for part in parts:
         try:
             tg.send_message(chat_id, redact(part))
         except TelegramError as exc:
             log.error("sending the reply failed: %s", redact(str(exc)))
-            return
+            return False
+    return True
 
 
 def poll_loop(
@@ -1090,6 +1118,7 @@ class _SelftestTelegram:
         self.sent: list[tuple[int, str]] = []
         self.status: list[tuple[int, str]] = []
         self.edits: list[tuple[int, int, str]] = []
+        self.deleted: list[tuple[int, int]] = []
 
     def send_message(self, chat_id: int, text: str) -> dict:
         if text == STATUS_WORKING:
@@ -1101,6 +1130,10 @@ class _SelftestTelegram:
     def edit_message_text(self, chat_id: int, message_id: int, text: str) -> dict:
         self.edits.append((chat_id, message_id, text))
         return {"message_id": message_id}
+
+    def delete_message(self, chat_id: int, message_id: int) -> bool:
+        self.deleted.append((chat_id, message_id))
+        return True
 
 
 _SELFTEST_UPDATE = {
@@ -1208,8 +1241,10 @@ def _selftest_failure(conn, tg, cfg: Config, root: Path) -> str | None:
     if tg.status != [(424242, STATUS_WORKING)]:
         return "the status message was not sent exactly once"
     edits = [text for _chat, _mid, text in tg.edits]
-    if len(edits) != 2 or not edits[0].startswith("⚙️ exec: ") or edits[1] != STATUS_DONE:
+    if len(edits) != 1 or not edits[0].startswith("⚙️ exec: "):
         return "the status message was not edited through the expected states"
+    if tg.deleted != [(424242, 1)]:
+        return "the status message was not deleted exactly once"
     if storage.get_state(conn, "last_update_id") != "1":
         return "the polling cursor was not persisted"
     if root not in cfg.db_path.parents or root not in cfg.exec_workdir.parents:

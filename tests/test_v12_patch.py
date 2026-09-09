@@ -142,7 +142,8 @@ class _FakeSelftestTg:
     def __init__(self):
         self.sent = [(424242, "selftest ok")]
         self.status = [(424242, bot.STATUS_WORKING)]
-        self.edits = [(424242, 1, "⚙️ exec: uname…"), (424242, 1, bot.STATUS_DONE)]
+        self.edits = [(424242, 1, "⚙️ exec: uname…")]
+        self.deleted: list[tuple[int, int]] = [(424242, 1)]
 
 
 def test_t_v12_id_04_selftest_pairing_check(tmp_path):
