@@ -77,11 +77,11 @@ def meta_line(text: Any) -> str:
 MAX_SPANS_PER_TRACE = 64
 
 PALETTE: dict[str, str] = {
-    "kind_internal": "#8b95a3",
-    "kind_client": "#3f7fd0",
+    "kind_internal": "#5f6873",
+    "kind_client": "#1f5fb0",
     "error_outline": "#b23636",
-    "bar": "#3f7fd0",
-    "bar_track": "#eef1f5",
+    "bar": "#1f5fb0",
+    "bar_track": "#eef0f2",
 }
 
 
@@ -90,43 +90,54 @@ PALETTE: dict[str, str] = {
 # ----------------------------------------------------------------------------
 
 STYLE = """
-:root { color-scheme: light; }
+:root { color-scheme: light;
+        --ink: #16181c; --ground: #eef0f2; --plate: #ffffff; --rule: #ccd2d8;
+        --dim: #5f6873; --signal: #1f5fb0; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 2rem 1.5rem 4rem; background: #f6f7f9; color: #16191d;
-       font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial,
+body { margin: 0; padding: 2rem 1.5rem 4rem; background: var(--ground); color: var(--ink);
+       font: 13px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial,
        sans-serif; }
 main { max-width: 68rem; margin: 0 auto; }
-h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
-h2 { font-size: 1.15rem; margin: 2.5rem 0 .75rem; padding-bottom: .3rem;
-     border-bottom: 2px solid #d8dce2; }
-h3 { font-size: .95rem; margin: 1.5rem 0 .5rem; font-weight: 600; }
-p.sub { margin: 0 0 1rem; color: #5a6472; font-size: .85rem; }
-nav { margin: 1rem 0 0; font-size: .85rem; }
-nav a { color: #1f5fb0; text-decoration: none; margin-right: 1rem; }
+h1 { font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em;
+     margin: 0 0 .75rem; padding-bottom: .5rem; border-bottom: 2px solid var(--ink); }
+h2 { font-size: 16px; line-height: 1.3; font-weight: 600; margin: 2.5rem 0 .75rem;
+     display: flex; align-items: baseline; gap: .75rem; }
+h2::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--rule);
+            align-self: center; }
+h3 { font-size: 13px; line-height: 1.35; font-weight: 600; margin: 1.5rem 0 .5rem; }
+p.sub { margin: 0 0 1rem; color: var(--dim); font-size: 12px; line-height: 1.4; }
+nav { margin: 1rem 0 0; font-size: 12px; line-height: 1.4; }
+nav a { color: var(--signal); text-decoration: none; margin-right: 1rem; }
 nav a:hover { text-decoration: underline; }
-section { background: #fff; border: 1px solid #e2e6eb; border-radius: 8px;
-          padding: .25rem 1.25rem 1.25rem; margin-top: 1rem; }
-table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+section { background: var(--plate); border: 1px solid var(--rule); border-radius: 2px;
+          padding: 0 1rem 1rem; margin-top: 1rem; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; line-height: 1.5; }
 caption { text-align: left; font-weight: 600; padding: .5rem 0; }
-th, td { padding: .35rem .6rem; border-bottom: 1px solid #eceff3; text-align: left;
+th, td { padding: .35rem .6rem; border-bottom: 1px solid var(--rule); text-align: left;
          vertical-align: top; }
-th { font-weight: 600; color: #47505d; font-size: .8rem; text-transform: uppercase;
-     letter-spacing: .02em; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
-                 font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+th { font-weight: 600; color: var(--dim); font-size: 12px; line-height: 1.4;
+     text-transform: none; letter-spacing: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr:last-child td { border-bottom: none; }
-.bar { background: #eef1f5; border-radius: 3px; height: .7rem; min-width: 6rem; }
-.bar span { display: block; height: 100%; border-radius: 3px; background: #3f7fd0; }
-.bar.time span { background: #d08a3f; }
-.tag { display: inline-block; padding: .05rem .45rem; border-radius: 999px;
-       font-size: .75rem; border: 1px solid #ccd3db; color: #47505d; }
+.bar { background: var(--ground); height: .6rem; min-width: 6rem; }
+.bar span { display: block; height: 100%; background: var(--signal); }
+.reading-strip { display: flex; align-items: flex-end; gap: 1.5rem;
+                  margin: 0 0 1rem; padding: .75rem 0 1rem; }
+.reading-cell { display: flex; flex-direction: column; gap: .2rem;
+                padding-left: 1.5rem; border-left: 1px solid var(--rule); }
+.reading-cell:first-child { padding-left: 0; border-left: none; }
+.reading-label { font-size: 12px; line-height: 1.4; color: var(--dim); }
+.reading-value { font-size: 22px; line-height: 1.25; font-weight: 600;
+                  font-variant-numeric: tabular-nums; }
+.tag { display: inline-block; padding: .05rem .45rem; border-radius: 2px;
+       font-size: 12px; border: 1px solid var(--rule); color: var(--dim); }
 .ok { color: #1c7a4a; }
 .bad { color: #b23636; }
-.warn { background: #fff4e5; border: 1px solid #e0b678; border-radius: 6px;
-        padding: .6rem .9rem; margin: 1rem 0; font-size: .875rem; }
-.meta { font-size: .8rem; color: #5a6472; }
-.na { color: #8b95a3; }
-footer { margin-top: 3rem; color: #8b95a3; font-size: .78rem; }
+.warn { background: var(--ground); border: 1px solid var(--rule); border-radius: 2px;
+        padding: .6rem .9rem; margin: 1rem 0; font-size: 13px; color: #b23636; }
+.meta { font-size: 12px; line-height: 1.4; color: var(--dim); }
+.na { color: var(--dim); }
+footer { margin-top: 3rem; color: var(--dim); font-size: 12px; line-height: 1.4; }
 """
 
 
@@ -319,32 +330,80 @@ def _share_cell(value: float | None) -> str:
     return "—" if value is None else f"{value * 100:.2f}%"
 
 
+# ----------------------------------------------------------------------------
+# declared column specs (REQ-V180-DSH-03): `class="num"` is a property of the
+# COLUMN, declared here as an ordered `(heading, kind)` sequence, never
+# inferred from a cell's own content. `_th_cell`/`_td_cell`/`_row_th_cell` are
+# the only three places that decide whether a cell carries `class="num"`, and
+# all three decide it from the `kind` argument alone -- a placeholder cell
+# (e.g. `_share_cell`'s `—`) is passed through the same `kind` as every other
+# cell of its column, so it keeps the class.
+# ----------------------------------------------------------------------------
+
+ColumnSpec = tuple[str, str]  # (heading, "num" | "text")
+
+
+def _num_class(kind: str) -> str:
+    if kind not in ("num", "text"):
+        raise ValueError(f"unknown column kind: {kind!r}")
+    return ' class="num"' if kind == "num" else ""
+
+
+def _th_cell(heading: Any, kind: str) -> str:
+    return f"<th{_num_class(kind)}>{esc(heading)}</th>"
+
+
+def _td_cell(inner_html: str, kind: str) -> str:
+    return f"<td{_num_class(kind)}>{inner_html}</td>"
+
+
+def _row_th_cell(inner_html: str, kind: str) -> str:
+    """A body row's own `<th>` row-header cell (`usage_section`,
+    `tool_health_section`) -- `inner_html` is already escaped/rendered by the
+    caller, the same convention `_td_cell` uses, unlike `_th_cell` (which
+    escapes a raw heading for `_head_row`)."""
+    return f"<th{_num_class(kind)}>{inner_html}</th>"
+
+
+def _head_row(spec: Sequence[ColumnSpec]) -> str:
+    return "<tr>" + "".join(_th_cell(heading, kind) for heading, kind in spec) + "</tr>"
+
+
+# The row-label column (the usage table's `group` heading, e.g. "model") is
+# caller-supplied and always `"text"` -- it is declared inline where the
+# heading text is built, not here.
+USAGE_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("calls", "num"),
+    ("errors", "num"),
+    ("input tokens", "num"),
+    ("output tokens", "num"),
+    ("cached", "num"),
+    ("reasoning", "num"),
+    ("cost", "num"),
+    ("cost basis", "text"),
+    ("cache-hit share", "num"),
+    ("reasoning share", "num"),
+)
+
+
 def _usage_row_html(key: Any, row: Any) -> str:
     cost = _field(row, "cost_usd", 0.0) or 0.0
-    return (
-        "<tr>"
-        f"<th>{esc(key)}</th>"
-        f'<td class="num">{esc(_field(row, "calls"))}</td>'
-        f'<td class="num">{esc(_field(row, "errors"))}</td>'
-        f'<td class="num">{esc(_field(row, "input_tokens"))}</td>'
-        f'<td class="num">{esc(_field(row, "output_tokens"))}</td>'
-        f'<td class="num">{esc(_field(row, "cached_tokens"))}</td>'
-        f'<td class="num">{esc(_field(row, "reasoning_tokens"))}</td>'
-        f'<td class="num">{esc(f"${float(cost):.6f}")}</td>'
-        f"<td>{esc(_field(row, 'cost_basis'))}</td>"
-        f'<td class="num">{_share_cell(_field(row, "cache_hit_share"))}</td>'
-        f'<td class="num">{_share_cell(_field(row, "reasoning_share"))}</td>'
-        "</tr>"
+    values = (
+        esc(_field(row, "calls")),
+        esc(_field(row, "errors")),
+        esc(_field(row, "input_tokens")),
+        esc(_field(row, "output_tokens")),
+        esc(_field(row, "cached_tokens")),
+        esc(_field(row, "reasoning_tokens")),
+        esc(f"${float(cost):.6f}"),
+        esc(_field(row, "cost_basis")),
+        _share_cell(_field(row, "cache_hit_share")),
+        _share_cell(_field(row, "reasoning_share")),
     )
-
-
-_USAGE_HEAD_TAIL = (
-    '<th class="num">calls</th><th class="num">errors</th>'
-    '<th class="num">input tokens</th><th class="num">output tokens</th>'
-    '<th class="num">cached</th><th class="num">reasoning</th>'
-    '<th class="num">cost</th><th>cost basis</th>'
-    '<th class="num">cache-hit share</th><th class="num">reasoning share</th>'
-)
+    cells = "".join(
+        _td_cell(value, kind) for value, (_, kind) in zip(values, USAGE_COLUMNS, strict=True)
+    )
+    return f"<tr><th>{esc(key)}</th>{cells}</tr>"
 
 
 def usage_section(rows: Sequence[Any], *, group: str, totals: Any) -> str:
@@ -352,10 +411,11 @@ def usage_section(rows: Sequence[Any], *, group: str, totals: Any) -> str:
     function `devtools/dashboard.py`'s bench report and (T6's)
     `dashboard_server.py` both call, so one fixture renders byte-identically
     through either caller (REQ-V160-DSH-01, `T-V160-DSH-02`)."""
-    head = f"<tr><th>{esc(group)}</th>{_USAGE_HEAD_TAIL}</tr>"
+    head = _head_row(((group, "text"), *USAGE_COLUMNS))
     body_rows = "\n".join(_usage_row_html(_field(row, "key", "?"), row) for row in rows)
     if not body_rows:
-        body_rows = f'<tr><td colspan="11">No usage recorded for {esc(group)}.</td></tr>'
+        colspan = len(USAGE_COLUMNS) + 1
+        body_rows = f'<tr><td colspan="{colspan}">No usage recorded for {esc(group)}.</td></tr>'
     totals_table = (
         "<table><caption>Totals</caption><tbody>\n"
         + _usage_row_html("all", totals)
@@ -366,6 +426,36 @@ def usage_section(rows: Sequence[Any], *, group: str, totals: Any) -> str:
         f"{body_rows}\n</tbody></table>\n"
     )
     return f'<section id="usage">\n<h2>Usage</h2>\n{totals_table}{group_table}</section>'
+
+
+# ----------------------------------------------------------------------------
+# the reading strip (REQ-V180-DSH-05): four measured values -- calls, total
+# tokens, cost, error rate -- as label-above-number pairs on one baseline,
+# split by 1px `--rule` verticals, numbers at 22px/600 tabular. Pure: takes
+# already-computed totals, wired into a route by T6, not here.
+# ----------------------------------------------------------------------------
+
+
+def reading_strip_section(*, calls: Any, total_tokens: Any, cost_usd: Any, error_rate: Any) -> str:
+    """The `/` page's reading strip: four already-computed totals rendered as
+    label-above-number pairs on one baseline. Takes plain values, not a
+    `totals`-shaped mapping/dataclass, so a caller that has already reduced
+    its own totals to these four numbers (T6) never has to reach back into
+    `_field`'s duck-typing."""
+    cost = float(cost_usd or 0.0)
+    rate = float(error_rate or 0.0)
+    items = (
+        ("calls", esc(calls)),
+        ("total tokens", esc(total_tokens)),
+        ("cost", esc(f"${cost:.6f}")),
+        ("error rate", esc(f"{rate * 100:.2f}%")),
+    )
+    cells = "".join(
+        f'<div class="reading-cell"><span class="reading-label">{esc(label)}</span>'
+        f'<span class="reading-value">{value}</span></div>'
+        for label, value in items
+    )
+    return f'<div class="reading-strip">{cells}</div>'
 
 
 def error_breakdown_section(breakdown: Any) -> str:
@@ -386,48 +476,62 @@ def error_breakdown_section(breakdown: Any) -> str:
     )
 
 
+# The `tool` row-label column comes first and is always `"text"`.
+TOOL_HEALTH_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("tool", "text"),
+    ("calls", "num"),
+    ("ok", "num"),
+    ("error", "num"),
+    ("budget", "num"),
+    ("rejected", "num"),
+    ("refused_repeat", "num"),
+    ("error rate", "num"),
+    ("p50 ms", "num"),
+    ("p95 ms", "num"),
+    ("max repeat run", "num"),
+    ("output tokens", "num"),
+)
+
+
 def tool_health_section(rows: Sequence[Any], *, summary: Any) -> str:
     """The `tool_health` table (calls, the five-outcome split, error rate,
     p50/p95 duration, longest consecutive repeat run, output tokens) plus a
     `summary_health` band above it (REQ-V160-DSH-03's `/tools` page)."""
-    head = (
-        '<tr><th>tool</th><th class="num">calls</th><th class="num">ok</th>'
-        '<th class="num">error</th><th class="num">budget</th>'
-        '<th class="num">rejected</th><th class="num">refused_repeat</th>'
-        '<th class="num">error rate</th><th class="num">p50 ms</th>'
-        '<th class="num">p95 ms</th><th class="num">max repeat run</th>'
-        '<th class="num">output tokens</th></tr>'
-    )
+    head = _head_row(TOOL_HEALTH_COLUMNS)
     rows_html = []
     for row in rows:
         error_rate = _field(row, "error_rate", 0.0) or 0.0
-        rows_html.append(
-            "<tr>"
-            f"<th>{esc(_field(row, 'tool'))}</th>"
-            f'<td class="num">{esc(_field(row, "calls"))}</td>'
-            f'<td class="num">{esc(_field(row, "ok"))}</td>'
-            f'<td class="num">{esc(_field(row, "error"))}</td>'
-            f'<td class="num">{esc(_field(row, "budget"))}</td>'
-            f'<td class="num">{esc(_field(row, "rejected"))}</td>'
-            f'<td class="num">{esc(_field(row, "refused_repeat"))}</td>'
-            f'<td class="num">{esc(f"{float(error_rate) * 100:.2f}%")}</td>'
-            f'<td class="num">{esc(_field(row, "p50_ms"))}</td>'
-            f'<td class="num">{esc(_field(row, "p95_ms"))}</td>'
-            f'<td class="num">{esc(_field(row, "max_consecutive_repeats"))}</td>'
-            f'<td class="num">{esc(_field(row, "output_tokens_est"))}</td>'
-            "</tr>"
+        values = (
+            esc(_field(row, "tool")),
+            esc(_field(row, "calls")),
+            esc(_field(row, "ok")),
+            esc(_field(row, "error")),
+            esc(_field(row, "budget")),
+            esc(_field(row, "rejected")),
+            esc(_field(row, "refused_repeat")),
+            esc(f"{float(error_rate) * 100:.2f}%"),
+            esc(_field(row, "p50_ms")),
+            esc(_field(row, "p95_ms")),
+            esc(_field(row, "max_consecutive_repeats")),
+            esc(_field(row, "output_tokens_est")),
         )
+        first_value, first_kind = values[0], TOOL_HEALTH_COLUMNS[0][1]
+        rest = "".join(
+            _td_cell(value, kind)
+            for value, (_, kind) in zip(values[1:], TOOL_HEALTH_COLUMNS[1:], strict=True)
+        )
+        rows_html.append(f"<tr>{_row_th_cell(first_value, first_kind)}{rest}</tr>")
     body = (
         "\n".join(rows_html)
         if rows_html
-        else '<tr><td colspan="12">No tool call recorded.</td></tr>'
+        else f'<tr><td colspan="{len(TOOL_HEALTH_COLUMNS)}">No tool call recorded.</td></tr>'
     )
     summary_html = (
         '<p class="meta">'
-        f"attempts {esc(_field(summary, 'attempts'))} · "
-        f"ok {esc(_field(summary, 'ok'))} · "
-        f"truncated {esc(_field(summary, 'truncated'))} · "
-        f"retried {esc(_field(summary, 'retried'))} · "
+        f"attempts {esc(_field(summary, 'attempts'))}, "
+        f"ok {esc(_field(summary, 'ok'))}, "
+        f"truncated {esc(_field(summary, 'truncated'))}, "
+        f"retried {esc(_field(summary, 'retried'))}, "
         f"failed {esc(_field(summary, 'failed'))}"
         "</p>"
     )
@@ -454,40 +558,55 @@ def _row_field(row: Any, name: str, default: Any = None) -> Any:
         return default
 
 
+TRACE_LIST_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("trace", "text"),
+    ("ts", "text"),
+    ("conv", "num"),
+    ("turn", "num"),
+    ("root", "text"),
+    ("scenario", "text"),
+    ("spans", "num"),
+    ("duration ms", "num"),
+    ("status", "text"),
+    ("chat", "num"),
+    ("execute_tool", "num"),
+)
+
+
 def trace_list_section(traces: Sequence[Any]) -> str:
     """One row per trace, newest first (REQ-V160-DSH-03's `/traces`):
     timestamp, conversation id, turn id, root span name, scenario id when
     present, span count, total duration, status, and the `chat`/
     `execute_tool` child counts. `trace_id` is abbreviated to its first 12
     characters with the full value in the `title` attribute."""
-    head = (
-        '<tr><th>trace</th><th>ts</th><th class="num">conv</th>'
-        '<th class="num">turn</th><th>root</th><th>scenario</th>'
-        '<th class="num">spans</th><th class="num">duration ms</th>'
-        '<th>status</th><th class="num">chat</th>'
-        '<th class="num">execute_tool</th></tr>'
-    )
+    head = _head_row(TRACE_LIST_COLUMNS)
     rows_html = []
     for row in traces:
         trace_id = str(_row_field(row, "trace_id", ""))
         short = esc(trace_id[:12])
-        rows_html.append(
-            "<tr>"
-            f'<td><a href="/traces/{esc(trace_id)}" title="{esc(trace_id)}">{short}</a></td>'
-            f"<td>{esc(_row_field(row, 'ts'))}</td>"
-            f'<td class="num">{esc(_row_field(row, "conv_id"))}</td>'
-            f'<td class="num">{esc(_row_field(row, "turn_id"))}</td>'
-            f"<td>{esc(_row_field(row, 'name'))}</td>"
-            f"<td>{esc(_row_field(row, 'scenario_id'))}</td>"
-            f'<td class="num">{esc(_row_field(row, "span_count"))}</td>'
-            f'<td class="num">{esc(_row_field(row, "total_duration_ms"))}</td>'
-            f"<td>{esc(_row_field(row, 'status'))}</td>"
-            f'<td class="num">{esc(_row_field(row, "chat_count"))}</td>'
-            f'<td class="num">{esc(_row_field(row, "execute_tool_count"))}</td>'
-            "</tr>"
+        link_html = f'<a href="/traces/{esc(trace_id)}" title="{esc(trace_id)}">{short}</a>'
+        values = (
+            link_html,
+            esc(_row_field(row, "ts")),
+            esc(_row_field(row, "conv_id")),
+            esc(_row_field(row, "turn_id")),
+            esc(_row_field(row, "name")),
+            esc(_row_field(row, "scenario_id")),
+            esc(_row_field(row, "span_count")),
+            esc(_row_field(row, "total_duration_ms")),
+            esc(_row_field(row, "status")),
+            esc(_row_field(row, "chat_count")),
+            esc(_row_field(row, "execute_tool_count")),
         )
+        cells = "".join(
+            _td_cell(value, kind)
+            for value, (_, kind) in zip(values, TRACE_LIST_COLUMNS, strict=True)
+        )
+        rows_html.append(f"<tr>{cells}</tr>")
     body = (
-        "\n".join(rows_html) if rows_html else '<tr><td colspan="11">No trace recorded.</td></tr>'
+        "\n".join(rows_html)
+        if rows_html
+        else f'<tr><td colspan="{len(TRACE_LIST_COLUMNS)}">No trace recorded.</td></tr>'
     )
     return (
         '<section id="traces">\n<h2>Traces</h2>\n'
@@ -540,8 +659,8 @@ def _render_span_node(
         f'<div class="span-row" style="margin-left:{indent}">'
         f'<span class="tag">{esc(span.kind)}</span> '
         f"<b>{esc(span.name)}</b> "
-        f'<span class="meta">{esc(span.duration_ms)} ms · {esc(span.status)}'
-        f" · span {esc(span.span_id)}</span>"
+        f'<span class="meta">{esc(span.duration_ms)} ms, {esc(span.status)}'
+        f", span {esc(span.span_id)}</span>"
         "</div>"
     )
     attr_indent = f"{(depth + 1) * 1.25:.2f}rem"
