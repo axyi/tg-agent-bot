@@ -48,7 +48,9 @@ changes behaviour without touching `docs/spec/` is incomplete.
   pure functions, no I/O, shared by the live dashboard server and the static
   benchmark report renderer
 - `dashboard_server.py` — the live dashboard's HTTP server: loopback-only,
-  read-only, started as a daemon thread alongside the polling loop
+  read-only, started as a daemon thread alongside the polling loop; gaining
+  `/conversations` and `/conversations/<id>` (plus their `/api/` mirrors) in
+  this release
 - `skills/` — skill definitions loaded by the agent
 - `tests/` — pytest suite
 - `devtools/` — operator tooling, never imported by the bot: `bench.py`
@@ -60,6 +62,42 @@ Context boundaries: agents work inside this repository only. NEVER read or edit
 anything above the repository root.
 The exec tool runs untrusted model output — it executes only inside the
 sandbox described in the spec, NEVER against the host working tree.
+
+## Context discipline
+
+<!-- SYNC: canonical text lives in standards/workflow.md §5.1 (lab repo); this copy is intentionally self-contained -->
+
+Delegate to a subagent when **any one** of the following holds — inside a
+`go` run, per task, not only in interactive work:
+
+- more than one file or folder to explore;
+- a single read over 100 lines or 8 KB;
+- **a task that writes source files — code a gate compiles, imports or
+  runs**;
+- more than ~10 edits within one task across every file it touches;
+- applying a review or critique to a spec.
+
+**Brief by file, never by retyping.** Load-bearing content the orchestrator
+already resolved goes into a task-brief file at
+`docs/spec/task-briefs/v180-T<N>.md`, and the subagent gets its path — never
+a retyped copy. The brief is ~5 lines, carries no history, and names files
+and line ranges. The subagent returns a summary — findings, counts,
+`file:line` — never raw content.
+
+**The closed list of four exemptions**, and the report names the exemption
+in these exact words:
+
+- *commands only* (no file writes);
+- *artefacts only* (docs, config, fixtures with no code-shape dependency —
+  anything no gate compiles, imports or runs);
+- *a single edit under every threshold*; or
+- *the task is itself the clean-context review*.
+
+"The main context already holds what this needs" is **not** on the list.
+
+In the main context: `Read` with offset/limit, `grep`/`find` with line
+context — never a whole-file read, never a directory walk. Absolute paths in
+shell.
 
 ## Commit format
 
@@ -86,6 +124,11 @@ sandbox described in the spec, NEVER against the host working tree.
 - Enforced automatically by the `pre-commit`/`pre-push` branch-name
   check from spec-v1.5 T8 on; `main` and a detached HEAD warn rather
   than fail (a solo end-to-end run is permitted).
+- Parallelism is decided by **edit scope, not agent count** — split into
+  ownership zones (a zone = files exactly one agent may write); disjoint
+  zones run in parallel, one worktree each; **overlapping scopes run
+  sequentially**, because separate worktrees only defer the conflict to
+  merge time.
 
 ## Gates — run before reporting success
 
