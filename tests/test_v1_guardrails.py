@@ -79,6 +79,7 @@ class RecordingTelegram:
     def __init__(self, *, edit_error=None, edit_fail_on=None):
         self.sent = []
         self.edits = []
+        self.deleted = []
         self._edit_error = edit_error
         self._edit_fail_on = edit_fail_on
 
@@ -91,6 +92,10 @@ class RecordingTelegram:
         if self._edit_fail_on is not None and len(self.edits) == self._edit_fail_on:
             raise self._edit_error or bot.TelegramError("telegram editMessageText http 400")
         return {"message_id": message_id}
+
+    def delete_message(self, chat_id, message_id):
+        self.deleted.append((chat_id, message_id))
+        return True
 
 
 def process(conn, cfg, upd, *, tg=None, llm=None, skills=None, runner=None, **kwargs):
@@ -1060,7 +1065,8 @@ def test_t_v1_vis_01_status_message(conn, tmp_path):
     texts = [text for _chat, _mid, text in tg.edits]
     assert texts[0] == "⚙️ exec: uname…"
     assert texts[1] == "⚙️ fetch: https://wttr.in/Koln?format=3…"
-    assert texts[-1] == "✅ done"
+    assert len(tg.edits) == 2
+    assert tg.deleted == [(USER_ID, 101)]
     assert all(mid == 101 for _chat, mid, _text in tg.edits)
     assert all(len(text) <= 64 for text in texts)
 

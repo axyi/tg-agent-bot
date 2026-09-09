@@ -479,11 +479,11 @@ def test_prc02_a_corrupt_persisted_snapshot_is_ignored(conn, tmp_path):
 def test_prc02_the_resolver_reaches_run_agent(conn, tmp_path, monkeypatch):
     seen = {}
 
-    def fake_run_agent(**kwargs):
+    def fake_run_agent_outcome(**kwargs):
         seen.update(kwargs)
-        return "ok"
+        return agent.AgentOutcome(reply="ok", failed=False, kind=None)
 
-    monkeypatch.setattr(agent, "run_agent", fake_run_agent)
+    monkeypatch.setattr(agent, "run_agent_outcome", fake_run_agent_outcome)
     sentinel = pricing.make_resolver(make_cfg(tmp_path), None, snapshot_basis=None, stale=None)
     bot.process_update(
         {
