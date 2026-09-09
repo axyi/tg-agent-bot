@@ -958,6 +958,43 @@ def conversation_transcript_section(
     return html, next_cursor, split
 
 
+def transcript_page_footer(
+    rendered: Sequence[Any],
+    *,
+    conv_id: int,
+    limit: int,
+    next_cursor: tuple[int, int] | None,
+) -> str:
+    """The range note, next link and first-page link REQ-V180-CONV-04
+    requires beside the transcript rows. `conversation_transcript_section`
+    itself renders only the rows and the continued note (it returns
+    `next_cursor` as data, not markup) -- this is `dashboard_server.py`'s
+    (T6) own render of that data, kept in this module rather than there
+    because REQ-V160-DSH-01 forbids any HTML literal outside it; their
+    combined byte cost is what `TRANSCRIPT_PAGE_SUFFIX_BYTES` reserves
+    headroom for. `rendered` is the caller's own post-budget slice of the
+    messages actually shown (`_row_field`-shaped, `turn_id`-bearing); an
+    empty slice renders no range note -- the section's own empty-state text
+    already covers that case. There is never a previous link (CONV-04)."""
+    parts: list[str] = []
+    if rendered:
+        first_turn = _row_field(rendered[0], "turn_id")
+        last_turn = _row_field(rendered[-1], "turn_id")
+        count = len(rendered)
+        parts.append(
+            meta_line(
+                f"Showing {count} message{'s' if count != 1 else ''} "
+                f"(turn {first_turn} through turn {last_turn})."
+            )
+        )
+    if next_cursor is not None:
+        href = f"/conversations/{conv_id}?limit={limit}&cursor={next_cursor[0]}-{next_cursor[1]}"
+        parts.append(f'<p class="meta"><a href="{esc(href)}">next</a></p>')
+    first_page_href = f"/conversations/{conv_id}"
+    parts.append(f'<p class="meta"><a href="{esc(first_page_href)}">first page</a></p>')
+    return "".join(parts)
+
+
 # ----------------------------------------------------------------------------
 # SVG charts (REQ-V160-DSH-04): viewBox + width + height + role="img" +
 # <title> (accessible name) + <desc> (metric, unit, total count); every

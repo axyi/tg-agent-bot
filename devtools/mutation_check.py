@@ -1013,6 +1013,65 @@ MUTATIONS = [
         "where any of S13..S18 is not a clean 3/3, e.g. S18 at 2/3, never "
         "exit 0 on it",
     },
+    # -- spec-v1.8.0 T6 (REQ-V180-EC-10, section 9.4): six v180-* entries --
+    # three cover T2/T3's already-landed chat-status/typing mechanisms
+    # (no earlier task added mutation coverage for them), three cover T6's
+    # own transcript redaction/truncation/budget mechanisms. -------------
+    {
+        "id": "v180-status-signal-inverted",
+        "path": "bot.py",
+        "find": "    status.finish(ok=sent_ok and not outcome.failed)\n",
+        "replace": "    status.finish(ok=not (sent_ok and not outcome.failed))\n",
+        "why": "REQ-V180-CHAT-02/-10: the success/failure signal at the "
+        "status-message call site must not be inverted -- a successful, "
+        "delivered reply must delete the status message, never keep it "
+        "with a failed-looking edit, and vice versa",
+    },
+    {
+        "id": "v180-status-delete-skipped",
+        "path": "bot.py",
+        "find": "        if ok:\n            self._delete()\n",
+        "replace": "        if ok:\n            self._edit(STATUS_FAILED)\n",
+        "why": "REQ-V180-CHAT-02: finish(ok=True) must delete the status "
+        "message, not fall back to the old edit-to-STATUS_FAILED behaviour",
+    },
+    {
+        "id": "v180-typing-ceiling-removed",
+        "path": "bot.py",
+        "find": "            if self._monotonic() >= deadline:\n                return\n",
+        "replace": "",
+        "why": "REQ-V180-CHAT-06: the typing indicator must stop at "
+        "cfg.llm_timeout_s regardless of stop_event -- without the ceiling "
+        "check it would keep sending sendChatAction forever",
+    },
+    {
+        "id": "v180-transcript-redact-bypassed",
+        "path": "dashboard_server.py",
+        "find": '    content = config.redact(str(row["content"]))\n',
+        "replace": '    content = str(row["content"])\n',
+        "why": "REQ-V180-SEC-01: _redact_message must call config.redact() "
+        "on content -- a secret in a message must never reach either the "
+        "HTML or the JSON transcript sink",
+    },
+    {
+        "id": "v180-transcript-cap-removed",
+        "path": "dashboard_server.py",
+        "find": "    if len(content) > TRANSCRIPT_MESSAGE_CONTENT_MAX_CHARS:\n",
+        "replace": "    if False:\n",
+        "why": "REQ-V180-SEC-02 item 1: content must be truncated to 2000 "
+        "characters of the redacted plain text per message, the cap this "
+        "task's worst-case fixture measures against",
+    },
+    {
+        "id": "v180-transcript-budget-removed",
+        "path": "dashboard_render.py",
+        "find": "        if accumulator + turn_bytes <= budget_bytes:\n",
+        "replace": "        if True:\n",
+        "why": "REQ-V180-SEC-02 item 3: conversation_transcript_section's "
+        "byte-accumulation check must actually gate admission -- without "
+        "it a pathological conversation would render past the 1.5 MiB "
+        "page budget instead of paginating",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

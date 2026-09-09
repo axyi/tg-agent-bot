@@ -8,7 +8,7 @@ profiles:
   pre-commit: [ruff-check, ruff-format, gitleaks-staged, branch-name]
   pre-push:   [ruff-check-all, ruff-format, branch-name, pytest, selftest,
                gitleaks-tree, trivy, semgrep, skylos, mutation-v15, mutation-v160,
-               mutation-v170, hooks-installed, doctor]
+               mutation-v170, mutation-v180, hooks-installed, doctor]
   full:       [uv-sync, ruff-check-all, ruff-format, branch-name, pytest,
                selftest, selftest-live, mutation-all, gitleaks-tree, trivy,
                semgrep, skylos, hooks-installed, doctor, lint-docs]
@@ -259,6 +259,22 @@ gates:
     diff_scoped: false
     timeout_seconds: 1070
 
+  # spec-v1.8.0 T6 (REQ-V180-EC-10): the six v180-* entries of task-brief
+  # v180-T6 (three chat-status/typing mechanisms already landed at T2/T3,
+  # three transcript redaction/truncation/budget mechanisms of this task).
+  # Measured directly 2026-09-09 (`time uv run --locked python
+  # devtools/mutation_check.py --select v180-`, this tree, 6/6 killed):
+  # real=6m42.000s (402s) -> 2x 804s, rounded up to 810s.
+  mutation-v180:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, "v180-"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 810
+
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
   # directly on 2026-09-05 (`time uv run --locked python
@@ -280,6 +296,16 @@ gates:
   # per rerun -- consistent with the same shared-machine variance noted
   # above (this run happened to land on a quieter stretch); used as
   # measured, per the same rationale.
+  #
+  # spec-v1.8.0 T6: six v180-* entries added (98 total). Re-measured
+  # directly 2026-09-09 (`time uv run --locked python
+  # devtools/mutation_check.py`, no --select, this tree, 98/98 killed):
+  # real=46m49.000s (2809s) -> 2x 5618s, rounded up to 5620s. Up from 4690s
+  # at 92 entries -- six more entries plus a larger pytest suite per rerun
+  # (1217 tests vs. 1133 at T9's close) account for some of the jump, but
+  # not all of it; consistent with this being a shared, contended machine
+  # (documented at both earlier re-measurements above), so the fresh number
+  # is used as measured rather than adjusted toward a naive extrapolation.
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -288,7 +314,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 4690
+    timeout_seconds: 5620
 
   hooks-installed:
     kind: command

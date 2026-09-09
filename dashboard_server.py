@@ -51,10 +51,26 @@ _SECURITY_HEADERS = (
 )
 
 _STATIC_ROUTES = frozenset(
-    {"/", "/traces", "/tools", "/api/health", "/api/usage", "/api/traces", "/api/tools"}
+    {
+        "/",
+        "/traces",
+        "/tools",
+        "/api/health",
+        "/api/usage",
+        "/api/traces",
+        "/api/tools",
+        "/conversations",
+        "/api/conversations",
+    }
 )
 _TRACE_PAGE_RE = re.compile(r"^/traces/([0-9a-f]{32})$")
 _TRACE_API_RE = re.compile(r"^/api/traces/([0-9a-f]{32})$")
+_CONV_PAGE_RE = re.compile(r"^/conversations/([0-9]{1,10})$")
+_CONV_API_RE = re.compile(r"^/api/conversations/([0-9]{1,10})$")
+
+# REQ-V180-CONV-04: default 200/max 500 -- same bound as any other `limit`
+# (_parse_limit), reused as-is (see task-brief v180-T6).
+TRANSCRIPT_MESSAGE_CONTENT_MAX_CHARS = tracing.CONTENT_ATTRIBUTE_MAX_CHARS  # 2000, REQ-V160-TRC-09
 
 
 def _project_version() -> str:
@@ -189,6 +205,24 @@ def _parse_conv(params: dict[str, str], *, is_api: bool) -> int | None:
     return n
 
 
+_CURSOR_RE = re.compile(r"([0-9]{1,10})-([0-9]{1,10})")
+
+
+def _parse_cursor(params: dict[str, str], *, is_api: bool) -> tuple[int, int] | None:
+    """`_parse_conv`'s shape: absent -> `None` (the first page); present but
+    not `re.fullmatch`-shaped -> 400. Only the *shape* is validated here --
+    whether the pair names a real message of the conversation is
+    `storage.conversation_messages`'s own `ValueError` (REQ-V180-CONV-04),
+    which the route turns into the same 400."""
+    if "cursor" not in params:
+        return None
+    match = _CURSOR_RE.fullmatch(params["cursor"])
+    if not match:
+        _bad_request("cursor", is_api=is_api)
+        return None  # unreachable: _bad_request always raises
+    return int(match.group(1)), int(match.group(2))
+
+
 def _usage_totals(rows: list[metrics.UsageRow]) -> dict[str, Any]:
     cache_num = sum(
         (r.cache_hit_share or 0.0) * (r.input_tokens) for r in rows if r.cache_hit_share is not None
@@ -275,6 +309,174 @@ def _trace_row_json(row: sqlite3.Row) -> dict[str, Any]:
         "span_count": row["span_count"],
         "total_duration_ms": row["total_duration_ms"],
     }
+
+
+def _conversation_row_json(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "tg_user_id": row["tg_user_id"],
+        "created_at": row["created_at"],
+        "active": bool(row["active"]),
+        "message_count": row["message_count"],
+        "last_activity": row["last_activity"],
+    }
+
+
+# ----------------------------------------------------------------------------
+# REQ-V180-SEC-01/-02 item 1: the one place a `messages` row (from
+# `storage.conversation_messages`) is redacted and per-message truncated,
+# shared identically by both the HTML route (feeds
+# `dashboard_render.conversation_transcript_section`, which only escapes)
+# and the JSON route (serialized as-is -- `json.dumps` does its own
+# escaping). `dashboard_render.py` stays pure and never imports `config`.
+# ----------------------------------------------------------------------------
+
+
+def _redact_message(row: Any) -> dict[str, Any]:
+    """`config.redact()` on `content`, `role` and `tool_call_id` alike
+    (REQ-V180-SEC-01 -- not `content` alone), then `content` cut to
+    `TRANSCRIPT_MESSAGE_CONTENT_MAX_CHARS` characters of the *redacted*
+    plain text, before any escaping, so both sinks cut at the identical
+    boundary (REQ-V180-SEC-02 item 1). A truncation note is appended when
+    (and only when) the cut actually happened -- additional to the 2000
+    characters, counted only by the page's own byte budget. `tool_call_id`
+    stays `None` when absent rather than becoming the string `"None"`."""
+    role = config.redact(str(row["role"]))
+    tool_call_id = row["tool_call_id"]
+    if tool_call_id is not None:
+        tool_call_id = config.redact(str(tool_call_id))
+    content = config.redact(str(row["content"]))
+    if len(content) > TRANSCRIPT_MESSAGE_CONTENT_MAX_CHARS:
+        original_len = len(content)
+        content = (
+            content[:TRANSCRIPT_MESSAGE_CONTENT_MAX_CHARS]
+            + f"\n… [truncated to {TRANSCRIPT_MESSAGE_CONTENT_MAX_CHARS} "
+            f"of {original_len} characters]"
+        )
+    return {
+        "turn_id": row["turn_id"],
+        "id": row["id"],
+        "role": role,
+        "content": content,
+        "tool_call_id": tool_call_id,
+        "created_at": row["created_at"],
+    }
+
+
+# ----------------------------------------------------------------------------
+# REQ-V180-SEC-02 item 3, JSON sink: `/api/conversations/<id>` does not go
+# through `dashboard_render.conversation_transcript_section` (the HTML
+# builder) -- it applies the same atomic-turn-admission algorithm
+# independently, against `_dumps`-shaped JSON bytes instead of HTML bytes.
+# ----------------------------------------------------------------------------
+
+
+def _json_message_bytes(msg: dict[str, Any]) -> int:
+    return len(_dumps(msg))
+
+
+def _admit_json_transcript(
+    messages: list[dict[str, Any]],
+    *,
+    envelope_bytes: int,
+    reader_next_cursor: tuple[int, int] | None,
+    budget_bytes: int = dashboard_render.TRANSCRIPT_PAGE_BUDGET_BYTES,
+    suffix_bytes: int = dashboard_render.TRANSCRIPT_PAGE_SUFFIX_BYTES,
+) -> tuple[list[dict[str, Any]], tuple[int, int] | None]:
+    """CONV-04's atomic turn admission, reimplemented against JSON bytes
+    (`messages` already redacted/truncated by `_redact_message`, in
+    `turn_id`/`id` order). `envelope_bytes` is the caller's measured size of
+    the payload's fixed keys (`conv`/`limit`/`cursor`/`next_cursor`/
+    `messages` skeleton, `messages` empty) -- the JSON analogue of
+    `chrome_bytes`. Same per-turn order as the HTML side: (1) measure the
+    whole turn; (2) fits -> admit whole; (3) doesn't fit, page already holds
+    a turn -> stop; (4) doesn't fit, page empty -> split, admitting at least
+    one message and marking it `continued`. Returns `(messages, next_cursor)`
+    with the same reconciliation rule: a budget-forced stop's cursor always
+    wins over `reader_next_cursor`, which is only ever the fallback."""
+    accumulator = envelope_bytes + suffix_bytes
+
+    groups: list[tuple[int, list[dict[str, Any]]]] = []
+    for msg in messages:
+        turn_id = msg["turn_id"]
+        if groups and groups[-1][0] == turn_id:
+            groups[-1][1].append(msg)
+        else:
+            groups.append((turn_id, [msg]))
+
+    if not groups:
+        return [], reader_next_cursor
+
+    admitted: list[dict[str, Any]] = []
+    next_cursor: tuple[int, int] | None = None
+
+    for turn_id, turn_messages in groups:
+        joiner = 1 if admitted else 0
+        turn_bytes = (
+            joiner
+            + sum(_json_message_bytes(m) for m in turn_messages)
+            + (len(turn_messages) - 1)  # commas between this turn's own messages
+        )
+
+        if accumulator + turn_bytes <= budget_bytes:
+            admitted.extend(turn_messages)
+            accumulator += turn_bytes
+            continue
+
+        if admitted:
+            # case 3: the page already holds a turn -- stop here.
+            next_cursor = (turn_id, turn_messages[0]["id"])
+            break
+
+        # case 4: the page is empty -- split this turn, admitting at least
+        # one message so the page always advances.
+        partial: list[dict[str, Any]] = []
+        partial_bytes = 0
+        withheld_cursor: tuple[int, int] | None = None
+        for msg in turn_messages:
+            msg_bytes = _json_message_bytes(msg) + (1 if partial else 0)
+            if not partial or accumulator + partial_bytes + msg_bytes <= budget_bytes:
+                partial.append(msg)
+                partial_bytes += msg_bytes
+            else:
+                withheld_cursor = (turn_id, msg["id"])
+                break
+        if withheld_cursor is not None:
+            partial[-1] = {**partial[-1], "continued": True}
+        admitted.extend(partial)
+        accumulator += partial_bytes
+        if withheld_cursor is not None:
+            next_cursor = withheld_cursor
+            break
+        # the whole turn ended up fitting message-by-message after all --
+        # not a split, keep going (mirrors conversation_transcript_section).
+
+    if next_cursor is None:
+        next_cursor = reader_next_cursor
+    return admitted, next_cursor
+
+
+# ----------------------------------------------------------------------------
+# REQ-V180-CONV-04 HTML sink: the subset of `messages` this page actually
+# rendered, decided by `next_cursor` -- data only (no HTML literal, so this
+# stays in this module; the footer markup itself is
+# `dashboard_render.transcript_page_footer`, REQ-V160-DSH-01).
+# ----------------------------------------------------------------------------
+
+
+def _rendered_page_messages(
+    messages: list[dict[str, Any]], next_cursor: tuple[int, int] | None
+) -> list[dict[str, Any]]:
+    """Everything before the message `next_cursor` names, or all of
+    `messages` when there is no next_cursor, or it names nothing in
+    `messages` (the reader's own next-page cursor rather than a byte-budget
+    stop)."""
+    if next_cursor is None:
+        return messages
+    for i, msg in enumerate(messages):
+        if (msg["turn_id"], msg["id"]) == next_cursor:
+            return messages[:i]
+    return messages
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -411,6 +613,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._page_traces(query, send_body=send_body)
         if path == "/tools":
             return self._page_tools(query, send_body=send_body)
+        if path == "/conversations":
+            return self._page_conversations(query, send_body=send_body)
         if path == "/api/health":
             return self._api_health(send_body=send_body)
         if path == "/api/usage":
@@ -419,12 +623,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._api_traces(query, send_body=send_body)
         if path == "/api/tools":
             return self._api_tools(query, send_body=send_body)
+        if path == "/api/conversations":
+            return self._api_conversations(query, send_body=send_body)
         match = _TRACE_PAGE_RE.match(path)
         if match:
             return self._page_trace(match.group(1), send_body=send_body)
         match = _TRACE_API_RE.match(path)
         if match:
             return self._api_trace(match.group(1), send_body=send_body)
+        match = _CONV_PAGE_RE.match(path)
+        if match:
+            conv_id = int(match.group(1))
+            if not (1 <= conv_id <= 2**31 - 1):
+                _not_found(is_api=is_api)
+            return self._page_conversation(conv_id, query, send_body=send_body)
+        match = _CONV_API_RE.match(path)
+        if match:
+            conv_id = int(match.group(1))
+            if not (1 <= conv_id <= 2**31 - 1):
+                _not_found(is_api=is_api)
+            return self._api_conversation(conv_id, query, send_body=send_body)
         _not_found(is_api=is_api)
 
     # ------------------------------------------------------------------
@@ -454,6 +672,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ("day", "/?group=day"),
             ("purpose", "/?group=purpose"),
             ("scenario", "/?group=scenario"),
+            ("conversations", "/conversations"),
         ]
         body = [dashboard_render.usage_section(rows, group=group, totals=totals)]
         for hist in latency:
@@ -483,7 +702,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             conn.close()
         html = dashboard_render.page(
             "Traces",
-            nav=[("usage", "/"), ("tools", "/tools")],
+            nav=[("usage", "/"), ("tools", "/tools"), ("conversations", "/conversations")],
             body=dashboard_render.trace_list_section(traces),
             generated_at=storage.utc_now_iso(),
         )
@@ -506,7 +725,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         ]
         html = dashboard_render.page(
             "Tools",
-            nav=[("usage", "/"), ("traces", "/traces")],
+            nav=[("usage", "/"), ("traces", "/traces"), ("conversations", "/conversations")],
             body="\n".join(body),
             generated_at=storage.utc_now_iso(),
         )
@@ -528,9 +747,93 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
         html = dashboard_render.page(
             f"Trace {trace_id[:12]}",
-            nav=[("usage", "/"), ("traces", "/traces"), ("tools", "/tools")],
+            nav=[
+                ("usage", "/"),
+                ("traces", "/traces"),
+                ("tools", "/tools"),
+                ("conversations", "/conversations"),
+            ],
             body=body,
             generated_at=storage.utc_now_iso(),
+        )
+        self._respond(200, html.encode("utf-8"), "text/html; charset=utf-8", send_body=send_body)
+
+    _CONVERSATIONS_NAV = [
+        ("usage", "/"),
+        ("traces", "/traces"),
+        ("tools", "/tools"),
+        ("conversations", "/conversations"),
+    ]
+
+    def _page_conversations(self, query: str, *, send_body: bool) -> None:
+        params = _parse_query(query, frozenset({"limit"}), is_api=False)
+        limit = _parse_limit(params, 50, is_api=False)
+        conn = self._connect()
+        try:
+            rows = storage.recent_conversations(conn, limit=limit)
+        finally:
+            conn.close()
+        body = dashboard_render.meta_line(
+            "A conversation is one `/new`-to-`/new` stretch of chat; this is the list of them."
+        ) + dashboard_render.conversation_list_section(rows)
+        html = dashboard_render.page(
+            "Conversations",
+            nav=self._CONVERSATIONS_NAV,
+            body=body,
+            generated_at=storage.utc_now_iso(),
+        )
+        self._respond(200, html.encode("utf-8"), "text/html; charset=utf-8", send_body=send_body)
+
+    def _page_conversation(self, conv_id: int, query: str, *, send_body: bool) -> None:
+        params = _parse_query(query, frozenset({"limit", "cursor"}), is_api=False)
+        limit = _parse_limit(params, 200, is_api=False)
+        cursor = _parse_cursor(params, is_api=False)
+        conn = self._connect()
+        try:
+            conv_row = storage.conversation_row(conn, conv_id)
+            if conv_row is None:
+                _not_found(is_api=False)
+            try:
+                rows, reader_next_cursor = storage.conversation_messages(
+                    conn, conv_id, limit=limit, cursor=cursor
+                )
+            except ValueError:
+                _bad_request("cursor", is_api=False)
+                return  # unreachable: _bad_request always raises
+            turn_ids = sorted({row["turn_id"] for row in rows})
+            trace_map = storage.conversation_turn_traces(conn, conv_id, turn_ids)
+        finally:
+            conn.close()
+
+        messages = [_redact_message(row) for row in rows]
+        title = f"Conversation {conv_id}"
+        generated_at = storage.utc_now_iso()
+
+        # Pass 1: the page shell with an empty body -- REQ-V180-SEC-02 item 3
+        # requires the accumulator's chrome seed to be *measured*, not
+        # estimated.
+        placeholder_html = dashboard_render.page(
+            title, nav=self._CONVERSATIONS_NAV, body="", generated_at=generated_at
+        )
+        chrome_bytes = len(placeholder_html.encode("utf-8"))
+
+        transcript_html, next_cursor, _split = dashboard_render.conversation_transcript_section(
+            messages,
+            chrome_bytes=chrome_bytes,
+            reader_next_cursor=reader_next_cursor,
+            trace_map=trace_map,
+        )
+
+        # `conversation_transcript_section` renders the rows and the
+        # continued-note only -- the range note, next link and first-page
+        # link are `transcript_page_footer`'s job, sized within
+        # TRANSCRIPT_PAGE_SUFFIX_BYTES's headroom (REQ-V180-CONV-04).
+        rendered = _rendered_page_messages(messages, next_cursor)
+        body = transcript_html + dashboard_render.transcript_page_footer(
+            rendered, conv_id=conv_id, limit=limit, next_cursor=next_cursor
+        )
+        html = dashboard_render.page(
+            title, nav=self._CONVERSATIONS_NAV, body=body, generated_at=generated_at
         )
         self._respond(200, html.encode("utf-8"), "text/html; charset=utf-8", send_body=send_body)
 
@@ -647,6 +950,67 @@ class DashboardHandler(BaseHTTPRequestHandler):
             },
             "retry_rate": [retried, total],
             "context_pressure": [mean_messages, max_messages],
+        }
+        self._respond_json(200, payload, send_body=send_body)
+
+    def _api_conversations(self, query: str, *, send_body: bool) -> None:
+        params = _parse_query(query, frozenset({"limit"}), is_api=True)
+        limit = _parse_limit(params, 50, is_api=True)
+        conn = self._connect()
+        try:
+            rows = storage.recent_conversations(conn, limit=limit)
+        finally:
+            conn.close()
+        payload = {
+            "limit": limit,
+            "conversations": [_conversation_row_json(row) for row in rows],
+        }
+        self._respond_json(200, payload, send_body=send_body)
+
+    def _api_conversation(self, conv_id: int, query: str, *, send_body: bool) -> None:
+        params = _parse_query(query, frozenset({"limit", "cursor"}), is_api=True)
+        limit = _parse_limit(params, 200, is_api=True)
+        cursor = _parse_cursor(params, is_api=True)
+        conn = self._connect()
+        try:
+            conv_row = storage.conversation_row(conn, conv_id)
+            if conv_row is None:
+                _not_found(is_api=True)
+            try:
+                rows, reader_next_cursor = storage.conversation_messages(
+                    conn, conv_id, limit=limit, cursor=cursor
+                )
+            except ValueError:
+                _bad_request("cursor", is_api=True)
+                return  # unreachable: _bad_request always raises
+        finally:
+            conn.close()
+
+        # REQ-V180-CONV-06's payload has no trace_id field -- unlike the HTML
+        # rail, the JSON mirror does not compute `conversation_turn_traces`.
+        messages = [_redact_message(row) for row in rows]
+        cursor_echo = f"{cursor[0]}-{cursor[1]}" if cursor is not None else None
+        envelope_bytes = len(
+            _dumps(
+                {
+                    "conv": conv_id,
+                    "limit": limit,
+                    "cursor": cursor_echo,
+                    "next_cursor": None,
+                    "messages": [],
+                }
+            )
+        )
+        admitted, next_cursor = _admit_json_transcript(
+            messages, envelope_bytes=envelope_bytes, reader_next_cursor=reader_next_cursor
+        )
+        next_cursor_echo = f"{next_cursor[0]}-{next_cursor[1]}" if next_cursor is not None else None
+        payload = {
+            "conv": conv_id,
+            "limit": limit,
+            "cursor": cursor_echo,
+            "next_cursor": next_cursor_echo,
+            "messages": admitted,
         }
         self._respond_json(200, payload, send_body=send_body)
 
