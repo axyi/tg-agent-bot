@@ -7,9 +7,8 @@ functionality (SemVer). `pyproject.toml` `1.7.0` → `1.8.0`; tag `v1.8.0`.
 
 Four subjects and no fifth: (1) **`AGENTS.md` and the project prompts** — the
 process fix; the v1.7.0 run delegated 1 of 13 tasks because this repository's
-`AGENTS.md` has no Context discipline section, so the spec's reading map was
-the only mechanism and it lost 4/4 (`docs/reports/report-v1.7.0.md`, "RLM
-delegation record"). (2) **Telegram chat UX** — the status message stops
+`AGENTS.md` has no Context discipline section (`docs/reports/report-v1.7.0.md`,
+"RLM delegation record"). (2) **Telegram chat UX** — the status message stops
 littering the chat, and the bot says it is working. (3) **The dashboard** — a
 visual rework inside the existing hard constraints. (4) **Conversations** —
 the list of the operator's "sessions", and one conversation's transcript.
@@ -61,7 +60,7 @@ be modified **only** at these four sites, and the list is exhaustive:
 | `bot.py:1211` | the status assertion: two edits ending in `STATUS_DONE` becomes one `⚙️ exec: ` edit plus exactly one recorded deletion of the status message | REQ-V180-CHAT-02 deletes the message instead of editing it to `"✅ done"` |
 | `bot.py:1085-1103` (`_SelftestTelegram`) | gains a `deleted: list[tuple[int, int]]` recorder and a `delete_message` method that appends to it | the same |
 | `tests/test_v12_patch.py:145` (`_FakeSelftestTg`) | the fabricated `edits` drops its `bot.STATUS_DONE` entry, leaving `[(424242, 1, "⚙️ exec: uname…")]`; the fake gains `deleted: list[tuple[int, int]]` seeded `[(424242, 1)]` — the **same attribute name, type and shape** as `_SelftestTelegram`'s | it feeds `bot._selftest_failure`, so it must satisfy the amended assertion byte-for-byte; two differently-shaped fakes would let the check pass against one and fail against the other |
-| `tests/test_v15_standards.py:1685-1728` | `_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`) gains the `mutation-v180` label; `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` reads `spec-v1.8.0.md` in place of `spec-v1.7.0.md` at `:1728` | EC-10 puts `mutation-v180` in `pre-push`, so both the label map and the matrix table must carry it; a released spec is never edited, so EC-12 reproduces the table here and the test follows it |
+| `tests/test_v15_standards.py:1685-1728` | `_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`) gains the `mutation-v180` label; `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` reads `spec-v1.8.0-delta-1.md` in place of `spec-v1.7.0.md` at `:1728` | EC-10 puts `mutation-v180` in `pre-push`, so both the label map and the matrix table must carry it; a released spec is never edited, and this spec is at its size ceiling, so EC-12 puts the table in the delta file and the test follows it |
 
 Two test doubles already define an unused `delete_message(self, chat_id,
 message_id)` stub — `tests/test_pricing.py:128` and
@@ -70,22 +69,23 @@ making any other test fail means the change is wrong: stop and reconsider,
 never edit the test.
 
 **REQ-V180-EC-04 (MUST) — secrets discipline.** REQ-V170-EC-04 applies,
-narrowed: this release needs no `.env` write and no value confirmation.
-Credential **values** are never printed, logged, committed or quoted in
-`docs/`; presence checks are by key **name** only (`grep -q '^KEY=' .env`,
-yielding an exit status and nothing else); tests use the synthetic sentinel
+narrowed: no `.env` write, no value confirmation. Credential **values** are
+never printed, logged, committed or quoted in `docs/`; presence checks are by
+key **name** only (`grep -q '^KEY=' .env`); tests use the synthetic sentinel
 pattern; `data/`, `sandbox/`, `*.db` and `exec_audit.jsonl` are never opened,
-printed or quoted. **No key is written into `.env`**, no `.env.bak*` is
-created, no `sed -i` touches it. §6's transcript reads the database through
-the existing read-only handle at request time — the running bot's data path,
-not an executor read; **no task of this run opens `bot.db`.**
+printed or quoted. **No key is written into `.env`**, no `.env.bak*`, no
+`sed -i`. §6's transcript reads the database through the existing read-only
+handle at request time — the running bot's data path, not an executor read;
+**no task of this run opens `bot.db`.**
 
 **REQ-V180-EC-05 (MUST) — backward compatibility.** Every new parameter,
 config field, environment variable and helper defaults to **current
 behaviour** when absent, so unlisted tests and fakes keep passing. Concretely:
 `_StatusMessage.finish` gains a keyword-only `ok: bool` with **no default** —
-its one call site (`bot.py:707`) is amended in the same commit, and an
-omission is a `TypeError` at import-time coverage, not a silent revert.
+its call sites, the two that REQ-V180-CHAT-08's ordering creates around
+`bot.py:707`, are written in the same commit, and an omission is a
+`TypeError` at import-time coverage, not a silent revert. `_TypingIndicator`'s
+`ceiling_s` follows the same no-default discipline (CHAT-05).
 `bot.py` alone constructs the typing indicator (REQ-V180-CHAT-05);
 `agent.run_agent`'s signature, the agent loop, the LLM layer, the tracing
 layer and the storage schema are untouched.
@@ -96,11 +96,10 @@ benchmarked before and after. **No change here reaches a model request**: no
 message, system prompt, tool schema, token limit, timeout, retry or provider
 path changes, so `meta.prompt_tools_sha256` and every token-affecting input
 stay byte-identical to v1.7.0's. The report states that the rule **does not
-fire**, names the reason, and lists the touched modules to show none is on the
-request path (REQ-V180-RPT-02); no baseline, no candidate run, no
-`docs/assets/bench/` write. A task that discovers a change which would reach a
-request stops, records it under "Benchmark-affecting changes", and drops it to
-v1.9.0 — never folds it in.
+fire**, names the reason and lists the touched modules (REQ-V180-RPT-02); no
+baseline, no candidate run, no `docs/assets/bench/` write. A task that
+discovers a change reaching a request stops, records it under
+"Benchmark-affecting changes", and drops it to v1.9.0 — never folds it in.
 
 **REQ-V180-EC-07 (MUST) — delegation is specified, not hoped for.** This is
 the release's own process fix and it binds **this release's own run**.
@@ -119,11 +118,10 @@ the release's own process fix and it binds **this release's own run**.
    writes a **task-brief file** at `docs/spec/task-briefs/v180-T<N>.md` and
    passes its **path** (T0 creates the directory). The brief carries whatever
    the task depends on that was resolved earlier — a decided row shape,
-   §5.1's palette, an earlier control-flow finding — so nothing load-bearing
-   is retyped into a prompt. The subagent gets the path plus a ~5-line
-   instruction, no history, and returns a **summary** — findings, counts,
-   `file:line` — never raw content. Brief files are committed with their
-   task.
+   §5.1's palette — so nothing load-bearing is retyped into a prompt. The
+   subagent gets the path plus a ~5-line instruction, no history, and returns
+   a **summary** — findings, counts, `file:line` — never raw content. Brief
+   files are committed with their task.
 5. **Crossing the map forces delegation regardless of the column.** A task
    whose actual reading exceeds its mapped files and ranges, or crosses any
    §5.1 trigger, delegates from that point on. A precomputed `no` is never a
@@ -135,18 +133,16 @@ the release's own process fix and it binds **this release's own run**.
 **REQ-V180-EC-08 (MUST) — the handoff, prompts, commits, and no bypass.** The
 `go` session reads **`docs/handoff-v1.8.0.md`** first: the spec's authoring
 commits, final counts, any unresolved `[[VERIFY: …]]` marker, the repository
-facts folded into this file, the decisions `D1`–`D14`, and the exact `go` line
-with every operator input the run needs in its request text. Written before the
-run, it is the only handoff artefact; `docs/plan.md` is a carried-candidates
+facts folded into this file, the decisions `D1`–`D14`, and the exact `go` line.
+It is the only handoff artefact; `docs/plan.md` is a carried-candidates
 document, not a handoff. Every prompt file carries the seven-bullet header
 (`Date`, `Executor model`, `Model reason`, `Harness`, `Stage`, `Owner of`,
-`REQ ids`) then exactly four level-2 blocks in
-order — `## Goal`, `## Constraints`, `## Acceptance`, `## Stop` — per
-`docs/prompts/TEMPLATE.md`, unchanged here. **126 is the highest pre-existing
-prompt number** — 125 is v1.7.0's operator acceptance, 126 this spec's own
-authoring prompt, written before the run — so T0's is
-`docs/prompts/127-go-spec-v1.8.0.md` and the run numbers upward. Each task of
-§12 is one prompt file and one commit whose body carries `(prompt:
+`REQ ids`) then exactly four level-2 blocks in order — `## Goal`,
+`## Constraints`, `## Acceptance`, `## Stop` — per `docs/prompts/TEMPLATE.md`,
+unchanged here. **126 is the highest pre-existing prompt number** (125 is
+v1.7.0's operator acceptance, 126 this spec's own authoring prompt), so T0's
+is `docs/prompts/127-go-spec-v1.8.0.md` and the run numbers upward. Each task
+of §12 is one prompt file and one commit whose body carries `(prompt:
 docs/prompts/NN-….md)`; results of different prompts are never mixed. No commit
 or push may use `--no-verify`, `-n`, or any other bypass (an environment
 switch, a temporary `core.hooksPath` change, `git config --unset`, deleting and
@@ -164,7 +160,9 @@ size-neutrally or net-negatively — new text paid for by tightening in the same
 pass, before/after bytes reported. Overflow that will not fit goes to
 `docs/spec/spec-v1.8.0-delta-1.md`, that exact filename, never
 `spec-v1.8.1.md`, which would read as a released patch version that does not
-exist.
+exist. **Round 1 of the cross-review used that escape**: the 21-row gate
+matrix lives in the delta file (REQ-V180-EC-12), which is normative and is
+read by `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`.
 
 ---
 
@@ -179,7 +177,7 @@ Each is out of scope for v1.8.0 and named so a task that drifts into it stops.
 | `NG-03` | No benchmark baseline and no benchmark run (REQ-V180-EC-06); `devtools/bench.py` is not edited. |
 | `NG-04` | No new runtime dependency, no new host dependency, no developer-tool pin move. |
 | `NG-05` | **No JavaScript anywhere** — no `<script>`, no inline event handler, no external stylesheet, image, font or CDN. |
-| `NG-06` | No change to the agent loop: `agent.py`'s control flow, round cap, tool dispatch, summary path and fallbacks stay as they are. The only additions are REQ-V180-CHAT-04's pure helper and the derived prefix it reads. |
+| `NG-06` | No change to the agent loop: `agent.py`'s branch structure, round cap, tool dispatch, summary path and fallback **texts** stay as they are. The only additions are REQ-V180-CHAT-04's `AgentOutcome` and `run_agent_outcome`; `run_agent` keeps its signature and its `str` return. |
 | `NG-07` | No schema migration. `SCHEMA_VERSION` stays 5; no `ALTER TABLE`, no new table, no new index. |
 | `NG-08` | No change to the exec sandbox, the SSRF allowlist, the rate limiter or access control. |
 | `NG-09` | No refactor of `dashboard_server.py`; its 8 pre-existing skylos shadow findings are neither fixed nor suppressed. |
@@ -231,14 +229,21 @@ agent may write); disjoint zones run in parallel, one worktree each;
 **overlapping scopes run sequentially**, because separate worktrees only defer
 the conflict to merge time.* No existing bullet is deleted or reworded.
 
-**REQ-V180-AGT-03 (MUST) — the factual lines stay true.** In the same task,
-`AGENTS.md` is corrected where this release makes it wrong, and **nowhere
-else**: the gate-6 mutation-entry count (92 → the number after
-REQ-V180-EC-10's additions), the `--select` example gaining `v180-`, the
-`pytest` count if T0's re-measurement differs from 1133, and the
-`## Project layout` line for `dashboard_server.py` naming the conversations
-routes. Style edits, reorderings and rewrites of untouched paragraphs are a
-defect.
+**REQ-V180-AGT-03 (MUST) — the factual lines stay true, and each is written
+once.** `AGENTS.md` is corrected where this release makes it wrong and
+**nowhere else**, in **two tasks split by when the fact becomes true** — a
+line whose value does not exist yet cannot be written truthfully, and writing
+it twice puts the same factual line inside two tasks' acceptance boundaries:
+
+- **T1 — the non-count edits only**: the `## Project layout` line for
+  `dashboard_server.py` naming the conversations routes, alongside AGT-01's
+  and AGT-02's new sections. T1 touches **no** count-bearing line.
+- **T7 — every claim whose value depends on work already landed**, written
+  once and only there, after T6 has created the entries: the gate-6
+  mutation-entry count (92 → 98 after REQ-V180-EC-10's six), the `--select`
+  example gaining `v180-`, and the `pytest` count if it has moved off 1133.
+
+Style edits, reorderings and rewrites of untouched paragraphs are a defect.
 
 **REQ-V180-AGT-04 (MUST) — the project prompts are reviewed, not rewritten.**
 The project's only skill files are `skills/host-info.md` and
@@ -261,11 +266,18 @@ leaves a tombstone.
 `TelegramClient` gains, next to `edit_message_text` (`bot.py:171-175`):
 
 ```python
-def delete_message(self, chat_id: int, message_id: int) -> dict:
+def delete_message(self, chat_id: int, message_id: int) -> bool:
     return self._call_with_retry("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
 ```
 
-It goes through `_call_with_retry` exactly as its two neighbours do,
+`-> bool`, not `-> dict`: every client method returns the **unwrapped
+`result`** of the API envelope (`bot.py:140`), and `deleteMessage`'s `result`
+is the JSON boolean `true` where `send_message`'s and `edit_message_text`'s
+(`bot.py:167-175`) are Message objects — so the three annotations differ
+legitimately. `_call_with_retry`'s own annotation (`bot.py:142`) widens to
+`-> dict | bool` in the same commit; that is the whole edit — no behaviour, no
+call site and no other annotation moves. It goes through `_call_with_retry`
+exactly as its two neighbours do,
 inheriting REQ-V1-SND-01's bounded retry (`bot.py:142-157`) and raising
 `TelegramError` on a fatal result. No other method changes; the token still
 never reaches a log record.
@@ -280,68 +292,62 @@ line: **`STATUS_DONE` is deleted from `bot.py`** — nothing reads it afterwards
 and an unused constant is what skylos is for. Its three other occurrences are
 REQ-V180-EC-03's two amendments and its own definition.
 
-**REQ-V180-CHAT-03 (MUST) — on failure the message is kept, with a final
-line.** `bot.py` gains `STATUS_FAILED = "⚠️ failed"` beside `STATUS_WORKING`
-(`bot.py:62`). When `ok` is false, `finish` calls `self._edit(STATUS_FAILED)`
-and the message stays — the operator's record that the run happened and did
-not land. Like every status text it is under `STATUS_MAX_CHARS = 64`.
+**REQ-V180-CHAT-03 (MUST) — on failure the message is kept, and the final
+line is best-effort.** `bot.py` gains `STATUS_FAILED = "⚠️ failed"` beside
+`STATUS_WORKING` (`bot.py:62`). When `ok` is false, `finish` **attempts**
+`self._edit(STATUS_FAILED)` and the message stays — the operator's record that
+the run happened and did not land. The attempt carries CHAT-06's discipline
+and MUST never fail the run, so what is guaranteed is stated exactly: the bot
+attempts the edit; if Telegram rejects it the **previous status text remains**
+(`⚙️ working…`, or the last `⚙️ exec: ` line), one redacted `log.warning` is
+emitted and the run delivers its reply unchanged. That stale line is an
+**accepted outcome**, not a defect, not a retry loop and not an error shown to
+the user; the invariant that never bends is that a failed run's status message
+is never deleted. Like every status text `STATUS_FAILED` is under
+`STATUS_MAX_CHARS = 64`.
 
-**REQ-V180-CHAT-04 (MUST) — the failure signal is a closed table over the
-`FALLBACK_*` constants.** `agent.run_agent` returns a `str` and **never raises
-for a model failure** — it encodes failure as a `FALLBACK_*` constant
+**REQ-V180-CHAT-04 (MUST) — the failure signal is a structured outcome, not
+a predicate over reply text.** `agent.run_agent` returns a `str` and **never
+raises for a model failure** — it encodes failure as a `FALLBACK_*` constant
 (`agent.py:71-83`), so a bare `try/except` at the call site would mark almost
-every run successful. A structured return type was **rejected on cost**:
-`run_agent` has one production call site (`bot.py:692`) and about 25 across
-eleven test files, roughly half binding the return value — cheap in production,
-a sprawl in tests, and the classification would still be written by hand.
-**`run_agent` keeps returning `str`.**
+every run successful. Reconstructing the verdict *from the reply* is worse
+than useless: a model answer equal to a fallback, or a fallback that gains a
+decoration or a truncation notice, is indistinguishable from the other. The
+knowledge exists at the return site, so this release **carries it out**
+instead of throwing it away and guessing it back:
 
-The predicate is a **closed table over the constants themselves**, never a
-heuristic over reply text. Every `agent` constant whose name begins
-`FALLBACK_` appears here with a classification and a match rule:
+```python
+@dataclass(frozen=True)
+class AgentOutcome:
+    reply: str
+    failed: bool
+    kind: str | None    # "empty" | "no_answer" | "llm_error" | "interrupted" | None
+```
 
-| constant | classification | matched by |
-|---|---|---|
-| `FALLBACK_EMPTY` | failure | equality |
-| `FALLBACK_NO_ANSWER` | failure | equality |
-| `FALLBACK_INTERRUPTED` | failure | equality |
-| `FALLBACK_LLM_ERROR` | failure | its **derived** prefix: the constant's text up to its first `{` |
-
-All four are failures: in each the user did not get their answer, which is
-exactly when the status message stays (REQ-V180-CHAT-03); the
-"explicitly-not-a-failure" classification is open for a later constant, unused
-today. A templated constant is matched by a prefix **computed from the constant
-at import time**, never a retyped literal, so editing the message cannot desync
-the matcher.
-
-- `agent.py` gains one **pure module-level helper** and the derived prefix it
-  reads, adjacent to those constants and touching no control flow (NG-06):
-
-  ```python
-  _LLM_ERROR_PREFIX = FALLBACK_LLM_ERROR.split("{")[0]   # derived, never retyped
-
-  def is_failure_reply(text: str) -> bool:
-      """True when `text` is one of run_agent's fallback replies rather than
-      a model answer (REQ-V180-CHAT-04)."""
-      return text in (FALLBACK_EMPTY, FALLBACK_NO_ANSWER, FALLBACK_INTERRUPTED) \
-          or text.startswith(_LLM_ERROR_PREFIX)
-  ```
-- `bot.py`'s single call site (`bot.py:691-707`) becomes:
-
-  ```python
-  try:
-      reply = agent.run_agent(...)
-  except Exception:
-      status.finish(ok=False)
-      raise
-  status.finish(ok=not agent.is_failure_reply(reply))
-  ```
-
-  Four added lines. The exception arm covers the paths that really do raise
-  (`agent.finish`'s transactional write, `agent.py:288-292`), the table covers
-  the four fallbacks, and no other behaviour of `process_update` changes.
-  Inverting the `ok` expression MUST turn the suite red
-  (`v180-status-signal-inverted`, §9).
+- `agent.py` gains `AgentOutcome`, its `from dataclasses import dataclass`
+  (standard library, no new distribution — EC-01), and
+  **`run_agent_outcome(...) -> AgentOutcome`** carrying `run_agent`'s exact
+  signature (`agent.py:226-241`). `run_agent_outcome` takes over the present
+  body of `run_agent` — the root span and the delegation to `_run_agent_turn`
+  — and `_run_agent_turn`'s inner `finish` (`agent.py:280-297`) gains
+  keyword-only `failed: bool = False` and `kind: str | None = None` and
+  returns an `AgentOutcome` where it returns a `str` today; its redaction and
+  one-transaction discipline are byte-unchanged.
+- The fallback return sites pass `failed=True` and their `kind`:
+  `agent.py:328` `"interrupted"`, `:398` `"llm_error"`, `:405` and `:445`
+  `"no_answer"`, `:412` `"empty"`. The site at `:415-418` is conditional and
+  passes the **same condition** — `has_content` yields the answer and no
+  `kind`, otherwise `FALLBACK_NO_ANSWER` and `"no_answer"`; `:403`'s answer
+  path passes nothing and is `failed=False`. No branch, no round cap, no
+  fallback text and no control flow moves (NG-06).
+- **`run_agent` keeps its name, its signature and its `-> str`**, becoming a
+  one-line wrapper: `return run_agent_outcome(...).reply`. Its ~25 call sites
+  across eleven test files are **untouched** — zero test churn is what makes
+  the structured outcome cheaper than the text predicate it replaces.
+- `bot.py`'s single production call site (`bot.py:692-708`) is the only caller
+  that moves: it calls `run_agent_outcome` and reads `outcome.failed`. The
+  ordering around it is REQ-V180-CHAT-08's. Inverting that flag MUST turn the
+  suite red (`v180-status-signal-inverted`, §9).
 
 **REQ-V180-CHAT-05 (MUST) — a typing indicator while the bot is processing.**
 Telegram's `sendChatAction` with `action="typing"` clears itself after about
@@ -355,28 +361,57 @@ five seconds, so it is re-sent on an interval. Frozen numbers:
   `LLM_TIMEOUT_S` (> 0, ≤ 600), so the ceiling is a validated number the
   operator controls. A run that outlives it keeps the status message as its
   durable progress signal; the indicator simply stops. That trade is
-  deliberate, so no executor extends it.
+  deliberate, so no executor extends it;
+- **join bound: 1.0 s** — `TYPING_JOIN_TIMEOUT_S = 1.0`, beside the interval.
 
 Mechanics: a `_TypingIndicator` class in `bot.py` starting one **daemon**
-`threading.Thread` (`threading` is already imported, `bot.py:20`) looping on
-`threading.Event.wait(TYPING_INTERVAL_S)`, so `stop()` wakes it immediately
-rather than sleeping out the interval. `bot.py` starts it beside
-`_StatusMessage` (`bot.py:691`) and stops it in a `finally` around the same
-`run_agent` call, so no path leaves a thread running. It sends through the
-same `TelegramClient`; `httpx.Client` is safe for concurrent use and the
-indicator issues at most one request per interval. It **complements** the
-status message and never replaces it.
+`threading.Thread` (`threading` is already imported, `bot.py:20`) whose loop
+waits on a `threading.Event` for `TYPING_INTERVAL_S`, so `stop()` wakes it
+immediately rather than sleeping out the interval. Four properties are
+requirements, not implementation taste:
+
+1. **One unretried attempt per tick.** The worker calls
+   `tg.call("sendChatAction", …, read_timeout=…)` — the single-attempt path
+   at `bot.py:105` — and **never `_call_with_retry`**, which can block past
+   the ceiling, fire after `stop()`, and issue several requests for one tick.
+   One attempt per tick is what makes the ceiling arithmetic true: at most
+   `ceil(cfg.llm_timeout_s / TYPING_INTERVAL_S)` requests per run, no bursts.
+2. **Both guards are checked immediately before each attempt**, in order: the
+   stop event (set → return without sending), then the elapsed clock (≥ the
+   ceiling → return). No request is issued after either is true.
+3. **Any error is terminal for the indicator**: one `log.warning` with
+   `config.redact()` applied, the indicator disabled for that run, the thread
+   exits, the run unaffected (CHAT-06). No retry, no second attempt.
+4. **`stop()` sets the event and joins**, bounded by `TYPING_JOIN_TIMEOUT_S`;
+   a timed-out join is logged once and the caller proceeds — the thread is a
+   daemon and cannot block shutdown. The bounded join, not the daemon flag,
+   is what stops the worker racing the reply. `stop()` is idempotent.
+
+**The test seams are constructor parameters**, so the tested and the shipped
+synchronisation paths are the same code:
+`_TypingIndicator(tg, chat_id, *, ceiling_s: float, interval_s: float =
+TYPING_INTERVAL_S, monotonic: Callable[[], float] = time.monotonic,
+stop_event: threading.Event | None = None)` — `stop_event=None` constructs a
+real `threading.Event`, and `ceiling_s` has **no default** so an omission is a
+`TypeError`, not a silent forever-typing indicator (EC-05). The tests pass a
+fake clock and a fake event and **no test sleeps in real time**. `bot.py`
+starts it beside `_StatusMessage` (`bot.py:691`) and stops it in a `finally`
+around the same `run_agent_outcome` call, so no path leaves a thread running.
+It sends through the same `TelegramClient`; `httpx.Client` is safe for
+concurrent use. It **complements** the status message and never replaces it.
 
 **REQ-V180-CHAT-06 (MUST) — best-effort, in both directions, and proved by the
 selftest.** `_StatusMessage`'s discipline (`bot.py:286-288`) extends unchanged
 to both new mechanisms: **any** Telegram error disables further work of that
-kind for that run via `_fail` — one `log.warning` with `config.redact()`
-applied — and **never fails the run itself**:
+kind for that run — one `log.warning` with `config.redact()` applied — and
+**never fails the run itself**:
 
 - a failed `delete_message` **leaves the status message in the chat** — an
   accepted outcome, not a retry loop and not an error to the user; the run
   still delivers its reply;
-- a failed `sendChatAction` disables the indicator for that run, nothing else;
+- a failed `STATUS_FAILED` edit leaves the previous status text (CHAT-03);
+- a failed `sendChatAction` disables the indicator for that run and nothing
+  else — one attempt, no retry (CHAT-05 item 3);
 - neither mechanism may raise out of `process_update`.
 
 `--selftest` proves it offline: `_SelftestTelegram` (`bot.py:1085-1103`) gains
@@ -384,20 +419,43 @@ a `deleted` recorder and a `delete_message` method, and the assertion at
 `bot.py:1211` becomes: exactly one recorded status send of `STATUS_WORKING`,
 exactly one edit starting `"⚙️ exec: "`, and **exactly one recorded deletion**
 of that message id — no `STATUS_DONE` edit, the constant no longer existing.
-`--selftest` binds no port and makes no network call (`bot.py:1167`); the
-indicator is driven in the unit tests with a fake clock and a fake event,
-never a real sleep.
+`--selftest` binds no port and makes no network call (`bot.py:1167`).
 
-**REQ-V180-CHAT-07 (MUST) — the table is closed, and reflection proves it.**
-`T-V180-CHAT-08` enumerates every `agent` attribute whose name begins
-`FALLBACK_`, asserts the set equals REQ-V180-CHAT-04's table exactly, and
-asserts every constant the table calls a failure is matched by
-`is_failure_reply` (the templated one after `.format()`). A constant in `agent`
-but absent from the table fails the test. Reason:
-`v180-status-signal-inverted` kills an **inverted** signal; nothing kills an
-**incomplete** one. A fallback added later would make `is_failure_reply` return
-`False` on a failed run, silently deleting the status message on exactly the
-runs the operator wants it kept — the requirement inverted, no test red.
+**REQ-V180-CHAT-07 (MUST) — the outcome contract, proved per return path.**
+`T-V180-CHAT-08` drives `run_agent_outcome` down **each** fallback path with
+fakes and asserts, for every one: `failed is True`, `kind` equal to that
+path's literal, and `reply` identical to the matching `FALLBACK_*` constant
+(the templated one after `.format()`). It asserts the answer path yields
+`failed=False`, `kind is None` and the model's own text. The four `kind`
+literals are the closed vocabulary — `"empty"`, `"no_answer"`, `"llm_error"`,
+`"interrupted"` — and a fallback added later is classified at **its own return
+site** instead of by a matcher that has to be kept in sync with it.
+
+**REQ-V180-CHAT-08 (MUST) — the status is resolved after the reply is
+delivered, never before.** Deleting the status message before the reply is out
+leaves a failed send with no answer in the chat **and** no record that
+anything happened. The order at `bot.py:692-708` is a requirement, not prose:
+
+1. obtain the `AgentOutcome` from `run_agent_outcome`;
+2. **send the reply** — `_send(tg, chat_id, split_message(outcome.reply))`,
+   which gains an additive `-> bool`: `True` when every part went out,
+   `False` when it stopped at a failed part. `_send` (`bot.py:964-971`) keeps
+   catching `TelegramError`, logging it redacted and returning rather than
+   raising, so none of its fifteen other call sites changes behaviour and
+   EC-05 holds;
+3. **only when the send returned `True` and `outcome.failed` is false**,
+   `status.finish(ok=True)` — the deletion;
+4. **otherwise** `status.finish(ok=False)` — the `STATUS_FAILED` edit of
+   CHAT-03.
+
+The exception arm stays: an exception out of `run_agent_outcome` — the paths
+that really do raise, such as `finish`'s transactional write
+(`agent.py:288-296`) — calls `status.finish(ok=False)` and re-raises.
+`T-V180-CHAT-09` drives a `send_message` that raises `TelegramError` on the
+reply and asserts the status message survives carrying `STATUS_FAILED` and
+that no deletion was recorded. It asserts nothing about the typing indicator,
+which does not exist until T3 — a test claim may never depend on work a later
+task lands (AGT-03's rule, applied to tests).
 
 ---
 
@@ -522,26 +580,40 @@ declaration.** `STYLE` already carries `font-variant-numeric: tabular-nums` on
 `td.num, th.num` (`dashboard_render.py:115-116`), so a requirement merely
 asserting the property is **green before the executor starts** and could never
 fail. The requirement is therefore **coverage**, and this is the release's
-**single definition of the class**: membership is decided by content, never by
-column position. In the HTML of every section builder, **every cell whose
-content is a number or a fixed-format timestamp — a count, duration, token
-total, cost, percentage, id or ISO timestamp, anything whose digits should
-align down the column — MUST carry `class="num"`** on both `<th>` and `<td>`,
-and **every cell whose content is a word MUST NOT** (`active`'s `yes`/`no`, a
-role, a label). `T-V180-DSH-01` renders each builder against a fixture and
-fails on either miss; it MUST be red before the work and green after. In the
+**single definition of the class**: `class="num"` is a property of the
+**column**, not of the individual cell. A column is **numeric** when its
+**data cells** hold numbers or fixed-format timestamps — a count, duration,
+token total, cost, percentage, id or ISO timestamp, anything whose digits
+should align down the column. In the HTML of every section builder, **a
+numeric column carries `class="num"` on its `<th>` and on every one of its
+`<td>`s**, and a column whose data cells hold words (`active`'s `yes`/`no`, a
+role, a label) carries it on neither. The heading's own text is a word in
+every case — `id`, `user`, `started`, `messages` — and is **irrelevant**: the
+class controls the column's alignment, not the content type of the cell it
+sits on. `T-V180-DSH-01` renders each builder against a fixture, derives each
+column's kind from its data cells and fails on either miss; it MUST be red
+before the work and green after. In the
 same change the `td.num, th.num` rule **drops its `font-family: ui-monospace,
 ...` declaration**: §5.1 forbids a monospace face for data, and tabular figures
 in the body face do the alignment job.
 
-**REQ-V180-DSH-04 (MUST) — the rejected defaults are absent, and asserted.**
-`T-V180-DSH-02` reads `STYLE` and every builder's rendered output and fails on
-any of: a `box-shadow`; `text-transform: uppercase`; `border-radius` over 2px;
-a `font-family` naming a monospace or serif family; a colour literal outside
-the eight of §5.1; a meta string joining fields with `·`; link text ending in
-`→`. The middle-dot join is live today in `tool_health_section`
-(`dashboard_render.py:429-436`) and the uppercase `th` rule at `:113-114`, so
-the test is red before the work — a gate, not a decoration.
+**REQ-V180-DSH-04 (MUST) — the rejected defaults are absent from the
+chrome, and asserted.** The check is scoped to the **static chrome** — the
+`STYLE` constant and the markup the builders emit — and **excludes
+interpolated content**: a user is free to type `box-shadow`, `#ff0000` or a
+middle dot into a message, and a scan of the whole rendered page would
+false-fail on their transcript. The seam is named so the test can be written
+against it: every builder is rendered twice against the **same fixture**, once
+with the fixture's message/label text and once with every interpolated field
+replaced by a fixed sentinel; the **intersection** of the two outputs is the
+chrome, and only the chrome is scanned. `T-V180-DSH-02` reads `STYLE` and each
+builder's chrome and fails on any of: a `box-shadow`; `text-transform:
+uppercase`; `border-radius` over 2px; a `font-family` naming a monospace or
+serif family; a colour literal outside the eight of §5.1; a meta string
+joining fields with `·`; link text ending in `→`. The middle-dot join is live
+today in `tool_health_section` (`dashboard_render.py:429-436`) and the
+uppercase `th` rule at `:113-114`, so the test is red before the work — a
+gate, not a decoration.
 
 **REQ-V180-DSH-05 (MUST) — the pages get the plan's layout, and the nav gets
 the new destination.** `page()` (`dashboard_render.py:133-149`) keeps its
@@ -578,30 +650,53 @@ UI copy.** `/conversations` carries exactly one line of copy saying so — *"A
 conversation is one `/new`-to-`/new` stretch of chat; this is the list of
 them."* — and no parallel concept, alias, model or table is introduced.
 
-**REQ-V180-CONV-02 (MUST) — three read functions in `storage.py`.** All mirror
+**REQ-V180-CONV-02 (MUST) — four read functions in `storage.py`.** All mirror
 `recent_traces` (`storage.py:700-726`): parameterized SQL, bounds as
 parameters, `sqlite3.Row` results, no formatting.
 
+- `conversation_row(conn, conv_id)` — the `conversations` row, or `None`. An
+  **existence reader**: an empty conversation and an absent one are
+  indistinguishable through the message query, and this is what tells them
+  apart (CONV-04, CONV-07).
 - `recent_conversations(conn, *, limit)` — `id`, `tg_user_id`, `created_at`,
   `active`, `message_count` (`COUNT` over `messages`), `last_activity`
   (`MAX(messages.created_at)`, `NULL` for an empty conversation); ordered
   `created_at DESC, id DESC`, bounded by `limit`.
-- `conversation_messages(conn, conv_id, *, limit, offset)` — `turn_id`,
-  `role`, `content`, `tool_call_id`, `created_at`, `id`, ordered **`turn_id
-  ASC, id ASC`** so a turn group is never reordered.
+- `conversation_messages(conn, conv_id, *, limit, offset)` — **pages by turn,
+  never by row.** `ORDER BY turn_id, id` with `LIMIT`/`OFFSET` over messages
+  would split a turn across two pages, which CONV-04 forbids, so the page is
+  selected by turn and then filled:
+  1. **the turn window** — `SELECT turn_id, COUNT(*) AS n FROM messages WHERE
+     conv_id = ? GROUP BY turn_id ORDER BY turn_id ASC LIMIT ? OFFSET ?`,
+     `offset` counting **turns** and the limit bound as `limit + 1`: a turn
+     holds at least one message, so `limit` turns hold at least `limit`
+     messages and the extra turn is the row beyond the page;
+  2. **the page** — take turns in order while the running message count is
+     `< limit`; the turn that crosses `limit` is taken **whole**, so a page is
+     *up to `limit` messages, extended to the end of the last turn*;
+  3. **the probe** — the first turn not taken. Its presence is the return's
+     `has_more`; it is **discarded before rendering**;
+  4. **the messages** — `SELECT turn_id, role, content, tool_call_id,
+     created_at, id FROM messages WHERE conv_id = ? AND turn_id IN (…)
+     ORDER BY turn_id ASC, id ASC`, one bound placeholder per taken turn.
+
+  It returns `(rows, has_more)` — the one reader of the four returning more
+  than a row list, `has_more` being unrecoverable from the rows.
 - `conversation_turn_traces(conn, conv_id)` — REQ-V180-CONV-05's link map.
 
-A missing conversation yields an empty list; the caller decides the 404
-(CONV-07).
+A missing conversation yields an empty list from the message query and `None`
+from `conversation_row`; the caller decides the 404 (CONV-07).
 
 **REQ-V180-CONV-03 (MUST) — `/conversations`, the list.** A page rendered by
 the new pure builder `conversation_list_section(rows)` in
 `dashboard_render.py`. Row shape, exactly: **id** (linking to `/conversations/<id>`), **user**
 (`tg_user_id`), **started** (`created_at`), **messages** (count), **active**
 (`yes`/`no`, ok colour for yes), **last activity** (`last_activity`, or `—`
-when the conversation has no message). **Five of the six — id, user, started,
-messages, last activity — carry `class="num"`**; `active` does not, its
-content being a word (REQ-V180-DSH-03). Page size is bounded by the **`limit`
+when the conversation has no message). **Five of the six columns — id, user,
+started, messages, last activity — are numeric columns and carry `class="num"`
+on the `<th>` and on every `<td>`**; `active` is not one, its data cells
+holding a word. That the five headings are themselves words is irrelevant
+(REQ-V180-DSH-03). Page size is bounded by the **`limit`
 query parameter** through the existing `_parse_limit(params, 50, is_api=...)`
 (`dashboard_server.py:168-177`): **default 50**, range **1–500**, anything
 else a 400. An empty database renders one empty-state row, never a blank
@@ -611,26 +706,44 @@ table.
 rendered by `conversation_transcript_section(...)` in `dashboard_render.py`,
 laid out per §5.1's two-column plan. Per message, in `turn_id`/`id` order: the
 **role** (`user` / `assistant` / `tool`, visible as text, not a colour alone),
-the **turn id**, the **timestamp**, the **content**. Turn id and timestamp
-carry `class="num"`; role and content do not (REQ-V180-DSH-03). Content comes
+the **turn id**, the **timestamp**, the **content**. The rail's turn id and
+timestamp are its numeric fields and carry `class="num"`; the role word, the
+trace link and the content do not (REQ-V180-DSH-03). Content comes
 from `messages.content` — the text the bot already stores for the agent's own
 memory — bounded and sanitised by §7. A `tool` row also shows its
-`tool_call_id`. Pagination is by **`limit`** (`_parse_limit(params, 200,
-is_api=...)`, default **200**, range 1–500) and **`offset`**: a new
-`_parse_offset` sharing `_parse_conv`'s parse-and-reject shape —
-`re.fullmatch(r"[0-9]+")`, a range check, `_bad_request` on either failure —
-but **not** its bounds, the range being `0 ≤ n ≤ 2**31 - 1` with an absent
-parameter `0`, because offset 0 is the first page whereas a conversation id
-starts at 1. The page carries prev/next links built from the current
-`limit`/`offset` and nothing else, and states the range it is showing.
+`tool_call_id`. **No turn is ever split across two pages** — CONV-02's
+by-turn window is what guarantees it.
+
+Pagination is by **`limit`** (`_parse_limit(params, 200, is_api=...)`, default
+**200**, range 1–500, a bound on *messages*) and **`offset`** (a count of
+*turns*, per CONV-02): a new `_parse_offset` sharing `_parse_conv`'s
+parse-and-reject shape — `re.fullmatch(r"[0-9]+")`, a range check,
+`_bad_request` on either failure — but **not** its bounds, the range being
+`0 ≤ n ≤ 2**31 - 1` with an absent parameter `0`, because offset 0 is the
+first page whereas a conversation id starts at 1. The **next link is emitted
+if and only if `conversation_messages` returned `has_more`** — never on a row
+count, which would either walk the operator into empty pages forever or hide
+a real page when the last one holds exactly `limit` messages; its `offset` is
+the current one plus the number of turns this page took. The prev link is
+built from the same two values and nothing else, and the page states the
+range it is showing.
+
+**The 404 is decided by `conversation_row`, not by an empty result.** An
+existing conversation with no messages renders the empty state at 200; only
+`conversation_row(conn, conv_id) is None` is a 404 (CONV-07).
 
 **REQ-V180-CONV-05 (MUST) — the link to a trace, and the join that finds
 it.** `messages` has **no `trace_id` column** (`storage.py:154-171`), so the
 link is not a field lookup. `trace_id` lives on `llm_calls` and `tool_calls`,
 both carrying `conv_id` and `turn_id`, so `conversation_turn_traces(conn,
-conv_id)` returns a mapping `turn_id -> trace_id` from the **first non-null
-`trace_id`** for that `(conv_id, turn_id)`, preferring `llm_calls` and falling
-back to `tool_calls`. A turn in the mapping renders its rail entry as a link to
+conv_id)` returns a mapping `turn_id -> trace_id`. "First" is defined, because
+"the first non-null `trace_id`" is otherwise query-plan dependent and two
+implementations could link the same turn to different traces: it is the
+`trace_id` of the **lowest `id` in `llm_calls`** for that `(conv_id, turn_id)`
+whose `trace_id` is non-null; if there is none, the **lowest `id` in
+`tool_calls`** under the same condition; if there is still none, the turn is
+absent from the mapping and gets no link. A turn in the mapping renders its
+rail entry as a link to
 `/traces/<trace_id>`; a turn absent renders plain text — no dangling link, no
 placeholder. Link text is the abbreviated trace id with **no arrow appended**
 (§5.1).
@@ -640,9 +753,13 @@ placeholder. Link text is the abbreviated trace id with **no arrow appended**
 `/traces` (`dashboard_server.py:579-593`): same query parameters, same bounds,
 same rows, `_respond_json`, and a payload echoing the parameters (`{"limit":
 ..., "conversations": [...]}` and `{"conv": ..., "limit": ..., "offset": ...,
-"messages": [...]}`). The JSON carries the **same redacted and capped
-content** the HTML does (§7) — an API route is not a bypass. Errors use the
-existing JSON error body, not an HTML page.
+"has_more": ..., "messages": [...]}`). `offset` is the **turn** offset of
+CONV-02, echoed in the unit it was parsed in, and `has_more` is CONV-04's
+probe result — without it an API client cannot tell whether another page
+exists, the same defect the HTML next link avoids. The JSON carries the **same
+redacted and capped content** the HTML does (§7) — an API route is not a
+bypass, and SEC-02's byte budget binds it too. Errors use the existing JSON
+error body, not an HTML page.
 
 **REQ-V180-CONV-07 (MUST) — routing, and the two failure answers.** Two
 compiled patterns join `_TRACE_PAGE_RE`/`_TRACE_API_RE` (`:56-57`):
@@ -651,9 +768,11 @@ compiled patterns join `_TRACE_PAGE_RE`/`_TRACE_API_RE` (`:56-57`):
 (`dashboard_server.py:407-428`) gains `/conversations` and
 `/api/conversations` beside `/traces` and `/api/traces`, and the two
 `match`-based arms beside the trace ones, **before** the closing `_not_found`.
-An id outside `1 ≤ n ≤ 2**31 - 1`, or one no row matches, is a **404** through
-the existing `_not_found(is_api=...)`; a malformed `limit` or `offset` is a
-**400** through `_bad_request` (`dashboard_server.py:91-98`).
+An id outside `1 ≤ n ≤ 2**31 - 1`, or one for which `conversation_row` returns
+`None`, is a **404** through the existing `_not_found(is_api=...)` — and an
+existing conversation holding no messages is **not** one: it answers 200 with
+the empty state. A malformed `limit` or `offset` is a **400** through
+`_bad_request` (`dashboard_server.py:91-98`).
 `_STATIC_ROUTES` (`dashboard_server.py:53-55`) is **pre-existing dead code,
 referenced nowhere in the repository**; this release adds the two new static
 routes so it does not grow *more* stale, does not otherwise touch or delete
@@ -667,31 +786,57 @@ The transcript is the first dashboard view showing what the user and the model
 actually said. It gets its own group and its own mutation entries, because
 redaction that silently stops working is the failure a green suite hides.
 
-**REQ-V180-SEC-01 (MUST) — `redact()` then `esc()`, in that order, with no
-path around it.** Every value this release renders from `messages` — content,
-`tool_call_id`, any string derived from them — passes `config.redact()`
-(`config.py:161-166`) **and then** `dashboard_render.esc()`
-(`dashboard_render.py:53`). Order matters: escaping first would let an
-HTML-encoded fragment of a registered secret survive `redact`'s literal
-`str.replace`. Redaction happens in `dashboard_server.py` (which may import
-`config`); escaping in `dashboard_render.py`, which stays pure. There is **no**
-path writing message content into HTML or JSON without both, and the JSON
-route redacts even though it does not escape.
+**REQ-V180-SEC-01 (MUST) — `redact()` always; `esc()` per sink.** The
+invariant that admits no exception: **no message-derived value reaches any
+sink without `config.redact()`** (`config.py:161-166`). Escaping is stated per
+sink, the two sinks encoding differently:
 
-**REQ-V180-SEC-02 (MUST) — the output is bounded twice, and the 2 MiB cap is
-never what catches it.** `MAX_RESPONSE_BYTES` (`dashboard_server.py:39`) is a
-backstop, not a design. Two bounds keep a long conversation off it:
+- **HTML sink** — `redact()` **then** `dashboard_render.esc()`
+  (`dashboard_render.py:53`), in that order. Order matters: escaping first
+  would let an HTML-encoded fragment of a registered secret survive `redact`'s
+  literal `str.replace`.
+- **JSON sink** — `redact()` **only**. `json.dumps` performs its own escaping,
+  and HTML-escaping a JSON string would corrupt the stored text on the way out:
+  `<` served as `&lt;` is a different value from the database's, and CONV-06
+  requires a faithful mirror.
 
-1. **per message**: rendered content is truncated to **2000 characters *after*
-   redaction and before escaping**, with a visible `…` marker and the original
-   length stated — the number REQ-V160-TRC-09 already fixes for a captured
-   content attribute, reused rather than reinvented;
-2. **per page**: the `limit` of REQ-V180-CONV-04, default 200, maximum 500.
+Redaction happens in `dashboard_server.py` (which may import `config`);
+escaping in `dashboard_render.py`, which stays pure. Both routes redact; the
+API route is not a bypass.
 
-500 × 2000 characters is under 1 MiB before escaping and comfortably under the
-cap after it. `T-V180-SEC-02` drives a conversation at both maxima through
-both routes and asserts the response is produced normally — not through the
-"response too large" path (`dashboard_server.py:663-673`).
+**REQ-V180-SEC-02 (MUST) — the output is bounded three times, in bytes, and
+the 2 MiB cap is never what catches it.** `MAX_RESPONSE_BYTES`
+(`dashboard_server.py:39`) is a backstop, not a design. The cap is **not**
+provable by character arithmetic: UTF-8 needs up to four bytes per character
+and `esc()` expands one character to as many as six (`&quot;`), so
+500 × 2000 characters is worst-case ~6 MB, not "under 1 MiB". The bound is
+therefore **enforced, not proved**:
+
+1. **per message**: rendered content is truncated to **2000 characters of the
+   escaped text** — `redact()`, then `esc()`, then the cut — the number
+   REQ-V160-TRC-09 already fixes for a captured content attribute, reused
+   rather than reinvented. The `…` marker and the original-length note are
+   **additional to** the 2000, not inside it: the cap governs the message text
+   alone, and the two annotations are counted only by the page budget below.
+   That is the per-row maximum every byte-exact test asserts;
+2. **per page**: the `limit` of REQ-V180-CONV-04, default 200, maximum 500 —
+   messages, extended to the end of the last turn (CONV-02);
+3. **per response, on both sinks**: the builder accumulates **rendered
+   bytes** and stops before the first row that would carry the response past
+   **`TRANSCRIPT_PAGE_BUDGET_BYTES = 1_572_864`** (1.5 MiB, leaving room for
+   the chrome and the cap's own margin), then emits the truncation marker and
+   the next-page link. The JSON route does not go through the HTML builder, so
+   it applies the same budget to its own serialized rows before
+   `_respond_json`, dropping the trailing messages and reporting `has_more`
+   true. A pathological conversation paginates on either route; it is never
+   refused.
+
+`T-V180-SEC-02` drives a conversation at both maxima through both routes with
+a **worst-case fixture** — 4-byte characters (astral plane) mixed with
+escape-expanding characters (`"`, `&`, `<`, `>`) — and asserts the byte budget
+holds and the response is produced normally, not through the "response too
+large" path (`dashboard_server.py:663-673`). An ASCII fixture does not
+discharge this requirement.
 
 **REQ-V180-SEC-03 (MUST) — this does not violate REQ-V160-TRC-09.**
 REQ-V160-TRC-09 (`docs/spec/spec-v1.6.0.md:675-688`) governs the four **trace
@@ -726,7 +871,8 @@ unchanged database, and no query text containing the payload.
 
 Written before the code they cover (REQ-V180-EC-02). Files:
 `tests/test_v180_chat.py`, `tests/test_v180_dashboard.py`,
-`tests/test_v180_conversations.py`. All offline, all against fakes, a fake
+`tests/test_v180_conversations.py`, `tests/test_v180_version.py`. All offline,
+all against fakes, a fake
 clock and a `tmp_path` database.
 
 | id | asserts |
@@ -734,22 +880,23 @@ clock and a `tmp_path` database.
 | `T-V180-CHAT-01` | `delete_message` posts `deleteMessage` via `_call_with_retry`; raises `TelegramError` on a fatal result |
 | `T-V180-CHAT-02` | `finish(ok=True)` deletes, clears `_message_id`, issues no edit |
 | `T-V180-CHAT-03` | `finish(ok=False)` edits to `STATUS_FAILED`, no delete; `STATUS_DONE` absent from `bot`'s namespace |
-| `T-V180-CHAT-04` | `is_failure_reply` true for all four fallbacks incl. a formatted `FALLBACK_LLM_ERROR`; false for an answer and for one with `TRUNCATION_NOTICE` |
+| `T-V180-CHAT-04` | `run_agent` returns exactly `run_agent_outcome(...).reply` — same inputs, same `str`, no signature change |
 | `T-V180-CHAT-05` | negative: a raising `delete_message` leaves the message, logs once redacted, reply delivered |
-| `T-V180-CHAT-06` | sends on start, once per 4.0 s of fake clock, nothing at/after `cfg.llm_timeout_s`; `stop()` ends it in one `wait` |
+| `T-V180-CHAT-06` | **one** unretried request per tick on the fake clock, nothing at/after `ceiling_s`, none after the event is set; `stop()` wakes and joins inside `TYPING_JOIN_TIMEOUT_S` |
 | `T-V180-CHAT-07` | negative: a raising `sendChatAction` disables the indicator only |
-| `T-V180-CHAT-08` | reflection: `agent`'s `FALLBACK_*` attributes equal REQ-V180-CHAT-04's table exactly, and every one it calls a failure is matched |
-| `T-V180-DSH-01` | coverage: every number/timestamp cell carries `class="num"`, no word cell does; `STYLE` declares `tabular-nums`, **no** monospace family |
-| `T-V180-DSH-02` | negative: DSH-04's closed list of rejected defaults absent from `STYLE` and every builder's output |
+| `T-V180-CHAT-08` | every fallback return path yields `failed=True` with its `kind` and the matching constant; the answer path yields `failed=False`, `kind is None` |
+| `T-V180-CHAT-09` | negative: the reply send raises — the status message survives with `STATUS_FAILED`, no deletion recorded |
+| `T-V180-DSH-01` | coverage by column: a column whose data cells are numbers/timestamps carries `class="num"` on `<th>` and every `<td>`, a word column on neither; `STYLE` declares `tabular-nums`, **no** monospace family |
+| `T-V180-DSH-02` | negative: DSH-04's closed list absent from `STYLE` and from every builder's **chrome** — the sentinel-intersection seam, interpolated content excluded |
 | `T-V180-DSH-03` | exactly the six palette tokens plus two status colours; every colour literal is one of those eight |
 | `T-V180-DSH-04` | every nav carries the four entries in order; `page()` emits one `<style>`, no `<script>`, no external URL |
 | `T-V180-CONV-01` | `recent_conversations`: six fields, newest first, bounded; `last_activity` `NULL` when empty |
-| `T-V180-CONV-02` | `conversation_messages` orders by `turn_id, id`; no turn group split at the default limit |
+| `T-V180-CONV-02` | `conversation_messages` orders by `turn_id, id`, pages by turn — no group split at the default limit — and returns `has_more` from the probe turn, which never appears in the rows |
 | `T-V180-CONV-03` | `conversation_turn_traces` maps to `llm_calls`, falls back to `tool_calls`, omits a turn with neither |
 | `T-V180-CONV-04` | negative: the list renders the decided row shape; `limit=0`, `501`, `x` each give 400 |
-| `T-V180-CONV-05` | negative: transcript in order, only traced turns linked, paginates by `limit`/`offset`; unknown id 404 |
+| `T-V180-CONV-05` | negative: transcript in order, only traced turns linked, paginates by `limit`/turn `offset` with the next link following `has_more`; unknown id 404, **existing-but-empty 200** |
 | `T-V180-SEC-01` | negative: a registered secret is replaced on both routes; `<script>` in content is escaped, not served |
-| `T-V180-SEC-02` | 500 × 8000 characters render under the cap, each truncated to 2000 with marker and original length |
+| `T-V180-SEC-02` | worst-case fixture (4-byte + escape-expanding characters), 500 × 8000 characters: the page holds under `TRANSCRIPT_PAGE_BUDGET_BYTES`, each message cut to 2000 escaped characters with the marker and original length **additional** |
 | `T-V180-SEC-03` | content capture off: no served content attribute, while the same turn's transcript renders its text |
 | `T-V180-SEC-04` | negative: an injection-shaped id gives 400/404, database unchanged, no query text holds the payload |
 | `T-V180-AGT-01` | `AGENTS.md` carries Context discipline with the write trigger, four **verbatim** exemptions, and the ownership-zone rule |
@@ -777,11 +924,21 @@ image pulled, LM Studio and an OpenRouter key) and runs at **T0** on the
 unchanged tree, at **T8** once every source change has landed, and at **T10**
 on the tree that ships; an unreachable LM Studio is a **blocked run**, not a
 noted one. The test count MUST **exceed** T0's measured floor (1133) on every
-branch reaching T8, and MUST **equal** it on a stop-route branch (§11), no code
-having been written and no test deleted; state the exact number in the report.
+branch reaching T8; on a stop-route branch (§11) it is **whatever the tree
+has** — a stop after T2 has committed tests, and no test may be deleted to get
+back to the floor. State the exact number in the report either way.
 Gates 1–4 and 6 are re-run against the final tree before the closing commit on
 **every** branch, stop route included — T0's exit codes prove the tree T0 ran
 on, not the tree that ships.
+
+**The gates run against the tree that ships, including the last commit.** T10
+lands a docs-only commit *after* its gate run, so that commit would otherwise
+carry the tag ungated. The rule: after the final docs-only commit, **re-run
+`checks.py lint-docs` and tag that commit**. Gates 1–4 and 6 are **not**
+re-run, for the reason stated in the same sentence — the commit changed no
+file any of them reads, the rule the lab already applies to skipping the
+mutation gate on a docs-only change. The report records `lint-docs`'s exit
+code and the tagged sha (REQ-V180-RPT-02).
 
 **REQ-V180-EC-10 (MUST) — the mutation entries, and one new profile gate.**
 `devtools/mutation_check.py` gains **six** `v180-*` entries in its existing
@@ -797,7 +954,16 @@ shipped source, and each MUST match **exactly once** in its file:
 | `v180-typing-ceiling-removed` | the `cfg.llm_timeout_s` ceiling in the indicator loop: remove the elapsed check so it types forever | `T-V180-CHAT-06` |
 | `v180-transcript-redact-bypassed` | the `config.redact()` call on the transcript path: pass the raw content through | `T-V180-SEC-01` |
 | `v180-transcript-cap-removed` | the 2000-character per-message truncation: render the full content | `T-V180-SEC-02` |
-| `v180-dashboard-bind-widened` | the loopback bind: `DASHBOARD_BIND` `127.0.0.1` → `0.0.0.0` | the existing `T-V160-SRV-*` bind assertions plus `T-V180-SEC-04`'s route check |
+| `v180-transcript-budget-removed` | the transcript page builder's byte accumulation: remove the `TRANSCRIPT_PAGE_BUDGET_BYTES` check so it emits every row of the page | `T-V180-SEC-02` |
+
+The sixth entry is deliberately **not** a mutation of the loopback bind: a
+mutation must break a mechanism *this release introduces*, and
+`DASHBOARD_BIND` is a pre-existing constant already covered by the
+pre-existing `T-V160-SRV-*` assertions, so such an entry is green on day one
+and proves nothing. The bind stays covered exactly as it is today (SEC-04);
+the byte budget replaces it because removing that budget is precisely the
+failure the 2 MiB cap must catch, and it does not exist until T6. Each of the
+six MUST be confirmed **red before the work and killed after**.
 
 `config/quality_gates.yaml` gains exactly one gate, placed in the **`pre-push`**
 profile, with `mutation-v170`'s key set and key order
@@ -824,51 +990,38 @@ above must be checkable against a plausible bad run and go red** — an entry
 whose `find` does not match, or that the named test does not kill, is a defect
 in the entry, not a reason to relax the gate.
 
-**REQ-V180-EC-12 (MUST) — the gate matrix moves into this spec.**
-`test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
-(`tests/test_v15_standards.py:1727-1741`) parses the table below out of the
-spec it names and asserts it agrees with `profiles:` in
+**REQ-V180-EC-12 (MUST) — the gate matrix moves into this release's delta
+file.** `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
+(`tests/test_v15_standards.py:1727-1741`) parses the gate matrix out of the
+spec file it names and asserts it agrees with `profiles:` in
 `config/quality_gates.yaml`. It reads `spec-v1.7.0.md` today; a released spec
-is never edited, so T6 repoints it at **this** file (`:1728`) and adds the
-`mutation-v180` label to `_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`). Below is
-REQ-V170-GATE-03's table, yes/— verbatim, plus the new row, minus the `note`
-column the parser never reads. It is load-bearing markup: the parser finds the
-header by the literal `| gate | pre-commit` and takes rows until the first line
-not starting with `|`, and every label must match the map byte-for-byte.
-
-| gate | pre-commit | pre-push | full |
-|---|:---:|:---:|:---:|
-| `ruff check` (staged) | yes | — | — |
-| `ruff check .` (tree) | — | yes | yes |
-| `ruff format --check` | yes | yes | yes |
-| branch-name check | yes | yes | yes |
-| `gitleaks git --staged` | yes | — | — |
-| `gitleaks dir` (tree) | — | yes | yes |
-| `uv sync --locked` | — | — | yes |
-| `pytest` | — | yes | yes |
-| `bot.py --selftest` | — | yes | yes |
-| `bot.py --selftest-live` | — | — | yes |
-| `mutation_check.py --select v15-` | — | yes | — |
-| `mutation_check.py --select v160-` | — | yes | — |
-| `mutation_check.py --select v170-` | — | yes | — |
-| `mutation_check.py --select v180-` | — | yes | — |
-| `mutation_check.py` (all) | — | — | yes |
-| `trivy fs` | — | yes | yes |
-| `semgrep scan` | — | yes | yes |
-| `skylos` | — | yes | yes |
-| `install_hooks.py --check` | — | yes | yes |
-| `checks.py doctor` | — | yes | yes |
-| `checks.py lint-docs` | — | — | yes |
+is never edited, so T6 repoints it (`:1728`) at
+**`docs/spec/spec-v1.8.0-delta-1.md`** — this release's overflow file, per §1's
+budget rule — and adds the `mutation-v180` label to
+`_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`). That file carries
+REQ-V170-GATE-03's table, yes/— verbatim, plus the `mutation_check.py --select
+v180-` row, minus the `note` column the parser never reads; it is **21 rows**
+and it is load-bearing markup — the parser finds the header by the literal
+`| gate | pre-commit`, takes rows until the first line not starting with `|`,
+and every label must match the map byte-for-byte. The delta file holds the
+matrix and nothing else; it is created in T6 and committed with it.
 
 ---
 
 ## 10. Version, reporting and the ledger
 
 **REQ-V180-VER-01 (MUST) — 1.8.0, and where the bump lives.**
-`pyproject.toml`'s `project.version` moves `1.7.0` → `1.8.0` in **T7 and
-nowhere else**; `T-V180-VER-01` is written in the same task, red before the
-edit and green after. `README.md`'s Versioning section and `AGENTS.md` echo the
-number in the same commit. The annotated tag `v1.8.0` is created **only** on
+`pyproject.toml`'s `project.version` moves `1.7.0` → `1.8.0` in **T9 and
+nowhere else** — the last task before tagging, and only **after T8's gates are
+green**. This is the one carve-out from T8's "every source, test and config fix
+lands here or earlier", named here and in §12 so the two do not contradict:
+the version line and `T-V180-VER-01` are not a fix, they are the release
+stamp, and T10 re-runs every gate over the tree that carries them. Putting the
+bump last is also what makes the stop route honest — a stop at **any** earlier
+point needs no revert, because `pyproject.toml` still reads `1.7.0` by
+construction (REQ-V180-REV-04). `T-V180-VER-01` is written in the same task,
+red before the edit and green after; `README.md`'s Versioning section and
+`AGENTS.md` echo the number in the same commit. The annotated tag `v1.8.0` is created **only** on
 REQ-V180-REV-02's evidence-only commit, only when every gate is green, and is
 the last action of the run — no commit follows it. Existing tags (`v1.3`,
 `v1.3-baseline`, `v1.6.0`, `v1.7.0`) are untouched.
@@ -901,7 +1054,11 @@ release:
 8. the pre-existing dead code surfaced and **not** fixed: `_STATIC_ROUTES`
    (`dashboard_server.py:53-55`) and the 8 skylos shadow findings in the same
    module (NG-09);
-9. the `--no-verify` attestation sentence of REQ-V180-EC-08.
+9. the `--no-verify` attestation sentence of REQ-V180-EC-08;
+10. the **tagged sha** and the exit code of the `lint-docs` run made against
+    the tagged commit *after* it landed (REQ-V180-EC-09, REQ-V180-REV-02) —
+    or, on the stop route, the stage and the last green commit
+    (REQ-V180-REV-04).
 
 **REQ-V180-RPT-03 (MUST) — the Telegram post.**
 `docs/reports/tg-post-v1.8.0.md`, **Russian**, under 1500 characters by `wc
@@ -933,33 +1090,41 @@ prompt is logged in `docs/prompts/`. Beyond the standard checklist:
 1. `dashboard_render.py` is still pure — no import of `config`, `storage` or
    `sqlite3`, no I/O, no `Path` — and still the only module holding an HTML or
    SVG literal;
-2. redaction happens **before** escaping on every transcript path, HTML and
-   JSON alike, with no third path;
+2. **every** transcript path redacts, and the HTML paths escape after
+   redacting while the JSON paths do not escape at all (SEC-01) — no third
+   path, and no HTML-escaped value in a JSON body;
 3. `served_span()`, `SERVED_SPAN_ATTRIBUTE_KEYS` and the `OBS_CAPTURE_CONTENT`
    default are byte-unchanged (NG-10);
 4. every new SQL statement binds its parameters;
 5. `_StatusMessage` and `_TypingIndicator` cannot raise into `process_update`,
    and the indicator's thread stops on every path including the exception one;
-6. `agent.py` gained REQ-V180-CHAT-04's helper and its derived prefix constant
-   and **nothing else** (NG-06), and the `FALLBACK_*` table is complete;
+6. `agent.py` gained `AgentOutcome`, `run_agent_outcome` and `finish`'s two
+   keyword-only arguments and **nothing else** (NG-06); `run_agent` is the
+   one-line wrapper and its signature is byte-unchanged; every fallback return
+   site carries a `kind`;
 7. `STYLE` matches §5.1 literally: six tokens, two status colours, four sizes,
    two weights, no shadow, no monospace, no uppercase transform;
-8. each of §9's six mutation entries has a `find` matching exactly once and a
-   named killing test, and §9's gate-matrix table still agrees with
-   `config/quality_gates.yaml`.
+8. each of §9's six mutation entries has a `find` matching exactly once, a
+   named killing test, and a **recorded red-before / killed-after** pair — no
+   entry over a pre-existing, already-covered mechanism — and the delta file's
+   gate-matrix table still agrees with `config/quality_gates.yaml`.
 
 **REQ-V180-REV-02 (MUST) — acceptance, offline, and the freeze.** After the
 `full` profile is green, execute **Appendix B** against the repository and the
 recorded documents — every scenario against fakes, a fake clock and a temporary
 database. **No live LLM call is needed to accept this release** and none is
 made. Record pass or fail per scenario and, per REQ-V12-REP-02, **how** each
-was driven. T9 lands a provisional `report-v1.8.0.md` carrying every
-REQ-V180-RPT-02 item except item 5's tip SHA; that commit's SHA **is**
-`<implementation-tip>`. T10 re-runs the six gates, `full --since <base>`,
+was driven. T9 lands VER-01's version bump and a provisional
+`report-v1.8.0.md` carrying every REQ-V180-RPT-02 item except item 5's tip
+SHA; that commit's SHA **is** `<implementation-tip>`. T10 re-runs the six gates, `full --since <base>`,
 `replay --range <base>..<implementation-tip>` and Appendix B against the final
 tree, then lands **one evidence-only commit** touching `docs/reports/*` and
-nothing else — not recursively required to replay against itself. **Only after
-it lands** is the annotated tag `v1.8.0` created on it.
+nothing else — not recursively required to replay against itself. **After it
+lands**, `checks.py lint-docs` is re-run against it and the annotated tag
+`v1.8.0` is created on **that** commit, so the tagged tree is the one the
+recorded documentation gate passed. Gates 1–4 and 6 are not re-run: the commit
+changed no file any of them reads (EC-09). The report records the re-run exit
+code and the tagged sha.
 
 **REQ-V180-REV-03 (MUST) — regression, and no weakened posture.** spec-v1.2's
 D1 and D2, spec-v1.4's S01 acceptance, spec-v1.5's freeze properties and
@@ -971,13 +1136,27 @@ constraint. Failures are fixed and the whole set rerun inside the **4-cycle**
 repair budget; exhausting it means the stop route — not relaxing a gate, not
 deleting a test, not lowering a bound.
 
-**REQ-V180-REV-04 (MUST) — the stop route.** If a gate stays red after the
-repair budget, or a spec-internal contradiction is found that cannot be
-resolved without a decision, the run **stops and finalises** — it does not
-half-ship. The procedure, invoked from wherever the run stands:
+**REQ-V180-REV-04 (MUST) — the stop route, in two stages.** If a gate stays
+red after the repair budget, or a spec-internal contradiction is found that
+cannot be resolved without a decision, the run **stops and finalises** — it
+does not half-ship. What the route can promise depends on **where the run
+stands**, because from T2 on code is committed and finalising does not
+un-commit it:
 
-1. **Finalise `docs/reports/report-v1.8.0.md`** from T0's skeleton: every
-   REQ-V180-RPT-02 item the branch reached, and for each it did not, the
+- **Stage A — before T2.** Nothing of this release is committed. The
+  procedure below runs and, additionally, the collected test count equals
+  T0's measured floor and the report states that no code was written.
+- **Stage B — from T2 on.** Commits exist. Then: **no revert, no test
+  deletion, the tree stays exactly as committed**; the failing gate's output
+  is the evidence; the collected test count is **whatever the tree has**
+  (EC-09), never reduced toward the floor; no version bump and no tag —
+  `pyproject.toml` still reads `1.7.0` **by construction**, VER-01 having put
+  the bump in T9; and the report records the **last green commit by sha**.
+
+The procedure, invoked from wherever the run stands, naming its stage:
+
+1. **Finalise `docs/reports/report-v1.8.0.md`** from T0's skeleton: the stage,
+   every REQ-V180-RPT-02 item the branch reached, and for each it did not, the
    explicit words *"not reached: <task> stop"* — never a blank, never a `TBD`.
    The red gate is named with its exact command and exit code; the repair
    cycles spent are listed one per line.
@@ -997,11 +1176,18 @@ half-ship. The procedure, invoked from wherever the run stands:
    before the closing commit. `gitleaks` MUST exit 0. **Nothing is silently
    skipped.**
 5. **Commit the permitted evidence and nothing else**: report, tg-post, usage
-   rows, task-brief files. No source, test or config file is in this commit;
-   `--no-verify` is forbidden here as everywhere.
+   rows, task-brief files. **This commit is permitted on the stop route and
+   required by it** — it is how the evidence reaches the repository at all. No
+   source, test or config file is in it; `--no-verify` is forbidden here as
+   everywhere.
 6. **Prove the negative and terminate**: `pyproject.toml` still reads its
-   pre-stop version, `git tag -l` shows no `v1.8.0`, and the report says so.
-   **No bump, no tag, no evidence-only commit.** No later task of §12 runs.
+   pre-stop version (`1.7.0` at every stage, per VER-01), `git tag -l` shows no
+   `v1.8.0`, and the report says so. **No bump, no tag, and none of REV-02's
+   closing sequence**: item 5's commit is *not* REV-02's evidence-only commit,
+   is never tagged, and is the run's last action. The prohibition on an
+   evidence-only commit governs the **normal** route — where the only one is
+   REV-02's, created at T10 on a green tree — and does not reach item 5. No
+   later task of §12 runs.
 
 ---
 
@@ -1014,16 +1200,16 @@ come before the code they cover, inside the same task.
 | T | task | acceptance |
 |---|---|---|
 | **T0** | Preconditions: six gates green on the unchanged tree, hooks installed, `doctor` green, **test count re-measured** (floor 1133), `<base>` and the spec's `sha256` recorded, `docs/prompts/127-go-spec-v1.8.0.md` and `docs/spec/task-briefs/` created, the `report-v1.8.0.md` skeleton landed with `## Operator inputs` copied verbatim from the `go` request and a complete ledger-row block | every item recorded; 126 is the highest pre-existing prompt; `<base>` written before the first commit; an unreachable LM Studio **blocks** here |
-| **T1** | §3: Context discipline and the branch-zone rule; the factual lines corrected; `skills/*.md` and `CLAUDE.md` reviewed. Test `T-V180-AGT-01` | green; the four exemptions verbatim; the project-prompt record written for all three files |
-| **T2** | §4 part 1: `delete_message`, `finish(ok=)`, `STATUS_FAILED`, `STATUS_DONE` removed, `is_failure_reply`, the call site. Tests `T-V180-CHAT-01…-05`, `-08`; amends `bot.py:1085-1103`, `:1211`, `tests/test_v12_patch.py:145` | green; `--selftest` green with the amended assertion; no other test amended |
+| **T1** | §3: Context discipline and the branch-zone rule; the **non-count** factual line (the layout line) corrected; `skills/*.md` and `CLAUDE.md` reviewed. Test `T-V180-AGT-01` | green; the four exemptions verbatim; the project-prompt record written for all three files; **no count-bearing line touched** (AGT-03) |
+| **T2** | §4 part 1: `delete_message` (`-> bool`), `finish(ok=)`, `STATUS_FAILED`, `STATUS_DONE` removed, `AgentOutcome` + `run_agent_outcome` + `finish`'s `failed`/`kind`, `_send -> bool`, the reordered call site. Tests `T-V180-CHAT-01…-05`, `-08`, `-09`; amends `bot.py:1085-1103`, `:1211`, `tests/test_v12_patch.py:145` | green; `run_agent`'s signature and its ~25 test call sites untouched; `--selftest` green with the amended assertion; no other test amended |
 | **T3** | §4 part 2: `_TypingIndicator`, `TYPING_INTERVAL_S`, the ceiling, start/stop around `run_agent`. Tests `T-V180-CHAT-06`, `-07` | green with a fake clock and event; no real sleep in the suite; `--selftest` still binds no port |
 | **T4** | §5: `STYLE` rewritten to §5.1, the `num` coverage pass, the reading strip, the restyled sections, the nav entry, the SVG palette. Tests `T-V180-DSH-01…-04` | green — each **red before** the change, recorded so; `T-V160-DSH-02`'s byte identity holds |
-| **T5** | §6 storage and render: the three read functions, `conversation_list_section`, `conversation_transcript_section`. Tests `T-V180-CONV-01…-03` | green; migration tests green from v1…v5; `SCHEMA_VERSION` still 5; `git diff` shows no DDL |
-| **T6** | §6 server + §7: four routes, two regexes, `_parse_offset`, `_STATIC_ROUTES`, redact-then-escape, the two bounds; then the six `v180-*` entries, the `mutation-v180` gate with both re-measured timeouts, and §9's matrix test repointed (EC-12). Tests `T-V180-CONV-04`, `-05`, `T-V180-SEC-01…-04` | green; `--select v180-` green with every `find` matching once; `mutation-all` green inside its new timeout; the repointed matrix test green |
-| **T7** | Docs, config and **the version bump**: `pyproject.toml` → `1.8.0`, `README.md` (Dashboard, Versioning), `AGENTS.md`'s counts, `docs/plan.md`, `report_path`. Test `T-V180-VER-01` | red before the bump, green after; `lint-docs` green on the T0 skeleton; docs match reality |
-| **T8** | **Review (REQ-V180-REV-01) in a clean context, then every gate**: the six verbatim, `checks.py run --profile full --since <base>`. **Every source, test and config fix lands here or earlier** | findings closed or waived; every gate green; the count exceeds T0's floor; the tree is final |
-| **T9** | **Provisional** `report-v1.8.0.md` (RPT-02 minus item 5's tip SHA), `tg-post-v1.8.0.md` (RU, `wc -m` quoted), `docs/llm-usage.md` rows | `lint-docs` green against the repointed `report_path`; no self-referential SHA claimed |
-| **T10** | **Final acceptance (REQ-V180-REV-02)**: the six gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the evidence-only commit; then the annotated tag `v1.8.0`, only on green | every gate green on the tree that ships; the tag recorded, or its absence recorded with the verdict withholding it |
+| **T5** | §6 storage and render: the **four** read functions (`conversation_row` included), the by-turn window, `conversation_list_section`, `conversation_transcript_section`. Tests `T-V180-CONV-01…-03` | green; migration tests green from v1…v5; `SCHEMA_VERSION` still 5; `git diff` shows no DDL |
+| **T6** | §6 server + §7: four routes, two regexes, `_parse_offset`, `_STATIC_ROUTES`, redact-then-escape, the two bounds; then the six `v180-*` entries, the `mutation-v180` gate with both re-measured timeouts, and §9's matrix test repointed at the delta file (EC-12). Tests `T-V180-CONV-04`, `-05`, `T-V180-SEC-01…-04` | green; `--select v180-` green with every `find` matching once; `mutation-all` green inside its new timeout; the repointed matrix test green |
+| **T7** | Docs and config, **no version bump**: `README.md` (Dashboard), `AGENTS.md`'s count-bearing lines written **once, here** (AGT-03), `docs/plan.md`, `report_path` (RPT-01) | `lint-docs` green on the T0 skeleton; the mutation count reads 98; docs match reality |
+| **T8** | **Review (REQ-V180-REV-01) in a clean context, then every gate**: the six verbatim, `checks.py run --profile full --since <base>`. **Every source, test and config *fix* lands here or earlier** — the single exception is T9's release stamp (VER-01), which is not a fix and is re-gated at T10 | findings closed or waived; every gate green; the count exceeds T0's floor; the tree is functionally final |
+| **T9** | **The version bump** (VER-01): `pyproject.toml` → `1.8.0`, `README.md`'s Versioning section and `AGENTS.md`'s echo, test `T-V180-VER-01` in `tests/test_v180_version.py`; then **provisional** `report-v1.8.0.md` (RPT-02 minus item 5's tip SHA), `tg-post-v1.8.0.md` (RU, `wc -m` quoted), `docs/llm-usage.md` rows | `T-V180-VER-01` red before the bump, green after; `lint-docs` green against the repointed `report_path`; no self-referential SHA claimed |
+| **T10** | **Final acceptance (REQ-V180-REV-02)**: the six gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the evidence-only commit; **then `lint-docs` re-run against it** and the annotated tag `v1.8.0` created on **that** commit, only on green | every gate green on the tree that ships; the post-commit `lint-docs` exit code and the tagged sha recorded, or the tag's absence recorded with the verdict withholding it |
 
 ### 12.1 Per-task reading map
 
@@ -1036,14 +1222,14 @@ more is never a defect; reading less never releases a requirement. §1
 |---|---|---|---|
 | **T0** | §9, §10 | `AGENTS.md:92-121`, `config/quality_gates.yaml:330-340` | no — *commands only* |
 | **T1** | §3 | `AGENTS.md` (whole), `skills/host-info.md`, `skills/weather.md`, `CLAUDE.md`, `templates` block quoted in §3 | no — *artefacts only* |
-| **T2** | §4 (CHAT-01…-04, -06, -07) | `bot.py:45-70`, `:142-180`, `:241-295`, `:685-710`, `:1085-1115`, `:1200-1215`; `agent.py:66-86`; `tests/test_v12_patch.py:140-150` | **yes** |
+| **T2** | §4 (CHAT-01…-04, -06, -07, -08) | `bot.py:45-70`, `:100-115`, `:142-180`, `:241-295`, `:685-710`, `:960-975`, `:1085-1115`, `:1200-1215`; `agent.py:1-20`, `:66-86`, `:226-300`, `:320-330`, `:390-420`, `:440-450`; `tests/test_v12_patch.py:140-150` | **yes** |
 | **T3** | §4 (CHAT-05, -06) | `bot.py:45-70`, `:100-180`, `:685-710`; `config.py:90-100`, `:296-330` | **yes** |
 | **T4** | §5 (DSH-01…-06), §5.1 | `dashboard_render.py:88-150`, `:340-470`, `:600-700`; the task-brief file carrying §5.1 | **yes** |
-| **T5** | §6 (CONV-01…-05) | `storage.py:140-175`, `:270-290`, `:695-730`; `dashboard_render.py:45-90`, `:440-470` | **yes** |
-| **T6** | §6 (CONV-06, -07), §7, §9 (EC-10, -12) | `dashboard_server.py:30-60`, `:85-100`, `:160-195`, `:400-430`, `:470-495`, `:570-600`, `:655-700`; `config.py:155-175`; `devtools/mutation_check.py` **tail only** (`MUTATIONS` entries and `main()`); `config/quality_gates.yaml:200-260`, `:330-340`; `tests/test_v15_standards.py:1685-1741` | **yes** |
-| **T7** | §10 | `pyproject.toml` (`project.version` only), `README.md:204-228`, `:609-642`, `AGENTS.md:102-121`, `docs/plan.md`, `config/quality_gates.yaml:330-340` | no — *artefacts only* |
+| **T5** | §6 (CONV-01…-05), §7 (SEC-02) | `storage.py:140-175`, `:270-290`, `:695-730`; `dashboard_render.py:45-90`, `:440-470` | **yes** |
+| **T6** | §6 (CONV-06, -07), §7, §9 (EC-10, -12) | `dashboard_server.py:30-60`, `:85-100`, `:160-195`, `:400-430`, `:470-495`, `:570-600`, `:655-700`; `config.py:155-175`; `devtools/mutation_check.py` **tail only** (`MUTATIONS` entries and `main()`); `config/quality_gates.yaml:200-260`, `:330-340`; `tests/test_v15_standards.py:1685-1741`; `docs/spec/spec-v1.8.0-delta-1.md` (created here) | **yes** |
+| **T7** | §3 (AGT-03), §10 (RPT-01) | `README.md:204-228`, `AGENTS.md:102-121`, `docs/plan.md`, `config/quality_gates.yaml:330-340` | no — *artefacts only* |
 | **T8** | §9, §11 (REV-01) | the review's own reading map; otherwise only commands run | no — *the task is itself the clean-context review* |
-| **T9** | §10, §11 | this run's own artefacts | no — *artefacts only* |
+| **T9** | §10 (VER-01, RPT-02…04), §11 | `pyproject.toml` (`project.version` only), `README.md:609-642`, `AGENTS.md:102-121`; this run's own artefacts | **yes** — it writes `tests/test_v180_version.py`, which `pytest` runs |
 | **T10** | §11, Appendix B | this run's own artefacts | no — *commands only* |
 
 A task whose actual reading exceeds its map crosses REQ-V180-EC-07 item 5 and
@@ -1054,8 +1240,8 @@ delegates from that point on; the report records map versus actual either way
 
 ## Appendix A — requirement traceability
 
-Every `MUST` appears exactly once; the **fifty** rows below are in bijection
-with the fifty `MUST` ids defined in §§1–12. NON-GOALs live in §2's table.
+Every `MUST` appears exactly once; the **fifty-one** rows below are in
+bijection with the fifty-one `MUST` ids defined in §§1–12. NON-GOALs live in §2's table.
 "Verified by" names a test id, a negative test, a Gherkin scenario or a
 recorded artefact — never "by inspection". Provenance (the prior `REQ` a row
 inherits from, the decisions `D1`–`D14`) lives in `docs/handoff-v1.8.0.md`.
@@ -1070,48 +1256,49 @@ inherits from, the decisions `D1`–`D14`) lives in `docs/handoff-v1.8.0.md`.
 | `REQ-V180-EC-06` — not benchmark-affecting; the rule does not fire | the report's "Benchmark-affecting changes" statement; `git diff --stat` |
 | `REQ-V180-EC-07` — delegation: map, default `yes`, verbatim exemptions, brief file, live crossing, report record | §12.1's map; the committed `task-briefs/v180-T*.md`; the delegation record; `E13` |
 | `REQ-V180-EC-08` — handoff file; prompt format; one prompt one commit; `--no-verify` ban; prompt 127 | `lint-docs`; `replay --range <base>..<implementation-tip>`; the attestation; the handoff committed before T0 |
-| `REQ-V180-EC-09` — the six gates verbatim; the count floor; the final re-run | the report's two recorded exit-code sets |
+| `REQ-V180-EC-09` — the six gates verbatim; the count floor (stop route: whatever the tree has); the final re-run; `lint-docs` re-run on the tagged commit | the report's two recorded exit-code sets; the post-commit `lint-docs` code and the tagged sha |
 | `REQ-V180-EC-10` — six mutation entries by mechanism; `mutation-v180`; two re-measured timeouts | `mutation_check.py --select v180-`; `--list` recorded; the matrix test |
 | `REQ-V180-EC-11` — the implementation order; tests before code within a task | the commit sequence; the report's per-task record |
-| `REQ-V180-EC-12` — the gate matrix reproduced here; the matrix test repointed, label map extended | `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` green on this file |
+| `REQ-V180-EC-12` — the gate matrix in `spec-v1.8.0-delta-1.md`; the matrix test repointed, label map extended | `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` green on the delta file |
 | `REQ-V180-AGT-01` — Context discipline: write trigger, brief-by-file, four verbatim exemptions | `T-V180-AGT-01`; `E13` |
 | `REQ-V180-AGT-02` — the ownership-zone branch rule | `T-V180-AGT-01` |
-| `REQ-V180-AGT-03` — the factual lines corrected and nothing else | `git diff -- AGENTS.md` reviewed at T8; the report's count record |
+| `REQ-V180-AGT-03` — the factual lines corrected and nothing else; each written once, counts in T7 | `git diff -- AGENTS.md` reviewed at T8; the report's count record |
 | `REQ-V180-AGT-04` — the three project prompts reviewed, not rewritten | the report's project-prompt record naming all three files |
 | `REQ-V180-CHAT-01` — `delete_message` through `_call_with_retry` | `T-V180-CHAT-01` |
 | `REQ-V180-CHAT-02` — success deletes the message; `STATUS_DONE` removed | `T-V180-CHAT-02`; `--selftest`; `v180-status-delete-skipped`; `E1` |
 | `REQ-V180-CHAT-03` — failure edits to `STATUS_FAILED` and keeps it | `T-V180-CHAT-03`; `E2` |
-| `REQ-V180-CHAT-04` — the signal: closed `FALLBACK_*` table, `is_failure_reply`, exception arm | `T-V180-CHAT-04`; `v180-status-signal-inverted`; `E2` |
-| `REQ-V180-CHAT-05` — typing: 4.0 s, `cfg.llm_timeout_s` ceiling, daemon thread | `T-V180-CHAT-06`; `v180-typing-ceiling-removed`; `E4` |
+| `REQ-V180-CHAT-04` — the signal is `AgentOutcome`; `run_agent_outcome`; `run_agent` a one-line wrapper | `T-V180-CHAT-04`, `T-V180-CHAT-08`; `v180-status-signal-inverted`; `E2` |
+| `REQ-V180-CHAT-05` — typing: 4.0 s, `cfg.llm_timeout_s` ceiling, one unretried attempt per tick, bounded join, injected clock and event | `T-V180-CHAT-06`; `v180-typing-ceiling-removed`; `E4` |
 | `REQ-V180-CHAT-06` — best-effort both ways; the selftest records deletions | `T-V180-CHAT-05`, `-07`; `--selftest`; `E3`, `E5` |
-| `REQ-V180-CHAT-07` — the `FALLBACK_*` table is closed; reflection proves it | `T-V180-CHAT-08` |
+| `REQ-V180-CHAT-07` — the outcome contract: every fallback path carries `failed` and its `kind` | `T-V180-CHAT-08` |
+| `REQ-V180-CHAT-08` — reply first, then resolve the status; `_send -> bool` | `T-V180-CHAT-09`; `E1`, `E3` |
 | `REQ-V180-DSH-01` — the constraints that do not move; system font only | `T-V180-DSH-04`; `E7` |
 | `REQ-V180-DSH-02` — §5.1 is frozen; the executor implements, never designs | `T-V180-DSH-03`; the committed T4 task-brief file |
-| `REQ-V180-DSH-03` — tabular numerals by **coverage**; monospace dropped | `T-V180-DSH-01`, recorded red before T4; `E6` |
-| `REQ-V180-DSH-04` — the rejected defaults are absent and asserted | `T-V180-DSH-02`, recorded red before T4; `E7` |
+| `REQ-V180-DSH-03` — tabular numerals by **column coverage**; monospace dropped | `T-V180-DSH-01`, recorded red before T4; `E6` |
+| `REQ-V180-DSH-04` — the rejected defaults are absent from the **chrome** and asserted | `T-V180-DSH-02`, recorded red before T4; `E7` |
 | `REQ-V180-DSH-05` — per-page layout; nav gains conversations; no column moves | `T-V180-DSH-04`; `T-V160-DSH-02` still green; `E8` |
 | `REQ-V180-DSH-06` — the four SVG helpers reused, only their colours move | `T-V180-DSH-03`; `git diff` shows unchanged geometry |
 | `REQ-V180-CONV-01` — the entity is a conversation; one line of copy says so | `T-V180-CONV-04`; `E8` |
-| `REQ-V180-CONV-02` — three read functions, parameterized, mirroring `recent_traces` | `T-V180-CONV-01`, `-02`, `-03` |
+| `REQ-V180-CONV-02` — four read functions incl. `conversation_row`; the by-turn window and its probe | `T-V180-CONV-01`, `-02`, `-03` |
 | `REQ-V180-CONV-03` — `/conversations` row shape; `limit` 50, range 1–500 | `T-V180-CONV-04`; `E8` |
-| `REQ-V180-CONV-04` — transcript: `turn_id`/`id` order, roles visible, `limit`/`offset` | `T-V180-CONV-05`; `E9` |
-| `REQ-V180-CONV-05` — the trace link joins via `(conv_id, turn_id)` | `T-V180-CONV-03`, `-05`; `E9` |
-| `REQ-V180-CONV-06` — the JSON mirrors carry the same redacted, capped content | `T-V180-CONV-04`, `T-V180-SEC-01`; `E10` |
+| `REQ-V180-CONV-04` — transcript: `turn_id`/`id` order, no split turn, `limit`/turn `offset`, next link from `has_more`, 404 only on a missing row | `T-V180-CONV-05`; `E9` |
+| `REQ-V180-CONV-05` — the trace link joins via `(conv_id, turn_id)`, lowest `id` first, `llm_calls` before `tool_calls` | `T-V180-CONV-03`, `-05`; `E9` |
+| `REQ-V180-CONV-06` — the JSON mirrors carry the same redacted, capped content, the turn `offset` and `has_more` | `T-V180-CONV-04`, `T-V180-SEC-01`; `E10` |
 | `REQ-V180-CONV-07` — routing, 404/400, the `_STATIC_ROUTES` disposition | `T-V180-CONV-04`, `-05`; the dead-code record; `E12` |
-| `REQ-V180-SEC-01` — `redact()` then `esc()`, no third path | `T-V180-SEC-01`; `v180-transcript-redact-bypassed`; `E10` |
-| `REQ-V180-SEC-02` — two bounds: 2000 chars per message, `limit` per page | `T-V180-SEC-02`; `v180-transcript-cap-removed`; `E11` |
+| `REQ-V180-SEC-01` — `redact()` on every sink; `esc()` on the HTML sink only | `T-V180-SEC-01`; `v180-transcript-redact-bypassed`; `E10` |
+| `REQ-V180-SEC-02` — three bounds: 2000 escaped chars per message (marker additional), `limit` per page, 1.5 MiB of rendered bytes per response | `T-V180-SEC-02`; `v180-transcript-cap-removed`, `v180-transcript-budget-removed`; `E11` |
 | `REQ-V180-SEC-03` — REQ-V160-TRC-09 not violated; the sources are distinct | `T-V180-SEC-03`; `E13`'s content-attribute half |
-| `REQ-V180-SEC-04` — headers, cap, read-only handle, loopback bind unchanged | `T-V180-SEC-04`; `v180-dashboard-bind-widened`; `E12` |
+| `REQ-V180-SEC-04` — headers, cap, read-only handle, loopback bind unchanged | `T-V180-SEC-04`; the pre-existing `T-V160-SRV-*` bind assertions; `E12` |
 | `REQ-V180-SEC-05` — parameterized SQL; no interpolation of request input | `T-V180-SEC-04`; the T8 review item 4 |
-| `REQ-V180-VER-01` — `1.7.0` → `1.8.0` at T7 only; the tag last, on green | `T-V180-VER-01`; `git tag -l` recorded |
+| `REQ-V180-VER-01` — `1.7.0` → `1.8.0` at T9 only, after T8's gates; the tag last, on green | `T-V180-VER-01`; `git tag -l` recorded |
 | `REQ-V180-RPT-01` — `lint-docs` repointed at `report-v1.8.0.md` at T7 | `checks.py lint-docs` exit code recorded |
-| `REQ-V180-RPT-02` — the report's nine items, delegation record included | `lint-docs`; `/verify-run` item 8 against the record |
+| `REQ-V180-RPT-02` — the report's ten items, delegation record included | `lint-docs`; `/verify-run` item 8 against the record |
 | `REQ-V180-RPT-03` — the Russian tg-post under 1500 characters | `wc -m` quoted in the report |
 | `REQ-V180-RPT-04` — usage rows; a complete ledger row the operator pastes | `lint-docs`'s ledger-row check; the `docs/llm-usage.md` rows |
 | `REQ-V180-REV-01` — clean-context review at T8, eight extra checks | the logged review prompt; the findings-closed record |
-| `REQ-V180-REV-02` — offline acceptance, evidence-only commit, then the tag | Appendix B's per-scenario record; `replay --range`; the tag |
+| `REQ-V180-REV-02` — offline acceptance, evidence-only commit, `lint-docs` re-run, then the tag on that commit | Appendix B's per-scenario record; `replay --range`; the tagged sha |
 | `REQ-V180-REV-03` — regression; no weakened posture; the 4-cycle budget | earlier suites staying green; the repair-cycle count |
-| `REQ-V180-REV-04` — the stop route: what is finalised; no bump, no tag | the stop-route report section, or its recorded non-use |
+| `REQ-V180-REV-04` — the stop route in two stages; what is finalised; no revert, no bump, no tag | the stop-route report section naming its stage, or its recorded non-use |
 
 ---
 
@@ -1124,32 +1311,38 @@ inherits from, the decisions `D1`–`D14`) lives in `docs/handoff-v1.8.0.md`.
 # scenario reads .env or opens the deployment database.
 
 Scenario: E1 — a successful run leaves no status message behind
-  Given a fake Telegram client and a run whose reply is an ordinary answer
+  Given a fake Telegram client and a run whose outcome has failed = False
   When the turn finishes
   Then exactly one status message was sent
+  And the reply was fully delivered before any deleteMessage was issued
   And exactly one deleteMessage was recorded for that message id
   And no message text "✅ done" was ever sent or edited
 
 Scenario: E2 — a failed run keeps the status message with a failure line
-  Given a fake LLM that makes run_agent return FALLBACK_LLM_ERROR
+  Given a fake LLM that drives run_agent_outcome down its llm_error path
   When the turn finishes
-  Then the last edit to the status message is "⚠️ failed"
+  Then the outcome carries failed = True and kind = "llm_error"
+  And the last edit to the status message is "⚠️ failed"
   And no deleteMessage was recorded
-  And the user still received the fallback reply
+  And the user still received FALLBACK_LLM_ERROR as the reply
 
-Scenario: E3 — a failed delete is accepted, never escalated
+Scenario: E3 — a failed delete, and a failed reply send, are both accepted
   Given a fake Telegram client whose delete_message always raises
   When a successful turn finishes
   Then the status message is still present in the chat
   And exactly one warning was logged with every registered secret redacted
   And process_update returned normally with the reply delivered
+  And when instead the reply send raises TelegramError on a successful
+      outcome, the status message is edited to "⚠️ failed", never deleted
 
-Scenario: E4 — the typing indicator re-sends on the interval and then stops
-  Given a fake clock and a configured llm_timeout_s of 30 seconds
+Scenario: E4 — the typing indicator sends once per tick and then stops
+  Given a fake clock, a fake stop event and a ceiling_s of 30 seconds
   When a turn runs for 60 seconds of fake time
-  Then a typing chat action was sent once per 4.0 s of elapsed fake time,
-       each send made only while elapsed < llm_timeout_s at that moment
+  Then exactly one sendChatAction was issued per 4.0 s tick — never two for
+       one tick, and never through the retry wrapper
+  And every send was preceded by a stop-event check and an elapsed check
   And no typing chat action was sent once elapsed reached 30 seconds
+  And stop() set the event and joined the worker within 1.0 s
   And the indicator thread had stopped before the reply was sent
 
 Scenario: E5 — a typing failure disables the indicator and nothing else
@@ -1162,8 +1355,9 @@ Scenario: E5 — a typing failure disables the indicator and nothing else
 Scenario: E6 — every numeric cell is a column, not a drift
   Given a fixture exercising every section builder in dashboard_render
   When each builder renders
-  Then every cell holding a number or a fixed-format timestamp carries
-       class "num", and no cell holding a word carries it
+  Then every column whose data cells hold numbers or fixed-format timestamps
+       carries class "num" on its th and on every one of its td cells
+  And no column whose data cells hold words carries it on either
   And STYLE declares font-variant-numeric: tabular-nums for td.num and th.num
   And STYLE names no monospace family anywhere
 
@@ -1180,16 +1374,23 @@ Scenario: E8 — the conversations list is bounded and names the entity
   When GET /conversations is served with no query parameters
   Then 50 rows are rendered, newest first
   And each row shows id, user, started, messages, active and last activity
-  And class "num" is on every one of those columns except active
+  And class "num" is on the th and every td of all of those columns except
+      active, whose data cells hold the word yes or no
   And the page uses the word "conversation" and never the word "session"
   And GET /conversations?limit=501 is answered 400
 
-Scenario: E9 — the transcript reads in order and reaches its traces
-  Given a conversation of three turns where turn 2 has an llm_calls trace_id
+Scenario: E9 — the transcript reads in order, pages by turn, reaches traces
+  Given a conversation of three turns where turn 2 has two llm_calls rows
+       with non-null trace_id and turn 1 and 3 have none
   When GET /conversations/<id> is served
   Then the messages appear in turn_id then id order with their roles visible
-  And turn 2 links to /traces/<trace_id>
+  And turn 2 links to the trace_id of the lowest llm_calls id of that turn
   And turns 1 and 3 render their turn label as plain text, no dangling link
+  And when limit is set so a page would end inside turn 2, the page is
+      extended to the end of turn 2 and no turn appears on two pages
+  And the next link is emitted only when the probe turn existed
+  And GET /conversations/<id> for a conversation with no messages is 200
+      with the empty state, while an id no row matches is 404
 
 Scenario: E10 — content is redacted, then escaped, on both routes
   Given a registered secret and a message whose content contains it
@@ -1200,11 +1401,13 @@ Scenario: E10 — content is redacted, then escaped, on both routes
   And the JSON response carries the redacted text
 
 Scenario: E11 — a long transcript paginates instead of hitting the cap
-  Given a conversation of 500 messages of 8000 characters each
+  Given a conversation of 500 messages of 8000 characters each, every message
+       mixing 4-byte characters with escape-expanding ones
   When GET /conversations/<id>?limit=500 is served
-  Then the response is under 2 MiB and is not the "response too large" body
-  And each rendered message is truncated to 2000 characters with its marker
-      and its original length stated
+  Then the rendered page is under TRANSCRIPT_PAGE_BUDGET_BYTES, the response
+       is under 2 MiB, and it is not the "response too large" body
+  And each rendered message is cut to 2000 characters of escaped text, with
+      the marker and the original length additional to that 2000
 
 Scenario: E12 — the failure answers are the existing ones
   Given a running dashboard server bound to 127.0.0.1 only
@@ -1234,11 +1437,49 @@ Scenario: E14 — the run left no secret anywhere
 
 ## Appendix C — cross-review log
 
-### Round 1
+### Round 1 of at most 3 — against the whole spec (`58d4553`); 24 findings, 24 accepted (7 adapted), 0 rejected
 
-*(empty — no cross-review has been run yet. Each finding is recorded as: id,
-severity, requirement touched, ruling (applied / rejected with reason), edit.)*
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R1-1 | Crit | CHAT-04, CHAT-07 | accepted, adapted | the signal is a frozen `AgentOutcome` returned by a new `run_agent_outcome`; `run_agent` stays a `-> str` one-line wrapper, so no test call site moves |
+| R1-2 | High | CHAT-04, `T-V180-CHAT-04` | accepted, adapted | the same change removes text matching entirely: `is_failure_reply`, its closed table and `_LLM_ERROR_PREFIX` are gone, so decoration and truncation cannot mis-classify |
+| R1-3 | High | CHAT-02, CHAT-04 | accepted | new REQ-V180-CHAT-08 fixes the order — outcome, then reply, then delete only when the send returned `True`; `_send` gains an additive `-> bool` |
+| R1-4 | High | CHAT-03, CHAT-06 | accepted | CHAT-03 now promises only the attempt: a rejected edit leaves the previous status text, logs once, and is an accepted outcome |
+| R1-5 | Med | CHAT-01 | accepted | `delete_message` is annotated `-> bool` and the client's unwrapped-`result` contract is stated; `_call_with_retry` widens to `-> dict \| bool` |
+| R1-6 | High | CHAT-05, CHAT-06 | accepted | the typing worker makes one **unretried** `tg.call` per tick and checks the stop event and the elapsed clock immediately before each attempt |
+| R1-7 | High | CHAT-05, `T-V180-CHAT-06` | accepted | `stop()` sets the event **and joins**, bounded by `TYPING_JOIN_TIMEOUT_S = 1.0`; a timeout is logged and the caller proceeds |
+| R1-8 | Med | CHAT-05, CHAT-06 | accepted | one attempt per tick makes the ceiling arithmetic true: at most `ceil(llm_timeout_s / TYPING_INTERVAL_S)` requests, no bursts |
+| R1-9 | Med | CHAT-05, `T-V180-CHAT-06` | accepted | the seams are named constructor parameters — `interval_s`, `ceiling_s`, `monotonic`, `stop_event` — with their production defaults, so no test sleeps |
+| R1-10 | High | SEC-01, CONV-06 | accepted | SEC-01 is stated per sink: `redact()` everywhere, `esc()` on the HTML sink only, because `json.dumps` escapes and HTML-escaping would corrupt the mirror |
+| R1-11 | Crit | SEC-02, `T-V180-SEC-02` | accepted, adapted | the bound is enforced, not proved: the page builder accumulates rendered **bytes** against `TRANSCRIPT_PAGE_BUDGET_BYTES = 1.5 MiB`, and the test uses a 4-byte / escape-expanding fixture |
+| R1-12 | Med | SEC-02 | accepted | the 2000 governs the escaped message text alone; the marker and the original-length note are additional and counted by the byte budget |
+| R1-13 | High | CONV-02, `T-V180-CONV-02` | accepted, adapted | the page is selected **by turn**: a turn window bounded `limit + 1`, turns taken whole, "up to `limit` messages, extended to the end of the last turn" |
+| R1-14 | High | CONV-04 | accepted | the window fetches one turn beyond the page; that probe alone decides the next link and is discarded before rendering (`has_more`) |
+| R1-15 | Med | CONV-04, CONV-07 | accepted | a fourth reader, `conversation_row`, decides the 404; an existing conversation with no messages answers 200 with the empty state |
+| R1-16 | Med | CONV-05 | accepted | the link is the `trace_id` of the lowest `llm_calls` `id` for the turn with a non-null value, then the lowest in `tool_calls`, then none |
+| R1-17 | High | DSH-03, CONV-03 | accepted | `class="num"` is a property of the **column**, decided by its data cells and carried on the `<th>` and every `<td>`; the word-valued-`<th>` prohibition is gone |
+| R1-18 | Med | DSH-04, `T-V180-DSH-02` | accepted | the anti-pattern scan is scoped to the static chrome through a named sentinel-intersection seam, excluding interpolated message content |
+| R1-19 | Med | EC-10 | accepted | `v180-dashboard-bind-widened` is replaced by `v180-transcript-budget-removed`, a mechanism this release introduces; the bind keeps its pre-existing `T-V160-SRV-*` coverage |
+| R1-20 | High | AGT-03, T1, T7 | accepted | AGT-03 splits by when the fact becomes true: T1 writes the layout line only, T7 writes every count-bearing line once, after T6 |
+| R1-21 | Crit | REV-04, EC-09 | accepted, adapted | the stop route has two stages; from T2 on there is no revert, no test deletion, and the collected count is whatever the tree has |
+| R1-22 | Crit | REV-04, VER-01 | accepted, adapted | the version bump moves to T9, the last task before tagging, so a stop at any earlier point needs no revert and VER-01's stop evidence is true by construction |
+| R1-23 | High | REV-04 items 5–6 | accepted, adapted | item 5's evidence commit is explicitly permitted on the stop route; the ban on an evidence-only commit is named as the normal route's rule |
+| R1-24 | High | REV-02, EC-09, T10 | accepted | `lint-docs` is re-run against the final docs-only commit and the tag goes on **that** commit; the other gates are not re-run, and the spec says why |
 
-| # | severity | requirement | finding | ruling | edit |
-|---|---|---|---|---|---|
-| | | | | | |
+**Round 1: 24 findings, 24 accepted (7 adapted), 0 rejected.** New
+requirements: `REQ-V180-CHAT-08`; `REQ-V180-CHAT-07` was deleted and its id
+reused for the outcome contract, and `T-V180-CHAT-09` is new.
+
+**Two standing lab rulings were overturned in this round**, and are recorded
+as such rather than quietly dropped:
+
+- **R3 — "a structured return from `run_agent` is rejected on cost"** — that
+  ruling measured only the cost of *changing* `run_agent`'s return type and
+  missed the third shape: a new `run_agent_outcome` beside it. Zero test churn,
+  so the cost that justified the rejection does not exist (R1-1, R1-2). The
+  paragraph arguing for the rejected design is deleted; a spec that argues for
+  a design it does not use is a trap.
+- **The single-stage stop route** — written for a stop before any commit and
+  impossible after one. It demanded the T0 test floor, an unwritten source
+  tree, a pre-bump `pyproject.toml` and an evidence commit another item
+  forbade (R1-21…R1-23).
