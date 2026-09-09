@@ -541,7 +541,14 @@ def test_sigint_takes_the_same_abort_path_immediately(tmp_path, monkeypatch):
     original = threading.Thread.join
 
     def join(self, timeout=None):
-        if not raised["done"]:
+        # Scoped to the harness's own worker thread (named "bench-<id>-<n>" at
+        # its creation in `_execute_run`) rather than the first `Thread.join`
+        # call anywhere: spec-v1.8.0 T3's `_TypingIndicator.stop()` also joins
+        # a (differently named) thread from inside `bot.process_update`, which
+        # runs on this same worker thread and can race ahead of the outer
+        # `worker.join(timeout_s)` below -- an unscoped patch could intercept
+        # that join instead and silently swallow the simulated SIGINT.
+        if not raised["done"] and self.name.startswith("bench-"):
             raised["done"] = True
             raise KeyboardInterrupt
         return original(self, timeout)

@@ -4,13 +4,15 @@ on the Telegram client, delete-on-success / edit-to-`STATUS_FAILED`-on-failure
 for `_StatusMessage.finish`, the `AgentOutcome` / `run_agent_outcome` split,
 and the reordered `process_update` call site.
 
-No typing indicator here: `_TypingIndicator` and step 2 of REQ-V180-CHAT-08's
-ordering are T3's (REQ-V180-CHAT-05), not this task's.
+T3 (REQ-V180-CHAT-05, -08 step 2) adds `_TypingIndicator` below and wires it
+into the same call site; `T-V180-CHAT-09`/`-10` above are re-run against that
+change, unmodified, as part of this file's suite.
 """
 
 import inspect
 import json
 import logging
+import threading
 
 import httpx
 import pytest
@@ -354,3 +356,131 @@ def test_t_v180_chat_10_structurally_failed_outcome_marks_status_failed_no_delet
     assert tg.deleted == []
     assert tg.edits[-1] == (USER_ID, 1, bot.STATUS_FAILED)
     assert tg.sent == [(USER_ID, agent.FALLBACK_LLM_ERROR.format(reason="llm http 500"))]
+
+
+# ---------------------------------------------------------------------------
+# T-V180-CHAT-06 / -07 -- `_TypingIndicator` (REQ-V180-CHAT-05)
+# ---------------------------------------------------------------------------
+
+class _CallRecordingTg:
+    """A `tg` stub exposing only `call`, matching what `_TypingIndicator`
+    itself uses (never `_call_with_retry`, never `send_message`/`edit_...`)."""
+
+    def __init__(self, handler=None):
+        self.calls = []
+        self._handler = handler
+
+    def call(self, method, payload, **kwargs):
+        self.calls.append((method, payload, kwargs))
+        if self._handler is not None:
+            return self._handler(method, payload, kwargs)
+        return {}
+
+
+class _RaisingTg:
+    def __init__(self, exc):
+        self.calls = []
+        self._exc = exc
+
+    def call(self, method, payload, **kwargs):
+        self.calls.append((method, payload, kwargs))
+        raise self._exc
+
+
+class _FakeClock:
+    """A scripted `monotonic()` -- returns each value in turn, then repeats
+    the last one forever (so a runaway loop terminates on the ceiling
+    instead of raising `StopIteration`)."""
+
+    def __init__(self, values):
+        self._values = list(values)
+        self.calls = 0
+
+    def __call__(self):
+        index = min(self.calls, len(self._values) - 1)
+        self.calls += 1
+        return self._values[index]
+
+
+_EXPECTED_TICK_KWARGS = {
+    "read_timeout": bot.TYPING_REQUEST_TIMEOUT_S,
+    "connect_timeout": bot.TYPING_REQUEST_TIMEOUT_S,
+    "write_timeout": bot.TYPING_REQUEST_TIMEOUT_S,
+    "pool_timeout": bot.TYPING_REQUEST_TIMEOUT_S,
+}
+
+
+def test_t_v180_chat_06_sends_immediately_then_one_per_tick_until_ceiling():
+    tg = _CallRecordingTg()
+    clock = _FakeClock([0.0, 1.0, 2.0, 20.0])  # deadline = 0.0 + ceiling_s(10.0)
+    indicator = bot._TypingIndicator(
+        tg, 424242, ceiling_s=10.0, interval_s=0.0, monotonic=clock,
+    )
+    indicator.start()
+    indicator._thread.join(1.0)
+    assert not indicator._thread.is_alive()
+    # Two ticks land (elapsed 1.0 and 2.0, both under the 10.0 ceiling); the
+    # third check sees elapsed 20.0 >= ceiling and sends nothing more.
+    assert len(tg.calls) == 2
+    for method, payload, kwargs in tg.calls:
+        assert method == "sendChatAction"
+        assert payload == {"chat_id": 424242, "action": "typing"}
+        assert kwargs == _EXPECTED_TICK_KWARGS
+    indicator.stop()  # idempotent after a natural exit; returns promptly
+
+
+def test_t_v180_chat_06_stop_event_rechecked_after_the_request_returns():
+    stop_event = threading.Event()
+    calls = []
+
+    def handler(method, payload, kwargs):
+        calls.append((method, payload, kwargs))
+        stop_event.set()  # as if stop() fired while this request was in flight
+        return {}
+
+    tg = _CallRecordingTg(handler)
+    clock = _FakeClock([0.0])  # ceiling far away: only the event should end the loop
+    indicator = bot._TypingIndicator(
+        tg, 424242, ceiling_s=1000.0, interval_s=0.0, monotonic=clock,
+        stop_event=stop_event,
+    )
+    indicator.start()
+    indicator._thread.join(1.0)
+    assert not indicator._thread.is_alive()
+    assert len(tg.calls) == 1  # the in-flight request landed, nothing scheduled after it
+    indicator.stop()  # idempotent, joins an already-finished thread promptly
+
+
+def test_t_v180_chat_06_stop_wakes_a_worker_parked_in_the_interval_wait():
+    sent = threading.Event()
+    tg = _CallRecordingTg(lambda method, payload, kwargs: sent.set() or {})
+    clock = _FakeClock([0.0])  # ceiling far away: only stop() should end the loop
+    indicator = bot._TypingIndicator(
+        tg, 424242, ceiling_s=1000.0, interval_s=1000.0, monotonic=clock,
+    )
+    indicator.start()
+    assert sent.wait(1.0)  # bounded wait for the first (immediate) send
+    thread = indicator._thread
+    indicator.stop()  # must wake the worker out of `wait(1000.0)` and join well inside
+    assert not thread.is_alive()  # TYPING_JOIN_TIMEOUT_S (3.0)
+    assert len(tg.calls) == 1  # stop() pre-empted the would-be second tick
+
+
+def test_t_v180_chat_07_raising_send_chat_action_disables_indicator_only(caplog):
+    tg = _RaisingTg(RuntimeError("boom"))
+    clock = _FakeClock([0.0])
+    indicator = bot._TypingIndicator(
+        tg, 424242, ceiling_s=1000.0, interval_s=0.0, monotonic=clock,
+    )
+    with caplog.at_level(logging.WARNING):
+        indicator.start()
+        indicator._thread.join(1.0)
+    assert not indicator._thread.is_alive()
+    assert len(tg.calls) == 1  # no retry, no second attempt after the error
+    assert any("typing indicator disabled" in r.getMessage() for r in caplog.records)
+    indicator.stop()  # idempotent even though the worker already disabled itself
+
+
+def test_t_v180_chat_07_ceiling_s_has_no_default():
+    with pytest.raises(TypeError):
+        bot._TypingIndicator(_CallRecordingTg(), 424242)

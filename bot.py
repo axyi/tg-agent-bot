@@ -52,6 +52,10 @@ PRICING_STATE_KEY = "pricing_json"    # REQ-V13-PRC-02: the persisted price snap
 STATS_MAX_CHARS = 3500            # REQ-V13-OBS-07
 REAP_TIMEOUT_S = 15.0             # REQ-V11-ORP-02
 
+TYPING_INTERVAL_S = 4.0           # REQ-V180-CHAT-05
+TYPING_JOIN_TIMEOUT_S = 3.0
+TYPING_REQUEST_TIMEOUT_S = 2.0
+
 NON_TEXT_REPLY = "I can only process plain text messages."
 NEW_CONVERSATION_REPLY = "New conversation started."
 RATE_LIMIT_REPLY = "Rate limit exceeded. Please wait a moment."
@@ -102,10 +106,21 @@ class TelegramClient:
         self._client = client
         self._sleep = sleep
 
-    def call(self, method: str, payload: dict, *, read_timeout: float) -> dict:
+    def call(
+        self,
+        method: str,
+        payload: dict,
+        *,
+        read_timeout: float,
+        connect_timeout: float = 10.0,
+        write_timeout: float = 10.0,
+        pool_timeout: float = 10.0,
+    ) -> dict:
         # The URL embeds the bot token: never log it, redacted or not.
         url = f"{TELEGRAM_API_HOST}/bot{self._token}/{method}"
-        timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=10.0)
+        timeout = httpx.Timeout(
+            connect=connect_timeout, read=read_timeout, write=write_timeout, pool=pool_timeout
+        )
         try:
             response = self._client.post(url, json=payload, timeout=timeout)
         except httpx.TransportError as exc:
@@ -315,6 +330,72 @@ def _status_line(tool: str, first_argument: str) -> str:
     # Redact before truncating: cutting a secret in half would leave a fragment
     # that `redact` can no longer recognise.
     return redact(f"⚙️ {tool}: {first_argument}…")[:STATUS_MAX_CHARS]
+
+
+class _TypingIndicator:
+    """Best-effort "typing…" indicator, run alongside `_StatusMessage` for the
+    duration of one agent run (REQ-V180-CHAT-05). Any error from Telegram
+    disables it for the rest of this run; the run itself never notices --
+    the same one-`log.warning`-then-disable discipline as `_StatusMessage`.
+    """
+
+    def __init__(
+        self,
+        tg,
+        chat_id: int,
+        *,
+        ceiling_s: float,
+        interval_s: float = TYPING_INTERVAL_S,
+        monotonic: Callable[[], float] = time.monotonic,
+        stop_event: threading.Event | None = None,
+    ) -> None:
+        self._tg = tg
+        self._chat_id = chat_id
+        self._ceiling_s = ceiling_s
+        self._interval_s = interval_s
+        self._monotonic = monotonic
+        self._stop_event = stop_event if stop_event is not None else threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        deadline = self._monotonic() + self._ceiling_s
+        while True:
+            if self._stop_event.is_set():
+                return
+            if self._monotonic() >= deadline:
+                return
+            try:
+                self._tg.call(
+                    "sendChatAction",
+                    {"chat_id": self._chat_id, "action": "typing"},
+                    read_timeout=TYPING_REQUEST_TIMEOUT_S,
+                    connect_timeout=TYPING_REQUEST_TIMEOUT_S,
+                    write_timeout=TYPING_REQUEST_TIMEOUT_S,
+                    pool_timeout=TYPING_REQUEST_TIMEOUT_S,
+                )
+            except Exception as exc:
+                log.warning("typing indicator disabled: %s", redact(str(exc)))
+                return
+            # Re-checked after the request returns, before scheduling anything
+            # further: at most one stale action can still land (~5s after the
+            # reply) if this request was in flight when `stop()` fired --
+            # accepted, not fixed.
+            if self._stop_event.is_set():
+                return
+            self._stop_event.wait(self._interval_s)
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        thread, self._thread = self._thread, None
+        if thread is None:
+            return
+        thread.join(TYPING_JOIN_TIMEOUT_S)
+        if thread.is_alive():
+            log.warning("typing indicator join timed out")
 
 
 def exec_backend_status(
@@ -712,6 +793,8 @@ def process_update(
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     storage.add_user_message(conn, conv_id, redact(text))
     status = _StatusMessage(tg, chat_id)
+    typing = _TypingIndicator(tg, chat_id, ceiling_s=cfg.llm_timeout_s)
+    typing.start()
     try:
         outcome = agent.run_agent_outcome(
             conn=conn,
@@ -729,8 +812,13 @@ def process_update(
             resolve_cost=resolve_cost,
         )
     except Exception:
+        # The indicator must be stopped before `status.finish` runs, on this
+        # path too (REQ-V180-CHAT-08 step 2's ordering) -- not just before
+        # the reply send below.
+        typing.stop()
         status.finish(ok=False)
         raise
+    typing.stop()
     sent_ok = _send(tg, chat_id, split_message(outcome.reply))
     status.finish(ok=sent_ok and not outcome.failed)
 
