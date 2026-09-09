@@ -484,3 +484,27 @@ def test_t_v180_chat_07_raising_send_chat_action_disables_indicator_only(caplog)
 def test_t_v180_chat_07_ceiling_s_has_no_default():
     with pytest.raises(TypeError):
         bot._TypingIndicator(_CallRecordingTg(), 424242)
+
+
+def test_t_v180_chat_08_thread_start_raising_disables_indicator_without_raising(
+    monkeypatch, caplog
+):
+    class _RaisingThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(bot.threading, "Thread", _RaisingThread)
+    tg = _CallRecordingTg()
+    clock = _FakeClock([0.0])
+    indicator = bot._TypingIndicator(
+        tg, 424242, ceiling_s=1000.0, interval_s=0.0, monotonic=clock,
+    )
+    with caplog.at_level(logging.WARNING):
+        indicator.start()  # Thread.start() raises RuntimeError; must not propagate
+    assert indicator._thread is None
+    assert len(tg.calls) == 0  # the worker never ran
+    assert any("typing indicator disabled" in r.getMessage() for r in caplog.records)
+    indicator.stop()  # idempotent no-op: nothing was ever started

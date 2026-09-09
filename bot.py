@@ -358,8 +358,14 @@ class _TypingIndicator:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        thread = threading.Thread(target=self._run, daemon=True)
+        try:
+            thread.start()
+        except Exception as exc:
+            log.warning("typing indicator disabled: %s", redact(str(exc)))
+            self._thread = None
+            return
+        self._thread = thread
 
     def _run(self) -> None:
         deadline = self._monotonic() + self._ceiling_s

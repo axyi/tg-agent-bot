@@ -674,7 +674,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ("scenario", "/?group=scenario"),
             ("conversations", "/conversations"),
         ]
-        body = [dashboard_render.usage_section(rows, group=group, totals=totals)]
+        reading_strip = dashboard_render.reading_strip_section(
+            calls=totals["calls"],
+            total_tokens=totals["input_tokens"] + totals["output_tokens"],
+            cost_usd=totals["cost_usd"],
+            error_rate=(totals["errors"] / totals["calls"]) if totals["calls"] else 0.0,
+        )
+        body = [reading_strip, dashboard_render.usage_section(rows, group=group, totals=totals)]
         for hist in latency:
             body.append(
                 dashboard_render.histogram_svg(hist, width=640, height=160, title="Latency")

@@ -874,6 +874,21 @@ def test_api_traces_and_usage_pages_render(live_server):
         assert status == 200, path
 
 
+def test_t_v180_dsh_05_reading_strip_renders_on_the_usage_page(live_server):
+    """REQ-V180-DSH-05 review finding (T8): `reading_strip_section` is built
+    and unit-tested (test_v180_dashboard.py) but was never wired into `/` --
+    this asserts the route itself, not just the builder."""
+    port, _ = live_server
+    status, _, body = _request(port, "GET", "/")
+    assert status == 200
+    html = body.decode("utf-8")
+    assert 'class="reading-strip"' in html
+    assert 'class="reading-cell"' in html
+    assert ">calls<" in html
+    assert ">total tokens<" in html
+    assert ">error rate<" in html
+
+
 def test_a_trace_page_and_api_serve_real_spans(live_server):
     port, db_path = live_server
     conn = storage.connect(db_path)
