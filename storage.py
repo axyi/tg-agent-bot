@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +17,11 @@ import config
 WINDOW_TURNS = 40
 SCHEMA_VERSION = 5
 RECENT_GOAL_CHARS = 200
+# REQ-V180-CONV-02: the SQL bound on `conversation_messages`'s message fetch --
+# four times the maximum page `limit` of 500, so no lawful page ever reaches
+# it. Hitting it is not an error; the extra row is dropped and its turn
+# becomes the render-time split case (CONV-04, not this module's concern).
+TRANSCRIPT_FETCH_ROWS_MAX = 2000
 
 log = logging.getLogger("storage")
 
@@ -724,6 +729,183 @@ def recent_traces(
     )
     params.append(limit)
     return conn.execute(query, params).fetchall()
+
+
+# ----------------------------------------------------------------------------
+# REQ-V180-CONV-02: four read functions for the conversations/transcript
+# dashboard pages. All mirror `recent_traces` above: parameterized SQL,
+# bounds as parameters, `sqlite3.Row` results, no string formatting of
+# request-shaped values into SQL text.
+# ----------------------------------------------------------------------------
+
+
+def conversation_row(conn: sqlite3.Connection, conv_id: int) -> sqlite3.Row | None:
+    """The `conversations` row for `conv_id`, or `None`. The existence
+    reader: it is what tells an empty conversation (row exists, zero
+    messages) from an absent one, which `conversation_messages` cannot --
+    that function returns an empty list either way (CONV-04, CONV-07)."""
+    return conn.execute(
+        "SELECT id, tg_user_id, created_at, active FROM conversations WHERE id = ?",
+        (conv_id,),
+    ).fetchone()
+
+
+def recent_conversations(conn: sqlite3.Connection, *, limit: int) -> list[sqlite3.Row]:
+    """`id`, `tg_user_id`, `created_at`, `active`, `message_count` (`COUNT`
+    over `messages`) and `last_activity` (`MAX(messages.created_at)`, `NULL`
+    for an empty conversation) -- newest first (`created_at DESC, id DESC`),
+    bounded by `limit`. A `LEFT JOIN` so a conversation with zero messages
+    still appears, with `message_count = 0` and `last_activity = NULL`."""
+    query = (
+        "SELECT c.id AS id, c.tg_user_id AS tg_user_id, c.created_at AS created_at, "
+        "       c.active AS active, COUNT(m.id) AS message_count, "
+        "       MAX(m.created_at) AS last_activity "
+        "FROM conversations AS c "
+        "LEFT JOIN messages AS m ON m.conv_id = c.id "
+        "GROUP BY c.id, c.tg_user_id, c.created_at, c.active "
+        "ORDER BY c.created_at DESC, c.id DESC "
+        "LIMIT ?"
+    )
+    return conn.execute(query, (limit,)).fetchall()
+
+
+def conversation_messages(
+    conn: sqlite3.Connection,
+    conv_id: int,
+    *,
+    limit: int,
+    cursor: tuple[int, int] | None,
+) -> tuple[list[sqlite3.Row], tuple[int, int] | None]:
+    """Pages `messages` by turn, never by row (REQ-V180-CONV-02). `cursor` is
+    the `(turn_id, id)` pair of the page's first message, or `None` for the
+    first page.
+
+    Steps, in order (spec-v1.8.0 §6, REQ-V180-CONV-02 item 3):
+
+    0. cursor check -- an exact `(conv_id, turn_id, id)` match, never a range
+       probe; no match raises `ValueError` (the caller, T6, turns this into a
+       400);
+    1. the turn window -- turns from `turn_id` (or the cursor's position)
+       onward, `limit + 1` of them, each carrying its message count and its
+       lowest `id`;
+    2. the page -- turns taken in order while the running message count
+       stays below `limit`; the turn that crosses `limit` is taken whole;
+    3. the probe -- the first turn from the window not taken, never fetched
+       or rendered, only its `(turn_id, first_id)` kept;
+    4. the messages -- fetched for the taken turns only, bounded in SQL by
+       `LIMIT TRANSCRIPT_FETCH_ROWS_MAX + 1`; a cap hit drops the extra row;
+    5. `next_cursor` -- the `(turn_id, id)` of the first message this reader
+       did not return: the dropped row from step 4 if the cap was hit, else
+       the probe's pair from step 3, else `None`.
+
+    A missing conversation (no rows for `conv_id` at all) yields an empty
+    `rows` list and `next_cursor = None` -- the caller decides the 404 via
+    `conversation_row`, not this function's empty result."""
+    cursor_turn_id: int | None = None
+    cursor_id: int | None = None
+    if cursor is not None:
+        cursor_turn_id, cursor_id = cursor
+        match = conn.execute(
+            "SELECT 1 FROM messages WHERE conv_id = ? AND turn_id = ? AND id = ? LIMIT 1",
+            (conv_id, cursor_turn_id, cursor_id),
+        ).fetchone()
+        if match is None:
+            raise ValueError(
+                f"cursor (turn_id={cursor_turn_id}, id={cursor_id}) names no message "
+                f"of conversation {conv_id}"
+            )
+
+    if cursor is None:
+        window = conn.execute(
+            "SELECT turn_id, COUNT(*) AS n, MIN(id) AS first_id FROM messages "
+            "WHERE conv_id = ? "
+            "GROUP BY turn_id ORDER BY turn_id ASC LIMIT ?",
+            (conv_id, limit + 1),
+        ).fetchall()
+    else:
+        window = conn.execute(
+            "SELECT turn_id, COUNT(*) AS n, MIN(id) AS first_id FROM messages "
+            "WHERE conv_id = ? AND (turn_id > ? OR (turn_id = ? AND id >= ?)) "
+            "GROUP BY turn_id ORDER BY turn_id ASC LIMIT ?",
+            (conv_id, cursor_turn_id, cursor_turn_id, cursor_id, limit + 1),
+        ).fetchall()
+
+    taken: list[sqlite3.Row] = []
+    probe: sqlite3.Row | None = None
+    running = 0
+    for row in window:
+        if running < limit:
+            taken.append(row)
+            running += row["n"]
+        else:
+            probe = row
+            break
+
+    if not taken:
+        return [], None
+
+    turn_ids = [row["turn_id"] for row in taken]
+    placeholders = ", ".join("?" for _ in turn_ids)
+    query = (
+        "SELECT turn_id, role, content, tool_call_id, created_at, id FROM messages "
+        f"WHERE conv_id = ? AND turn_id IN ({placeholders})"
+    )
+    params: list[object] = [conv_id, *turn_ids]
+    if cursor is not None:
+        query += " AND (turn_id > ? OR (turn_id = ? AND id >= ?))"
+        params.extend([cursor_turn_id, cursor_turn_id, cursor_id])
+    query += " ORDER BY turn_id ASC, id ASC LIMIT ?"
+    params.append(TRANSCRIPT_FETCH_ROWS_MAX + 1)
+
+    rows = conn.execute(query, params).fetchall()
+
+    if len(rows) > TRANSCRIPT_FETCH_ROWS_MAX:
+        dropped = rows[TRANSCRIPT_FETCH_ROWS_MAX]
+        next_cursor: tuple[int, int] | None = (dropped["turn_id"], dropped["id"])
+        rows = rows[:TRANSCRIPT_FETCH_ROWS_MAX]
+    elif probe is not None:
+        next_cursor = (probe["turn_id"], probe["first_id"])
+    else:
+        next_cursor = None
+
+    return rows, next_cursor
+
+
+def conversation_turn_traces(
+    conn: sqlite3.Connection, conv_id: int, turn_ids: Sequence[int]
+) -> dict[int, str]:
+    """`turn_id -> trace_id` for exactly the given `turn_ids` (REQ-V180-CONV-05),
+    bounded to the page's own turns, nothing wider. Per turn: the `trace_id`
+    of the lowest `id` in `llm_calls` for that `(conv_id, turn_id)` whose
+    `trace_id` is non-null; failing that, the lowest `id` in `tool_calls`
+    under the same condition; failing that, the turn is absent from the
+    mapping -- no key, not a `None` value."""
+    turn_id_list = list(dict.fromkeys(turn_ids))
+    if not turn_id_list:
+        return {}
+    placeholders = ", ".join("?" for _ in turn_id_list)
+
+    def _lowest_trace_per_turn(table: str) -> dict[int, str]:
+        # `table` is one of the two literal, hard-coded names below -- never
+        # request-shaped -- so this f-string carries no untrusted value.
+        query = (
+            f"SELECT turn_id, trace_id FROM {table} "
+            f"WHERE id IN ("
+            f"    SELECT MIN(id) FROM {table} "
+            f"    WHERE conv_id = ? AND trace_id IS NOT NULL AND turn_id IN ({placeholders}) "
+            f"    GROUP BY turn_id"
+            f")"
+        )
+        params: list[object] = [conv_id, *turn_id_list]
+        return {row["turn_id"]: row["trace_id"] for row in conn.execute(query, params)}
+
+    llm_map = _lowest_trace_per_turn("llm_calls")
+    tool_map = _lowest_trace_per_turn("tool_calls")
+    return {
+        turn_id: llm_map[turn_id] if turn_id in llm_map else tool_map[turn_id]
+        for turn_id in turn_id_list
+        if turn_id in llm_map or turn_id in tool_map
+    }
 
 
 def fetch_llm_calls(

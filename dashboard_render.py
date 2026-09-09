@@ -137,6 +137,12 @@ tr:last-child td { border-bottom: none; }
         padding: .6rem .9rem; margin: 1rem 0; font-size: 13px; color: #b23636; }
 .meta { font-size: 12px; line-height: 1.4; color: var(--dim); }
 .na { color: var(--dim); }
+.turn-row { display: flex; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--rule); }
+.turn-row:last-child { border-bottom: none; }
+.rail { flex: 0 0 7rem; display: flex; flex-direction: column; gap: .15rem;
+        color: var(--dim); font-size: 12px; line-height: 1.4; }
+.rail .num { font-variant-numeric: tabular-nums; }
+.msg { flex: 1 1 auto; white-space: pre-wrap; word-break: break-word; }
 footer { margin-top: 3rem; color: var(--dim); font-size: 12px; line-height: 1.4; }
 """
 
@@ -698,6 +704,258 @@ def trace_tree_section(spans: Sequence[ServedSpan]) -> str:
         )
     body = "".join(_render_span_node(root, children, 0) for root in children.get(None, []))
     return f'<section id="trace-tree">\n<h2>Trace</h2>\n{banner}{body}\n</section>'
+
+
+# ----------------------------------------------------------------------------
+# conversations and transcripts (REQ-V180-CONV-03, REQ-V180-CONV-04). Pure:
+# no `import config`, no `import storage`, no `import sqlite3`, no I/O, no
+# `Path` -- rows/messages arrive already fetched by `storage.py`'s readers
+# (T5) and, for the transcript, already redacted and 2000-char-truncated by
+# `dashboard_server.py` (T6, REQ-V180-SEC-01/-02 item 1).
+# ----------------------------------------------------------------------------
+
+CONVERSATION_LIST_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("id", "num"),
+    ("user", "num"),
+    ("started", "num"),
+    ("messages", "num"),
+    ("active", "text"),
+    ("last activity", "num"),
+)
+
+
+def conversation_list_section(rows: Sequence[Any]) -> str:
+    """One row per conversation (REQ-V180-CONV-03's `/conversations`), from
+    `storage.recent_conversations`-shaped rows: **id** (linking to
+    `/conversations/<id>`), **user** (`tg_user_id`), **started**
+    (`created_at`), **messages** (`message_count`), **active** (`yes`/`no`,
+    `ok` colour class for `yes` -- the only `"text"` column), **last
+    activity** (`last_activity`, or `—` when the conversation holds no
+    message -- the placeholder keeps the `"num"` class per `_td_cell`'s
+    convention). An empty `rows` renders one empty-state row, never a blank
+    table. The `/new`-to-`/new` page-copy line (REQ-V180-CONV-01) is left to
+    the caller's page body, not this section fragment."""
+    head = _head_row(CONVERSATION_LIST_COLUMNS)
+    rows_html = []
+    for row in rows:
+        conv_id = _row_field(row, "id")
+        active = bool(_row_field(row, "active"))
+        active_word = "yes" if active else "no"
+        active_html = (
+            f'<span class="ok">{esc(active_word)}</span>' if active else esc(active_word)
+        )
+        last_activity = _row_field(row, "last_activity")
+        last_activity_html = "—" if last_activity is None else esc(last_activity)
+        id_html = f'<a href="/conversations/{esc(conv_id)}">{esc(conv_id)}</a>'
+        values = (
+            id_html,
+            esc(_row_field(row, "tg_user_id")),
+            esc(_row_field(row, "created_at")),
+            esc(_row_field(row, "message_count")),
+            active_html,
+            last_activity_html,
+        )
+        cells = "".join(
+            _td_cell(value, kind)
+            for value, (_, kind) in zip(values, CONVERSATION_LIST_COLUMNS, strict=True)
+        )
+        rows_html.append(f"<tr>{cells}</tr>")
+    body = (
+        "\n".join(rows_html)
+        if rows_html
+        else (
+            f'<tr><td colspan="{len(CONVERSATION_LIST_COLUMNS)}">'
+            "No conversation recorded.</td></tr>"
+        )
+    )
+    return (
+        '<section id="conversations">\n<h2>Conversations</h2>\n'
+        f"<table><thead>{head}</thead><tbody>\n{body}\n</tbody></table>\n</section>"
+    )
+
+
+TRANSCRIPT_PAGE_BUDGET_BYTES = 1_572_864  # 1.5 MiB (REQ-V180-SEC-02 item 3)
+TRANSCRIPT_PAGE_SUFFIX_BYTES = 4096  # truncation marker + next/first-page links
+
+_TRANSCRIPT_SECTION_OPEN = '<section id="conversation">\n<h2>Conversation</h2>\n'
+_TRANSCRIPT_SECTION_CLOSE = "\n</section>"
+_TRANSCRIPT_EMPTY_STATE = '<p class="meta">No messages in this conversation.</p>'
+_TRANSCRIPT_CONTINUED_NOTE = (
+    '<p class="meta">continued -- this turn was split across the byte budget</p>'
+)
+
+
+def _turn_groups(messages: Sequence[Any]) -> list[tuple[int, list[Any]]]:
+    """Groups `messages` (already `turn_id, id` ordered -- CONV-02's own
+    guarantee) into consecutive `(turn_id, [message, ...])` pairs, without
+    re-sorting: a caller handing rows out of order gets groups split at every
+    turn_id change, never silently re-merged."""
+    groups: list[tuple[int, list[Any]]] = []
+    for msg in messages:
+        turn_id = _row_field(msg, "turn_id")
+        if groups and groups[-1][0] == turn_id:
+            groups[-1][1].append(msg)
+        else:
+            groups.append((turn_id, [msg]))
+    return groups
+
+
+def _trace_link_html(turn_id: int, trace_map: Mapping[int, str] | None) -> str:
+    """Plain text with no arrow appended when the turn has no trace; an `<a
+    href="/traces/{trace_id}">` of the abbreviated id (first 12 characters,
+    matching `trace_list_section`'s convention) when it does (REQ-V180-CONV-05)."""
+    trace_id = None if trace_map is None else trace_map.get(turn_id)
+    if trace_id is None:
+        return ""
+    trace_id = str(trace_id)
+    short = esc(trace_id[:12])
+    return f'<a href="/traces/{esc(trace_id)}" title="{esc(trace_id)}">{short}</a>'
+
+
+def _message_html(msg: Any, *, trace_link_html: str) -> str:
+    """One message row: a fixed-width rail (turn id and timestamp are its
+    `"num"` fields; role and the trace link are not -- REQ-V180-CONV-04) plus
+    the message text column. The trace link, when the turn has one, is shown
+    once per turn -- on the turn's first message only (`trace_link_html`
+    empty for every other message of the turn) -- design choice: CONV-05
+    speaks of "the turn's rail entry" in the singular, and repeating the link
+    on every message of a multi-message turn would spend byte budget without
+    adding information. A `tool` row also shows its `tool_call_id`."""
+    role = esc(_row_field(msg, "role"))
+    turn_id_html = esc(_row_field(msg, "turn_id"))
+    ts_html = esc(_row_field(msg, "created_at"))
+    content_html = esc(_row_field(msg, "content"))
+    tool_call_id = _row_field(msg, "tool_call_id")
+    tool_html = (
+        f'<div class="meta">tool_call_id: {esc(tool_call_id)}</div>'
+        if tool_call_id is not None
+        else ""
+    )
+    rail = (
+        '<div class="rail">'
+        f"<div{_num_class('num')}>{turn_id_html}</div>"
+        f"<div>{role}</div>"
+        f"<div{_num_class('num')}>{ts_html}</div>"
+        f"<div>{trace_link_html}</div>"
+        f"{tool_html}"
+        "</div>"
+    )
+    return f'<div class="turn-row">{rail}<div class="msg">{content_html}</div></div>'
+
+
+def conversation_transcript_section(
+    messages: Sequence[Any],
+    *,
+    chrome_bytes: int,
+    reader_next_cursor: tuple[int, int] | None = None,
+    trace_map: Mapping[int, str] | None = None,
+    budget_bytes: int = TRANSCRIPT_PAGE_BUDGET_BYTES,
+    suffix_bytes: int = TRANSCRIPT_PAGE_SUFFIX_BYTES,
+) -> tuple[str, tuple[int, int] | None, bool]:
+    """Renders `messages` (already redacted and 2000-char-truncated per
+    message -- upstream, `dashboard_server.py`'s job, REQ-V180-SEC-02 item 1)
+    under REQ-V180-CONV-04's atomic turn admission and REQ-V180-SEC-02 item
+    3's whole-response byte budget. Pure: escaping (`esc()`) and admission
+    only, no I/O, no `Path`, no `config`/`storage`/`sqlite3` import.
+
+    `chrome_bytes` is the caller's measured size of `page()`-level chrome
+    only (nav/style/headings/closing markup) -- this function adds its own
+    wrapping `<section>`/`<h2>` open and close tags to the seed itself, since
+    those bytes are emitted here and the caller cannot measure them before
+    calling. The accumulator is seeded with
+    `chrome_bytes + suffix_bytes + len(section wrapper bytes)` before any
+    turn is admitted, so the budget bounds the whole response, not just the
+    rows (REQ-V180-SEC-02 item 3).
+
+    Atomic turn admission, per turn, in this exact order: (1) render the
+    whole turn and measure its UTF-8 byte length; (2) it fits the remaining
+    budget -> admit the entire turn; (3) it does not fit and the page already
+    holds a turn -> stop, next cursor is that turn's first message; (4) it
+    does not fit and the page is empty -> split it, admitting at least one
+    message so the page always advances, marking it continued. This is the
+    only case a turn is ever split.
+
+    Returns `(html, next_cursor, split)`. `next_cursor` is this function's
+    own reconciliation of the "two next-cursor" question: when every given
+    message was admitted, the reader's own `reader_next_cursor` (the first
+    message `conversation_messages` did not return, if any) is passed
+    through unchanged; when this function's own byte-budget admission
+    stopped the page before the input ran out, *that* earlier cursor always
+    wins, since it is what was actually rendered -- `reader_next_cursor` is
+    only ever a fallback, never mixed with or overridden by a later value.
+    `split` is `True` exactly when case 4 forced a partial-turn render."""
+    section_wrapper_bytes = len(
+        (_TRANSCRIPT_SECTION_OPEN + _TRANSCRIPT_SECTION_CLOSE).encode("utf-8")
+    )
+    accumulator = chrome_bytes + suffix_bytes + section_wrapper_bytes
+
+    groups = _turn_groups(messages)
+    if not groups:
+        return (
+            _TRANSCRIPT_SECTION_OPEN + _TRANSCRIPT_EMPTY_STATE + _TRANSCRIPT_SECTION_CLOSE,
+            reader_next_cursor,
+            False,
+        )
+
+    rendered: list[str] = []
+    next_cursor: tuple[int, int] | None = None
+    split = False
+
+    for turn_id, turn_messages in groups:
+        trace_link_html = _trace_link_html(turn_id, trace_map)
+        turn_html = "".join(
+            _message_html(
+                msg, trace_link_html=(trace_link_html if i == 0 else "")
+            )
+            for i, msg in enumerate(turn_messages)
+        )
+        turn_bytes = len(turn_html.encode("utf-8"))
+
+        if accumulator + turn_bytes <= budget_bytes:
+            rendered.append(turn_html)
+            accumulator += turn_bytes
+            continue
+
+        if rendered:
+            # case 3: the page already holds a turn -- stop here.
+            first = turn_messages[0]
+            next_cursor = (turn_id, _row_field(first, "id"))
+            break
+
+        # case 4: the page is empty -- split this turn, admitting at least
+        # one message so the page always advances.
+        partial_html: list[str] = []
+        partial_bytes = 0
+        withheld_cursor: tuple[int, int] | None = None
+        for i, msg in enumerate(turn_messages):
+            msg_html = _message_html(
+                msg, trace_link_html=(trace_link_html if i == 0 else "")
+            )
+            msg_bytes = len(msg_html.encode("utf-8"))
+            if not partial_html or accumulator + partial_bytes + msg_bytes <= budget_bytes:
+                partial_html.append(msg_html)
+                partial_bytes += msg_bytes
+            else:
+                withheld_cursor = (turn_id, _row_field(msg, "id"))
+                break
+        rendered.append("".join(partial_html))
+        accumulator += partial_bytes
+        if withheld_cursor is not None:
+            split = True
+            next_cursor = withheld_cursor
+            break
+        # the whole turn ended up fitting message-by-message after all
+        # (possible when the whole-turn measurement's overhead differs from
+        # the sum of its parts) -- not a split, keep going.
+
+    if next_cursor is None:
+        next_cursor = reader_next_cursor
+
+    html = _TRANSCRIPT_SECTION_OPEN + "\n".join(rendered)
+    if split:
+        html += _TRANSCRIPT_CONTINUED_NOTE
+    html += _TRANSCRIPT_SECTION_CLOSE
+    return html, next_cursor, split
 
 
 # ----------------------------------------------------------------------------
