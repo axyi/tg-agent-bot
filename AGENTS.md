@@ -143,8 +143,8 @@ uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1133
-tests as of spec-v1.7.0 T8). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1217
+tests as of spec-v1.8.0 T8). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its
@@ -152,11 +152,12 @@ Telegram message. **Gate 5 must be fully green at every commit, including its
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 92 entries as of spec-v1.7.0 T9 (up
-from 83 at spec-v1.6.0's close; T9 added nine `v170-*` entries covering
-the reasoning policy, the summary budget and the new bench.py gates; see
-`docs/reports/report-v1.7.0.md`); `--select <prefix>` runs a named subset
-(mutually exclusive with `--only`), e.g. `--select v170-`.
+the test suite once per mutation) — 98 entries as of spec-v1.8.0 T6 (up
+from 92 at spec-v1.7.0's close; T6 added six `v180-*` entries covering
+the chat-status signal, the typing-indicator ceiling, and transcript
+redaction/truncation/budget; see
+`docs/reports/report-v1.8.0.md`); `--select <prefix>` runs a named subset
+(mutually exclusive with `--only`), e.g. `--select v180-`.
 
 Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY` (`model-default` | `off` | `by-purpose`, default `by-purpose`) and
 `LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,

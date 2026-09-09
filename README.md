@@ -215,12 +215,17 @@ but read-only database connections.
 
 Open `http://127.0.0.1:8765/` for usage and cost aggregates, `/traces` for
 the list of recent traces with a detail page per trace (a span tree and a
-Gantt-style SVG timeline), and `/tools` for tool health (call counts, error
-rates, latency) — each page also has a JSON twin under `/api/…` for
-scripting. Every response carries the standard security headers, and no
-route ever serves message or tool content, regardless of
-`OBS_CAPTURE_CONTENT` (see [Configure](#configure)) — only counters,
-timings and truncated non-content attributes.
+Gantt-style SVG timeline), `/tools` for tool health (call counts, error
+rates, latency), `/conversations` for the conversation list and
+`/conversations/<id>` for a single transcript — each page also has a JSON
+twin under `/api/…` for scripting. Every response carries the standard
+security headers. Trace and span content stays off by default: it is
+gated by `OBS_CAPTURE_CONTENT` (see [Configure](#configure)), and with it
+off `/traces` and `/tools` show only counters, timings and truncated
+non-content attributes, never message or tool content. The conversation
+transcript is a different, always-available source — `/conversations/<id>`
+serves `messages.content` regardless of `OBS_CAPTURE_CONTENT`, redacted and
+length-capped before it ever reaches a response.
 
 Turn it off with `DASHBOARD_ENABLED=false` or `bot.py --no-dashboard`; the
 flag wins when the two disagree. `/status` reports the dashboard's current
