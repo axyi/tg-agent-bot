@@ -76,7 +76,10 @@ pattern; `data/`, `sandbox/`, `*.db` and `exec_audit.jsonl` are never opened,
 printed or quoted. **No key is written into `.env`**, no `.env.bak*`, no
 `sed -i`. §6's transcript reads the database through the existing read-only
 handle at request time — the running bot's data path, not an executor read;
-**no task of this run opens `bot.db`.**
+**no task of this run opens `bot.db`.** **The secret scan covers the tree that
+ships:** the final report, Telegram post and usage rows land *after* T10's
+profile run, so `gitleaks-tree` is re-run on the evidence commit before the tag
+(REV-02, EC-09).
 
 **REQ-V180-EC-05 (MUST) — backward compatibility.** Every new parameter,
 config field, environment variable and helper defaults to **current
@@ -86,8 +89,9 @@ its call sites, the two that REQ-V180-CHAT-08's ordering creates around
 `bot.py:707`, are written in the same commit, and an omission is a
 `TypeError` at import-time coverage, not a silent revert. `_TypingIndicator`'s
 `ceiling_s` follows the same no-default discipline, and `TelegramClient.call`
-gains keyword-only `connect_timeout: float = 10.0` whose default reproduces
-`bot.py:108`'s present connect bound (CHAT-05).
+gains keyword-only `connect_timeout`, `write_timeout` and `pool_timeout`,
+each `float = 10.0`, reproducing `bot.py:108`'s three present bounds exactly —
+so **all four** `httpx.Timeout` phases become callable per request (CHAT-05).
 `bot.py` alone constructs the typing indicator (REQ-V180-CHAT-05);
 `agent.run_agent`'s signature, the agent loop, the LLM layer, the tracing
 layer and the storage schema are untouched.
@@ -161,8 +165,9 @@ branch-name gate is warn-only.
 net-negatively, before/after bytes reported. Overflow goes to
 `docs/spec/spec-v1.8.0-delta-1.md`, that exact filename, never
 `spec-v1.8.1.md`, which would read as a released patch version that does not
-exist. **Rounds 1 and 2 used that escape**: the 21-row gate matrix, which is
-normative (REQ-V180-EC-12), and Appendix C's round-1 table, which is not.
+exist. **All three rounds used that escape**: the 21-row gate matrix and §5.1's
+frozen design plan, both normative (REQ-V180-EC-12, -DSH-02), and Appendix C's
+three round tables, which are not.
 
 ---
 
@@ -340,7 +345,10 @@ class AgentOutcome:
 - `bot.py`'s single production call site (`bot.py:692-708`) is the only caller
   that moves: it calls `run_agent_outcome` and reads `outcome.failed`. The
   ordering around it is REQ-V180-CHAT-08's. Inverting that flag MUST turn the
-  suite red (`v180-status-signal-inverted`, §9).
+  suite red (`v180-status-signal-inverted`, §9) — killed by
+  `T-V180-CHAT-10`, which drives the **production path** in both directions;
+  `T-V180-CHAT-02` and `-03` drive `finish` directly and cannot see an
+  inversion at the call site.
 
 **REQ-V180-CHAT-05 (MUST) — a typing indicator while the bot is processing.**
 Telegram's `sendChatAction` with `action="typing"` clears itself after about
@@ -355,10 +363,12 @@ five seconds, so it is re-sent on an interval. Frozen numbers:
   operator controls. A run that outlives it keeps the status message as its
   progress signal and the indicator simply stops; no executor extends it;
 - **join bound: 3.0 s** — `TYPING_JOIN_TIMEOUT_S = 3.0`, beside the interval;
-- **request bound: 2.0 s** — `TYPING_REQUEST_TIMEOUT_S = 2.0`, passed as both
-  the `read_timeout` and the `connect_timeout` of the typing request (EC-05).
-  It is **shorter than the join bound**, so a stalled request cannot outlive
-  the join.
+- **request bound: 2.0 s** — `TYPING_REQUEST_TIMEOUT_S = 2.0`, passed as
+  **all four** `httpx.Timeout` phases — `read_timeout`, `connect_timeout`,
+  `write_timeout`, `pool_timeout` (EC-05). Two phases are not a 2-second
+  request: the phases run sequentially, so bounding connect and read alone
+  leaves a request that can outlast the join. Four bound any one phase at
+  2.0 s and the request at 8.0 s worst case.
 
 Mechanics: a `_TypingIndicator` class in `bot.py` starting one **daemon**
 `threading.Thread` (`threading` is already imported, `bot.py:20`) whose loop
@@ -369,8 +379,9 @@ sleeping out the interval. Four properties are
 requirements, not implementation taste:
 
 1. **One unretried attempt per tick.** The worker calls
-   `tg.call("sendChatAction", …, read_timeout=TYPING_REQUEST_TIMEOUT_S,
-   connect_timeout=TYPING_REQUEST_TIMEOUT_S)` — the single-attempt path at
+   `tg.call("sendChatAction", …)` with `read_timeout`, `connect_timeout`,
+   `write_timeout` and `pool_timeout` all
+   `= TYPING_REQUEST_TIMEOUT_S` — the single-attempt path at
    `bot.py:105` — and **never `_call_with_retry`**, which can block past
    the ceiling, fire after `stop()`, and issue several requests for one tick.
    At most `ceil(cfg.llm_timeout_s / TYPING_INTERVAL_S)` requests per run.
@@ -384,6 +395,11 @@ requirements, not implementation taste:
    a timed-out join is logged once and the caller proceeds — the thread is a
    daemon and cannot block shutdown. The bounded join, not the daemon flag,
    is what stops the worker racing the reply. `stop()` is idempotent.
+   **The residual is named, not pretended away:** in a pathological stall the
+   worker can outlive the join; the consequence is at most **one** stale typing
+   action, visible about five seconds after the reply, and that is **accepted**.
+   The worker MUST re-check the stop event **after** its request returns and
+   schedule nothing further when it is set.
 
 **The test seams are constructor parameters**, so the tested and the shipped
 synchronisation paths are the same code:
@@ -395,9 +411,10 @@ real `threading.Event`, and `ceiling_s` has **no default** so an omission is a
 fake clock and a fake event and **no test sleeps in real time**. `bot.py`
 starts it beside `_StatusMessage` (`bot.py:691`) and stops it in a `finally`
 around the `run_agent_outcome` call — **before the reply is sent**
-(CHAT-08) — so a stale action can only land *before* the reply and the reply
+(CHAT-08) — so a stale action lands *before* the reply and the reply
 itself clears the indicator, Telegram clearing typing when the bot sends a
-message. No path leaves a thread running.
+message, except for item 4's named residual. No path leaves a thread
+running that the join did not first ask to stop.
 It sends through the same `TelegramClient`; `httpx.Client` is safe for
 concurrent use. It **complements** the status message and never replaces it.
 
@@ -481,7 +498,7 @@ existing stack (`ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica,
 Arial, sans-serif`) is the single face for the whole document.
 
 **REQ-V180-DSH-02 (MUST) — §5.1 is a frozen plan; the executor implements it
-and does not design.** Every hex value, size, weight and layout below is a
+and does not design.** Every hex value, size, weight and layout in it is a
 literal to be written into `STYLE` and the section builders; substituting a
 palette, adding a value not in the table or introducing a second type face
 fails this requirement. The plan is copied into T4's task-brief file
@@ -489,85 +506,12 @@ fails this requirement. The plan is copied into T4's task-brief file
 
 ### 5.1 The frozen design plan
 
-**Direction.** An **operator's instrument panel**, not a SaaS analytics
-product: hairline rules, not floating cards; one accent reserved for
-**measured signal**; numbers in columns you read down.
-
-**Palette — exactly six named values**, custom properties on `:root` inside
-the one `STYLE` block:
-
-| token | hex | role |
-|---|---|---|
-| `--ink` | `#16181c` | body text, headings, the one heavy rule under `h1` |
-| `--ground` | `#eef0f2` | the page background: cool paper, never warm cream |
-| `--plate` | `#ffffff` | the surface of a panel/section, flat |
-| `--rule` | `#ccd2d8` | every hairline: panel edges, row rules, chart baselines, the `h2` scale line |
-| `--dim` | `#5f6873` | secondary text: column headers, units, timestamps, footer |
-| `--signal` | `#1f5fb0` | the single accent: bar fill, link, active nav item, focus ring — signal only |
-
-Two status colours carry over unchanged and are the **only** other saturated
-values: ok `#1c7a4a`, fault `#b23636`, on status text and an error-outlined
-gantt bar, nowhere else. A ninth colour is a defect.
-
-**The `PALETTE` dict is remapped onto those eight and gains no key.**
-`dashboard_render.PALETTE` (`dashboard_render.py:79-85`) is the SVG helpers'
-colour table: five keys today, the same five afterwards, with these literals.
-This is what DSH-06 means by "only the colour literals move", and what makes
-DSH-04's "every colour literal is one of the eight" satisfiable:
-
-| key | new literal | role |
-|---|---|---|
-| `bar` | `#1f5fb0` (`--signal`) | bar fill |
-| `bar_track` | `#eef0f2` (`--ground`) | bar track |
-| `kind_client` | `#1f5fb0` (`--signal`) | a `CLIENT` span — the outbound call, the signal |
-| `kind_internal` | `#5f6873` (`--dim`) | an `INTERNAL` span — structure, not signal |
-| `error_outline` | `#b23636` (fault) | unchanged |
-
-**Type scale — four sizes, two weights, one face**: REQ-V180-DSH-01's system
-stack, for **everything including numbers**.
-
-| element | size / line-height | weight | notes |
-|---|---|---|---|
-| `h1` | 22px / 1.25 | 600 | `letter-spacing: -0.01em`; one 2px `--ink` rule beneath, full content width |
-| `h2` | 16px / 1.3 | 600 | sentence case; a 1px `--rule` line from the text's right edge to the content's right edge — a scale line, not decoration |
-| `h3` | 13px / 1.35 | 600 | sentence case |
-| body, `td` | 13px / 1.5 | 400 | |
-| `th`, `.meta`, `footer`, units | 12px / 1.4 | 600 (`th`) / 400 (rest) | `--dim`; **sentence case, `text-transform: none`, `letter-spacing: 0`** |
-
-Four sizes and no fifth: 22 → 16 → 13 → 12. `h3` is **deliberately body size
-at the heavier weight** — weight is the distinction, not a fifth size and not a
-collision. No 300 or 700 weight, no italic.
-
-**Alignment — the answer to "the numbers slide".** The page is **one column**,
-`max-width: 68rem`, centred, and *every* element — `h1`'s rule, each `h2`'s
-scale line, every plate, table and `<svg>` — shares its left and right edges.
-Text is left-aligned, nothing centred but a single empty-state line; **every
-`class="num"` cell is right-aligned with `font-variant-numeric: tabular-nums`**
-in the body face, so a column of numbers has one right edge and one glyph width
-(REQ-V180-DSH-03 makes this checkable); units go in the column header, never
-per cell; charts are drawn to the table's content width, so bar baselines line
-up with table rules.
-
-**Surfaces.** A `section` is a **plate**: `background: var(--plate)`, `border:
-1px solid var(--rule)`, `border-radius: 2px`, **no `box-shadow` anywhere in the
-sheet**, padding `0 1rem 1rem`. Table rows are separated by 1px `--rule`, the
-last by none. A bar is a 0.6rem `--ground` track with a `--signal` fill, square
-ends.
-
-**Layout, per page.**
-
-| page | concept |
-|---|---|
-| `/` (usage) | a **reading strip** across the top of the first plate: four measured values — calls, total tokens, cost, error rate — as label-above-number pairs on one baseline, split by 1px `--rule` verticals, numbers at 22px/600 tabular; then the totals table, then the by-group table |
-| `/traces` | one full-width table, newest first; the duration column carries an inline `--signal` bar sized against the page's widest duration, drawn **inside** the number's own cell so magnitude and value read together |
-| `/traces/<id>` | the gantt on its own plate first, span table beneath, both at content width so a bar sits above its row |
-| `/tools` | the tool-health table on one plate, the limit-hits bar chart on the next, drawn to the same width |
-| `/conversations` | one table: id, user, started, messages, active, last activity — **five of the six** (id, user, started, messages, last activity) carry `class="num"`, right-aligned and tabular; `active` does not, its content being the word `yes`/`no` (REQ-V180-DSH-03) |
-| `/conversations/<id>` | a **two-column transcript**: a fixed 7rem left rail carrying role and turn (with the trace link when there is one), and a single measure column of message text; one left edge to track down, one 1px `--rule` between messages, no bubbles. In the rail, turn id and timestamp carry `class="num"`; the role word, the trace link and the message text do not |
-
-**What this deliberately is not.** Warm cream, a serif display face, card
-shadows, ALL-CAPS eyebrows, middle-dot meta strings, monospace data, an arrow
-after link text — all rejected; REQ-V180-DSH-04's list is the closed one.
+**The plan itself lives in `docs/spec/spec-v1.8.0-delta-1.md` §&nbsp;The frozen
+design plan** — direction, the six-value palette, the type scale, the layout
+and the closed list of rejected defaults — moved there as round 3's overflow
+under §1's budget rule (EC-01). It is **normative and frozen**: every "§5.1"
+reference in this file means that section. The four requirements that bind it
+stay here.
 
 **REQ-V180-DSH-03 (MUST) — tabular numerals, by coverage, not by
 declaration.** `STYLE` already carries `font-variant-numeric: tabular-nums` on
@@ -657,28 +601,39 @@ parameters, `sqlite3.Row` results, no formatting.
   or `None` for the first page (CONV-04). `ORDER BY turn_id, id` with
   `LIMIT`/`OFFSET` over messages would split a turn at an arbitrary point, so
   the page is selected by turn and then filled:
-  1. **the turn window** — `SELECT turn_id, COUNT(*) AS n FROM messages WHERE
-     conv_id = ? AND (turn_id > ? OR (turn_id = ? AND id >= ?)) GROUP BY
-     turn_id ORDER BY turn_id ASC LIMIT ?`, the cursor pair bound as
-     parameters and the limit bound as `limit + 1`: a turn holds at least one
-     message, so `limit` turns hold at least `limit` messages and the extra
-     turn is the row beyond the page. With no cursor the two cursor clauses
-     are omitted and the window starts at the conversation's first turn;
+  0. **the cursor check** — with a `cursor`, `SELECT 1 FROM messages WHERE
+     conv_id = ? AND turn_id = ? AND id = ? LIMIT 1` **first**: an exact
+     three-column match, never a range probe. No match → `ValueError`, which
+     the route turns into a 400 (CONV-04, CONV-07);
+  1. **the turn window** — `SELECT turn_id, COUNT(*) AS n, MIN(id) AS first_id
+     FROM messages WHERE conv_id = ? AND (turn_id > ? OR (turn_id = ? AND
+     id >= ?)) GROUP BY turn_id ORDER BY turn_id ASC LIMIT ?`, the cursor pair
+     bound as parameters and the limit bound as `limit + 1`: a turn holds at
+     least one message, so `limit` turns hold at least `limit` messages and the
+     extra turn is the row beyond the page. With no cursor the two cursor
+     clauses are omitted and the window starts at the conversation's first turn;
   2. **the page** — take turns in order while the running message count is
      `< limit`; the turn that crosses `limit` is taken **whole**, so a page is
      *up to `limit` messages, extended to the end of the last turn*;
-  3. **the probe** — the first turn not taken. Its presence is the return's
-     `has_more`; it is **discarded before rendering**;
+  3. **the probe** — the first turn not taken; it is **never fetched or
+     rendered**, only its `(turn_id, first_id)` is kept;
   4. **the messages** — `SELECT turn_id, role, content, tool_call_id,
      created_at, id FROM messages WHERE conv_id = ? AND turn_id IN (…)` plus
      the window's own cursor clause, `ORDER BY turn_id ASC, id ASC`, one bound
      placeholder per taken turn: a cursor landing inside a turn resumes at its
-     message instead of repeating the turn.
+     message instead of repeating the turn. It is **bounded in SQL** by
+     `LIMIT TRANSCRIPT_FETCH_ROWS_MAX + 1`, `TRANSCRIPT_FETCH_ROWS_MAX = 2000`
+     being a `storage.py` constant — four times the maximum `limit`, so no
+     lawful page reaches it. Hitting it is **not an error**: the extra row is
+     dropped and its turn is CONV-04's split case. Unbounded, one pathological
+     turn is fetched and redacted whole before any budget applies.
 
-  It returns `(rows, has_more)` — the one reader of the four returning more
-  than a row list. `has_more` means **another turn exists beyond the window**;
-  it is unrecoverable from the rows and is not the same fact as CONV-04's next
-  link.
+  It returns `(rows, next_cursor)` — the one reader of the four returning more
+  than a row list. **`next_cursor` is the `(turn_id, id)` of the first message
+  the reader did not return**: item 4's dropped row when the cap was hit, else
+  item 3's probe pair, else `None`. It is the *reader's* cursor; when SEC-02's
+  budget stops the page earlier the builder computes its own (CONV-04). No
+  `has_more` anywhere: its meaning is `next_cursor is not None`.
 - `conversation_turn_traces(conn, conv_id, turn_ids)` — REQ-V180-CONV-05's
   link map, **bounded to the page's turn ids**: it takes the turn ids the page
   rendered and returns only their mappings.
@@ -711,27 +666,35 @@ timestamp are its numeric fields and carry `class="num"`; the role word, the
 trace link and the content do not (REQ-V180-DSH-03). Content comes
 from `messages.content`, bounded and sanitised by §7. A `tool` row also shows its
 `tool_call_id`. **`limit` never splits a turn across two pages** — CONV-02's
-by-turn window guarantees that; only the byte-budget exception below splits
-one, and it says so on the page.
+by-turn window guarantees that — and the byte budget splits one only in the
+single case the atomic-admission rule below names, which the page then says.
 
 Pagination is by **`limit`** (`_parse_limit(params, 200, is_api=...)`, default
 **200**, range 1–500, a bound on *messages*) and an opaque **`cursor`** naming
 the page's first message: a new `_parse_cursor(params, *, is_api=...)` sharing
 `_parse_conv`'s parse-and-reject shape — `re.fullmatch(r"([0-9]{1,10})-([0-9]{1,10})")`,
 `_bad_request` on a mismatch — returning that `(turn_id, id)` pair, or `None`
-when the parameter is absent, which **is** the first page. A cursor whose turn
-window comes back empty is a **400** through the same `_bad_request`, never an
-empty 200: a next cursor is emitted only when an unrendered message exists, so
-a followed cursor always names a real message.
+when the parameter is absent, which **is** the first page. `_parse_cursor`
+validates **shape only**; the pair is then validated by CONV-02 item 0's exact
+`(conv_id, turn_id, id)` lookup, and a pair naming no message of that
+conversation is a **400** through the same `_bad_request` — never an empty 200,
+never a silent skip into a later turn. Proving that *some* message exists at or
+after the pair is not the check: `1-999999` is a 400.
 
-A page takes **whole turns** until `limit` messages or SEC-02's byte budget
-stops it. **The one exception:** a turn whose messages alone exceed the budget
-is **split** — the page ends inside it, at least one message is always
-rendered so the page always advances, and that turn is marked *continued* in
-both sinks. The **next cursor is the `(turn_id, id)` of the first message the
-page did not render**; the next link carries it and is emitted **if and only
-if** such a message exists, so `has_more` on either sink is `next_cursor is
-not None`. Beside it the page emits a **first-page link** — the same path with
+**Turn admission is atomic**, per turn, in this order: (1) measure the whole
+turn's **rendered** bytes; (2) it fits the remaining budget → admit the
+**entire** turn; (3) it does not fit and the page **already holds a turn** →
+stop, next cursor at that turn's first message; (4) it does not fit and the
+page is **empty** → split it, rendering at least one message so the page always
+advances, and mark it *continued* in both sinks. Case 4 is the **only** split:
+`limit` alone never splits a turn (CONV-02's window), and no turn is split
+merely for missing the space left in a part-filled page. Row-by-row admission
+without this whole-turn check is a defect. The **next cursor is the
+`(turn_id, id)` of the first
+message the page did not render** — CONV-02's `next_cursor` when the page
+rendered every row it was given, otherwise the first row the budget dropped.
+The next link carries it and is emitted **if and only if** such a message
+exists. Beside it the page emits a **first-page link** — the same path with
 no `cursor` — and **nothing else: there is no previous link**, page widths
 varying with the byte budget. The page states the range it is showing.
 
@@ -760,10 +723,12 @@ placeholder. Link text is the abbreviated trace id with **no arrow appended**
 `/traces` (`dashboard_server.py:579-593`): same query parameters, same bounds,
 same rows, `_respond_json`, and a payload echoing the parameters (`{"limit":
 ..., "conversations": [...]}` and `{"conv": ..., "limit": ..., "cursor": ...,
-"next_cursor": ..., "has_more": ..., "messages": [...]}`). `cursor` echoes the
-parameter (`null` when absent), `next_cursor` is CONV-04's next cursor
-serialised (`null` at the end of the conversation), `has_more` is
-`next_cursor is not None`, and a turn the page split carries `"continued":
+"next_cursor": ..., "messages": [...]}`). `cursor` echoes the
+parameter (`null` when absent), `next_cursor` is **CONV-04's page cursor**
+serialised — the first message *this response* did not carry, not CONV-02's
+reader cursor, which would skip whatever the budget dropped; `null` at the end
+of the conversation. There is **no `has_more` key**: its meaning is
+`next_cursor !== null`. A turn the page split carries `"continued":
 true` on its last message object — without these an API client cannot page at
 all. The JSON carries the **same
 redacted and capped content** the HTML does (§7) — an API route is not a
@@ -782,7 +747,9 @@ An id outside `1 ≤ n ≤ 2**31 - 1`, or one for which `conversation_row` retur
 existing conversation holding no messages is **not** one: it answers 200 with
 the empty state. A malformed `limit`, or a `cursor` that is unparseable or
 names no message of that conversation, is a **400** through `_bad_request`
-(`dashboard_server.py:91-98`).
+(`dashboard_server.py:91-98`) — the first from `_parse_cursor`'s shape check,
+the second from the `ValueError` CONV-02 item 0's exact lookup raises, which
+the route catches and hands to the same `_bad_request("cursor", is_api=...)`.
 `_STATIC_ROUTES` (`dashboard_server.py:53-55`) is **pre-existing dead code,
 referenced nowhere in the repository**; this release adds the two new static
 routes so it does not grow *more* stale, does not otherwise touch or delete
@@ -797,7 +764,9 @@ actually said. It gets its own group and its own mutation entries.
 
 **REQ-V180-SEC-01 (MUST) — `redact()` always; `esc()` per sink.** The
 invariant that admits no exception: **no message-derived value reaches any
-sink without `config.redact()`** (`config.py:161-166`). Escaping is stated per
+sink without `config.redact()`** (`config.py:161-166`) — every field the
+transcript renders from a `messages` row, `content`, `role` and `tool_call_id`
+alike, not `content` alone. Escaping is stated per
 sink, the two sinks encoding differently:
 
 - **HTML sink** — `redact()` **then** `dashboard_render.esc()`
@@ -831,23 +800,28 @@ proved**:
    item 3 stops the page first;
 3. **per response, on both sinks**: the budget is measured on **rendered
    bytes**, so it is a different bound from item 1's character cap and is
-   applied to each sink's own output. The builder admits a row only while the
-   accumulated total stays under **`TRANSCRIPT_PAGE_BUDGET_BYTES -
-   TRANSCRIPT_PAGE_SUFFIX_BYTES`**, where `TRANSCRIPT_PAGE_BUDGET_BYTES =
-   1_572_864` (1.5 MiB) and `TRANSCRIPT_PAGE_SUFFIX_BYTES = 4096` is the
-   allowance **reserved before the first row is admitted** for the truncation
-   marker, the next link, the first-page link and the closing chrome — so no
-   mandatory suffix can carry the response past the budget. It then emits that
-   suffix with CONV-04's next cursor. The JSON route does not go through the
-   HTML builder, so it applies the same budget to its own serialized rows
-   before `_respond_json`. A pathological conversation paginates on either
-   route; it is never refused, and a single turn larger than the budget is
-   split per CONV-04.
+   applied to each sink's own output. **The budget covers the whole response,
+   not the rows.** Before the first row is admitted the accumulator is
+   **seeded** with the **measured** byte size of that page's own chrome — on
+   the HTML sink `page()`'s prefix, the `STYLE` block, the nav, the headings
+   and the closing markup; on the JSON sink the envelope and its metadata keys
+   — **plus** `TRANSCRIPT_PAGE_SUFFIX_BYTES`. Rows are admitted only while the
+   seeded total stays under **`TRANSCRIPT_PAGE_BUDGET_BYTES = 1_572_864`**
+   (1.5 MiB); `TRANSCRIPT_PAGE_SUFFIX_BYTES = 4096` is the allowance for the
+   truncation marker, the next link and the first-page link. Seeded means
+   measured on that render, never estimated — so neither chrome nor suffix can
+   carry the response past the budget. It then emits that suffix with CONV-04's
+   next cursor. The JSON route does not go through the HTML builder, so it
+   applies the same budget to its own serialized rows before `_respond_json`. A
+   pathological conversation paginates on either route; it is never refused,
+   and CONV-04's atomic admission decides every stop, its split included.
 
 `T-V180-SEC-02` drives a conversation at both maxima through both routes with
 a **worst-case fixture** — 4-byte characters (astral plane) mixed with
-escape-expanding characters (`"`, `&`, `<`, `>`) — and asserts the byte budget
-holds and the response is produced normally, not through the "response too
+escape-expanding characters (`"`, `&`, `<`, `>`) — and measures the **complete
+response body**, chrome and suffix included, not the concatenated rows:
+that measurement is what must stay under the budget, and the response must be
+produced normally, not through the "response too
 large" path (`dashboard_server.py:663-673`). An ASCII fixture does not
 discharge this requirement.
 
@@ -900,16 +874,17 @@ clock and a `tmp_path` database.
 | `T-V180-CHAT-07` | negative: a raising `sendChatAction` disables the indicator only |
 | `T-V180-CHAT-08` | every fallback return path yields `failed=True` with its `kind` and the matching constant; the answer path yields `failed=False`, `kind is None` |
 | `T-V180-CHAT-09` | negative: the reply send raises — the status message survives with `STATUS_FAILED`, no deletion recorded |
+| `T-V180-CHAT-10` | the **production path** — `process_update` with fakes, twice: a successful outcome (`failed=False`, reply delivered) records exactly one deletion and no `STATUS_FAILED` edit; a structurally failed one (`failed=True`, `kind="llm_error"`) records the edit and **no** deletion. Opposite status behaviour from the same call site, so inverting `ok` there turns it red. Asserts nothing about the typing indicator, absent until T3 |
 | `T-V180-DSH-01` | each builder's rendered `class="num"` matches its **declared** column spec exactly — every `<th>` and `<td>` of a `"num"` column including placeholder cells, neither for a `"text"` one, nothing inferred from cell data; `STYLE` declares `tabular-nums`, **no** monospace family |
 | `T-V180-DSH-02` | negative: DSH-04's closed list absent from `STYLE` and from every builder's **chrome** — the all-sentinel render, interpolated content excluded |
 | `T-V180-DSH-03` | exactly the six palette tokens plus two status colours; every colour literal is one of those eight |
 | `T-V180-DSH-04` | every nav carries the four entries in order; `page()` emits one `<style>`, no `<script>`, no external URL |
 | `T-V180-CONV-01` | `recent_conversations`: six fields, newest first, bounded; `last_activity` `NULL` when empty |
-| `T-V180-CONV-02` | `conversation_messages` orders by `turn_id, id` and pages by turn from a `(turn_id, id)` cursor — no turn split at the default limit, no message repeated or skipped across pages, a cursor inside a turn resuming at its message — and returns `has_more` from the probe turn, which never appears in the rows |
+| `T-V180-CONV-02` | `conversation_messages` orders by `turn_id, id` and pages by turn from a `(turn_id, id)` cursor — no turn split at the default limit, no message repeated or skipped across pages, a cursor inside a turn resuming at its message — and returns `next_cursor` — the `(turn_id, id)` of the first message it did not return, `None` at the end — never a boolean; the probe turn never appears in the rows; `TRANSCRIPT_FETCH_ROWS_MAX + 1` bounds the fetch and hitting it yields a cursor, not an error; a cursor matching no `(conv_id, turn_id, id)` raises `ValueError` |
 | `T-V180-CONV-03` | `conversation_turn_traces` maps only the turn ids it is given, prefers `llm_calls`, falls back to `tool_calls`, omits a turn with neither |
 | `T-V180-CONV-04` | negative: the list renders the decided row shape; `limit=0`, `501`, `x` each give 400 |
-| `T-V180-CONV-05` | negative: transcript in order, only traced turns linked, paginates by `limit`/`cursor` with the next link carrying the first unrendered message and no prev link emitted; an unparseable or unknown `cursor` 400; unknown id 404, **existing-but-empty 200** |
-| `T-V180-SEC-01` | negative: a registered secret is replaced on both routes; `<script>` in content is escaped, not served |
+| `T-V180-CONV-05` | negative: transcript in order, only traced turns linked, paginates by `limit`/`cursor` with the next link carrying the first unrendered message and no prev link emitted; a turn that does not fit a part-filled page ends it instead of splitting, only an empty page splits; an unparseable `cursor`, and `1-999999` matching no message, each 400; unknown id 404, **existing-but-empty 200** |
+| `T-V180-SEC-01` | negative: a registered secret injected into **every rendered message-derived field** — `content`, `role`, `tool_call_id` — is replaced on both routes, so redaction cannot pass by protecting one column. Escaping is asserted **on HTML only**: the markup carries the escaped form of `<script>`, never the literal tag. The **JSON** assertion is separate — the body carries the literal redacted text as `json.dumps` encodes it, `<` included, safe by the `application/json` type and `default-src 'none'` (`dashboard_server.py:46-51`), not by escaping; asserting JSON lacks `<script>` would contradict CONV-06's faithful mirror |
 | `T-V180-SEC-02` | worst-case fixture (4-byte + escape-expanding characters), 500 × 8000 characters: the page holds under `TRANSCRIPT_PAGE_BUDGET_BYTES` with `TRANSCRIPT_PAGE_SUFFIX_BYTES` reserved, each message cut to 2000 characters of **redacted plain text** with the marker and original length **additional** |
 | `T-V180-SEC-03` | content capture off: no served content attribute, while the same turn's transcript renders its text |
 | `T-V180-SEC-04` | negative: an injection-shaped id gives 400/404, database unchanged, no query text holds the payload |
@@ -948,11 +923,17 @@ on, not the tree that ships.
 **The gates run against the tree that ships, including the last commit.** T10
 lands a docs-only commit *after* its gate run, so that commit would otherwise
 carry the tag ungated. The rule: after the final docs-only commit, **re-run
-`checks.py lint-docs` and tag that commit**. Gates 1–4 and 6 are **not**
+`checks.py lint-docs` *and* the `gitleaks-tree` scan, then tag that commit**.
+The scan is the one non-docs gate a docs-only commit can newly fail — a
+credential copied into the report, the Telegram post or the usage rows is
+otherwise tagged and shipped. `checks.py run` has no single-gate selector, so
+it runs as that gate's own argv (`config/quality_gates.yaml:92-104`),
+placeholders expanded. Gates 1–4 and 6 are **not**
 re-run: the commit changed no file any of them reads, the rule the lab
 already applies to a docs-only change. The report records the **tag name** and
 the gate results for the tree it describes; the tagged sha and this
-post-commit `lint-docs` exit code are recorded outside it (RPT-02 item 10).
+post-commit `lint-docs` and `gitleaks-tree` exit codes are recorded outside
+it (RPT-02 item 10).
 
 **REQ-V180-EC-10 (MUST) — the mutation entries, and one new profile gate.**
 `devtools/mutation_check.py` gains **six** `v180-*` entries in its existing
@@ -963,7 +944,7 @@ shipped source, and each MUST match **exactly once** in its file:
 
 | id | mechanism it breaks | must be killed by |
 |---|---|---|
-| `v180-status-signal-inverted` | the signal at `bot.py`'s call site: invert `ok` so a successful run keeps its message and a failed one deletes it | `T-V180-CHAT-02`, `-03`, `bot.py --selftest` |
+| `v180-status-signal-inverted` | the signal at `bot.py`'s call site: invert `ok` so a successful run keeps its message and a failed one deletes it | `T-V180-CHAT-10`, `bot.py --selftest` |
 | `v180-status-delete-skipped` | `finish(ok=True)`'s delete call: replace it with the old edit | `T-V180-CHAT-02`, `bot.py --selftest` |
 | `v180-typing-ceiling-removed` | the `cfg.llm_timeout_s` ceiling in the indicator loop: remove the elapsed check so it types forever | `T-V180-CHAT-06` |
 | `v180-transcript-redact-bypassed` | the `config.redact()` call on the transcript path: pass the raw content through | `T-V180-SEC-01` |
@@ -1018,8 +999,8 @@ v180-` row, minus the `note` column the parser never reads; it is **21 rows**
 and it is load-bearing markup — the parser finds the header by the literal
 `| gate | pre-commit`, takes rows until the first line not starting with `|`,
 and every label must match the map byte-for-byte. The delta file — authored
-with this spec — holds that matrix and Appendix C's round-1 table, nothing
-else; T6 repoints the test at it and commits the repointing.
+with this spec — holds that matrix, §5.1's frozen design plan and Appendix C's
+three round tables, nothing else; T6 repoints the test at it and commits the repointing.
 
 ---
 
@@ -1070,7 +1051,7 @@ release:
 9. the `--no-verify` attestation sentence of REQ-V180-EC-08;
 10. the **tag name** `v1.8.0` and the gate results for the tree this report
     describes — never its own sha, which no commit can contain, and never the
-    post-tag `lint-docs` exit code, both of which REQ-V180-REV-02 records
+    post-tag `lint-docs` and `gitleaks-tree` exit codes, which REQ-V180-REV-02 records
     outside this file — or, on the stop route, the stage and the last green
     commit (REQ-V180-REV-04).
 
@@ -1135,11 +1116,15 @@ SHA; that commit's SHA **is** `<implementation-tip>`. T10 re-runs the six gates,
 `replay --range <base>..<implementation-tip>` and Appendix B against the final
 tree, then lands **one evidence-only commit** touching `docs/reports/*` and
 nothing else — not recursively required to replay against itself. **After it
-lands**, `checks.py lint-docs` is re-run against it and the annotated tag
-`v1.8.0` is created on **that** commit, so the tagged tree is the one the
-recorded documentation gate passed. Gates 1–4 and 6 are not re-run: the commit
-changed no file any of them reads (EC-09). Neither the re-run exit code nor
-the tagged sha can be inside that commit: both go into the run's closing
+lands**, `checks.py lint-docs` **and the `gitleaks-tree` scan** are re-run
+against it — the scan because that commit is the first carrying the final
+report, Telegram post and usage rows, which no earlier scan saw (EC-04) — and,
+both green, the annotated tag `v1.8.0` is created on **that** commit, so the
+tagged tree is the one the recorded documentation *and* secret gates passed. A
+finding there withholds the tag; it is never waived. Gates 1–4 and 6 are not
+re-run: the commit
+changed no file any of them reads (EC-09). Neither the two re-run exit codes
+nor the tagged sha can be inside that commit: all go into the run's closing
 message and into the working-tree copy of `docs/handoff-v1.8.0.md`, which this
 release never commits (EC-08).
 
@@ -1217,15 +1202,15 @@ come before the code they cover, inside the same task.
 |---|---|---|
 | **T0** | Preconditions: six gates green on the unchanged tree, hooks installed, `doctor` green, **test count re-measured** (floor 1133), `<base>` and the spec's `sha256` recorded, `docs/prompts/127-go-spec-v1.8.0.md` and `docs/spec/task-briefs/` created, the `report-v1.8.0.md` skeleton landed with `## Operator inputs` copied verbatim from the `go` request and a complete ledger-row block | every item recorded; 126 is the highest pre-existing prompt; `<base>` written before the first commit; an unreachable LM Studio **blocks** here |
 | **T1** | §3: Context discipline and the branch-zone rule; the **non-count** factual line (the layout line) corrected; `skills/*.md` and `CLAUDE.md` reviewed. Test `T-V180-AGT-01` | green; the four exemptions verbatim; the project-prompt record written for all three files; **no count-bearing line touched** (AGT-03) |
-| **T2** | §4 part 1: `delete_message` (`-> bool`), `finish(ok=)`, `STATUS_FAILED`, `STATUS_DONE` removed, `AgentOutcome` + `run_agent_outcome` + `finish`'s `failed`/`kind`, `_send -> bool`, the reordered call site. Tests `T-V180-CHAT-01…-05`, `-08`, `-09`; amends `bot.py:1085-1103`, `:1211`, `tests/test_v12_patch.py:145` | green; `run_agent`'s signature and its ~25 test call sites untouched; `--selftest` green with the amended assertion; no other test amended |
-| **T3** | §4 part 2: `_TypingIndicator`, `TYPING_INTERVAL_S`, the ceiling, `call`'s `connect_timeout`, the start before `run_agent_outcome` and CHAT-08 step 2's stop-and-join before the reply. Tests `T-V180-CHAT-06`, `-07` | green with a fake clock and event; no real sleep in the suite; `--selftest` still binds no port |
+| **T2** | §4 part 1: `delete_message` (`-> bool`), `finish(ok=)`, `STATUS_FAILED`, `STATUS_DONE` removed, `AgentOutcome` + `run_agent_outcome` + `finish`'s `failed`/`kind`, `_send -> bool`, the reordered call site. Tests `T-V180-CHAT-01…-05`, `-08`, `-09`, `-10`; amends `bot.py:1085-1103`, `:1211`, `tests/test_v12_patch.py:145` | green; `run_agent`'s signature and its ~25 test call sites untouched; `--selftest` green with the amended assertion; no other test amended |
+| **T3** | §4 part 2: `_TypingIndicator`, `TYPING_INTERVAL_S`, the ceiling, `call`'s three new timeout keywords, the start before `run_agent_outcome` and CHAT-08 step 2's stop-and-join before the reply. Tests `T-V180-CHAT-06`, `-07` | green with a fake clock and event; no real sleep in the suite; `--selftest` still binds no port |
 | **T4** | §5: `STYLE` rewritten to §5.1, the `num` coverage pass, the reading strip, the restyled sections, the nav entry, the SVG palette. Tests `T-V180-DSH-01…-04` | green — each **red before** the change, recorded so; `T-V160-DSH-02`'s byte identity holds |
-| **T5** | §6 storage and render: the **four** read functions (`conversation_row` included), the by-turn window, `conversation_list_section`, `conversation_transcript_section`. Tests `T-V180-CONV-01…-03` | green; migration tests green from v1…v5; `SCHEMA_VERSION` still 5; `git diff` shows no DDL |
+| **T5** | §6 storage and render: the **four** read functions (`conversation_row` included), the by-turn window with its exact cursor lookup and `TRANSCRIPT_FETCH_ROWS_MAX` bound, `conversation_list_section`, `conversation_transcript_section` with atomic turn admission and the seeded byte accumulator. Tests `T-V180-CONV-01…-03` | green; migration tests green from v1…v5; `SCHEMA_VERSION` still 5; `git diff` shows no DDL |
 | **T6** | §6 server + §7: four routes, two regexes, `_parse_cursor`, `_STATIC_ROUTES`, redact-then-escape, the two bounds; then the six `v180-*` entries, the `mutation-v180` gate with both re-measured timeouts, and §9's matrix test repointed at the delta file (EC-12). Tests `T-V180-CONV-04`, `-05`, `T-V180-SEC-01…-04` | green; `--select v180-` green with every `find` matching once; `mutation-all` green inside its new timeout; the repointed matrix test green |
 | **T7** | Docs and config, **no version bump**: `README.md` (Dashboard), `AGENTS.md`'s count-bearing lines written **once, here** (AGT-03), `docs/plan.md`, `report_path` (RPT-01) | `lint-docs` green on the T0 skeleton; the mutation count reads 98; docs match reality |
 | **T8** | **Review (REQ-V180-REV-01) in a clean context, then every gate**: the six verbatim, `checks.py run --profile full --since <base>`. **Every source, test and config *fix* lands here or earlier** — the single exception is T9's release stamp (VER-01), which is not a fix and is re-gated at T10 | findings closed or waived; every gate green; the count exceeds T0's floor; the tree is functionally final |
 | **T9** | **The version bump** (VER-01): `pyproject.toml` → `1.8.0`, `README.md`'s Versioning section and `AGENTS.md`'s echo, test `T-V180-VER-01` in `tests/test_v180_version.py`; then **provisional** `report-v1.8.0.md` (RPT-02 minus item 5's tip SHA), `tg-post-v1.8.0.md` (RU, `wc -m` quoted), `docs/llm-usage.md` rows | `T-V180-VER-01` red before the bump, green after; `lint-docs` green against the repointed `report_path`; no self-referential SHA claimed |
-| **T10** | **Final acceptance (REQ-V180-REV-02)**: the six gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the evidence-only commit; **then `lint-docs` re-run against it** and the annotated tag `v1.8.0` created on **that** commit, only on green | every gate green on the tree that ships; the post-commit `lint-docs` exit code and the tagged sha recorded **outside the tagged commit** (REV-02), or the tag's absence recorded with the verdict withholding it |
+| **T10** | **Final acceptance (REQ-V180-REV-02)**: the six gates, `full --since <base>`, `replay --range <base>..<implementation-tip>`, Appendix B; the evidence-only commit; **then `lint-docs` and `gitleaks-tree` re-run against it** and the annotated tag `v1.8.0` created on **that** commit, only on green | every gate green on the tree that ships; the post-commit `lint-docs` and `gitleaks-tree` exit codes and the tagged sha recorded **outside the tagged commit** (REV-02), or the tag's absence recorded with the verdict withholding it |
 
 ### 12.1 Per-task reading map
 
@@ -1240,7 +1225,7 @@ more is never a defect; reading less never releases a requirement. §1
 | **T1** | §3 | `AGENTS.md` (whole), `skills/host-info.md`, `skills/weather.md`, `CLAUDE.md`, `templates` block quoted in §3; `tests/test_v180_agents.py` (created here) | **yes** — it writes a test file `pytest` runs |
 | **T2** | §4 (CHAT-01…-04, -06, -07, -08) | `bot.py:45-70`, `:100-115`, `:142-180`, `:241-295`, `:685-710`, `:960-975`, `:1085-1115`, `:1200-1215`; `agent.py:1-20`, `:66-86`, `:226-300`, `:320-330`, `:390-420`, `:440-450`; `tests/test_v12_patch.py:140-150` | **yes** |
 | **T3** | §4 (CHAT-05, -06) | `bot.py:45-70`, `:100-180`, `:685-710`; `config.py:90-100`, `:296-330` | **yes** |
-| **T4** | §5 (DSH-01…-06), §5.1 | `dashboard_render.py:88-150`, `:340-470`, `:600-700`; the task-brief file carrying §5.1 | **yes** |
+| **T4** | §5 (DSH-01…-06), §5.1 | `dashboard_render.py:88-150`, `:340-470`, `:600-700`; `docs/spec/spec-v1.8.0-delta-1.md` § The frozen design plan; the task-brief file carrying that plan | **yes** |
 | **T5** | §6 (CONV-01…-05), §7 (SEC-02) | `storage.py:140-175`, `:270-290`, `:695-730`; `dashboard_render.py:45-90`, `:440-470` | **yes** |
 | **T6** | §6 (CONV-06, -07), §7, §9 (EC-10, -12) | `dashboard_server.py:30-60`, `:85-100`, `:160-195`, `:400-430`, `:470-495`, `:570-600`, `:655-700`; `config.py:155-175`; `devtools/mutation_check.py` **tail only** (`MUTATIONS` entries and `main()`); `config/quality_gates.yaml:200-260`, `:330-340`; `tests/test_v15_standards.py:1685-1741`; `docs/spec/spec-v1.8.0-delta-1.md` | **yes** |
 | **T7** | §3 (AGT-03), §10 (RPT-01) | `README.md:204-228`, `AGENTS.md:102-121`, `docs/plan.md`, `config/quality_gates.yaml:330-340` | **yes** — it edits `config/quality_gates.yaml`, which `lint-docs` and the matrix test read |
@@ -1267,12 +1252,12 @@ inherits from, the decisions `D1`–`D14`) lives in `docs/handoff-v1.8.0.md`.
 | `REQ-V180-EC-01` — boundary; zero new deps; no migration; budget 4 | `uv.lock`/`pyproject.toml` diffs show no new distribution; `git diff` no DDL |
 | `REQ-V180-EC-02` — test-first; Appendix A is the map | the report's per-task "failed first for the right reason" record |
 | `REQ-V180-EC-03` — 1133-test floor; the four-site amendment list | `pytest --collect-only -q` at T0 and T10; the amended-file diff |
-| `REQ-V180-EC-04` — secrets discipline; presence by key name only | `gitleaks-tree`; the report's `.env` record; `E14` |
-| `REQ-V180-EC-05` — back-compat; `finish(ok=)` keyword-only, no default | `T-V180-CHAT-02`; §8's unamended-test set staying green |
+| `REQ-V180-EC-04` — secrets discipline; presence by key name only; the scan covers the tree that ships | `gitleaks-tree`, re-run on the evidence commit; the report's `.env` record; `E14` |
+| `REQ-V180-EC-05` — back-compat; `finish(ok=)` keyword-only, no default; `call`'s four timeout phases each defaulting to today's bound | `T-V180-CHAT-02`, `-06`; §8's unamended-test set staying green |
 | `REQ-V180-EC-06` — not benchmark-affecting; the rule does not fire | the report's "Benchmark-affecting changes" statement; `git diff --stat` |
 | `REQ-V180-EC-07` — delegation: map, default `yes`, verbatim exemptions, brief file, live crossing, report record | §12.1's map; the committed `task-briefs/v180-T*.md`; the delegation record; `E13` |
 | `REQ-V180-EC-08` — handoff file; prompt format; one prompt one commit; `--no-verify` ban; prompt 127 | `lint-docs`; `replay --range <base>..<implementation-tip>`; the attestation; the handoff committed before T0 |
-| `REQ-V180-EC-09` — the six gates verbatim; the count floor (stop route: whatever the tree has); the final re-run; `lint-docs` re-run on the tagged commit | the report's two recorded exit-code sets and tag name; the post-commit `lint-docs` code and tagged sha in the closing message |
+| `REQ-V180-EC-09` — the six gates verbatim; the count floor (stop route: whatever the tree has); the final re-run; `lint-docs` and `gitleaks-tree` re-run on the tagged commit | the report's two recorded exit-code sets and tag name; the post-commit `lint-docs` and `gitleaks-tree` codes and tagged sha in the closing message |
 | `REQ-V180-EC-10` — six mutation entries by mechanism; `mutation-v180`; two re-measured timeouts | `mutation_check.py --select v180-`; `--list` recorded; the matrix test |
 | `REQ-V180-EC-11` — the implementation order; tests before code within a task | the commit sequence; the report's per-task record |
 | `REQ-V180-EC-12` — the gate matrix in `spec-v1.8.0-delta-1.md`; the matrix test repointed, label map extended | `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` green on the delta file |
@@ -1283,26 +1268,26 @@ inherits from, the decisions `D1`–`D14`) lives in `docs/handoff-v1.8.0.md`.
 | `REQ-V180-CHAT-01` — `delete_message` through `_call_with_retry` | `T-V180-CHAT-01` |
 | `REQ-V180-CHAT-02` — success deletes the message, clearing `_message_id` only on a `True` result; `STATUS_DONE` removed | `T-V180-CHAT-02`; `--selftest`; `v180-status-delete-skipped`; `E1` |
 | `REQ-V180-CHAT-03` — failure edits to `STATUS_FAILED` and keeps it | `T-V180-CHAT-03`; `E2` |
-| `REQ-V180-CHAT-04` — the signal is `AgentOutcome`; `run_agent_outcome`; `run_agent` a one-line wrapper | `T-V180-CHAT-04`, `T-V180-CHAT-08`; `v180-status-signal-inverted`; `E2` |
-| `REQ-V180-CHAT-05` — typing: immediate first send then 4.0 s, `cfg.llm_timeout_s` ceiling, one unretried 2.0 s attempt per tick, 3.0 s join before the reply, injected clock and event | `T-V180-CHAT-06`; `v180-typing-ceiling-removed`; `E4` |
+| `REQ-V180-CHAT-04` — the signal is `AgentOutcome`; `run_agent_outcome`; `run_agent` a one-line wrapper | `T-V180-CHAT-04`, `-08`, `-10`; `v180-status-signal-inverted`; `E1`, `E2` |
+| `REQ-V180-CHAT-05` — typing: immediate first send then 4.0 s, `cfg.llm_timeout_s` ceiling, one unretried attempt per tick with all four timeout phases at 2.0 s, 3.0 s join before the reply, the named one-stale-action residual, injected clock and event | `T-V180-CHAT-06`; `v180-typing-ceiling-removed`; `E4` |
 | `REQ-V180-CHAT-06` — best-effort both ways; the selftest records deletions | `T-V180-CHAT-05`, `-07`; `--selftest`; `E3`, `E5` |
 | `REQ-V180-CHAT-07` — the outcome contract: every fallback path carries `failed` and its `kind` | `T-V180-CHAT-08` |
 | `REQ-V180-CHAT-08` — reply first, then resolve the status; `_send -> bool` | `T-V180-CHAT-09`; `E1`, `E3` |
 | `REQ-V180-DSH-01` — the constraints that do not move; system font only | `T-V180-DSH-04`; `E7` |
-| `REQ-V180-DSH-02` — §5.1 is frozen; the executor implements, never designs | `T-V180-DSH-03`; the committed T4 task-brief file |
+| `REQ-V180-DSH-02` — §5.1's plan, in the delta file, is frozen; the executor implements, never designs | `T-V180-DSH-03`; the committed T4 task-brief file |
 | `REQ-V180-DSH-03` — tabular numerals by **declared column spec**; monospace dropped | `T-V180-DSH-01`, recorded red before T4; `E6` |
 | `REQ-V180-DSH-04` — the rejected defaults are absent from the **chrome** and asserted | `T-V180-DSH-02`, recorded red before T4; `E7` |
 | `REQ-V180-DSH-05` — per-page layout; nav gains conversations; no column moves | `T-V180-DSH-04`; `T-V160-DSH-02` still green; `E8` |
 | `REQ-V180-DSH-06` — the four SVG helpers reused, only their colours move | `T-V180-DSH-03`; `git diff` shows unchanged geometry |
 | `REQ-V180-CONV-01` — the entity is a conversation; one line of copy says so | `T-V180-CONV-04`; `E8` |
-| `REQ-V180-CONV-02` — four read functions incl. `conversation_row`; the cursor-anchored by-turn window, its probe, the turn-bounded trace map | `T-V180-CONV-01`, `-02`, `-03` |
+| `REQ-V180-CONV-02` — four read functions incl. `conversation_row`; the exact cursor lookup, the by-turn window, the `TRANSCRIPT_FETCH_ROWS_MAX` SQL bound, `next_cursor` in place of `has_more`, the turn-bounded trace map | `T-V180-CONV-01`, `-02`, `-03`; `E9` |
 | `REQ-V180-CONV-03` — `/conversations` row shape; `limit` 50, range 1–500 | `T-V180-CONV-04`; `E8` |
-| `REQ-V180-CONV-04` — transcript: `turn_id`/`id` order, whole turns but for one over the budget, `limit`/`cursor`, next link from the first unrendered message, no prev link, 400 on a bad cursor, 404 only on a missing row | `T-V180-CONV-05`; `E9` |
+| `REQ-V180-CONV-04` — transcript: `turn_id`/`id` order, atomic turn admission with the empty page the only split, `limit`/`cursor`, next link from the first unrendered message, no prev link, 400 on a cursor naming no message, 404 only on a missing row | `T-V180-CONV-05`; `E9` |
 | `REQ-V180-CONV-05` — the trace link joins via `(conv_id, turn_id)` for the page's turns only, lowest `id` first, `llm_calls` before `tool_calls` | `T-V180-CONV-03`, `-05`; `E9` |
-| `REQ-V180-CONV-06` — the JSON mirrors carry the same redacted, capped content, the `cursor`, `next_cursor` and `has_more` | `T-V180-CONV-04`, `T-V180-SEC-01`; `E10` |
+| `REQ-V180-CONV-06` — the JSON mirrors carry the same redacted, capped content and the `cursor`/`next_cursor` pair, the latter the page's own; no `has_more` key | `T-V180-CONV-04`, `T-V180-SEC-01`; `E9`, `E10` |
 | `REQ-V180-CONV-07` — routing, 404/400, the `_STATIC_ROUTES` disposition | `T-V180-CONV-04`, `-05`; the dead-code record; `E12` |
-| `REQ-V180-SEC-01` — `redact()` on every sink; `esc()` on the HTML sink only | `T-V180-SEC-01`; `v180-transcript-redact-bypassed`; `E10` |
-| `REQ-V180-SEC-02` — three bounds: 2000 redacted plain-text chars per message (marker additional), `limit` per page, 1.5 MiB of rendered bytes per response less a reserved suffix | `T-V180-SEC-02`; `v180-transcript-cap-removed`, `v180-transcript-budget-removed`; `E11` |
+| `REQ-V180-SEC-01` — `redact()` on every message-derived field on every sink, `tool_call_id` included; `esc()` on the HTML sink only | `T-V180-SEC-01`; `v180-transcript-redact-bypassed`; `E10` |
+| `REQ-V180-SEC-02` — three bounds: 2000 redacted plain-text chars per message (marker additional), `limit` per page, 1.5 MiB over the **whole response**, its accumulator seeded with the measured chrome and the reserved suffix | `T-V180-SEC-02`; `v180-transcript-cap-removed`, `v180-transcript-budget-removed`; `E11` |
 | `REQ-V180-SEC-03` — REQ-V160-TRC-09 not violated; the sources are distinct | `T-V180-SEC-03`; `E13`'s content-attribute half |
 | `REQ-V180-SEC-04` — headers, cap, read-only handle, loopback bind unchanged | `T-V180-SEC-04`; the pre-existing `T-V160-SRV-*` bind assertions; `E12` |
 | `REQ-V180-SEC-05` — parameterized SQL; no interpolation of request input | `T-V180-SEC-04`; the T8 review item 4 |
@@ -1312,7 +1297,7 @@ inherits from, the decisions `D1`–`D14`) lives in `docs/handoff-v1.8.0.md`.
 | `REQ-V180-RPT-03` — the Russian tg-post under 1500 characters | `wc -m` quoted in the report |
 | `REQ-V180-RPT-04` — usage rows; a complete ledger row the operator pastes | `lint-docs`'s ledger-row check; the `docs/llm-usage.md` rows |
 | `REQ-V180-REV-01` — clean-context review at T8, eight extra checks | the logged review prompt; the findings-closed record |
-| `REQ-V180-REV-02` — offline acceptance, evidence-only commit, `lint-docs` re-run, then the tag on that commit | Appendix B's per-scenario record; `replay --range`; the tag name in the report, the tagged sha in the closing message |
+| `REQ-V180-REV-02` — offline acceptance, evidence-only commit, `lint-docs` **and `gitleaks-tree`** re-run on it, then the tag on that commit | Appendix B's per-scenario record; `replay --range`; the tag name in the report, the two exit codes and the tagged sha in the closing message; `E14` |
 | `REQ-V180-REV-03` — regression; no weakened posture; the 4-cycle budget | earlier suites staying green; the repair-cycle count |
 | `REQ-V180-REV-04` — the stop route in two stages; what is finalised; no revert, no bump, no tag | the stop-route report section naming its stage, or its recorded non-use |
 
@@ -1359,8 +1344,10 @@ Scenario: E4 — the typing indicator sends once per tick and then stops
       two for one tick, and never through the retry wrapper
   And every send was preceded by a stop-event check and an elapsed check
   And no typing chat action was sent once elapsed reached 30 seconds
+  And every sendChatAction bounded all four httpx timeout phases at 2.0 s
   And stop() set the event and joined the worker within 3.0 s
   And the indicator was stopped and joined before the reply was sent
+  And a worker that outlived the join sent nothing after its request returned
 
 Scenario: E5 — a typing failure disables the indicator and nothing else
   Given a fake Telegram client whose sendChatAction raises on the first call
@@ -1406,28 +1393,38 @@ Scenario: E9 — the transcript reads in order, pages by turn, reaches traces
   And turns 1 and 3 render their turn label as plain text, no dangling link
   And when limit is set so a page would end inside turn 2, the page is
       extended to the end of turn 2 and no turn appears on two pages
+  And when turn 2 does not fit the bytes left on a page that already holds
+      turn 1, the page stops before turn 2 rather than splitting it
+  And only a turn that does not fit an empty page is split, and it is marked
+      continued
   And the next link carries a cursor naming the first message not rendered,
       and is absent when every message was rendered
   And no previous link is emitted on any page
   And following the next link repeats no message and skips none
-  And a cursor naming no message of that conversation is answered 400
+  And no response body carries a has_more key
+  And cursor=1-999999, which matches no message row even though later
+      messages exist, is answered 400 and never a 200
   And GET /conversations/<id> for a conversation with no messages is 200
       with the empty state, while an id no row matches is 404
 
 Scenario: E10 — content is redacted, then escaped, on both routes
-  Given a registered secret and a message whose content contains it
-       followed by "<script>alert(1)</script>"
+  Given a registered secret placed in every rendered message-derived field —
+       content, role and tool_call_id — and a content also containing
+       "<script>alert(1)</script>"
   When GET /conversations/<id> and GET /api/conversations/<id> are served
-  Then neither response body contains the secret
+  Then neither response body contains the secret, in any of those fields
   And the HTML response contains no unescaped "<script>"
-  And the JSON response carries the redacted text
+  And the JSON response carries the literal redacted text as json.dumps
+      encodes it, its "<" characters unescaped, served as application/json
+      under default-src 'none'
 
 Scenario: E11 — a long transcript paginates instead of hitting the cap
   Given a conversation of 500 messages of 8000 characters each, every message
        mixing 4-byte characters with escape-expanding ones
   When GET /conversations/<id>?limit=500 is served
-  Then the rendered page is under TRANSCRIPT_PAGE_BUDGET_BYTES, the response
-       is under 2 MiB, and it is not the "response too large" body
+  Then the complete response body — chrome, headings, suffix and rows
+       together — is under TRANSCRIPT_PAGE_BUDGET_BYTES, the response is
+       under 2 MiB, and it is not the "response too large" body
   And each rendered message is cut to 2000 characters of redacted plain text
       before escaping, with the marker and the original length additional
 
@@ -1451,6 +1448,9 @@ Scenario: E14 — the run left no secret anywhere
   Given the repository at the implementation tip
   When gitleaks scans the tracked set and the run's own artefacts
   Then it exits 0
+  And gitleaks-tree is run again on the evidence-only commit, before the tag,
+      so the final report, Telegram post and usage rows are themselves scanned
+  And a finding there withholds the tag rather than being waived
   And no file under docs/ contains a credential value
   And no report, prompt or spec names the deployment database or its contents
 ```
@@ -1459,31 +1459,19 @@ Scenario: E14 — the run left no secret anywhere
 
 ## Appendix C — cross-review log
 
-**Round 1's table is in `docs/spec/spec-v1.8.0-delta-1.md` § Cross-review log
-— round 1**, moved there as this round's overflow under §1's budget rule
-(EC-01). Rounds 1 and 2 of at most 3: **40 findings, 40 accepted
-(13 adapted), 0 rejected.**
+**Rounds 1–3 of 3, termination: `round_limit`** — the lab's stop criterion (a
+round without Critical or High findings) was **not reached within the round
+budget**; challenger **OpenAI Codex `gpt-5.6-sol`**, called through the lab's
+cross-review seam with the plan passed by file (the loop wrapper's argv form
+cannot carry a plan above 128 KB). **50 findings, 50 accepted (14 adapted),
+0 rejected** — 24 in round 1, 16 in round 2, 10 in round 3. The tables hold 48 rows
+for those 50: round 2's 16 occupy 14, three sharing one root cause and ruled
+once as R2-1.
 
-### Round 2 of at most 3 — against the whole spec (`e537335`); 16 findings, 16 accepted (6 adapted), 0 rejected
+**Residual findings may exist.** The log closes because the three-round budget
+ran out, not because a round came back clean: round 3 still returned one
+Critical and six High findings, and all ten were accepted.
 
-| # | sev | REQ(s) | verdict | change |
-|---|---|---|---|---|
-| R2-1 | Crit | CONV-02, -04, -06, -07, SEC-02, `T-V180-CONV-02` | accepted, adapted | **three findings collapsed into one ruling** — a byte budget that stops mid-page cannot coexist with an offset counting whole turns: pagination is now an opaque `(turn_id, id)` **cursor**, a turn larger than the budget is split and marked *continued*, the previous link and `_parse_offset` are **deleted**, and an unparseable or unknown cursor is a 400 |
-| R2-2 | Crit | RPT-02 item 10, REV-02, EC-09 | accepted | the report records the tag **name** and the gate results for its own tree; the tagged sha and the post-tag `lint-docs` code go to the closing message and the uncommitted handoff copy |
-| R2-3 | Crit | REV-04, EC-09 | accepted | the stop stages are defined by **whether any source or test file has been committed**, with no task number in either definition |
-| R2-4 | High | CHAT-05, CHAT-08 | accepted, adapted | the indicator is stopped and joined **before** the reply is sent, so a stale action can only land before it and the reply itself clears typing |
-| R2-5 | High | CHAT-05, EC-05 | accepted | `TYPING_REQUEST_TIMEOUT_S = 2.0` on the read and connect bounds, `TYPING_JOIN_TIMEOUT_S = 3.0`; the request bound is shorter than the join |
-| R2-6 | High | SEC-02, CONV-06 | accepted | the 2000-character cap is over the **redacted plain text, before escaping**, identically on both sinks; the byte budget is the separate bound, on rendered output |
-| R2-7 | High | SEC-02 | accepted | `TRANSCRIPT_PAGE_SUFFIX_BYTES = 4096` is reserved for the marker, the links and the closing chrome and subtracted before the first row is admitted |
-| R2-8 | High | EC-07, §12.1 | accepted | every delegate cell recomputed against the closed exemptions: T1, T7 and T8 now delegate, T0 and T10 are *artefacts only*, and nine of eleven tasks delegate |
-| R2-9 | High | DSH-04, `T-V180-DSH-02` | accepted, adapted | the chrome is one render against an all-sentinel fixture, not an intersection of two renders |
-| R2-10 | High | EC-10, REV-01 item 8 | accepted | red-before is the mutation gate's own mutate → red → revert cycle, run at T6 once the code exists |
-| R2-11 | Med | CHAT-05, E4 | accepted | the first typing action is sent immediately on start, then every 4.0 s |
-| R2-12 | Med | CHAT-01, CHAT-02 | accepted | `finish(ok=True)` clears `_message_id` only when the unwrapped result is exactly `True`; anything else is a failed delete |
-| R2-13 | Med | CONV-02, CONV-05 | accepted | `conversation_turn_traces(conn, conv_id, turn_ids)` returns mappings for the page's turns only |
-| R2-14 | Med | DSH-03, CONV-03, `T-V180-DSH-01` | accepted, adapted | column kind is **declared** in each builder's column spec, never inferred from cell data; a placeholder cell keeps its column's class |
-
-**Round 2: 16 findings, 16 accepted (6 adapted), 0 rejected.** New
-requirements: none. Three findings — the byte budget against the turn offset,
-the unusable previous link, the undefined out-of-range offset — share one root
-cause and are ruled once, as R2-1.
+The three round tables live in `docs/spec/spec-v1.8.0-delta-1.md`
+§&nbsp;Cross-review log, moved there as round 3's overflow under §1's budget
+rule (EC-01).

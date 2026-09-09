@@ -1,12 +1,13 @@
-# spec-v1.8.0-delta-1 — the gate matrix
+# spec-v1.8.0-delta-1 — the gate matrix, the design plan, the review log
 
 Overflow file of `docs/spec/spec-v1.8.0.md`, created because that file is at
 `standards/workflow.md` §12's ~80 KB ceiling (REQ-V180-EC-01, "The spec's own
 budget"). It is **normative**: REQ-V180-EC-12 makes this table the one
 `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
 (`tests/test_v15_standards.py:1727-1741`) parses, in place of
-`spec-v1.7.0.md`. Nothing else belongs in this file, beyond round 1 of
-`spec-v1.8.0.md`'s Appendix C below, moved here as round 2's overflow
+`spec-v1.7.0.md`, and REQ-V180-DSH-02 makes the frozen design plan below the
+one §&nbsp;5.1 points at. Nothing else belongs in this file beyond those two and
+`spec-v1.8.0.md`'s Appendix C tables, all moved here as overflow
 (REQ-V180-EC-01).
 
 ## The gate matrix (REQ-V180-EC-12)
@@ -44,10 +45,98 @@ reads. It is load-bearing markup: the parser finds the header by the literal
 
 ---
 
-## Cross-review log — round 1 (Appendix C of `spec-v1.8.0.md`)
+## The frozen design plan (REQ-V180-DSH-02, §&nbsp;5.1 of `spec-v1.8.0.md`)
 
-Round 1's table only, moved here as round 2's overflow (REQ-V180-EC-01).
-Appendix C's heading and its round-2 section stay in the spec.
+Moved here as round 3's overflow (REQ-V180-EC-01). **Normative and frozen:**
+the executor implements it and never designs. REQ-V180-DSH-03…-06, which bind
+it, stay in §&nbsp;5.1 of the spec.
+
+**Direction.** An **operator's instrument panel**, not a SaaS analytics
+product: hairline rules, not floating cards; one accent reserved for
+**measured signal**; numbers in columns you read down.
+
+**Palette — exactly six named values**, custom properties on `:root` inside
+the one `STYLE` block:
+
+| token | hex | role |
+|---|---|---|
+| `--ink` | `#16181c` | body text, headings, the one heavy rule under `h1` |
+| `--ground` | `#eef0f2` | the page background: cool paper, never warm cream |
+| `--plate` | `#ffffff` | the surface of a panel/section, flat |
+| `--rule` | `#ccd2d8` | every hairline: panel edges, row rules, chart baselines, the `h2` scale line |
+| `--dim` | `#5f6873` | secondary text: column headers, units, timestamps, footer |
+| `--signal` | `#1f5fb0` | the single accent: bar fill, link, active nav item, focus ring — signal only |
+
+Two status colours carry over unchanged and are the **only** other saturated
+values: ok `#1c7a4a`, fault `#b23636`, on status text and an error-outlined
+gantt bar, nowhere else. A ninth colour is a defect.
+
+**The `PALETTE` dict is remapped onto those eight and gains no key.**
+`dashboard_render.PALETTE` (`dashboard_render.py:79-85`) is the SVG helpers'
+colour table: five keys today, the same five afterwards, with these literals.
+This is what DSH-06 means by "only the colour literals move", and what makes
+DSH-04's "every colour literal is one of the eight" satisfiable:
+
+| key | new literal | role |
+|---|---|---|
+| `bar` | `#1f5fb0` (`--signal`) | bar fill |
+| `bar_track` | `#eef0f2` (`--ground`) | bar track |
+| `kind_client` | `#1f5fb0` (`--signal`) | a `CLIENT` span — the outbound call, the signal |
+| `kind_internal` | `#5f6873` (`--dim`) | an `INTERNAL` span — structure, not signal |
+| `error_outline` | `#b23636` (fault) | unchanged |
+
+**Type scale — four sizes, two weights, one face**: REQ-V180-DSH-01's system
+stack, for **everything including numbers**.
+
+| element | size / line-height | weight | notes |
+|---|---|---|---|
+| `h1` | 22px / 1.25 | 600 | `letter-spacing: -0.01em`; one 2px `--ink` rule beneath, full content width |
+| `h2` | 16px / 1.3 | 600 | sentence case; a 1px `--rule` line from the text's right edge to the content's right edge — a scale line, not decoration |
+| `h3` | 13px / 1.35 | 600 | sentence case |
+| body, `td` | 13px / 1.5 | 400 | |
+| `th`, `.meta`, `footer`, units | 12px / 1.4 | 600 (`th`) / 400 (rest) | `--dim`; **sentence case, `text-transform: none`, `letter-spacing: 0`** |
+
+Four sizes and no fifth: 22 → 16 → 13 → 12. `h3` is **deliberately body size
+at the heavier weight** — weight is the distinction, not a fifth size and not a
+collision. No 300 or 700 weight, no italic.
+
+**Alignment — the answer to "the numbers slide".** The page is **one column**,
+`max-width: 68rem`, centred, and *every* element — `h1`'s rule, each `h2`'s
+scale line, every plate, table and `<svg>` — shares its left and right edges.
+Text is left-aligned, nothing centred but a single empty-state line; **every
+`class="num"` cell is right-aligned with `font-variant-numeric: tabular-nums`**
+in the body face, so a column of numbers has one right edge and one glyph width
+(REQ-V180-DSH-03 makes this checkable); units go in the column header, never
+per cell; charts are drawn to the table's content width, so bar baselines line
+up with table rules.
+
+**Surfaces.** A `section` is a **plate**: `background: var(--plate)`, `border:
+1px solid var(--rule)`, `border-radius: 2px`, **no `box-shadow` anywhere in the
+sheet**, padding `0 1rem 1rem`. Table rows are separated by 1px `--rule`, the
+last by none. A bar is a 0.6rem `--ground` track with a `--signal` fill, square
+ends.
+
+**Layout, per page.**
+
+| page | concept |
+|---|---|
+| `/` (usage) | a **reading strip** across the top of the first plate: four measured values — calls, total tokens, cost, error rate — as label-above-number pairs on one baseline, split by 1px `--rule` verticals, numbers at 22px/600 tabular; then the totals table, then the by-group table |
+| `/traces` | one full-width table, newest first; the duration column carries an inline `--signal` bar sized against the page's widest duration, drawn **inside** the number's own cell so magnitude and value read together |
+| `/traces/<id>` | the gantt on its own plate first, span table beneath, both at content width so a bar sits above its row |
+| `/tools` | the tool-health table on one plate, the limit-hits bar chart on the next, drawn to the same width |
+| `/conversations` | one table: id, user, started, messages, active, last activity — **five of the six** (id, user, started, messages, last activity) carry `class="num"`, right-aligned and tabular; `active` does not, its content being the word `yes`/`no` (REQ-V180-DSH-03) |
+| `/conversations/<id>` | a **two-column transcript**: a fixed 7rem left rail carrying role and turn (with the trace link when there is one), and a single measure column of message text; one left edge to track down, one 1px `--rule` between messages, no bubbles. In the rail, turn id and timestamp carry `class="num"`; the role word, the trace link and the message text do not |
+
+**What this deliberately is not.** Warm cream, a serif display face, card
+shadows, ALL-CAPS eyebrows, middle-dot meta strings, monospace data, an arrow
+after link text — all rejected; REQ-V180-DSH-04's list is the closed one.
+
+---
+
+## Cross-review log (Appendix C of `spec-v1.8.0.md`)
+
+All three round tables, moved here as overflow (REQ-V180-EC-01). Appendix C's
+heading, its closing tally and its `round_limit` note stay in the spec.
 
 ### Round 1 of at most 3 — against the whole spec (`58d4553`); 24 findings, 24 accepted (7 adapted), 0 rejected
 
@@ -92,3 +181,47 @@ as such rather than quietly dropped:
   impossible after one. It demanded the T0 test floor, an unwritten source
   tree, a pre-bump `pyproject.toml` and an evidence commit another item
   forbade (R1-21…R1-23).
+
+### Round 2 of at most 3 — against the whole spec (`e537335`); 16 findings, 16 accepted (6 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R2-1 | Crit | CONV-02, -04, -06, -07, SEC-02, `T-V180-CONV-02` | accepted, adapted | **three findings collapsed into one ruling** — a byte budget that stops mid-page cannot coexist with an offset counting whole turns: pagination is now an opaque `(turn_id, id)` **cursor**, a turn larger than the budget is split and marked *continued*, the previous link and `_parse_offset` are **deleted**, and an unparseable or unknown cursor is a 400 |
+| R2-2 | Crit | RPT-02 item 10, REV-02, EC-09 | accepted | the report records the tag **name** and the gate results for its own tree; the tagged sha and the post-tag `lint-docs` code go to the closing message and the uncommitted handoff copy |
+| R2-3 | Crit | REV-04, EC-09 | accepted | the stop stages are defined by **whether any source or test file has been committed**, with no task number in either definition |
+| R2-4 | High | CHAT-05, CHAT-08 | accepted, adapted | the indicator is stopped and joined **before** the reply is sent, so a stale action can only land before it and the reply itself clears typing |
+| R2-5 | High | CHAT-05, EC-05 | accepted | `TYPING_REQUEST_TIMEOUT_S = 2.0` on the read and connect bounds, `TYPING_JOIN_TIMEOUT_S = 3.0`; the request bound is shorter than the join |
+| R2-6 | High | SEC-02, CONV-06 | accepted | the 2000-character cap is over the **redacted plain text, before escaping**, identically on both sinks; the byte budget is the separate bound, on rendered output |
+| R2-7 | High | SEC-02 | accepted | `TRANSCRIPT_PAGE_SUFFIX_BYTES = 4096` is reserved for the marker, the links and the closing chrome and subtracted before the first row is admitted |
+| R2-8 | High | EC-07, §12.1 | accepted | every delegate cell recomputed against the closed exemptions: T1, T7 and T8 now delegate, T0 and T10 are *artefacts only*, and nine of eleven tasks delegate |
+| R2-9 | High | DSH-04, `T-V180-DSH-02` | accepted, adapted | the chrome is one render against an all-sentinel fixture, not an intersection of two renders |
+| R2-10 | High | EC-10, REV-01 item 8 | accepted | red-before is the mutation gate's own mutate → red → revert cycle, run at T6 once the code exists |
+| R2-11 | Med | CHAT-05, E4 | accepted | the first typing action is sent immediately on start, then every 4.0 s |
+| R2-12 | Med | CHAT-01, CHAT-02 | accepted | `finish(ok=True)` clears `_message_id` only when the unwrapped result is exactly `True`; anything else is a failed delete |
+| R2-13 | Med | CONV-02, CONV-05 | accepted | `conversation_turn_traces(conn, conv_id, turn_ids)` returns mappings for the page's turns only |
+| R2-14 | Med | DSH-03, CONV-03, `T-V180-DSH-01` | accepted, adapted | column kind is **declared** in each builder's column spec, never inferred from cell data; a placeholder cell keeps its column's class |
+
+**Round 2: 16 findings, 16 accepted (6 adapted), 0 rejected.** New
+requirements: none. Three findings — the byte budget against the turn offset,
+the unusable previous link, the undefined out-of-range offset — share one root
+cause and are ruled once, as R2-1.
+
+### Round 3 of at most 3 (final) — against the whole spec (`a8a3db9`); 10 findings, 10 accepted (1 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R3-1 | Crit | CONV-02, -04, -06, `T-V180-CONV-02` | accepted | `conversation_messages` returns `(rows, next_cursor)` — the `(turn_id, id)` of the first message it did not return, `None` at the end; `has_more` is gone from the reader, from both sinks and from the JSON payload, its meaning being `next_cursor is not None` |
+| R3-2 | High | CONV-04, CONV-07 | accepted | a cursor is validated by an exact `(conv_id, turn_id, id)` lookup, never a range probe; a pair naming no message — `1-999999` — is a 400 through `_bad_request`, not a 200 that skips into a later turn |
+| R3-3 | High | CONV-04, SEC-02 | accepted | turn admission is atomic and ordered: measure the whole turn's rendered bytes, admit it whole if it fits, stop the page if it does not and a turn is already there, and split only when the page is empty — the one split case |
+| R3-4 | High | CONV-02 | accepted | the message fetch is bounded in SQL by `LIMIT TRANSCRIPT_FETCH_ROWS_MAX + 1`, `TRANSCRIPT_FETCH_ROWS_MAX = 2000`; hitting the cap is R3-3's split case, not an error |
+| R3-5 | High | CHAT-05, CHAT-08, EC-05 | accepted, adapted | `TYPING_REQUEST_TIMEOUT_S` now binds **all four** `httpx.Timeout` phases — superseding R2-5's two — and `call` gains `connect_timeout`, `write_timeout` and `pool_timeout`, each defaulting to today's 10.0; the 3.0 s join stays and the residual is **named**: at most one stale typing action, ~5 s after the reply, accepted, with the worker re-checking the stop event after its request returns |
+| R3-6 | High | REV-02, EC-04, EC-09 | accepted | `gitleaks-tree` is re-run on the evidence-only commit, before the tag, beside `lint-docs`, so the final report, Telegram post and usage rows are themselves scanned; a finding there withholds the tag |
+| R3-7 | High | SEC-02, `T-V180-SEC-02` | accepted | the byte accumulator is **seeded** with the page's measured chrome plus the reserved suffix, so the budget bounds the whole response; the worst-case assertion measures the complete body |
+| R3-8 | Med | EC-10, `v180-status-signal-inverted` | accepted | a new `T-V180-CHAT-10` drives `process_update` with a successful and a structurally failed outcome, asserting opposite status behaviour, and owns the mutation; `T-V180-CHAT-02`/`-03`, which drive `finish` directly, no longer claim it |
+| R3-9 | Med | SEC-01, `T-V180-SEC-01` | accepted | the security test injects a registered secret into **every** rendered message-derived field — `content`, `role`, `tool_call_id` — so redaction cannot pass by protecting one column |
+| R3-10 | Med | `T-V180-SEC-01` | accepted | the escaping assertion is scoped to HTML; the JSON assertion is stated separately — the literal redacted text as `json.dumps` encodes it, safe by content type and `default-src 'none'`, not by escaping |
+
+**Round 3: 10 findings, 10 accepted (1 adapted), 0 rejected.** New
+requirements: none; one new test id, `T-V180-CHAT-10`. R3-5 supersedes R2-5's
+two-phase bound. **The log closes here on `round_limit`, not on a clean
+round** — see Appendix C's opening paragraph.
