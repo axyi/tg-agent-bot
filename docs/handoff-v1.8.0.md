@@ -15,6 +15,32 @@ clock and a temporary database. LM Studio does not have to be reachable, and
 the GPU box's floating IP — which cost four re-pins across v1.6.0 and
 v1.7.0 — is irrelevant to this release.
 
+## Models
+
+- **Executor: `claude-sonnet-5`.** `standards/workflow.md` §3 sends execution
+  against a finished spec to the cheapest model that passes acceptance, and
+  sonnet-5 executed v1.5, v1.6.0 and v1.7.0 end to end in this repository —
+  v1.5 first-run green with 0 of 5 repair cycles, v1.6.0 first-run green
+  through T14 with 1016 tests and mutation 83/83. v1.7.0's only failure was
+  its cost gate, a measurement outcome rather than an execution one. v1.8.0
+  is smaller in scope than v1.6.0 and makes no live model call at all.
+- **Reviewer: `sonnet`**, pinned in `.claude/agents/code-reviewer.md`. §3's
+  evidence: three v0 reviews found only test defects, and an opus review
+  costs about three times as much for the same findings. Overriding the pin
+  needs a written reason in the spec's Execution contract; this release has
+  none, so it stands.
+- **Effort: high for the orchestrator, default for the implementation
+  subagents.** Not maximum. The spec is the reasoning artefact — 50 accepted
+  cross-review findings' worth of ambiguity has already been taken out of
+  it, and spending maximum effort re-deriving what the spec states is the
+  waste §3 warns about. High is for the two places where care actually pays:
+  the cursor and byte-budget interaction, which took three findings across
+  two rounds to settle, and implementing §5.1's frozen design plan rather
+  than redesigning it. Note this recommendation is reasoned, not measured:
+  no prompt file in this repository records an effort level, so unlike the
+  model choice it carries no lab evidence behind it.
+- A spec-internal contradiction is a **STOP**, never a cue to raise effort.
+
 ## What it is
 
 Four areas, in the operator's words:

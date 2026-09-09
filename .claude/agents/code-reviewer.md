@@ -1,6 +1,7 @@
 ---
 name: code-reviewer
 description: Reviews the project's changes in a clean, isolated context. Use after implementation and green gates, before reporting a task as done.
+model: sonnet
 tools: Read, Glob, Grep, Bash
 ---
 
