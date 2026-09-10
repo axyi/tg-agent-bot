@@ -143,8 +143,8 @@ uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1217
-tests as of spec-v1.8.0 T8). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1220
+tests as of spec-v1.8.0 T10). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its
