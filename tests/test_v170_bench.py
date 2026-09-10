@@ -385,8 +385,18 @@ def test_t_v170_acc_03_equivalence_half():
 
 
 def test_t_v170_acc_03_version_half():
-    with open(_REAL_PROJECT_ROOT / "pyproject.toml", "rb") as handle:
-        version = tomllib.load(handle)["project"]["version"]
+    """Checks ACC-03's T12 version decision **as it stood at the `v1.7.0`
+    tag**, not the live tree's current `pyproject.toml` -- erratum, spec-
+    v1.8.0 T9: the live-tree read this test used through v1.7.0 broke the
+    moment v1.8.0's own required VER-01 bump landed, the same structural
+    class as this release's other disclosed EC-03-list gaps. Reading the
+    tagged blob instead of the working tree makes this assertion permanent,
+    immune to every future release's own version bump."""
+    result = subprocess.run(
+        ["git", "show", "v1.7.0:pyproject.toml"],
+        cwd=_REAL_PROJECT_ROOT, capture_output=True, text=True, check=True,
+    )
+    version = tomllib.loads(result.stdout)["project"]["version"]
     cand_docs = _acc03_cand_v170_documents()
     resolved = _acc03_final_tree_reasoning_pair()
     has_match = len(_acc03_find_matching_candidates(cand_docs, resolved)) == 1
