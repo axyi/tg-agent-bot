@@ -11,7 +11,7 @@ sends the bot a `.txt`, `.md`, `.docx` or `.pdf`; the bot extracts the text,
 chunks it, embeds it through LM Studio's OpenAI-compatible embeddings
 endpoint, stores chunks and vectors in the existing SQLite file behind
 `sqlite-vec`, and the agent answers later questions through one new tool,
-`search_documents(query)`, whose results are hybrid (vector + 150,22225, fused by
+`search_documents(query)`, whose results are hybrid (vector + BM25, fused by
 RRF), reranked by the LLM, and attributed to a filename and, for PDFs, a page.
 The grading rubric is `/home/akh/aihome/coders-su/base/assignments/06-rag-for-agent.md`
 (Russian) — cited as the **provenance** of the requirement list and **not read
@@ -43,8 +43,17 @@ with these adjustments:
 - the repair budget is **4 total** repair-and-rerun cycles (one cycle = one fix
   + a complete run of all gates from the first); exhausted → stop and report
   through §14's stop route;
-- **no project or lab file outside the repository root may be read or
-  written** — in particular **the executor does not read the external
+- **the filesystem boundary, stated exactly**: *"Existing project/lab files
+  outside the repository may not be read or modified. Ephemeral
+  executor-created files may be written under the OS temporary directory
+  (`tempfile`), must contain no secrets or uploaded document bytes, and must
+  be removed before task completion."* The permission is the **executor's
+  tooling** only — REV-04 Stage 0's `tempfile.mkdtemp()` backup directory and
+  `devtools/rag_eval.py`'s `tempfile.TemporaryDirectory`. It grants the
+  **bot's own modules nothing**: `documents.py` and the document handler still
+  contain no `open(`, no `Path(`, no `tempfile` (SEC-04, `T-V190-SEC-04`), and
+  no uploaded byte ever leaves memory. In particular **the executor does not
+  read the external
   assignment-4 project** (`local-rag-hybrid`): the algorithms it inspired are
   reproduced normatively and completely in RET-04, RET-05 and EVAL-03, and no
   path outside this repository appears in §15.1; the network this release needs is gate 5's live preflight, gate
@@ -236,8 +245,15 @@ records its own overrun**: its two new test rows and its amended table rows
 went to the delta, every prose change to this file, taking this file to
 **150,222 bytes** and the delta to **25,899 bytes** — 899 bytes past
 the 25 KB cap, paid in text like round 1's overrun and never by deleting
-normative content. Round 3, if it runs, offsets any further growth of the
-delta rather than adding to it.
+normative content. **Round 3 obeyed the same placement rule and did not
+offset**: its five new test rows and its amended table rows went to the
+delta, every prose change to this file, taking this file to **174,186
+bytes** and the delta to **30,222 bytes** — 5,222 bytes past the 25 KB cap,
+paid in text like rounds 1 and 2. The plan recorded here after
+round 2 — that round 3 would offset any further growth of the delta rather
+than adding to it — was **not** met, and is recorded as missed rather than
+paid for by deleting a normative row: five findings needed five new test
+ids, and a test id without its table row is not a specified test.
 
 ---
 
@@ -253,7 +269,7 @@ Out of scope; named so a task that drifts into one stops.
 | `NG-04` | Re-embedding after a model or dimension change. A stored `rag.embedding` pair that differs from config refuses to start while any document exists (STO-04); once the last one is deleted the empty index is rebound atomically. The fix is manual, never automated. |
 | `NG-05` | A dashboard page, route or JSON mirror for documents; `dashboard_server.py` and `dashboard_render.py` are not edited. |
 | `NG-06` | A numeric similarity threshold; "not in the documents" is the prompt rule plus the structural check of TOOL-05, never a distance cut-off. |
-| `NG-07` | Caching the 150,22225 index, the query embedding or the rerank verdict between requests; 150,22225 is rebuilt per query (RET-04). |
+| `NG-07` | Caching the BM25 index, the query embedding or the rerank verdict between requests; BM25 is rebuilt per query (RET-04). |
 | `NG-08` | Vector or semantic memory of the conversation, automatic model routing, semantic caching — the part of `REQ-NG-05`/`REQ-V1-NG-05` that stays (EC-13). |
 | `NG-09` | Reasoning-policy work: `LLM_REASONING_POLICY` / `LLM_REASONING_ON_PURPOSES`, their defaults and `resolve_reasoning`'s table are untouched; the reranker forces `off` for its own call only (RET-06). |
 | `NG-10` | Any change to the exec sandbox, the SSRF allowlist, the rate limiter's parameters or access control; the Docker image is untouched (it runs `exec`, not the bot). |
@@ -368,7 +384,7 @@ For a PDF, `chunk_text` runs **per page**; a chunk never spans pages and
 `chunks.page` (STO-02) is the page's 1-based number; for `txt`/`md`/`docx`
 `page` is `NULL`. `chunk_index` is the 0-based position in the document
 across pages. `README.md` explains the four numbers and the risks of too-small
-(context lost, more chunks to embed, weaker 150,22225 statistics) and too-large
+(context lost, more chunks to embed, weaker BM25 statistics) and too-large
 (irrelevant text dilutes the embedding, fewer distinct hits in K = 5, longer
 tool output) chunks (assignment item R2; RPT-05).
 
@@ -376,21 +392,47 @@ tool output) chunks (assignment item R2; RPT-05).
 transaction.** Inside `documents.index_document` (DOC-05), after extraction:
 (1) extracted text over **500,000** characters (sum over pages) → "too
 large (text)"; (2) fewer than **20** non-whitespace characters → "empty";
-(3) the user already has **20** documents and this filename is not one of
-them → "limit" (a replace does not count); (4) the wall-clock budget of
+(3) the wall-clock budget of
 **300 s** from the start of the handler, checked **between stages** —
 after extraction, after chunking, after every embeddings batch — and,
 inside PDF extraction, **between pages** (DOC-02); with an
 injected `monotonic: Callable[[], float] = time.monotonic`; over → raise
 `documents.IndexBudgetExceeded` (a named exception of `documents.py`, so no
 handler has to recognise it by message) → "timed out", and **nothing is
-stored**: the whole index — the document row, its
-chunks, its vectors, the `rag.embedding` pair when first written — is
-**one transaction** (`BEGIN IMMEDIATE` … `COMMIT`) opened only after the
+stored**.
+
+**"From the start of the handler" has exactly one meaning.**
+`index_document` takes `started_at: float` (DOC-05), captured by
+`monotonic()` as the **first action of `_handle_document`** — before
+`getFile`, before the download, before the status message — and **every
+budget check is `monotonic() - started_at > budget_s`**, wherever it stands:
+between stages, between PDF pages, after an embeddings batch. Time spent in
+`getFile`, in the download and in the handler's own pre-index work is
+therefore inside the budget by construction, and no implementation can
+restart the clock at the top of `index_document`. `T-V190-CMD-09` pins it:
+a fake clock advanced by 290 s **before** `index_document` is entered plus
+20 s inside gives ERR-01 row 10c.
+
+**The document limit is the handler's, checked twice.** The "user already
+has **20** documents and this filename is not one of them" refusal (a
+replace does not count) is **not** an `index_document` stage: CMD-03 runs it
+as one scoped `COUNT` **before** the `📄 received` status message and before
+`getFile`, so ERR-01 row 13 keeps its "precedes the status message, plain
+reply" property. `index_document` **re-checks the same condition inside the
+indexing transaction, immediately before the document row is inserted** —
+two uploads racing through the pre-check must not both land — and the
+transactional refusal raises the same exception and maps to the **same
+ERR-01 row 13 string**.
+
+**The transaction, and what it does not cover.** The whole index is **one
+transaction** (`BEGIN IMMEDIATE` … `COMMIT`) opened only after the
 last embeddings batch has returned, so a failure at any stage leaves the
 database exactly as it was, including the replaced document when this is a
-re-upload (DOC-05). The size limit before download (10 MiB) is CMD-03's;
-the download cap is CMD-02's.
+re-upload (DOC-05). **The indexing transaction covers only
+replacement/deletion, the document row, chunks and vectors. `rag.embedding`
+and `vec_chunks` lifecycle changes occur exclusively in `init_schema` under
+STO-04 and never in `index_document`.** The size limit before download
+(10 MiB) is CMD-03's; the download cap is CMD-02's.
 
 **What the 300 s budget is, exactly.** A check between stages and between
 PDF pages — nothing more. A single library call inside a stage is **not**
@@ -402,13 +444,29 @@ the DOCX archive bounds and the 500-page PDF ceiling (DOC-02) — and
 
 **REQ-V190-DOC-05 (MUST) — the indexing pipeline and replace-on-reupload.**
 `documents.index_document(conn, *, user_id: int, filename: str, data: bytes,
-embedder, progress: Callable[[str], None], now: str, monotonic=time.monotonic,
+embedder, progress: Callable[[str], None], now: str, started_at: float,
+monotonic=time.monotonic,
 budget_s: float = 300.0) -> IndexResult` with `IndexResult(chunk_count: int,
-page_count: int | None, text_chars: int, replaced: bool)`. Stages, each
-reported through `progress` with the exact strings of CMD-04: classify →
-extract → chunk → embed (batches of 32 through the embedder, `progress`
-after each batch with `i/n`) → store. Store, in the one transaction of
-DOC-04: if a row `documents(user_id, filename)` exists, **delete it first**
+page_count: int | None, text_chars: int, replaced: bool)`. `started_at` is
+the handler's own `monotonic()` reading (DOC-04) and has no default — the
+caller must supply it, so the budget's origin can never be lost by omission.
+Stages: classify → extract → chunk → embed (batches of 32 through the
+embedder) → store.
+
+**Progress ownership is split, and the split is exhaustive.**
+`index_document` emits **only three** of CMD-04's strings through
+`progress`: `📄 extracted: …` after extraction, `📄 chunked: N` after
+chunking, and `📄 embedding: i/n` after each embeddings batch. **The
+classify and store stages emit nothing** — CMD-04's list is the complete
+set of stage strings and contains no classify or store line. `📄 received`
+is the **handler's**, sent before `getFile` (CMD-04), and so are both
+endings: the success deletion plus the confirmation reply, and the failure
+edit. `index_document` sends no Telegram message and knows nothing of the
+status message; `progress` is its only channel.
+
+Store, in the one transaction of
+DOC-04 — which re-checks the 20-document limit before the insert:
+if a row `documents(user_id, filename)` exists, **delete it first**
 through STO-05's `delete_document` (vectors, chunks, row) inside the same
 transaction, then insert the new document row (`size_bytes = len(data)`,
 `sha256 = hashlib.sha256(data).hexdigest()`, `page_count` = number of
@@ -532,14 +590,47 @@ to `('agent', 'summary')`; RET-06 records rerank calls with purpose
 **Why the rebuild is safe here, as a fact of this schema:** no table in
 `_SCHEMA` or `_OBSERVABILITY_DDL` declares a foreign key referencing
 `llm_calls`, and no trigger exists; the only dependent object is the index
-`idx_llm_calls_conv` (`storage.py:96`), which the script recreates. Belt and
-braces regardless, because a future table must not silently break the
-migration: `_MIGRATION_5_TO_6` issues `PRAGMA foreign_keys=OFF;` **before**
-`BEGIN IMMEDIATE` and `PRAGMA foreign_keys=ON;` **after** `COMMIT` — the
-pragma is a no-op inside a transaction, so that order is load-bearing — and
-after the restore `PRAGMA foreign_key_check` MUST return **no rows**.
+`idx_llm_calls_conv` (`storage.py:96`), which the migration recreates. Belt
+and braces regardless, because a future table must not silently break the
+migration: foreign keys are disabled across the rebuild — the pragma is a
+no-op inside a transaction, so the toggle must stand outside it.
 
-Between them the script: (1)
+**The 5 → 6 step is normative Python control flow, not a success-only
+script.** `conn.executescript(...)` cannot express a rollback: a failure in
+the create/copy/drop/rename sequence would leave the explicit transaction
+open and the connection with foreign keys **off**, and the `PRAGMA
+foreign_keys=ON` that follows a successful `COMMIT` would never run. So
+`storage._migrate_5_to_6(conn)` is a function with exactly this shape, and
+`_MIGRATION_5_TO_6` is the statement list it executes, never an
+`executescript` carrying its own pragmas or transaction control:
+
+```python
+def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys=OFF")   # no transaction is active here
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for statement in _MIGRATION_5_TO_6:   # the steps (1)-(3) below
+            conn.execute(statement)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+```
+
+`except BaseException` — not `Exception` — so a `KeyboardInterrupt` or a
+`SystemExit` mid-rebuild still rolls back; the `finally` restores the pragma
+on **every** exit, success or failure; and the two assertions run only on
+the success path, where `PRAGMA foreign_keys` MUST read **1** and `PRAGMA
+foreign_key_check` MUST return **no rows**. On the failure path the
+exception propagates to `init_schema`'s caller with the **schema-5 database
+intact and usable** and foreign keys back on — `T-V190-STO-09` injects a
+failure mid-rebuild and proves exactly that.
+
+The statement list: (1)
 runs `_DOCUMENTS_DDL`; (2) rebuilds `llm_calls` by the documented
 rename-copy procedure — `CREATE TABLE llm_calls_v6 (…)` with the **same
 columns in the same order** as the live table (the v4 DDL of
@@ -550,16 +641,19 @@ column list>) SELECT <the same list> FROM llm_calls`, `DROP TABLE
 llm_calls`, `ALTER TABLE llm_calls_v6 RENAME TO llm_calls`, `CREATE INDEX
 IF NOT EXISTS idx_llm_calls_conv ON llm_calls (conv_id, id)`; (3) `UPDATE
 schema_version SET version = 6 WHERE id = 1`. `init_schema` (`:310-334`)
-applies it as the 4→5 step is applied: `if schema_version(conn) == 5:
-conn.executescript(_MIGRATION_5_TO_6)` right after `:329-330`, so the fresh
+applies it where the 4→5 step is applied: `if schema_version(conn) == 5:
+_migrate_5_to_6(conn)` right after `:329-330`, so the fresh
 path (4 → 5 → 6) and the migrated paths all land at 6; the accepted set at
 `:315` becomes `(1, 2, 3, 4, 5, SCHEMA_VERSION)`. `_OBSERVABILITY_DDL` stays
 v4-shaped for the reason its own comment gives (`:235-245`): the rebuild is
 what widens the constraint, uniformly, on every path. No `llm_calls` row is
 lost: `T-V190-STO-02` seeds `llm_calls`, `spans`, `tool_calls` and
 `messages` on a v5 database and asserts equal counts **and identical
-contents** for all four after the migration, plus an empty `PRAGMA
-foreign_key_check`;
+contents** for all four after the migration, plus `PRAGMA foreign_keys` = 1
+and an empty `PRAGMA
+foreign_key_check`; `T-V190-STO-09` (negative) proves the other half — a
+failure injected mid-rebuild rolls back, leaves the schema-5 data intact and
+usable, and restores foreign keys;
 `metrics.py:100` and `:154` filter `purpose == "agent"`, so rerank rows
 never enter the prefix or token metrics, and `group == "purpose"` (`:357`)
 simply gains a `rerank` line. A folded repository fact, not a reopened
@@ -670,7 +764,7 @@ user and parameterised.** `storage.py` gains, in this order after
   transaction either way, so vectors and rows never diverge;
 - `user_chunks(conn, *, user_id) -> list[sqlite3.Row]` — `SELECT c.id,
   c.text, c.page, c.chunk_index, d.filename FROM chunks c JOIN documents d
-  ON d.id = c.document_id WHERE d.user_id = ? ORDER BY c.id` (the 150,22225
+  ON d.id = c.document_id WHERE d.user_id = ? ORDER BY c.id` (the BM25
   corpus);
 - `knn_chunk_ids(conn, *, user_id, vector: bytes, k: int) -> list[tuple[int,
   float]]` — `SELECT chunk_id, distance FROM vec_chunks WHERE embedding
@@ -768,7 +862,7 @@ user_id, embedder, query, k=20) -> list[int]`: embed the query (one text,
 RET-01), `knn_chunk_ids` (STO-05) with `k`, return chunk ids by ascending
 cosine distance. With no `vec_chunks` rows for the user the result is `[]`.
 
-**REQ-V190-RET-04 (MUST) — 150,22225 over the user's chunks, rebuilt per query.**
+**REQ-V190-RET-04 (MUST) — BM25 over the user's chunks, rebuilt per query.**
 `rag.tokenize(text) -> list[str]` is `snowballstemmer.stemmer("russian")
 .stemWords(re.findall(r"\w+", text.lower()))` — the tokeniser is `\w+` over
 the lowercased text, then the Russian Snowball stemmer over the token list.
@@ -776,7 +870,7 @@ The rule is **adopted from the lab's assignment-4 project and not read by
 this run**; it is complete and normative as written here. The stemmer
 passes English tokens through unchanged, so the EN
 corpus item of EVAL-01 still matches. `rag.bm25_search(rows, query, k=20)
--> list[int]` builds `rank_bm25.150,22225Okapi` over `user_chunks` (STO-05)
+-> list[int]` builds `rank_bm25.BM25Okapi` over `user_chunks` (STO-05)
 **for this query only** (NG-07), scores the tokenised query, and returns the
 chunk ids with **score > 0** by descending score then ascending id — rows
 whose score is zero are dropped, not ranked last — at most `k`. An empty corpus or all-zero scores → `[]`,
@@ -825,12 +919,47 @@ imports `rag.py`, so there is no cycle.
 **REQ-V190-RET-07 (MUST) — the `Searcher`.** `rag.Passage` is a frozen
 dataclass `(chunk_id, filename, page: int | None, chunk_index, text)`.
 `rag.Searcher(conn, *, user_id, embedder, llm, cfg, conv_id, resolve_cost)`
-exposes `search(query: str) -> SearchResult` where `SearchResult(passages:
-list[Passage], documents_present: bool)`. The pipeline runs in **this exact
+exposes `search(query: str) -> SearchResult`, a frozen dataclass with
+**five** fields:
+
+```python
+SearchResult(
+    passages: list[Passage],
+    documents_present: bool,
+    rerank_attempted: bool,
+    rerank_succeeded: bool,
+    rerank_failure: str | None,
+)
+```
+
+**The three rerank fields are the only sound way to prove the reranker
+ran.** Counting `llm_calls` rows cannot distinguish a call that was applied
+from one that succeeded and was then discarded by a parse failure or a
+bookkeeping error, and a log line is not an API. So the contract is
+explicit:
+
+- `rerank_attempted` is `True` exactly when step 4's rerank path was
+  entered — `cfg.rag_rerank == "on"` **and** ≥ 2 candidates. With reranking
+  off, or with fewer than two candidates, all three fields are `False`,
+  `False`, `None`.
+- `rerank_succeeded` is set `True` **only after the validated order and all
+  required bookkeeping have completed** — the reply parsed, every index in
+  `1…len(candidates)` and distinct, the reordered list built, and
+  `_record_llm_call`, span finalisation and `resolve_cost` all returned. It
+  is the **last** assignment on the success path; anything that raises or
+  returns `None` before it leaves it `False`.
+- `rerank_failure` is `None` on success and a short **redacted** reason
+  string otherwise (the same text the step-4 warning carries). It is
+  **never rendered to the model** — TOOL-02's envelope and its `passages: n`
+  count are built from `passages` alone and are unaffected by all three
+  flags (SEC-03's redaction discipline still applies to anything that would
+  reach a sink).
+
+The pipeline runs in **this exact
 order — hydration precedes reranking**, because `rerank` takes
 `list[Passage]` and needs each passage's filename and text:
 
-1. vector retrieval (RET-03) and 150,22225 retrieval (RET-04), each ≤ 20 ids;
+1. vector retrieval (RET-03) and BM25 retrieval (RET-04), each ≤ 20 ids;
 2. RRF fusion (RET-05) down to **at most ten** chunk ids;
 3. **hydrate those ten ids** through `chunks_by_ids` (STO-05) and restore
    the RRF order over the returned rows — the database's row order must
@@ -843,7 +972,8 @@ order — hydration precedes reranking**, because `rerank` takes
    `agent._record_llm_call`, span finalisation, `resolve_cost`, warning
    formatting, anything else that runs on the rerank path — in one
    `try/except Exception`, and on any exception returns the hydrated RRF
-   order of step 3. The warning itself is emitted **inside its own guarded
+   order of step 3 with `rerank_succeeded=False` and `rerank_failure` set.
+   The warning itself is emitted **inside its own guarded
    block** (a redacted, best-effort `log.warning`), so a failing logger or a
    failing call recorder cannot escape into the answer either;
 5. slice to the first `cfg.rag_top_k` (default **K = 5**).
@@ -926,10 +1056,13 @@ block per passage `[n] <filename> — page <p> | chunk <i>: <text>` (`page
 **Every returned passage is represented, and no header is ever bisected.**
 A blind cap over the joined text would drop or halve a block while
 `passages: N` and TOOL-05 still claimed it, so the truncation is
-**per passage, before the blocks are joined**: each passage's *text* is cut
-independently to `RAG_PASSAGE_CHARS = 1000` characters — a module constant
-in `tools.py`, deliberately **not** configuration — with a trailing `…`
-when it was cut; the header part of a block (`[n] <filename> — page <p> |
+**per passage, before the blocks are joined**, and its arithmetic is exact:
+with `RAG_PASSAGE_CHARS = 1000` — a module constant in `tools.py`,
+deliberately **not** configuration — **when `len(text) > 1000`, return
+`text[:999] + '…'`; otherwise return text unchanged.** A cut body is
+therefore exactly 1,000 characters including the ellipsis, never 1,001, so
+the envelope arithmetic below and `T-V190-TOOL-02`'s 1,000-character
+assertion state one number. The header part of a block (`[n] <filename> — page <p> |
 chunk <i>: `) is never truncated. The envelope then passes
 `compact_output(text, max_chars=12000)` (`tools.py:296`), and 12,000 is not
 a magic number: `rag_top_k` is at most 10 (RET-02), a block is at most
@@ -978,18 +1111,40 @@ turn's `Searcher` recorded ≥ 1 call:
 
 - **Passages were returned** (any call with ≥ 1 passage): collect the
   distinct `(filename, page)` pairs across those calls in first-seen order,
-  at most **5**; the canonical block is `\n\nSources: <filename> (page N),
-  …` (`(page N)` only when the page is not `NULL`; a filename with several
-  pages lists `(pages 2, 5)`). Validation is **structural, not a filename
-  mention**: every line of the reply that starts with `Source:` or
-  `Sources:` is parsed, and a line survives **only when it consists solely
-  of returned `(filename, page)` values** — every entry it names is one of
-  the collected pairs and it carries nothing else; any other such line is
-  **removed**, with one `log.warning("stripped an invented source line")`.
-  If **no valid source line remains** after that pass, the canonical block
+  at most **5**. One pure function of `rag.py` does all the rendering —
+  `rag._render_sources(pairs) -> str`: group the pairs by filename in first-seen
+  filename order, each filename followed by `(page N)` for a single page,
+  `(pages N, M, …)` for several in first-seen page order, and nothing at all
+  when the page is `NULL`; join the filenames with `, `. The canonical block
+  is `\n\nSources: ` + `_render_sources(<all collected pairs>)`.
+
+  **Validation never parses a filename.** A filename may legally contain
+  commas, parentheses, colons and the words `page`/`pages` — `a, b (page
+  9).pdf` is a valid name — so splitting a source line on those delimiters
+  admits several readings of the same text and cannot support the
+  invented-source guarantee. Instead the bot **generates** and compares:
+  for every **non-empty subset** of the collected pairs, in the defined
+  first-seen order and with the grouping above, compute
+  `_render_sources(subset)`; a line of the reply beginning `Source:` or
+  `Sources:` **survives only when its whole text, stripped of surrounding
+  whitespace, equals `Source: ` or `Sources: ` followed by one of those
+  renderings**. Nothing is extracted from the line and nothing is matched
+  loosely — it is one string equality against a generated set. The
+  enumeration is safe by construction: at most 5 pairs means at most
+  **31** non-empty subsets, computed once per turn. Either prefix is
+  accepted, because TOOL-04's prompt line teaches the model the singular
+  `Source:`; the block the bot appends always uses `Sources:`.
+
+  Any `Source:`/`Sources:` line that matches no rendering is **removed**,
+  with one `log.warning("stripped an invented source line")`. If **no valid
+  source line remains** after that pass, the canonical block
   is appended. A filename appearing elsewhere in prose — *"I read
   policy.pdf"* — **does not** satisfy attribution and does not suppress the
   block. Return `(reply, True)` whenever the reply was changed.
+  `T-V190-TOOL-08` (negative) pins the delimiter-hostile case: with the
+  returned pair `("a, b (page 9).pdf", 9)`, the exact canonical line
+  survives, while a line differing anywhere — an added file, a dropped page,
+  reordered entries — is stripped and the canonical block appended.
 - **No passage was returned by any call**: if the reply contains a line
   starting with `Source:` or `Sources:`, strip those lines, emit one
   `log.warning("stripped an invented source line")`, and return the rest;
@@ -1044,18 +1199,54 @@ f"{TELEGRAM_API_HOST}/file/bot{self._token}/{file_path}",
 timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0))`,
 consuming `iter_bytes()` into a buffer and raising
 `DocumentTooLarge` the moment the buffer would exceed `max_bytes` (the
-response is closed; nothing more is read). A non-200 status or a
-`TransportError` raises `TelegramError` with `redact()`-ed text as `call`
-does (`:124-142`); the URL embeds the token and is never logged. The method
+response is closed; nothing more is read).
+
+**A download timeout is a distinguishable type, and the clause order is
+normative.** `httpx.TimeoutException` **subclasses** `httpx.TransportError`,
+so a single `except httpx.TransportError` clause would swallow every timeout
+into a plain `TelegramError` and ERR-01 row 10a's exact string would be
+unreachable. `bot.py` therefore defines
+`TelegramDownloadTimeout(TelegramError)` beside `TelegramError`, and
+`download_file`'s handlers stand in **this order**:
+
+```python
+except httpx.TimeoutException as exc:
+    raise TelegramDownloadTimeout("download timed out") from exc
+except httpx.TransportError as exc:
+    raise TelegramError(...) from exc
+```
+
+The timeout clause is **first**; a non-200 status or any other
+`TransportError` raises the plain `TelegramError` (ERR-01 row 11), and the
+handler catches `TelegramDownloadTimeout` **before** `TelegramError`, so
+row 10a is matched **by type** and never by parsing a message. Both messages
+are `redact()`-ed as `call` does (`:124-142`); the URL embeds the token and
+is never logged, and neither exception text carries it. `T-V190-CMD-10`
+(negative) proves this through the **real `download_file` boundary** with an
+`httpx.MockTransport` that raises `httpx.ReadTimeout` — not a handler
+monkeypatch, which would prove nothing about the clause order. The method
 is injected like every seam: the fake of TST-02 implements both.
 
-**REQ-V190-CMD-03 (MUST) — before the download: size, name, type.** In
+**REQ-V190-CMD-03 (MUST) — before the download: the clock, size, name,
+type, the document limit.** `_handle_document`'s **first action** is
+`started_at = monotonic()` (DOC-04) — before every step below, so the whole
+handler is inside the 300 s budget. Then, in
 order: `document.file_size` present and > **10,485,760** → refused with
 ERR-01's "too large (file)" line, **no `getFile` call**; `clean_filename(
 document.file_name)` (DOC-01) `None` → "unsupported"; `classify` `None` →
-"unsupported"; then `get_file` → `download_file(file_path,
+"unsupported"; **the 20-document limit** — one scoped
+`document_count(conn, user_id=from_id)` plus
+`document_id_for(conn, user_id=from_id, filename=<cleaned>)` to tell a
+replace from a new document; at 20 and not a replace → ERR-01 row 13's line
+as a **plain reply, no status message, no `getFile`**; only then the
+`📄 received` status message (CMD-04), `get_file` → `download_file(file_path,
 max_bytes=10_485_760)` — an over-cap stream is the same "too large (file)"
-line. `mime_type` is ignored (DOC-01). The bytes are parsed from memory and
+line. Every one of these five refusals happens **before** a byte is
+downloaded and before the status message exists, which is precisely what
+ERR-01's "rows 1, 5a-pre, 13 and 14 arrive as a plain reply" means. The
+pre-check is advisory against a race, never authoritative: DOC-04's
+transactional recheck inside the indexing transaction is.
+`mime_type` is ignored (DOC-01). The bytes are parsed from memory and
 never written anywhere (SEC-04).
 
 **REQ-V190-CMD-04 (MUST) — progress through the status message, the
@@ -1066,10 +1257,18 @@ the first message (recording `message_id`; the `_start` discipline of
 (`_edit`, `:319-323`); returns `True` when the message exists and the call
 did not fail. The document handler starts a `_TypingIndicator(tg, chat_id,
 ceiling_s=300.0)` (`:335-406`) for the duration of indexing and stops it on
-every path (the `try`/`except`-re-raise discipline of `:804-827`). Stages, each ≤
-`STATUS_MAX_CHARS` and each one `update`: `📄 received` (before `getFile`),
+every path (the `try`/`except`-re-raise discipline of `:804-827`).
+
+**These four strings are the complete list, and each has exactly one
+owner.** Stages, each ≤
+`STATUS_MAX_CHARS` and each one `update`: `📄 received` — the **handler's**,
+sent after CMD-03's five pre-checks have passed and before `getFile`;
 `📄 extracted: P pages, N chars` (or `📄 extracted: N chars` for non-PDF),
-`📄 chunked: N`, `📄 embedding: i/n` after every batch, then, on success,
+`📄 chunked: N` and `📄 embedding: i/n` after every batch — all three
+emitted by `index_document` through its `progress` callback (DOC-05), which
+the handler binds to `_StatusMessage.update`. **There is no classify string
+and no store string**: those two stages of DOC-05 report nothing, and a
+progress line CMD-04 does not list here does not exist. Then, on success,
 `finish(ok=True)` — the message is **deleted** (REQ-V180-CHAT-02 semantics,
 `:284-289`) — and **one** confirmation reply via `_send`: `✅ <filename>: N
 chunks, P pages. Ask me about it.` (`, P pages` only for PDFs). On failure
@@ -1132,20 +1331,25 @@ in every failure case** (DOC-04's one transaction).
 | 5b | extracted text > 500,000 chars, **or** a DOC-02 pre-parse guard: DOCX archive > 2,000 members / > 50 MiB uncompressed / a member > 20 MiB / ratio > 100, PDF > 500 pages | `Document too large (over 500,000 characters).` | `document refused: text too large <n>`, `document refused: docx archive bounds <detail>`, `document refused: pdf pages <n>` | nothing |
 | 6 | `EmbeddingError` — HTTP ≠ 200, malformed body, wrong dimension, a non-timeout transport failure (caught **after** row 10b's subtype) | `Embedding service error. Please try again later.` | `document failed: embeddings: <message>` | nothing |
 | 7 | `sqlite3.Error` from the store stage | `Storage error. The document was not saved.` | `document failed: sqlite: <class>` (`log.error`) | nothing — the transaction rolled back |
-| 8 | any failure of the rerank path (answer path): `LLMError`, an unparsable reply, **or an exception from its bookkeeping** — `_record_llm_call`, the span, `resolve_cost`, the warning itself | *none* — RET-06's `None` plus RET-07 step 4's `try/except Exception`; the answer proceeds on the hydrated RRF order | `rerank fell back to rrf order: <reason>`, best-effort in its own guarded block | n/a |
+| 8 | any failure of the rerank path (answer path): `LLMError`, an unparsable reply, **or an exception from its bookkeeping** — `_record_llm_call`, the span, `resolve_cost`, the warning itself | *none* — RET-06's `None` plus RET-07 step 4's `try/except Exception`; the answer proceeds on the hydrated RRF order, and the `SearchResult` records `rerank_attempted=True`, `rerank_succeeded=False`, `rerank_failure=<reason>` (RET-07) — the flags the eval reads, never rendered to the model | `rerank fell back to rrf order: <reason>`, best-effort in its own guarded block | n/a |
 | 9 | `LLMError` in the answer itself | the existing `FALLBACK_LLM_ERROR` path (`agent.py`'s constants; REQ-V180-CHAT-07) | existing | n/a |
-| 10a | `httpx.TimeoutException` during the download | `Download timed out. Please try again.` | `document failed: download timeout` | nothing |
+| 10a | `bot.TelegramDownloadTimeout` — the `TelegramError` subtype `download_file` raises `from exc` for an `httpx.TimeoutException`, in a clause placed **before** the generic `TransportError` clause (CMD-02); matched **by type**, and caught before row 11 | `Download timed out. Please try again.` | `document failed: download timeout` | nothing |
 | 10b | `EmbeddingTimeoutError` — the `EmbeddingError` subtype RET-01 raises `from exc` when the one retry is exhausted on an `httpx.TimeoutException`; matched **by type**, never by parsing a message, and caught before row 6 | `Embedding service timed out. Please try again later.` | `document failed: embeddings timeout` | nothing |
-| 10c | `documents.IndexBudgetExceeded` — the 300 s budget exceeded between stages **or between PDF pages** (DOC-02 re-raises it through the corruption handler, so row 2 can never claim it) | `Indexing timed out (over 300 s). Nothing was saved.` | `document failed: budget exceeded after <stage>` | nothing |
-| 11 | `TelegramError` on `getFile`/`download_file` | `Telegram error while receiving the file. Please try again.` | `document failed: telegram: <message>` | nothing |
+| 10c | `documents.IndexBudgetExceeded` — `monotonic() - started_at > budget_s` at any check, `started_at` being the handler's first action (DOC-04), so pre-index time counts; raised between stages **or between PDF pages** (DOC-02 re-raises it through the corruption handler, so row 2 can never claim it) | `Indexing timed out (over 300 s). Nothing was saved.` | `document failed: budget exceeded after <stage>` | nothing |
+| 11 | `TelegramError` on `getFile`/`download_file` that is **not** a `TelegramDownloadTimeout` — a non-200 status or a non-timeout `httpx.TransportError`; caught **after** row 10a's subtype | `Telegram error while receiving the file. Please try again.` | `document failed: telegram: <message>` | nothing |
 | 12 | `TelegramError` on the confirmation send | *none reachable* — `_send` logs and returns `False` (`bot.py:1085-1093`) | `sending the reply failed: …` (existing) | the document **is** stored (the send happens after `COMMIT`) |
-| 13 | the user already has 20 documents (not a replace) | `Limit of 20 documents reached. Use /delete <filename>.` | `document refused: limit` | nothing |
+| 13 | the user already has 20 documents (not a replace) — checked by the handler as one scoped `COUNT` **before** the status message and `getFile` (CMD-03), and **re-checked inside the indexing transaction before the document row is inserted** (DOC-04); both checks map to this one row and this one string | `Limit of 20 documents reached. Use /delete <filename>.` | `document refused: limit` | nothing |
 | 14 | RAG not configured (`embedder is None`) | `Document search is not configured on this bot.` | `document refused: rag not configured` | nothing |
 | 15 | any other exception (CMD-07) | `Something went wrong while processing the document.` | `document handler failed` + traceback (`log.exception`) | nothing |
 
 Row 12 is the one case where "nothing stored" does not hold, and it is a
 success with a lost confirmation, not a failure. Rows 1, 5a-pre, 13 and 14
-precede the status message and arrive as a plain reply (CMD-04).
+precede the status message and arrive as a plain reply (CMD-04) — the
+20-document `COUNT` sits with them, before `📄 received` and before
+`getFile`, which is what keeps row 13 in that set. Row 13's **transactional
+recheck** (DOC-04) is the one path that fires later; it is reachable only
+when two uploads race past the pre-check, carries the same string, and
+arrives through CMD-04's failure ending like every other in-flight refusal.
 
 **REQ-V190-ERR-02 (MUST) — no traceback reaches the user; every log line
 is redacted.** Every user-facing string in ERR-01 is a literal in `bot.py`
@@ -1259,10 +1463,14 @@ extracted text of its source).
 **REQ-V190-EVAL-03 (MUST) — `devtools/rag_eval.py`: three modes, two
 metrics, one floor.** `main()` loads `Config` (`load_config`), builds an
 `EmbeddingsClient` and the LLM client exactly as `bot.py` does, creates a
-temporary database (`tempfile.TemporaryDirectory`, `storage.connect`,
+temporary database (`tempfile.TemporaryDirectory` — executor tooling, so
+EC-01's ephemeral-file permission covers it; the context manager removes the
+directory on exit — `storage.connect`,
 `init_schema(embedding_dim=…, embedding_model=…)`), indexes the four
 corpus documents for **synthetic user id −1** through
-`documents.index_document` (the production pipeline, no Telegram), then
+`documents.index_document` (the production pipeline, no Telegram; it passes
+`started_at=time.monotonic()` per document, DOC-05's required argument, and
+`progress=` a no-op sink since it owns no status message), then
 for every question and each mode — `vector` (RET-03 alone, top-5),
 `hybrid` (RET-03 + RET-04 + RET-05, top-5), `hybrid+rerank` (the full
 `Searcher.search`) — records the **first-hit rank**.
@@ -1302,10 +1510,18 @@ two-turn exchange through `run_agent_outcome` with the corpus searcher
 turn's recorded `search_documents` query contains a token of the first
 question, else `fail`; **advisory**, and it spends inference tokens (the
 one place in the gate set that does — stated in README Tests).
-**The rerank mode must actually run, and the gate cannot pass without it.**
-In a live run the reranker MUST complete without a **single** fallback on
-the ten answerable items, because a bonus mechanism that silently degrades
-is not evidence that it works. **Failure to construct or call the chat
+**The rerank mode must actually run, and the gate cannot pass without it —
+proved by the result contract, not by a count or a log.** In a live run the
+reranker MUST complete without a **single** fallback on the ten answerable
+items, because a bonus mechanism that silently degrades is not evidence
+that it works. The evaluator reads RET-07's flags off each answerable item's
+`hybrid+rerank` `SearchResult` and **exits 2 unless every one of the ten has
+`rerank_attempted is True` and `rerank_succeeded is True`**; the failing
+items are named in the exit message together with their `rerank_failure`
+strings. Counting `llm_calls` rows is **not** an acceptable substitute — a
+successful call whose reply was malformed, or whose bookkeeping raised,
+produces a row and no applied rerank — and neither is scraping the warning
+log. **Failure to construct or call the chat
 model, or failure to obtain one successful rerank for every answerable
 item, is an environment failure → exit 2** (round 2 moved this out of exit
 1: a reranker that never ran says nothing about retrieval quality, so it is
@@ -1328,13 +1544,15 @@ extracted text.
 Output: a Markdown table
 (question × mode → `hit@r`/`miss`, then a summary block with recall@5,
 MRR, page hit-rate per mode) to stdout. **Exit codes:** 0 when `hybrid`
-recall@5 ≥ **0.8** on the answerable items **and** every answerable item
-obtained a successful rerank; 1 when `hybrid` recall@5 is below the floor
+recall@5 ≥ **0.8** on the answerable items **and** every answerable item's
+`SearchResult` carries `rerank_attempted is True and rerank_succeeded is
+True`; 1 when `hybrid` recall@5 is below the floor
 (the red gate — a retrieval regression); 2 when the environment did not let
 the run measure anything it claims to measure — the embeddings endpoint or
 the corpus unavailable, the chat model impossible to construct or call, or
-a rerank that fell back on any answerable item (each with a `live:
-FAIL`-style message naming which). The recall floor and the
+**any answerable item whose `rerank_attempted` or `rerank_succeeded` is not
+`True`** (each with a `live:
+FAIL`-style message naming which item and its `rerank_failure`). The recall floor and the
 completed-rerank condition are the only blocking conditions; everything
 else is reported into the README table and the report (RPT-02, RPT-05). T-V190-EVAL-02 drives the whole script
 offline with `FakeEmbedder` and `FakeLLM` and asserts the metric
@@ -1374,9 +1592,11 @@ a `tmp_path` database: `tests/test_v190_parsing.py`,
 assignment's five levels — parsing, chunking, retrieval, isolation,
 end-to-end — each have their own module above; the table below is the
 minimum. The expected addition is **at least 80** collected tests
-(estimated: parsing 10, chunking 8, storage 12, embeddings 6, config 7,
-retrieval 11, isolation 6, tool 8, commands 7, errors 15, attribution 4,
-e2e 3, eval 5, version 1); T12 records the measured number. **Gate 3 stays
+(estimated: parsing 10, chunking 8, storage 13, embeddings 6, config 7,
+retrieval 12, isolation 6, tool 8, commands 9, errors 15, attribution 5,
+e2e 3, eval 5, version 1 — round 3's five new ids raised storage,
+retrieval, commands and attribution; the **80** floor is unchanged); T12
+records the measured number. **Gate 3 stays
 offline**: `tests/conftest.py:11-16` (`no_network`) and `:19-25` (`no_dns`)
 are autouse and unchanged; no test sleeps for real (`monotonic` and
 `sleep` are injected); the eval script's tests use `FakeEmbedder`, never
@@ -1400,16 +1620,23 @@ as literals, DOCX via `python-docx` into `BytesIO`, PDF via
 `devtools/pdf_fixture.write_pdf`; corrupted variants are the first half of
 the valid bytes; nothing binary is committed.
 
-**REQ-V190-TST-03 (MUST) — the test table.** The 57 `T-V190-*` ids (**all
-57 cited by Appendix A**, in both directions) are defined, one row each with
+**REQ-V190-TST-03 (MUST) — the test table.** The 62 `T-V190-*` ids (**all
+62 cited by Appendix A**, in both directions) are defined, one row each with
 what it asserts, in **`docs/spec/spec-v1.9.0-delta-1.md` § The test table**;
-twelve are marked negative. Each id names one test function or a small
+seventeen are marked negative. Each id names one test function or a small
 parametrised set. Round 1 added four: `T-V190-STO-06`, `-07` (STO-04's
 empty-index rebind), `T-V190-RET-10` (hydration cannot reorder RRF) and
 `T-V190-EVAL-04` (every `expected_evidence` is in the corpus). Round 2
 added two, both negative: `T-V190-STO-08` (the orphan `vec_chunks` table
 recovered at first creation) and `T-V190-SEC-06` (`add_vectors` refuses
-another user's chunk ids).
+another user's chunk ids). Round 3 added five, **all negative**:
+`T-V190-STO-09` (a failure injected mid-migration rolls back with foreign
+keys restored), `T-V190-RET-11` (a malformed rerank reply leaves
+`rerank_succeeded=False` with a non-empty `rerank_failure`),
+`T-V190-CMD-09` (the budget counts pre-index time through `started_at`),
+`T-V190-CMD-10` (a download timeout is `TelegramDownloadTimeout`, proved at
+the real `download_file` boundary) and `T-V190-TOOL-08` (the canonical
+source rendering under a delimiter-hostile filename).
 
 ---
 
@@ -1451,8 +1678,9 @@ which now also proves `sqlite_vec.load` on every `connect`; gate 5 — any
 surviving, drifting or erroring, the seven `v190-*` included; gate 7 —
 `hybrid` recall@5 below 0.8 on the ten answerable items (exit 1), or an
 environment failure (exit 2): an unreachable embeddings endpoint or corpus,
-a chat model that cannot be constructed or called, or **a single rerank
-fallback on an answerable item**; before T8 it is **not applicable**,
+a chat model that cannot be constructed or called, or **any answerable item
+whose `SearchResult` does not carry `rerank_attempted is True and
+rerank_succeeded is True`** (RET-07, EVAL-03); before T8 it is **not applicable**,
 `devtools/rag_eval.py` not existing yet. **Exit 2 is not automatically a
 blocked run**, and the report says which cause it was: an unreachable
 endpoint or an absent chat model is the **blocked run** of §14 (the
@@ -1474,7 +1702,7 @@ each MUST match **exactly once** in its file:
 | id | mechanism it breaks | must be killed by |
 |---|---|---|
 | `v190-knn-user-predicate-dropped` | `knn_chunk_ids`: remove `AND user_id = ?` (and its bound value) from the KNN | `T-V190-SEC-01` |
-| `v190-bm25-user-predicate-dropped` | `user_chunks`: remove `WHERE d.user_id = ?` so 150,22225 indexes every user's chunks | `T-V190-SEC-01` |
+| `v190-bm25-user-predicate-dropped` | `user_chunks`: remove `WHERE d.user_id = ?` so BM25 indexes every user's chunks | `T-V190-SEC-01` |
 | `v190-documents-user-predicate-dropped` | `list_documents`: remove the user predicate | `T-V190-SEC-02` |
 | `v190-delete-user-predicate-dropped` | `document_id_for`: remove the user predicate so `/delete` resolves another user's file | `T-V190-SEC-03` |
 | `v190-delete-vec-skipped` | `delete_document`: skip the `vec_chunks` deletes | `T-V190-STO-03` |
@@ -1552,7 +1780,9 @@ T0 skeleton from then on (`devtools/checks.py:1477-1497`).
    the assignment-traceability table, each with one line of evidence (a
    test id, a gate exit code, or a README anchor);
 9. the T0 preflight record: `vec_version()`, the `/models` listing
-   containing `EMBEDDING_MODEL`, the probe vector's length;
+   containing `EMBEDDING_MODEL`, the probe vector's length, **the
+   `tempfile.mkdtemp()` backup directory by path and the statement that it
+   was removed** (EC-01, REV-04 Stage 0);
 10. the T1 confirmation that sqlite-vec 0.1.9 accepted STO-02's exact vec0
     form — `user_id integer partition key` and the `AND user_id = ?` KNN —
     the question round 1 closed; a rejection would have been a REV-04
@@ -1591,7 +1821,7 @@ its fallback, K = 5 and why), **Storage** (STO-02's DDL summarised and the
 `vec_chunks.chunk_id → chunks.id → documents.id → filename` chain),
 **Security** (the user predicate everywhere, the partition key, the
 schema with one parameter, memory-only parsing, redaction), **Limitations**
-(no OCR, no sharing, 150,22225 rebuilt per query, the model-change manual fix and
+(no OCR, no sharing, BM25 rebuilt per query, the model-change manual fix and
 the empty-index rebind, replace-on-reupload, the `Sources:` fallback, the
 eval's advisory items, and the 300 s budget for what it is — checked between
 stages and between PDF pages, no cancellable worker, hard bounds from the
@@ -1634,20 +1864,31 @@ test-independence checklist:
    RET-06 returns `None`, **and `Searcher.search` wraps the rerank call and
    all of its bookkeeping in `try/except Exception`**, so a failure in
    `_record_llm_call`, span finalisation, cost resolution or warning
-   formatting cannot escape either (RET-07 step 4);
+   formatting cannot escape either (RET-07 step 4); and
+   `rerank_succeeded = True` is the **last** assignment on the success path,
+   after the validated order **and** all bookkeeping, with `rerank_failure`
+   set on every other path — the flags EVAL-03 gates on;
 4. the one indexing transaction of DOC-04: no `COMMIT` before the last
-   embeddings batch; the replaced document is deleted inside it; `add_chunks`
+   embeddings batch; the replaced document is deleted inside it; the
+   20-document limit is re-checked inside it before the document row is
+   inserted; **no `rag.embedding` or `vec_chunks` lifecycle statement exists
+   anywhere in `index_document`**; `add_chunks`
    verifies ownership and collects one `lastrowid` per `INSERT`, and
    `add_vectors` verifies every chunk id it is handed; STO-04's first
    creation commits the table and the `rag.embedding` pair together;
+   `index_document` takes `started_at` and every budget check reads
+   `monotonic() - started_at`;
 5. `run_agent`'s signature byte-unchanged; `run_agent_outcome`,
    `_execute_tool_calls`, `execute_tool` gained `searcher` and nothing else;
    `_tool_stub` gained one branch;
 6. `SYSTEM_PROMPT` gained exactly one line; `tool_specs()` exactly one
    entry, last;
-7. the 5→6 migration preserves every `llm_calls` row and column, toggles
-   `PRAGMA foreign_keys` outside the transaction, leaves `PRAGMA
-   foreign_key_check` empty, recreates `idx_llm_calls_conv`, and the
+7. the 5→6 migration is `_migrate_5_to_6`'s Python control flow, not an
+   `executescript` — `PRAGMA foreign_keys=OFF` outside any transaction,
+   `BEGIN IMMEDIATE`, the statements, `COMMIT`, `except BaseException:
+   ROLLBACK; raise`, `finally: PRAGMA foreign_keys=ON` — it preserves every
+   `llm_calls` row and column, asserts `PRAGMA foreign_keys` = 1 and leaves
+   `PRAGMA foreign_key_check` empty, recreates `idx_llm_calls_conv`, and the
    accepted-version set at `storage.py:315` includes 5; STO-04's rebind
    drops `vec_chunks` before recreating it;
 8. each of the seven `v190-*` entries has a `find` matching exactly once, a
@@ -1694,8 +1935,12 @@ it does not half-ship.
   lockfile no longer matches, so the lockfile is regenerated and both files
   are restored afterwards:
 
-  1. copy `pyproject.toml` and `uv.lock` aside, outside the tracked tree
-     (the repository's git-ignored scratch or `/tmp`);
+  1. copy `pyproject.toml` and `uv.lock` aside into a directory created by
+     **`tempfile.mkdtemp()`** — EC-01's ephemeral-file permission, the only
+     write outside the repository this run makes; the directory's path is
+     **named in the report** (RPT-02 item 9) and it is **removed before T0
+     completes**. The two copies carry no secret and no uploaded document
+     byte;
   2. add the five pins of EC-01 to `pyproject.toml` **in the working tree
      only**;
   3. `uv lock` (this is the `uv lock` resolution EC-01's network list
@@ -1769,14 +2014,14 @@ come before the code they cover, inside the same task.
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preconditions and preflight: six gates green on the unchanged tree (gate 7 n/a), hooks installed, `doctor` green, **test count re-measured** (floor 1220), `<base>` and the spec's `sha256` recorded, the **three preflight checks** of REV-04 Stage 0 — check 1 as its seven-step reversible sequence (save `pyproject.toml`/`uv.lock` aside → pin → `uv lock` → `uv sync --locked` → check → restore → `uv sync --locked` → `git diff --exit-code`) — **then** the `v190-baseline` benchmark run (EC-06), `docs/prompts/142-go-spec-v1.9.0.md`, the `report-v1.9.0.md` skeleton with `## Operator inputs` copied verbatim from the `go` request and a complete ledger-row block | every item recorded; 141 is the highest pre-existing prompt; `<base>` written before the first commit; `git diff --exit-code` clean after the preflight's restore, and the baseline benchmark run only after it |
-| **T1** | §4 (STO-01…05) and the five pins: `pyproject.toml`, `uv lock`, extension loading, `_DOCUMENTS_DDL`, `_MIGRATION_5_TO_6` with the `llm_calls` rebuild and its foreign-key discipline, `init_schema(embedding_dim=, embedding_model=)`, the `rag.embedding` pair and its empty-index rebind, the storage API with `add_chunks`'s and `add_vectors`'s ownership checks; the version-pin amendments (EC-03). Tests `T-V190-STO-01…08`, `T-V190-SEC-02`, `-03`, `-05`, `-06` (storage half) | green; `select vec_version()` from a test through the production `connect`; migration proved from a seeded v5 `tmp_path` database with `spans`, `tool_calls` and `messages` seeded too and `PRAGMA foreign_key_check` empty; `trivy`/`semgrep` green with the pins; `bot.py --selftest` green |
+| **T0** | Preconditions and preflight: six gates green on the unchanged tree (gate 7 n/a), hooks installed, `doctor` green, **test count re-measured** (floor 1220), `<base>` and the spec's `sha256` recorded, the **three preflight checks** of REV-04 Stage 0 — check 1 as its seven-step reversible sequence (save `pyproject.toml`/`uv.lock` aside **into a `tempfile.mkdtemp()` directory**, named in the report and removed before T0 ends → pin → `uv lock` → `uv sync --locked` → check → restore → `uv sync --locked` → `git diff --exit-code`) — **then** the `v190-baseline` benchmark run (EC-06), `docs/prompts/142-go-spec-v1.9.0.md`, the `report-v1.9.0.md` skeleton with `## Operator inputs` copied verbatim from the `go` request and a complete ledger-row block | every item recorded; 141 is the highest pre-existing prompt; `<base>` written before the first commit; `git diff --exit-code` clean after the preflight's restore, and the baseline benchmark run only after it |
+| **T1** | §4 (STO-01…05) and the five pins: `pyproject.toml`, `uv lock`, extension loading, `_DOCUMENTS_DDL`, `_MIGRATION_5_TO_6`'s statement list and `_migrate_5_to_6`'s control flow with the `llm_calls` rebuild and its foreign-key discipline, `init_schema(embedding_dim=, embedding_model=)`, the `rag.embedding` pair and its empty-index rebind, the storage API with `add_chunks`'s and `add_vectors`'s ownership checks; the version-pin amendments (EC-03). Tests `T-V190-STO-01…09`, `T-V190-SEC-02`, `-03`, `-05`, `-06` (storage half) | green; `select vec_version()` from a test through the production `connect`; migration proved from a seeded v5 `tmp_path` database with `spans`, `tool_calls` and `messages` seeded too, `PRAGMA foreign_keys` = 1 and `PRAGMA foreign_key_check` empty, **and a failure injected mid-rebuild leaving the schema-5 data intact, usable and foreign keys on** (`T-V190-STO-09`); `trivy`/`semgrep` green with the pins; `bot.py --selftest` green |
 | **T2** | §5 (RET-01, -02, -08): `llm/embeddings.py`, the six config variables, `FakeEmbedder`, the two tracing keys, `_live_embeddings`; `.env.example` keys. Tests `T-V190-RET-01`, `-02`, `-09` | green; no test reaches a socket; `run_selftest_live` fails offline with the unset-pair line under a stubbed client |
 | **T3** | §3 (DOC-01…03, -06): `documents.classify`, `clean_filename`, `extract`, `chunk_text`, `devtools/pdf_fixture.py`. Tests `T-V190-DOC-01…06` | green; fixtures generated in memory; determinism asserted |
-| **T4** | §3 (DOC-04, -05): `index_document` with the limits, the budget, the one transaction, replace-on-reupload. Tests `T-V190-STO-05`, `T-V190-CMD-07`'s budget half, the storage rows of `T-V190-ERR-01` (4, 5b, 6, 7, 10c, 13) | green; a failure at every stage leaves zero rows |
-| **T5** | §5 (RET-03…07): `rag.py` — vector, 150,22225, RRF, rerank, the `Searcher` with hydration **before** rerank. Tests `T-V190-RET-03…08`, `T-V190-RET-10`, `T-V190-SEC-01` | green; the fallback proved for every failure class; hydration cannot reorder the RRF candidates; `llm_calls` carries a `rerank` row |
-| **T6** | §6 (TOOL-01…06): the fourth tool, dispatch, plumbing, stub, status line, the prompt line, `attach_sources`; the `test_prefix.py`/`test_skills.py` amendments (EC-03). Tests `T-V190-TOOL-01…07`, `T-V190-SEC-04` | green; `run_agent`'s signature pinned; catalog ≤ 1800, prompt ≤ 700 |
-| **T7** | §7 (CMD-01…07) and §8: `get_file`, `download_file`, `_handle_document`, progress, `/documents`, `/delete`, the error constants, the exception boundary; `FakeTelegram` extended. Tests `T-V190-CMD-01…08`, `T-V190-ERR-01…03`, `T-V190-E2E-01…03` | green; every ERR-01 row has its test; `poll_loop` survives the injected exception |
+| **T4** | §3 (DOC-04, -05): `index_document` with `started_at`, the limits, the budget, the one transaction with its 20-document recheck, the three-string `progress` contract, replace-on-reupload. Tests `T-V190-STO-05`, `T-V190-CMD-07`'s budget half, the storage rows of `T-V190-ERR-01` (4, 5b, 6, 7, 10c, and 13 as DOC-04's **transactional recheck** — row 13's pre-check is T7's) | green; a failure at every stage leaves zero rows; every budget check reads `monotonic() - started_at`; no `rag.embedding` or `vec_chunks` statement anywhere in `index_document` |
+| **T5** | §5 (RET-03…07): `rag.py` — vector, BM25, RRF, rerank, the `Searcher` with hydration **before** rerank. Tests `T-V190-RET-03…08`, `T-V190-RET-10`, `T-V190-RET-11`, `T-V190-SEC-01` | green; the fallback proved for every failure class; hydration cannot reorder the RRF candidates; `llm_calls` carries a `rerank` row; `SearchResult`'s three rerank flags hold on the success and on every failure path |
+| **T6** | §6 (TOOL-01…06): the fourth tool, dispatch, plumbing, stub, status line, the prompt line, `attach_sources`; the `test_prefix.py`/`test_skills.py` amendments (EC-03). Tests `T-V190-TOOL-01…08`, `T-V190-SEC-04` | green; `run_agent`'s signature pinned; catalog ≤ 1800, prompt ≤ 700; the source line validated by canonical rendering, never by parsing a filename |
+| **T7** | §7 (CMD-01…07) and §8: `get_file`, `download_file`, `_handle_document`, progress, `/documents`, `/delete`, the error constants, the exception boundary; `FakeTelegram` extended. Tests `T-V190-CMD-01…10`, `T-V190-ERR-01…03`, `T-V190-E2E-01…03` | green; every ERR-01 row has its test; `poll_loop` survives the injected exception; the 20-document `COUNT` precedes the status message and `getFile`; `started_at` is the handler's first action and a download timeout arrives as `TelegramDownloadTimeout` |
 | **T8** | §10 (EVAL-01…04): the corpus, `questions.json` with its `expected_evidence` strings, `devtools/rag_eval.py`, the `rag-eval` gate in `full`, the seven-gate block in `AGENTS.md` and README Tests; the corpus/questions `sha256` record **before** the first live run; **the first live gate-7 run**. Tests `T-V190-EVAL-01…04` | green offline (`T-V190-EVAL-04` proves every `expected_evidence` is in the corpus **before** the live run); live: exit 0 with `hybrid` recall@5 ≥ 0.8 and a completed rerank on every answerable item, the numbers and the hashes recorded; below the floor (exit 1) and a rerank fallback against a reachable model (exit 2) are repair cycles on **retrieval code or config only**, while an unreachable endpoint or chat model (also exit 2) is the blocked run of §12 — the corpus and the questions are frozen by their recorded hashes, and the floor is never lowered |
 | **T9** | §12 (EC-10, EC-12): the seven `v190-*` entries, `mutation-v190` with its measured timeout, `mutation-all` re-measured, the matrix test repointed at the delta file and its map extended | `--select v190-` green with every `find` matching once, 7/7 killed; `mutation-all` 105/105 inside its new timeout; the matrix test green |
 | **T10** | Docs and config, **no version bump**: `README.md` (`## Documents (RAG)`, Commands, Limits, Error behaviour — the eval table with T8's numbers), `AGENTS.md` (stack, layout, brief path, env note — **no count-bearing line**), `report_path` (RPT-01), the EC-13 sentences. Test `T-V190-EC-01` | `lint-docs` green on the T0 skeleton; `tests/test_v180_agents.py` green; docs match the tree |
@@ -1792,13 +2037,13 @@ the four exemptions **verbatim**.
 
 | T | spec sections | repository files and ranges | delegate? |
 |---|---|---|---|
-| **T0** | §12, §13, §14 (REV-04 Stage 0), §1 (EC-01's five pins and network list, EC-06) | `AGENTS.md:133-166`, `config/quality_gates.yaml:7-14`, `:338-366`; `docs/spec/task-briefs/` (listing only); `pyproject.toml:1-12`; `uv.lock` (copied aside and restored by the preflight's sequence, never read) | no — *artefacts only* (the preflight's seven-step sequence pins, locks and then restores `pyproject.toml` and `uv.lock` in the working tree, proving `git diff --exit-code` before any commit and before the baseline benchmark; everything else is a prompt, a skeleton or a recorded command) |
+| **T0** | §12, §13, §14 (REV-04 Stage 0), §1 (EC-01's five pins and network list, EC-06) | `AGENTS.md:133-166`, `config/quality_gates.yaml:7-14`, `:338-366`; `docs/spec/task-briefs/` (listing only); `pyproject.toml:1-12`; `uv.lock` (copied into the preflight's `tempfile.mkdtemp()` directory and restored from it, never read) | no — *artefacts only* (the preflight's seven-step sequence pins, locks and then restores `pyproject.toml` and `uv.lock` in the working tree, proving `git diff --exit-code` before any commit and before the baseline benchmark; the `mkdtemp()` backups are EC-01's ephemeral files, named in the report and removed; everything else is a prompt, a skeleton or a recorded command) |
 | **T1** | §4, §1 (EC-01, EC-03, EC-05) | `storage.py:17-24`, `:53-183`, `:188-250`, `:272-293`, `:310-345`, `:955-965`; `pyproject.toml:1-12`; `tests/conftest.py:49-54`; `tests/test_observability.py:438-482`; `tests/test_storage.py:41-46`; `metrics.py:96-101`, `:150-156`; `tests/test_v190_storage.py`, `tests/test_v190_isolation.py` (created here); the task brief carrying the decided DDL and STO-04's rebind rule | **yes** |
 | **T2** | §5 (RET-01, -02, -08), §11 (TST-02) | `llm/lmstudio.py:17-80`; `llm/base.py:365-375`; `config.py:39-56`, `:83-160`, `:214-370`, `:392-403`, `:448-460`, `:571-580`; `tracing.py:1-120`, `:287-300`; `bot.py:1351-1384`, `:1440-1459`; `tests/fakes.py:33-124`; `.env.example` (whole, 35 keys); `tests/test_v190_embeddings.py`, `tests/test_v190_config.py` (created here) | **yes** |
 | **T3** | §3 (DOC-01…03, -06) | `AGENTS.md:56-60`; `tests/test_v190_parsing.py`, `tests/test_v190_chunking.py` (created here); the installed `pypdf`/`docx` API surface named in DOC-02 only | **yes** |
 | **T4** | §3 (DOC-04, -05), §4 (STO-05), §8 (rows 4–7, 10c, 13) | `documents.py` (T3's), `storage.py` (T1's new API, tail only); `tests/test_v190_storage.py`, `tests/test_v190_errors.py` (storage rows) | **yes** |
-| **T5** | §5 (RET-03…07), §9 (SEC-01) | `rag.py` (created); `agent.py:905-960`, `:370-400`; `llm/base.py:74-80`, `:126-150`; `llm/failover.py:22-60`; `tests/test_v190_retrieval.py` (created here). **No file outside this repository** — RET-04 and RET-05 carry the tokeniser, the 150,22225 rule and the RRF formula normatively (EC-01) | **yes** |
-| **T6** | §6, §1 (EC-03's prefix rows), §9 (SEC-02…04) | `tools.py:296-312`, `:1183-1318`, `:1340-1354`; `agent.py:42-70`, `:115-160`, `:227-295`, `:597-628`, `:710-760`, `:1072-1076`; `bot.py:261-330`, `:797-831`; `tests/test_prefix.py:25-32`, `:84-120`, `:195-270`; `tests/test_skills.py:115-122`; `tests/test_tool_output.py:419-427`, `:695-704`; `tests/test_v190_tool.py`, `tests/test_v190_attribution.py` (created here) | **yes** |
+| **T5** | §5 (RET-03…07), §9 (SEC-01) | `rag.py` (created); `agent.py:905-960`, `:370-400`; `llm/base.py:74-80`, `:126-150`; `llm/failover.py:22-60`; `tests/test_v190_retrieval.py` (created here). **No file outside this repository** — RET-04 and RET-05 carry the tokeniser, the BM25 rule and the RRF formula normatively (EC-01) | **yes** |
+| **T6** | §6, §1 (EC-03's prefix rows), §9 (SEC-02…04) | `tools.py:296-312`, `:1183-1318`, `:1340-1354`; `agent.py:42-70`, `:115-160`, `:227-295`, `:597-628`, `:710-760`, `:1072-1076`; `bot.py:261-330`, `:797-831`; `rag.py` (T5's — the `attach_sources`/`_render_sources` tail only); `tests/test_prefix.py:25-32`, `:84-120`, `:195-270`; `tests/test_skills.py:115-122`; `tests/test_tool_output.py:419-427`, `:695-704`; `tests/test_v190_tool.py`, `tests/test_v190_attribution.py` (created here) | **yes** |
 | **T7** | §7, §8, §9 (SEC-03, -05), §11 (TST-02) | `bot.py:38-70`, `:97-197`, `:213-230`, `:261-330`, `:335-406`, `:703-831`, `:1075-1093`, `:1096-1164`, `:1506-1545`; `tests/fakes.py:109-124`; `tests/test_v190_commands.py`, `tests/test_v190_errors.py`, `tests/test_v190_e2e.py` (created here) | **yes** |
 | **T8** | §10, §12 (EC-09) | `devtools/rag_eval.py`, `evals/rag/*` (created); `config/quality_gates.yaml:7-14`, `:138-150`; `AGENTS.md:133-160`; `README.md:776-790`; `tests/test_v190_eval.py` (created here). **No file outside this repository** — EVAL-03 carries the hit rule and both metric formulas normatively (EC-01) | **yes** |
 | **T9** | §12 (EC-10, EC-12) | `devtools/mutation_check.py:23-60` and **tail only** (`MUTATIONS` entries after the last `v180-*`, `main()`); `config/quality_gates.yaml:204-208`, `:262-320`; `tests/test_v15_standards.py:1685-1745`; `docs/spec/spec-v1.9.0-delta-1.md` § The gate matrix; `storage.py`, `rag.py`, `bot.py` — only the seven lines the `find` strings target | **yes** |
@@ -1823,7 +2068,7 @@ cites the assignment-traceability table's codes (`R` requirement point,
 
 | Requirement | Verified by | Assignment item |
 |---|---|---|
-| `REQ-V190-EC-01` — boundary, no external project read; five pins exactly; one migration; budget 4 | `pyproject.toml`/`uv.lock` diffs; `trivy`/`semgrep` exit codes; `git diff` shows one DDL block; §15.1 carrying no path outside the repository | — |
+| `REQ-V190-EC-01` — boundary (existing outside files never read or modified; ephemeral executor `tempfile` files permitted, secret-free and removed), no external project read; five pins exactly; one migration; budget 4 | `pyproject.toml`/`uv.lock` diffs; `trivy`/`semgrep` exit codes; `git diff` shows one DDL block; §15.1 carrying no path outside the repository; `T-V190-SEC-04` proving the bot's own modules still use no `tempfile` | — |
 | `REQ-V190-EC-02` — test-first; Appendix A is the map | the report's per-task "failed first" record | A16 |
 | `REQ-V190-EC-03` — 1220-test floor; the exhaustive amendment list | `pytest --collect-only -q` at T0 and T13; the amended-file diff | — |
 | `REQ-V190-EC-04` — secrets discipline; `bot.db` never opened; the pair quoted, nothing else | `gitleaks-tree` re-run on the evidence commit; the report's `.env` record | — |
@@ -1839,50 +2084,50 @@ cites the assignment-traceability table's codes (`R` requirement point,
 | `REQ-V190-DOC-01` — type by lowercase extension; the filename contract | `T-V190-DOC-01`; `E1` | R1, A1 |
 | `REQ-V190-DOC-02` — extraction per type, from memory; `Extracted`/`ExtractedPage` defined once; the DOCX archive and PDF page guards; the corrupted-PDF handler's exact boundary, `IndexBudgetExceeded` re-raised through it | `T-V190-DOC-02`, `T-V190-DOC-03`, `T-V190-CMD-07`, `T-V190-ERR-01` (row 5b); `E1`, `E2` | R1, A2 |
 | `REQ-V190-DOC-03` — chunking 1000/1200/200/50, offset-based, paragraph-aware, per page; 1,200 is the maximum everywhere | `T-V190-DOC-04`, `T-V190-DOC-05`; `E3` | R2, A3 |
-| `REQ-V190-DOC-04` — limits in order; the 300 s budget between stages and PDF pages, raised as `IndexBudgetExceeded`; one transaction | `T-V190-ERR-01` (rows 4, 5b, 13), `T-V190-CMD-07`; `E7` | R10, A15 |
-| `REQ-V190-DOC-05` — the pipeline; replace-on-reupload | `T-V190-STO-05`; `E4` | R7, A4, A5 |
+| `REQ-V190-DOC-04` — limits in order; the 300 s budget as `monotonic() - started_at` between stages and PDF pages, raised as `IndexBudgetExceeded`; the 20-document limit pre-checked by the handler and re-checked transactionally; one transaction covering replacement, the row, chunks and vectors only — never `rag.embedding` or `vec_chunks` | `T-V190-ERR-01` (rows 4, 5b, 13), `T-V190-CMD-07`, `T-V190-CMD-09`; `E7` | R10, A15 |
+| `REQ-V190-DOC-05` — the pipeline; the required `started_at`; `index_document` emits only the extracted/chunked/embedding strings; replace-on-reupload | `T-V190-STO-05`, `T-V190-CMD-04`; `E4` | R7, A4, A5 |
 | `REQ-V190-DOC-06` — the stdlib PDF fixture writer | `T-V190-DOC-06` | R13, B2 |
 | `REQ-V190-STO-01` — sqlite-vec loaded on every connection; T0's `vec_version()` | `T-V190-STO-01`; the T0 preflight record | R4, A5 |
 | `REQ-V190-STO-02` — schema 6 DDL; the partition key, no over-fetch fallback; `vec_chunks` from `embedding_dim`; the chain vector → chunk → document → filename | `T-V190-STO-01`; the T1 confirmation of the vec0 form (RPT-02 item 10); `E4` | R4, A5, R15 |
-| `REQ-V190-STO-03` — the 5→6 migration with the `llm_calls` rebuild, the foreign-key toggle and the empty `foreign_key_check` | `T-V190-STO-02` | R4 |
+| `REQ-V190-STO-03` — the 5→6 migration with the `llm_calls` rebuild, `_migrate_5_to_6`'s normative control flow (`BEGIN IMMEDIATE` / `except BaseException: ROLLBACK` / `finally: PRAGMA foreign_keys=ON`), the `foreign_keys` = 1 assertion and the empty `foreign_key_check` | `T-V190-STO-02`, `T-V190-STO-09` | R4 |
 | `REQ-V190-STO-04` — the `rag.embedding` pair, written at creation, checked at start; creation and binding in one transaction with the orphan-table branch; the atomic empty-index rebind | `T-V190-STO-04`, `T-V190-STO-06`, `T-V190-STO-07`, `T-V190-STO-08`; `E5` | R3 |
 | `REQ-V190-STO-05` — the storage API, every runtime statement user-scoped and bound; `add_chunks` per-row `INSERT` with ownership check; `add_vectors` verifying every chunk id against the user | `T-V190-SEC-05`, `T-V190-SEC-06`, `T-V190-STO-03`, `T-V190-STO-05`; `v190-*-user-predicate-dropped` ×4 | R8, A9 |
 | `REQ-V190-RET-01` — the embeddings client: batches of 32, one retry, dim check, the span; `EmbeddingTimeoutError(EmbeddingError)` raised `from exc` on an exhausted timeout | `T-V190-RET-01`; `E6` | R3, A4 |
 | `REQ-V190-RET-02` — six config variables; the pair rule; `rag_enabled` | `T-V190-RET-02` | R3 |
 | `REQ-V190-RET-03` — vector top-20 | `T-V190-RET-03`; `E8` | A6 |
-| `REQ-V190-RET-04` — 150,22225 top-20, stemmed, rebuilt per query | `T-V190-RET-04`; `E8` | B3 |
+| `REQ-V190-RET-04` — BM25 top-20, stemmed, rebuilt per query | `T-V190-RET-04`; `E8` | B3 |
 | `REQ-V190-RET-05` — RRF k = 60, top-10 | `T-V190-RET-05`; `E8` | B3 |
 | `REQ-V190-RET-06` — LLM listwise rerank, reasoning forced off, never fatal, recorded as `rerank` | `T-V190-RET-06`, `T-V190-RET-07`; `E9` | B4, R10 |
-| `REQ-V190-RET-07` — the `Searcher`, hydration before rerank, K = 5, `calls` recorded; the rerank call **and all its bookkeeping** inside one `try/except Exception`, the warning in its own guarded block | `T-V190-RET-07`, `T-V190-RET-08`, `T-V190-RET-10`; `E8`, `E9` | R5, R6, A7 |
+| `REQ-V190-RET-07` — the `Searcher`, hydration before rerank, K = 5, `calls` recorded; the rerank call **and all its bookkeeping** inside one `try/except Exception`, the warning in its own guarded block; `SearchResult`'s five fields with `rerank_attempted`/`rerank_succeeded`/`rerank_failure` and the "succeeded last, after all bookkeeping" rule | `T-V190-RET-07`, `T-V190-RET-08`, `T-V190-RET-10`, `T-V190-RET-11`; `E8`, `E9` | R5, R6, A7 |
 | `REQ-V190-RET-08` — the live selftest's embeddings check | `T-V190-RET-09`; gate 5's `live: OK embeddings` line | R3 |
 | `REQ-V190-TOOL-01` — the fourth tool, last, ≤ 350 chars, catalog ≤ 1800 | `T-V190-TOOL-01`; `E10` | R6, A7 |
-| `REQ-V190-TOOL-02` — dispatch; the envelope text; per-passage truncation at `RAG_PASSAGE_CHARS = 1000` under a 12,000-char envelope cap, every header complete; "not available" | `T-V190-TOOL-02`, `T-V190-E2E-02`; `E10`, `E11` | R6, A7 |
+| `REQ-V190-TOOL-02` — dispatch; the envelope text; per-passage truncation at `RAG_PASSAGE_CHARS = 1000` — `text[:999] + '…'` when longer, so a cut body is exactly 1,000 — under a 12,000-char envelope cap, every header complete; the rerank flags never rendered; "not available" | `T-V190-TOOL-02`, `T-V190-E2E-02`; `E10`, `E11` | R6, A7 |
 | `REQ-V190-TOOL-03` — plumbing; the history stub; the status line | `T-V190-TOOL-03`, `T-V190-TOOL-04` | R6 |
 | `REQ-V190-TOOL-04` — one prompt line ≤ 140 chars; prompt ≤ 700 | `T-V190-TOOL-05` | R11, R12 |
-| `REQ-V190-TOOL-05` — the structural `Sources:` guarantee: a source line survives only if it consists solely of returned `(filename, page)` values, a prose mention never counts, the canonical block is appended when none remains; the invented-source strip | `T-V190-TOOL-06`, `T-V190-TOOL-07`, `T-V190-E2E-01`; `v190-sources-fallback-dropped`; `E11`, `E12` | R11, R12, A13, A14 |
+| `REQ-V190-TOOL-05` — the structural `Sources:` guarantee by **canonical rendering, never by parsing a filename**: `_render_sources` over each of the ≤ 31 non-empty subsets of the returned pairs, a line surviving only on whole-string equality behind `Source: ` or `Sources: `; a prose mention never counts; the canonical block appended when none remains; the invented-source strip | `T-V190-TOOL-06`, `T-V190-TOOL-07`, `T-V190-TOOL-08`, `T-V190-E2E-01`; `v190-sources-fallback-dropped`; `E11`, `E12` | R11, R12, A13, A14 |
 | `REQ-V190-TOOL-06` — conversation-aware RAG pinned offline, smoke live | `T-V190-TOOL-07`; the eval's advisory verdict | B5 |
 | `REQ-V190-CMD-01` — the document branch's position; the limiter; the `Searcher` built per turn | `T-V190-CMD-01`; `E1` | R6, A1 |
-| `REQ-V190-CMD-02` — `get_file`; streaming `download_file` capped at 10 MiB, 60 s | `T-V190-CMD-03`; `T-V190-CMD-02` | R10 |
-| `REQ-V190-CMD-03` — size before download; name; type | `T-V190-CMD-02`; `v190-size-precheck-disabled`; `E7` | R10, A15 |
-| `REQ-V190-CMD-04` — progress stages; typing; delete on success, keep on failure | `T-V190-CMD-04`, `T-V190-CMD-06`; `E1`, `E7` | B1 |
+| `REQ-V190-CMD-02` — `get_file`; streaming `download_file` capped at 10 MiB, 60 s; `TelegramDownloadTimeout(TelegramError)` raised `from exc` in a clause **before** the generic `TransportError` one, matched by type | `T-V190-CMD-03`; `T-V190-CMD-02`; `T-V190-CMD-10` | R10 |
+| `REQ-V190-CMD-03` — `started_at` captured first; size before download; name; type; the 20-document `COUNT` before the status message and `getFile` | `T-V190-CMD-02`, `T-V190-CMD-09`, `T-V190-ERR-01` (row 13); `v190-size-precheck-disabled`; `E7` | R10, A15 |
+| `REQ-V190-CMD-04` — the four progress strings and their owners (`📄 received` and both endings the handler's, the other three `index_document`'s); no classify or store string; typing; delete on success, keep on failure | `T-V190-CMD-04`, `T-V190-CMD-06`; `E1`, `E7` | B1 |
 | `REQ-V190-CMD-05` — `/documents` | `T-V190-CMD-05`, `T-V190-SEC-02`; `E13` | R9, A10 |
 | `REQ-V190-CMD-06` — `/delete <filename>` exact, own only | `T-V190-CMD-05`, `T-V190-SEC-03`, `T-V190-E2E-03`; `E14` | R9, A11, A12 |
 | `REQ-V190-CMD-07` — one exception boundary; the poll loop survives | `T-V190-CMD-08`; `E15` | R10, A15 |
-| `REQ-V190-ERR-01` — the matrix with exact strings, row 5b carrying the pre-parse guards; nothing stored | `T-V190-ERR-01`, `T-V190-ERR-03`; `E7`, `E15` | R10, A15 |
+| `REQ-V190-ERR-01` — the matrix with exact strings, row 5b carrying the pre-parse guards, row 10a bound to `TelegramDownloadTimeout` before row 11, row 13 reached by the handler's pre-check and by DOC-04's transactional recheck; nothing stored | `T-V190-ERR-01`, `T-V190-ERR-03`, `T-V190-CMD-10`; `E7`, `E15` | R10, A15 |
 | `REQ-V190-ERR-02` — no traceback to the user; log lines redacted | `T-V190-ERR-02` | R10 |
 | `REQ-V190-ERR-03` — README error and limit rows | the README diff reviewed at T11; `lint-docs` | R15, A18 |
 | `REQ-V190-SEC-01` — the owner predicate on every runtime statement; the partition key; ownership verified on both write paths (`add_chunks`, `add_vectors`); the two named exemptions | `T-V190-SEC-01`, `T-V190-SEC-05`, `T-V190-SEC-06`; the four predicate mutations; `E16` | R8, A9 |
 | `REQ-V190-SEC-02` — the model cannot choose the user | `T-V190-SEC-04` | R8 |
 | `REQ-V190-SEC-03` — filenames redacted and capped before every sink | `T-V190-CMD-05`, `T-V190-ERR-02` | R10 |
-| `REQ-V190-SEC-04` — no file on disk; the stream cap | `T-V190-SEC-04`, `T-V190-CMD-02` | R10 |
+| `REQ-V190-SEC-04` — no file on disk; the stream cap; EC-01's ephemeral-`tempfile` permission is executor tooling only and grants the bot's modules nothing | `T-V190-SEC-04`, `T-V190-CMD-02` | R10 |
 | `REQ-V190-SEC-05` — deletion scoped and atomic | `T-V190-STO-03`, `T-V190-SEC-03`; `v190-delete-vec-skipped`; `E14` | A11, A12 |
 | `REQ-V190-EVAL-01` — the four-file corpus, DOCX/PDF rendered at eval time | `T-V190-EVAL-02` (renders it) | R14, A17 |
 | `REQ-V190-EVAL-02` — 12 questions, 10 answerable with an immutable `expected_evidence`, 3 with pages, 2 null | `T-V190-EVAL-01`, `T-V190-EVAL-04` | R14, A17 |
-| `REQ-V190-EVAL-03` — three modes, the `rag_rerank`/`rag_top_k` override, the mandated hydration for the two id-level modes, evidence-level hits, recall@5/MRR/page hit-rate, the 0.8 floor, the frozen corpus, the no-fallback rerank rule (exit 2), exit codes | `T-V190-EVAL-02`, `T-V190-EVAL-03`, `T-V190-EVAL-04`; gate 7's recorded output | R14, A17, B2, B3, B4, B5 |
+| `REQ-V190-EVAL-03` — three modes, the `rag_rerank`/`rag_top_k` override, the mandated hydration for the two id-level modes, evidence-level hits, recall@5/MRR/page hit-rate, the 0.8 floor, the frozen corpus, the no-fallback rerank rule read off `rerank_attempted`/`rerank_succeeded` (exit 2), exit codes | `T-V190-EVAL-02`, `T-V190-EVAL-03`, `T-V190-EVAL-04`, `T-V190-RET-11`; gate 7's recorded output | R14, A17, B2, B3, B4, B5 |
 | `REQ-V190-EVAL-04` — gate 7 in `AGENTS.md`, README and the `full` profile; n/a before T8 | the matrix test; `T-V190-EC-01`; T0's "n/a (script absent)" record and gate 7's exit code at T8, T11, T13 | R14 |
 | `REQ-V190-TST-01` — the five levels; ≥ 80 new tests; gate 3 offline | `pytest --collect-only -q` at T12; `no_network`/`no_dns` unchanged | R13, A16 |
 | `REQ-V190-TST-02` — `FakeEmbedder`; `FakeTelegram` extended; in-memory fixtures | `T-V190-RET-03` (meaningful ranking offline); `T-V190-CMD-04` | R13 |
-| `REQ-V190-TST-03` — the test table, 57 ids, all cited here | Appendix A itself; the T12 count | R13, A16 |
+| `REQ-V190-TST-03` — the test table, 62 ids (seventeen negative), all cited here | Appendix A itself; the T12 count | R13, A16 |
 | `REQ-V190-VER-01` — `1.8.0` → `1.9.0` at T12 only; the tag last | `T-V190-VER-01`; `git tag -l` | — |
 | `REQ-V190-RPT-01` — `lint-docs` repointed at T10 | `checks.py lint-docs` exit code | — |
 | `REQ-V190-RPT-02` — the report's thirteen items | `lint-docs`; `/verify-run` items | A18 |
@@ -1892,7 +2137,7 @@ cites the assignment-traceability table's codes (`R` requirement point,
 | `REQ-V190-REV-01` — clean-context review at T11, nine extra checks | the logged review prompt; the findings record | — |
 | `REQ-V190-REV-02` — offline Appendix B; live gates 5 and 7; the evidence commit; the tag on it | Appendix B's per-scenario record; the two post-commit codes in the closing message | — |
 | `REQ-V190-REV-03` — regression; no weakened posture; the 4-cycle budget | earlier suites green; the repair-cycle count | — |
-| `REQ-V190-REV-04` — the stop route in three stages; Stage 0's three checks, check 1 as the seven-step reversible pin/lock/restore sequence | the stop-route section naming its stage, or its recorded non-use; the preflight record; T0's `git diff --exit-code` | — |
+| `REQ-V190-REV-04` — the stop route in three stages; Stage 0's three checks, check 1 as the seven-step reversible pin/lock/restore sequence with its `tempfile.mkdtemp()` backups | the stop-route section naming its stage, or its recorded non-use; the preflight record naming the `mkdtemp()` path and its removal (RPT-02 item 9); T0's `git diff --exit-code` | — |
 
 ### Assignment traceability
 
@@ -1912,19 +2157,20 @@ database (REQ-V190-REV-02), and Appendix A cites them by id.
 
 ## Appendix C — cross-review log
 
-**Rounds 1–2 of at most 3 so far** — the lab's stop criterion (a round
-without Critical or High findings) has **not** been reached: round 1
-returned four Critical, five High and one Medium finding, round 2 three
-Critical, five High and two Medium, and all twenty were accepted.
-Challenger **OpenAI Codex `gpt-5.6-sol`**, called through the lab's
-cross-review seam with the plan passed by file (the loop wrapper's argv form
-cannot carry a plan above 128 KB). **20 challenger findings, 20 accepted
-(8 adapted), 0 rejected — one clause of R1-8 rejected inside an accepted
-finding.** The lab's own audits contributed four further findings, logged
-here as *lab audit* (`L1`–`L3` in round 1, `L4` in round 2). Every verdict
-was ruled in `verdicts-r1.md` / `verdicts-r2.md` before a line of this spec
-moved; where the ruling adapted a finding, the cell below says what the spec
-now says, not what the challenger asked for.
+**Rounds 1–3 of 3, termination: `round_limit`** — the lab's stop criterion
+(a round without Critical or High findings) was **not reached within the
+round budget**: round 3 still returned **1 Critical and 6 High** findings,
+and the budget ran out with findings still arriving. Challenger **OpenAI
+Codex `gpt-5.6-sol`**, called through the lab's cross-review seam with the
+plan passed by file (the loop wrapper's argv form cannot carry a plan above
+128 KB). **30 challenger findings, 30 accepted (12 adapted), 0 rejected —
+one clause of R1-8 rejected inside an accepted finding.** The lab's own
+audits contributed **4** further findings, logged here as *lab audit*
+(`L1`–`L3` in round 1, `L4` in round 2), all accepted. Every verdict was
+ruled in `verdicts-r1.md` / `verdicts-r2.md` / `verdicts-r3.md` before a
+line of this spec moved; where the ruling adapted a finding, the cell below
+says what the spec now says, not what the challenger asked for.
+**Residual findings may exist.**
 
 ### Round 1 of at most 3 — against `spec-v1.9.0.md` + `spec-v1.9.0-delta-1.md` (`060a5e7`); 13 findings, 13 accepted, one clause rejected
 
@@ -1934,8 +2180,8 @@ now says, not what the challenger asked for.
 | R1-2 | Crit | STO-02, STO-05, SEC-01, RPT-02 item 10 | accepted, adapted | The spec fixes `user_id integer partition key` and `WHERE embedding MATCH ? AND k = ? AND user_id = ?` as the only authorised forms, cites sqlite-vec's own `vec0.md`/`knn.md` as the resolution, makes a rejection by 0.1.9 a REV-04 blocker, and carries **no open marker and no cross-tenant over-fetch fallback anywhere**. |
 | R1-3 | Crit | STO-04, `T-V190-STO-06`, `-07` | accepted | STO-04 now branches on `document_count_all` read before any DDL: any document → `ConfigError` and nothing touched; zero documents → one transaction that drops `vec_chunks`, deletes `rag.embedding`, recreates the table at the **configured** dimension and writes the new pair; a matching pair stays idempotent. |
 | R1-4 | Crit | STO-03, `T-V190-STO-02` | accepted, adapted | STO-03 records the audited schema fact — nothing references `llm_calls` but `idx_llm_calls_conv` (`storage.py:96`) — and still requires `PRAGMA foreign_keys=OFF` before `BEGIN IMMEDIATE`, `ON` after `COMMIT`, the index recreated, an empty `PRAGMA foreign_key_check`, and a migration test that seeds and re-counts `llm_calls`, `spans`, `tool_calls` and `messages` by count and content. |
-| R1-5 | High | RET-07, `T-V190-RET-10` | accepted | `Searcher.search` is five numbered steps — vector + 150,22225, RRF to ≤ 10 ids, **hydrate those ids through `chunks_by_ids` restoring RRF order**, rerank the resulting `list[Passage]` with fallback to that hydrated order, slice to `rag_top_k` — and `chunks_by_ids` is called exactly once per search. |
-| R1-6 | High | EC-01, RET-04, RET-05, EVAL-03, §15.1 | accepted, adapted | EC-01 states that the executor does not read the external assignment-4 project, §15.1's T5 and T8 rows carry no path outside the repository, and the tokeniser, the 150,22225 rule, the RRF formula (`score[d] += 1/(60 + rank)`, ties by id) and both eval metrics are normative in RET-04, RET-05 and EVAL-03 with one provenance sentence each. |
+| R1-5 | High | RET-07, `T-V190-RET-10` | accepted | `Searcher.search` is five numbered steps — vector + BM25, RRF to ≤ 10 ids, **hydrate those ids through `chunks_by_ids` restoring RRF order**, rerank the resulting `list[Passage]` with fallback to that hydrated order, slice to `rag_top_k` — and `chunks_by_ids` is called exactly once per search. |
+| R1-6 | High | EC-01, RET-04, RET-05, EVAL-03, §15.1 | accepted, adapted | EC-01 states that the executor does not read the external assignment-4 project, §15.1's T5 and T8 rows carry no path outside the repository, and the tokeniser, the BM25 rule, the RRF formula (`score[d] += 1/(60 + rank)`, ties by id) and both eval metrics are normative in RET-04, RET-05 and EVAL-03 with one provenance sentence each. |
 | R1-7 | High | DOC-02, DOC-03, `T-V190-DOC-04` | accepted, adapted | `Extracted(pages: tuple[ExtractedPage, ...], page_numbered)` with `ExtractedPage(text, page)` is defined exactly once and no `page_numbers` field exists; the chunker is offset-based, takes at most `hard_max - overlap` = 1,000 new characters after the first chunk, preserves the source separators, and merges a short tail only while the result stays ≤ 1,200 — the one maximum stated by DOC-03, README, the tests and `E3`. |
 | R1-8 | High | EVAL-02, EVAL-03, EVAL-04, EC-09, T8 | accepted in part; one clause rejected | Every answerable question carries an **immutable `expected_evidence`**, a hit is a top-5 passage from `expected_source` whose text contains it (case-insensitive, whitespace-normalised), `T-V190-EVAL-04` proves offline before any live run that each evidence string is in the extracted corpus, T8 records the corpus and `questions.json` `sha256` before the first live run and may afterwards change **retrieval code or config only**, and one rerank fallback on an answerable item is exit 1 — while the blocking `rerank MRR ≥ hybrid MRR − 0.05` condition was **rejected** (rationale below). |
 | R1-9 | High | DOC-02, DOC-04, ERR-01 row 5b, ERR-03 | accepted, adapted | DOC-02 bounds a DOCX archive with `zipfile` **before `python-docx`** (≤ 2,000 members, ≤ 50 MiB uncompressed, ≤ 20 MiB per member, ratio ≤ 100) and a PDF at ≤ 500 pages before any `extract_text()`, both refused through ERR-01 row 5b with their own log prefixes; DOC-04 states the 300 s budget for what it is — checked between stages and between PDF pages, no cancellable worker, hard bounds from the size guards — and README Limitations says the same. |
@@ -1986,3 +2232,29 @@ that own them (RET-01's error taxonomy, TOOL-05's attribution guarantee).
 New tests: `T-V190-STO-08`, `T-V190-SEC-06` (55 → 57 ids, twelve now
 negative). Bytes: this file 130,989 → **150,222**, the delta 23,605 →
 **25,899 bytes**.
+
+### Round 3 of at most 3 — against the round-2 spec (`57dc746`); 10 findings, 10 accepted (4 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R3-1 | Crit | RET-04, NG-07, STO-05, EC-10, §15.1 T5, R1-5's cell | accepted | All fourteen references to RET-04's lexical ranking algorithm read correctly again and the `rank_bm25` constructor RET-04 names is valid Python once more — the corruption came from **round 2's applying pass, whose global size-figure replacement (`130,989` → `150,222`) also matched inside that algorithm's four-character name**, splicing the digits into every occurrence; the byte figure `150,222` elsewhere was legitimate and is untouched, and round 3's own size figures were written with anchored edits, never a global replace. |
+| R3-2 | High | RET-07, EVAL-03, EC-09 gate 7, ERR-01 row 8, `T-V190-RET-11` | accepted | `SearchResult` now carries five fields — `passages`, `documents_present`, `rerank_attempted`, `rerank_succeeded`, `rerank_failure` — with `rerank_succeeded=True` set **last**, only after the validated order and every piece of bookkeeping have completed, and EVAL-03 exits 2 unless all ten answerable items report `rerank_attempted is True and rerank_succeeded is True`; the flags never reach the model, so TOOL-02's envelope and `passages: n` are unchanged. |
+| R3-3 | High | STO-03, REV-01 item 7, `T-V190-STO-02`, `T-V190-STO-09` | accepted | The 5→6 step is `storage._migrate_5_to_6`'s normative Python control flow — `PRAGMA foreign_keys=OFF` outside any transaction, `BEGIN IMMEDIATE`, the statements, `COMMIT`, `except BaseException: ROLLBACK; raise`, `finally: PRAGMA foreign_keys=ON` — followed by the assertions `PRAGMA foreign_keys` = 1 and an empty `foreign_key_check`, never an `executescript` carrying its own pragmas. |
+| R3-4 | High | DOC-04, DOC-05, CMD-03, ERR-01 row 10c, `T-V190-CMD-09` | accepted, adapted | The phrase "from the start of the handler" **stays** and now has one meaning: `index_document` takes a defaultless `started_at: float`, captured by `monotonic()` as `_handle_document`'s first action before `getFile`, and every budget check reads `monotonic() - started_at > budget_s`, so `getFile`, the download and the handler's own pre-index work all count against the 300 s. |
+| R3-5 | High | CMD-02, ERR-01 rows 10a and 11, `T-V190-CMD-03`, `T-V190-CMD-10` | accepted, adapted | Rather than re-raising the bare `httpx` timeout, `download_file` raises `TelegramDownloadTimeout(TelegramError)` `from exc` in a clause standing **before** the generic `TransportError` clause; ERR-01 row 10a binds to that type and is caught before row 11, which keeps every other transport failure, and the test drives the real `download_file` boundary with an `httpx.MockTransport` raising `httpx.ReadTimeout`. |
+| R3-6 | High | DOC-04, DOC-05, STO-04, REV-01 item 4 | accepted | DOC-04 now states: *"The indexing transaction covers only replacement/deletion, the document row, chunks and vectors. `rag.embedding` and `vec_chunks` lifecycle changes occur exclusively in `init_schema` under STO-04 and never in `index_document`."* |
+| R3-7 | High | TOOL-05, `T-V190-TOOL-06`, `-07`, `T-V190-TOOL-08`, `E11` | accepted | Attribution stops parsing filenames altogether: `_render_sources` generates the canonical string for each of the ≤ 31 non-empty subsets of the returned `(filename, page)` pairs, in first-seen order with `(pages 2, 5)` grouping, and a `Source:`/`Sources:` line survives only when its whole text equals one of them — otherwise it is stripped and the full canonical block appended, with `a, b (page 9).pdf` pinned as the negative case. |
+| R3-8 | Med | CMD-04, CMD-03, DOC-05, DOC-04, ERR-01 row 13 | accepted, adapted | CMD-04's four strings are the complete list and each has one owner — the handler emits `📄 received` and both endings, `index_document` emits only extracted/chunked/embedding, and classify and store emit nothing; the 20-document limit moves to CMD-03 as one scoped `COUNT` **before** the status message and `getFile`, so row 13 keeps "precedes the status message, plain reply", and DOC-04 re-checks it inside the indexing transaction before the insert, mapping to that same row-13 string. |
+| R3-9 | Med | EC-01, REV-04 Stage 0, EVAL-03, SEC-04, RPT-02 item 9 | accepted, adapted | EC-01's boundary now reads *"Existing project/lab files outside the repository may not be read or modified. Ephemeral executor-created files may be written under the OS temporary directory (`tempfile`), must contain no secrets or uploaded document bytes, and must be removed before task completion"*, scoped to executor tooling — Stage 0's backups go to a `tempfile.mkdtemp()` directory named in the report and removed, EVAL-03's `TemporaryDirectory` is thereby legal, and the bot's own modules still carry no `tempfile` (`T-V190-SEC-04`). |
+| R3-10 | Low | TOOL-02, `T-V190-TOOL-02` | accepted | The truncation rule is exact arithmetic: *"When `len(text) > 1000`, return `text[:999] + '…'`; otherwise return text unchanged"* — a cut body is 1,000 characters including the ellipsis, never 1,001, which is the number the envelope proof and the test already assumed. |
+
+**Round 3: 10 challenger findings, 10 accepted (4 adapted: R3-4, R3-5,
+R3-8, R3-9), 0 rejected.** New requirements: **none** — the seventy `MUST`
+ids of Appendix A are unchanged; every round-3 mechanism landed in the
+requirement that already owned it. New tests: `T-V190-STO-09`,
+`T-V190-RET-11`, `T-V190-CMD-09`, `T-V190-CMD-10`, `T-V190-TOOL-08` (57 →
+**62** ids, twelve → **seventeen** negative). Bytes: this file 150,222 →
+**174,186**, the delta 25,899 → **30,222** — §1's budget paragraph
+records that round 3, contrary to its own plan, **added** to the delta
+rather than offsetting it: five test rows are tables and the size rule sends
+tables there, and no normative content was deleted to make room.
