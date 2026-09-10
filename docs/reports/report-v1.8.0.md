@@ -1,11 +1,12 @@
 # Implementation report — spec-v1.8.0
 
-**Status: T9 complete — provisional report. Version bumped to 1.8.0
-(`pyproject.toml`/`uv.lock`); T-V180-VER-01 confirmed red-before/green-after.
-Every REQ-V180-RPT-02 item below is filled except item 5's tip SHA (this
-commit's own sha, unknowable before it exists) and item 10 (the tag, T10's
-job). T8's full gate suite was green on the pre-bump tree; T10 re-gates the
-tree carrying this bump before tagging.**
+**Status: T10 complete, run closed. `<implementation-tip>` = `30207af`
+(T9's commit). Six gates re-run clean against it (gate 5 needed one more
+GPU-box re-pin); `checks.py run --profile full` 15/15; `checks.py replay
+--range 28e6169..30207af` 12/12; Appendix B 14/14 PASS, driven by the
+automated suite. This evidence-only commit lands on `docs/reports/*`
+alone; `lint-docs` and `gitleaks-tree` are re-run against it below, and,
+both green, the annotated tag `v1.8.0` is created on it.**
 
 - **Spec:** `docs/spec/spec-v1.8.0.md`
 - **Spec `sha256` at T0:** `fad1e70998d77e5e2e7501edea5b4c16a7caa01fe14560ae528152ac6897f138`
@@ -13,9 +14,9 @@ tree carrying this bump before tagging.**
 - **Handoff:** `docs/handoff-v1.8.0.md`
 - **Executor:** claude-sonnet-5 (Claude Code)
 - **`<base>`** (HEAD before this run's first commit): `28e6169797be98bbf8bb874faa88e4758032c2ad`
-- **`<implementation-tip>`**: this task's own commit sha (RPT-02 item 5's
-  one excepted cell — a commit cannot carry its own hash inside itself;
-  recorded outside this file, in the run's closing message, per REQ-V180-REV-02).
+- **`<implementation-tip>`**: `30207af90f60fabc0920efbd793f16499ae4a08a` (T9's commit — the last
+  source/test/config commit; this evidence-only commit and its own sha
+  are, per REQ-V180-REV-02, never self-referenced inside this file).
 - **Final test count (RPT-02 item 2):** `pytest --collect-only -q` = **1220**
   (T0 floor 1133; +87 across T1's 11, T2's 20, T3's 5, T4's 11, T5's 23,
   T6's 14, T8-fixes' 2, T9's 1 new tests — exceeds the floor, per T8's
@@ -101,6 +102,9 @@ git-ignored and untouched by any commit.
 | T5 | yes | fresh `general-purpose` subagent, briefed via `docs/spec/task-briefs/v180-T5.md` | map: `storage.py`/`dashboard_render.py` ranges of §12.1; actual: same, no crossing |
 | T6 | yes | fresh `general-purpose` subagent, briefed via `docs/spec/task-briefs/v180-T6.md` (resumed once mid-run after a stall, see note below) | map: `dashboard_server.py`/`config.py`/`devtools/mutation_check.py`/`config/quality_gates.yaml`/`tests/test_v15_standards.py` ranges of §12.1; actual: same, plus one small pure `dashboard_render.py` addition (`transcript_page_footer`), flagged and justified by REQ-V160-DSH-01 |
 | T7 | yes | fresh `general-purpose` subagent, briefed via `docs/spec/task-briefs/v180-T7.md` | map: `README.md`/`AGENTS.md`/`docs/plan.md`/`config/quality_gates.yaml` ranges of §12.1; actual: same |
+| T8 | yes | `code-reviewer` subagent (review) + fresh `general-purpose` subagent (fixes, briefed via `docs/spec/task-briefs/v180-T8-fixes.md`); gate suite itself run by the orchestrator directly (*commands only*) | review: its own reading map (whole diff since `<base>`); fixes: `dashboard_server.py`/`bot.py` + one test file each, no crossing |
+| T9 | no — *artefacts only* for the report/tg-post/usage-row half; version bump + test done directly by the orchestrator as *a single edit under every threshold* (3 files, ~2 lines each, one new ~10-line test) | — | `pyproject.toml`, `uv.lock`, `tests/test_v180_version.py`, plus two more EC-03-class test fixes (`tests/test_v170_bench.py`) applied directly, already twice operator-authorized this run |
+| T10 | no — *artefacts only* | — | this report + the evidence-only commit |
 
 ## Project-prompt review record (REQ-V180-AGT-04)
 
@@ -340,9 +344,45 @@ fixed by rewriting history (this run has no standing authorization for
 that); every brief's actual content matches what its task consumed —
 verifiable via each task's own prompt file cross-referencing it.
 
-## `--no-verify` attestation
+## T10 — final acceptance (REQ-V180-REV-02)
 
-Not reached yet — recorded at closure.
+Six gates re-run verbatim against tip `30207af` (T9's commit, gate 5
+needed one more re-pin — the GPU box's floating IP moved again, from
+`192.168.0.145` to `172.16.50.233`, same known-set disposition as T0):
+all exit 0, mutation gate 98/98 killed. `checks.py run --profile full
+--since 28e6169…`: **all 15 gates PASS** (uv-sync, ruff-check-all,
+ruff-format, branch-name, pytest, selftest, selftest-live, mutation-all
+98/98, gitleaks-tree, trivy, semgrep, skylos 18+8 shadow, hooks-installed,
+doctor, lint-docs). `checks.py replay --range 28e6169..30207af`:
+**12/12 commits `[PASS] ... clean`** — no `--no-verify` or hook bypass
+anywhere in the run.
+
+## Appendix B — acceptance scenarios, driven by the automated suite
+
+Every `T-V180-*` test named below is green in the full suite (confirmed
+above); each scenario is **PASS**, driven automatically rather than
+hand-replayed, per REQ-12-REP-02:
+
+| scenario | driven by |
+|---|---|
+| E1 (delete on success) | `T-V180-CHAT-02`, `-08`, `-10` |
+| E2 (failed run keeps message) | `T-V180-CHAT-03`, `-08` |
+| E3 (failed delete/send accepted) | `T-V180-CHAT-05`, `-09` |
+| E4 (typing ticks, ceiling, bounds) | `T-V180-CHAT-06` |
+| E5 (typing failure disables only) | `T-V180-CHAT-07` |
+| E6 (numeric columns, declared) | `T-V180-DSH-01` |
+| E7 (rejected defaults absent) | `T-V180-DSH-02`, `-03` |
+| E8 (conversations list, bounded) | `T-V180-CONV-01`, `T-V180-CONV-04`'s list half |
+| E9 (transcript order/pagination/trace links) | `T-V180-CONV-02`, `-03`, `T-V180-CONV-05` |
+| E10 (redact then escape, both routes) | `T-V180-SEC-01` |
+| E11 (byte-budget pagination) | `T-V180-SEC-02` |
+| E12 (404/400, security headers) | `T-V180-SEC-04` + existing error-page tests |
+| E13 (context discipline + trace content still off) | `T-V180-AGT-01`, `T-V180-SEC-03` |
+| E14 (no secret shipped) | `gitleaks-tree`, PASS at T8 and T10, re-run once more below on the evidence-only commit |
+
+**14/14 PASS.**
+
+## `--no-verify` attestation
 
 ## Ledger row (paste into `economics.md`)
 
