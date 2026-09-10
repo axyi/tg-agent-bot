@@ -281,12 +281,17 @@ def test_t_v170_ver_01_version_matches_independent_tomllib_read(capsys):
     assert capsys.readouterr().out == f"tg-agent-bot {expected}\n"
 
 
-def test_t_v170_rpt_02_lint_docs_repointed_to_this_release():
+def test_t_v180_rpt_01_lint_docs_repointed_to_this_release():
+    """Superseded by spec-v1.8.0 REQ-V180-RPT-01, T7: lint-docs' report_path
+    tracks the current release and is repointed again at each one -- this
+    test's own name and assertion move with it (erratum, this run, operator-
+    authorized: the v1.7.0-named predecessor asserted the v1.7.0 path, which
+    v1.8.0's own required repoint necessarily made false)."""
     from devtools.checks import DEFAULT_CONFIG_PATH, load_gate_config
 
     raw = load_gate_config(DEFAULT_CONFIG_PATH)
     lint_docs = raw["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.7.0.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.8.0.md"
     assert lint_docs["ledger_header"] == (
         "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | "
         "Tokens ↑/↓ | Cost | Model | Harness |"
