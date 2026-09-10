@@ -48,21 +48,25 @@ not starting with `|`; every label must match `_GATE_MATRIX_LABEL_TO_NAME`
 ## The test table (REQ-V190-TST-03)
 
 Each id names one test function or a small parametrised set; "negative"
-tests prove a guard by violating it.
+tests prove a guard by violating it. **55 ids, ten of them negative**, and
+every one is cited in `spec-v1.9.0.md` Appendix A — the two lists are in
+bijection.
 
 | id | asserts |
 |---|---|
 | `T-V190-DOC-01` | `classify` by lowercase extension for the four types and `None` for `.PDF.exe`, no extension, `mime_type` ignored; `clean_filename` strips separators and control chars, caps at 120, `None` for empty |
-| `T-V190-DOC-02` | `extract`: utf-8-sig and cp1251 txt/md decode; DOCX paragraphs and table cells in document order; PDF per page with empty pages skipped and physical numbering kept |
-| `T-V190-DOC-03` | negative: truncated PDF → the corrupted-PDF class; truncated DOCX → `BadZipFile`; a ZIP without `word/document.xml` → `PackageNotFoundError`/`KeyError` — each mapped to ERR-01 rows 2/3 |
-| `T-V190-DOC-04` | `chunk_text`: every chunk ≤ 1200 (≤ 1250 after a tail merge); overlap of exactly 200 between consecutive chunks; paragraph boundaries preferred; a 5,000-char paragraph split on sentence ends; tail < 50 merged; determinism (two runs equal); offsets index the input |
+| `T-V190-DOC-02` | `extract`: utf-8-sig and cp1251 txt/md decode; DOCX paragraphs and table cells in document order; PDF per page with empty pages skipped and the physical 1-based number kept on the pages that remain; every result is `Extracted(pages: tuple[ExtractedPage, ...], page_numbered)` with `ExtractedPage.page` `None` for non-PDF and no `page_numbers` field anywhere |
+| `T-V190-DOC-03` | negative: truncated PDF → the corrupted-PDF class; truncated DOCX → `BadZipFile`; a ZIP without `word/document.xml` → `PackageNotFoundError`/`KeyError` — each mapped to ERR-01 rows 2/3; and the DOC-02 pre-parse guards fire **before** `python-docx`/`extract_text()`: an archive over the member, size or ratio bounds and a 501-page PDF each take ERR-01 row 5b |
+| `T-V190-DOC-04` | `chunk_text`: **every chunk ≤ 1200, tail merge included** — a tail that would push the merged chunk past 1200 stands alone; new material after the first chunk ≤ 1000; overlap of exactly 200 between consecutive chunks; paragraph boundaries preferred; a 5,000-char paragraph split on sentence ends; tail < 50 non-whitespace merged when it fits; determinism (two runs equal); `text == source[char_start:char_end]` for every chunk, separators preserved |
 | `T-V190-DOC-05` | PDF chunks never span pages; `page` is the 1-based physical page; non-PDF `page is None`; `chunk_index` monotonic across pages |
 | `T-V190-DOC-06` | `write_pdf` output is read by `pypdf` with the right page count and text per page; non-ASCII and > 60 lines raise `ValueError` |
 | `T-V190-STO-01` | `connect` and `connect_readonly` both answer `select vec_version()`; `init_schema()` without a dim creates no `vec_chunks`; with `dim=16` it does, idempotently |
-| `T-V190-STO-02` | a seeded v5 database (built by executing v5's `_SCHEMA` + `_MIGRATION_4_TO_5` and inserting agent/summary `llm_calls` rows) migrates to 6: rows preserved (count and content), the `rerank` purpose now insertable, `documents`/`chunks` present, version 6; a fresh database is 6; version 7 refused (the EC-03 amendment) |
+| `T-V190-STO-02` | a seeded v5 database (built by executing v5's `_SCHEMA` + `_MIGRATION_4_TO_5` and inserting rows into `llm_calls`, `spans`, `tool_calls` **and** `messages`) migrates to 6: all four tables preserved by **count and content**, `PRAGMA foreign_key_check` returns no rows, `idx_llm_calls_conv` exists again, the `rerank` purpose now insertable, `documents`/`chunks` present, version 6; a fresh database is 6; version 7 refused (the EC-03 amendment) |
 | `T-V190-STO-03` | `delete_document` removes vectors, chunks and the row in one transaction; a search afterwards returns nothing from it; a failing vector delete (monkeypatched) rolls the row back |
-| `T-V190-STO-04` | negative: a stored `rag.embedding` of `m:16` and config `m:32` → `ConfigError` before any DDL; same pair → starts; no config + stored pair → starts; empty `documents` → the key is rewritten from config |
-| `T-V190-STO-05` | `index_document` twice with the same filename replaces: one document row, new chunk ids, old vectors gone, `replaced=True`; the 21st distinct filename is refused and the 20th's replace is not |
+| `T-V190-STO-04` | negative: a stored `rag.embedding` of `m:16`, config `m:32` **and one indexed document** → `ConfigError` before any DDL and no state touched; the same pair → starts idempotently; no config + stored pair → starts |
+| `T-V190-STO-06` | the empty-index rebind, **model change**: `rag.embedding` `m1:16`, no document row, config `m2:16` → one transaction drops and recreates `vec_chunks` at dim 16 and the stored key reads `m2:16`; an insert of a 16-float vector afterwards succeeds |
+| `T-V190-STO-07` | the empty-index rebind, **dimension change**: `rag.embedding` `m:16`, no document row, config `m:32` → `vec_chunks` is recreated at dim 32 (a 16-float insert now fails, a 32-float insert succeeds) and the stored key reads `m:32` — the stale table can never survive `CREATE VIRTUAL TABLE IF NOT EXISTS` |
+| `T-V190-STO-05` | `index_document` twice with the same filename replaces: one document row, new chunk ids, old vectors gone, `replaced=True`; the 21st distinct filename is refused and the 20th's replace is not; `add_chunks` returns one id per chunk in order (`lastrowid` per `INSERT`, no `executemany`) and raises for a `document_id` the `user_id` does not own |
 | `T-V190-RET-01` | `EmbeddingsClient` batches 32 per request, orders by `index`, retries once on transport error, raises `EmbeddingError` on ≠ 200, malformed body, wrong dim; one CLIENT span per request with the five attributes, `conv_id=None` when indexing (`httpx.MockTransport`) |
 | `T-V190-RET-02` | negative: `EMBEDDING_MODEL` without `EMBEDDING_DIM` (and vice versa) → `ConfigError`; `EMBEDDING_DIM=0`/`4097`/`x` → `ConfigError`; defaults: `rag_enabled` false, `rag_top_k` 5, `rag_rerank` `on`, `embedding_timeout_s` 60.0, `embedding_base_url` = the LM Studio URL |
 | `T-V190-RET-03` | vector search over `FakeEmbedder`: the chunk sharing the query's tokens ranks first; `[]` with no rows |
@@ -70,7 +74,8 @@ tests prove a guard by violating it.
 | `T-V190-RET-05` | `rrf` reproduces assignment 4's ordering on a fixed pair of lists; the fused list is cut to 10; an empty BM25 list yields the vector order |
 | `T-V190-RET-06` | rerank: a scripted `[3, 1, 2]` reply reorders; omitted numbers follow in RRF order; each candidate text cut to 600; `max_tokens == 128`, `timeout_s == 20.0`, `reasoning.value == "off"` on the fake's recorded call; the call is in `llm_calls` with purpose `rerank` |
 | `T-V190-RET-07` | negative: `LLMError`, `"not json"`, `[9]`, `[1, 1]` each return `None`, the caller keeps the RRF order, one warning, and the answer still completes |
-| `T-V190-RET-08` | `Searcher.search` returns ≤ `rag_top_k` hydrated passages, `documents_present` false with no rows, `calls` recorded; `RAG_RERANK=off` makes no LLM call |
+| `T-V190-RET-08` | `Searcher.search` returns ≤ `rag_top_k` hydrated passages, `documents_present` false with no rows, `calls` recorded; `RAG_RERANK=off` makes no LLM call; the reranker receives `list[Passage]` already carrying filename and text (never bare ids), and `chunks_by_ids` is called exactly once per `search` |
+| `T-V190-RET-10` | hydration cannot reorder RRF: with `chunks_by_ids` returning the ten rows in reversed id order, the passages handed to the reranker — and the fallback order when the reranker fails — are still the RRF order of step 2 |
 | `T-V190-RET-09` | `_live_embeddings` (a stubbed `httpx.Client`): FAIL when the pair is unset; FAIL when the model is missing from `/models`; FAIL on a wrong-length vector; OK otherwise |
 | `T-V190-TOOL-01` | the fourth entry is last, serialises ≤ 350 chars, the catalog ≤ 1800; `_known_tool_names()` contains it; `expected_structure()` equality (the EC-03 amendment) |
 | `T-V190-TOOL-02` | envelope texts for no documents, no hits, N hits (header, per-passage format with and without page); the 6,000-char cap; `searcher=None` → the "not available" error; bad `query` refused |
@@ -91,13 +96,14 @@ tests prove a guard by violating it.
 | `T-V190-ERR-02` | negative: a registered secret in a filename and in an exception message reaches neither Telegram nor `caplog` unredacted |
 | `T-V190-ERR-03` | row 12: a failing confirmation send leaves the document stored |
 | `T-V190-SEC-01` | two users, same filename, different content: each user's search returns only own passages; user A's query never hits B's chunks (KNN and BM25 both) |
-| `T-V190-SEC-02` | `/documents` for A lists only A's; `document_count` per user |
+| `T-V190-SEC-02` | `/documents` for A lists only A's; `document_count` is per user, while `document_count_all` — STO-04's rebind check and the one owner-predicate exemption — counts A's and B's rows together |
 | `T-V190-SEC-03` | negative: A's `/delete <B's filename>` → "No document named"; B's rows intact |
 | `T-V190-SEC-04` | negative: an extra `user_id` key in the tool arguments is ignored; `documents.py` and the handler source contain no `open(`, `Path(`, `tempfile` |
-| `T-V190-SEC-05` | every SQL literal in `storage.py`/`rag.py` naming `documents`, `chunks` or `vec_chunks` contains `user_id`; every `execute` on them passes a parameter tuple (AST walk) |
-| `T-V190-EVAL-01` | `questions.json` shape: 12 items, 10 answerable, ≥ 2 per source, 3 PDF pages, 2 nulls naming no file; every source exists in `corpus/` |
-| `T-V190-EVAL-02` | `rag_eval` end-to-end with `FakeEmbedder`/`FakeLLM` on the real corpus: renders DOCX and PDF in memory, indexes for user −1, prints the table, exit 0/1 by the floor, 2 when the embedder raises |
-| `T-V190-EVAL-03` | the metric functions: recall@5 and MRR on a scripted rank list equal hand-computed values; page hit-rate counts only PDF items |
+| `T-V190-SEC-05` | AST walk over `storage.py`/`rag.py`: every **runtime** DML or `SELECT` naming `documents`, `chunks` or `vec_chunks` contains `user_id` and passes a parameter tuple; schema DDL is excluded; the point delete `DELETE FROM vec_chunks WHERE chunk_id = ?` passes **only** because the same function body also holds `WHERE d.id = ? AND d.user_id = ?` (both strings checked in that one function); `document_count_all` is the single allowed exemption |
+| `T-V190-EVAL-01` | `questions.json` shape: 12 items, 10 answerable, ≥ 2 per source, 3 PDF pages, 2 nulls naming no file and no evidence; every source exists in `corpus/`; every answerable item carries a non-empty `expected_evidence` |
+| `T-V190-EVAL-02` | `rag_eval` end-to-end with `FakeEmbedder`/`FakeLLM` on the real corpus: renders DOCX and PDF in memory, indexes for user −1, prints the table, exit 0/1 by the floor, **exit 1 when a scripted rerank failure forces one fallback on an answerable item**, 2 when the embedder raises |
+| `T-V190-EVAL-03` | the metric functions: recall@5 and MRR on a scripted rank list equal hand-computed values; page hit-rate counts only PDF items; a passage from `expected_source` **without** `expected_evidence` is not a hit, while one carrying it under different case and spacing is |
+| `T-V190-EVAL-04` | offline, before any live run: every answerable item's `expected_evidence` occurs in the extracted text of its `expected_source` (case-insensitive, whitespace-normalised) — a corpus defect fails here, never at the live gate |
 | `T-V190-E2E-01` | upload (txt) → `/documents` → question → the scripted `FakeLLM` calls `search_documents` → the reply carries the filename; `Sources:` appended when it does not |
 | `T-V190-E2E-02` | upload (PDF, 3 pages) → question → the returned passage carries the page → the reply's source line carries `(page N)` |
 | `T-V190-E2E-03` | `/delete` → the same question → "No passages matched." reaches the model → the model's "not covered" reply, no source line |
@@ -193,11 +199,13 @@ Scenario: E4 — re-uploading a filename replaces the old document
   Then documents has one "notes.md" row for that user with chunk_count 5
   And none of the three old chunk ids exists in chunks or vec_chunks
 
-Scenario: E5 — a changed embedding pair refuses to start
-  Given a database whose bot_state holds rag.embedding = "m:16"
+Scenario: E5 — a changed embedding pair refuses to start while a document exists
+  Given a database whose bot_state holds rag.embedding = "m:16" and one indexed document
   When init_schema runs with embedding_model "m" and embedding_dim 32
   Then a ConfigError is raised naming the stored pair before any DDL runs
   And the same call with "m" and 16 succeeds
+  And after that document is deleted the same "m"/32 call instead rebinds the empty index in one transaction
+  And vec_chunks then accepts a 32-float vector while bot_state reads "m:32"
 
 Scenario: E6 — the embeddings client batches, retries once, and checks the dimension
   Given 70 chunk texts and a mock transport that fails the first request with a transport error
