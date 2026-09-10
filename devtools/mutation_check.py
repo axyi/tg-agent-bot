@@ -865,11 +865,20 @@ MUTATIONS = [
         # only `mode=ro` (or only dropping the PRAGMA) survives -- the other
         # one masks it. Both must go together for the mutation to be
         # observable, so this entry's find/replace spans both lines.
+        # REQ-V190-STO-01 (spec-v1.9.0 T1) inserted the sqlite-vec extension
+        # load between `row_factory` and the `PRAGMA query_only` line; both
+        # find/replace variants carry it unchanged, since this mutation is
+        # about `mode=ro` and the PRAGMA, not the extension load.
         "find": (
             "    conn = sqlite3.connect(\n"
             '        f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0\n'
             "    )\n"
             "    conn.row_factory = sqlite3.Row\n"
+            "    # REQ-V190-STO-01: the read-only handle needs the module too, for the same\n"
+            "    # reason -- a schema naming `vec0` cannot even be parsed without it.\n"
+            "    conn.enable_load_extension(True)\n"
+            "    sqlite_vec.load(conn)\n"
+            "    conn.enable_load_extension(False)\n"
             '    conn.execute("PRAGMA query_only = ON")\n'
             "    return conn\n"
         ),
@@ -878,6 +887,11 @@ MUTATIONS = [
             '        f"file:{db_path}?mode=rw", uri=True, isolation_level=None, timeout=5.0\n'
             "    )\n"
             "    conn.row_factory = sqlite3.Row\n"
+            "    # REQ-V190-STO-01: the read-only handle needs the module too, for the same\n"
+            "    # reason -- a schema naming `vec0` cannot even be parsed without it.\n"
+            "    conn.enable_load_extension(True)\n"
+            "    sqlite_vec.load(conn)\n"
+            "    conn.enable_load_extension(False)\n"
             "    return conn\n"
         ),
         "why": "REQ-V160-SRV-06: the dashboard's own connection must be "

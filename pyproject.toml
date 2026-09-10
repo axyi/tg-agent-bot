@@ -6,6 +6,11 @@ requires-python = ">=3.13,<3.15"
 dependencies = [
     "httpx==0.28.1",
     "python-dotenv==1.2.3",
+    "sqlite-vec==0.1.9",
+    "pypdf==6.18.0",
+    "python-docx==1.2.0",
+    "rank-bm25==0.2.2",
+    "snowballstemmer==3.1.1",
 ]
 
 [dependency-groups]

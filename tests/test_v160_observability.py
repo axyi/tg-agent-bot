@@ -408,7 +408,10 @@ def test_t_v160_trc_07_migration_3_to_4_adds_spans_and_nullable_columns(tmp_path
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    # erratum: REQ-V190-EC-03's amendment table only lists test_observability.py
+    # for the SCHEMA_VERSION 5 -> 6 literal bump (spec-v1.9.0 T1); this file
+    # hardcodes the same post-init_schema version and was missed there too.
+    assert storage.schema_version(conn) == 6
     assert (
         conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'spans'"
@@ -426,7 +429,7 @@ def test_t_v160_trc_07_migration_3_to_4_adds_spans_and_nullable_columns(tmp_path
 
     # Idempotence: a second init_schema changes nothing further.
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    assert storage.schema_version(conn) == 6
     assert conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0] == 1
     conn.close()
@@ -441,7 +444,8 @@ def test_t_v160_trc_07_migration_1_to_4_chains(tmp_path):
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    # erratum: see the T1 note above -- the EC-03 amendment table missed this file.
+    assert storage.schema_version(conn) == 6
     for table in ("summaries", "llm_calls", "tool_calls", "spans"):
         assert (
             conn.execute(
@@ -462,7 +466,8 @@ def test_t_v160_trc_07_migration_2_to_4_chains(tmp_path):
 
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    # erratum: see the T1 note above -- the EC-03 amendment table missed this file.
+    assert storage.schema_version(conn) == 6
     for table in ("llm_calls", "tool_calls", "spans"):
         assert (
             conn.execute(
@@ -477,7 +482,9 @@ def test_t_v160_trc_07_migration_2_to_4_chains(tmp_path):
 # --- T-V160-TRC-08 -- unsupported versions ----------------------------------
 
 
-@pytest.mark.parametrize("bad_version", [0, 6, "x"])
+# erratum: 6 -> 7 -- SCHEMA_VERSION is 6 as of spec-v1.9.0 T1, so 6 is no
+# longer a future/unsupported version; see the T1 note above.
+@pytest.mark.parametrize("bad_version", [0, 7, "x"])
 def test_t_v160_trc_08_unsupported_version_raises(conn, bad_version):
     conn.execute("UPDATE schema_version SET version = ? WHERE id = 1", (bad_version,))
     with pytest.raises(RuntimeError) as raised:

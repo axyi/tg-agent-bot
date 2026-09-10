@@ -148,14 +148,16 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
     conn.close()
 
     ahead = storage.connect(path)
-    # 5 is the current SCHEMA_VERSION from spec-v1.7.0 T4; 6 is the future
+    # 6 is the current SCHEMA_VERSION from spec-v1.9.0 T1; 7 is the future
     # boundary (erratum: spec-v1.7.0 T4, REQ-V170-OBS-01 vs. REQ-V170-EC-03 --
-    # authorised by the operator, prompt 107).
-    ahead.execute("UPDATE schema_version SET version = 6 WHERE id = 1")
+    # authorised by the operator, prompt 107; amended again by the same class
+    # of edit REQ-V190-EC-03 authorises for test_observability.py, which its
+    # own amendment table missed for this file).
+    ahead.execute("UPDATE schema_version SET version = 7 WHERE id = 1")
     ahead.execute("DROP TABLE summaries")
     with pytest.raises(RuntimeError) as raised:
         storage.init_schema(ahead)
-    assert "6" in str(raised.value)
+    assert "7" in str(raised.value)
     # A database from a future version is refused untouched, not half-migrated.
     assert ahead.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"

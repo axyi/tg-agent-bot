@@ -624,7 +624,10 @@ def test_t_v170_obs_01_chains_to_5(tmp_path, schema_fn, start_version):
     _seed(path, schema_fn())
     conn = storage.connect(path)
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    # erratum: REQ-V190-EC-03's amendment table only lists test_observability.py
+    # for the SCHEMA_VERSION 5 -> 6 literal bump (spec-v1.9.0 T1); this file
+    # hardcodes the same post-init_schema version and was missed there too.
+    assert storage.schema_version(conn) == 6
     row = conn.execute("PRAGMA table_info(llm_calls)").fetchall()
     names = {r[1] for r in row}
     assert {"reasoning_requested", "reasoning_honored"} <= names
@@ -633,7 +636,8 @@ def test_t_v170_obs_01_chains_to_5(tmp_path, schema_fn, start_version):
 
 def test_t_v170_obs_01_migration_4_to_5_on_populated_db(tmp_path):
     """A genuine on-disk v4 database (pre-v1.7.0 shape): both new columns
-    appear nullable, a pre-existing row reads NULL in both, version reads 5."""
+    appear nullable, a pre-existing row reads NULL in both, version reads 6
+    (schema-v1.9.0's chain continues 4 -> 5 -> 6, see the erratum note above)."""
     path = tmp_path / "v4.db"
     conn = storage.connect(path)
     storage.init_schema(conn)  # today's code -> lands at 5 directly; force back to 4 to simulate
@@ -664,13 +668,13 @@ def test_t_v170_obs_01_migration_4_to_5_on_populated_db(tmp_path):
     )
 
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    assert storage.schema_version(conn) == 6
     row = conn.execute("SELECT reasoning_requested, reasoning_honored FROM llm_calls").fetchone()
     assert row[0] is None and row[1] is None
 
     # idempotent
     storage.init_schema(conn)
-    assert storage.schema_version(conn) == 5
+    assert storage.schema_version(conn) == 6
     assert conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 1
     conn.close()
 
@@ -684,10 +688,12 @@ def test_t_v170_obs_01_unsupported_version_still_raises(conn, bad):
 
 
 def test_n8_schema_version_6_raises(conn):
-    conn.execute("UPDATE schema_version SET version = 6 WHERE id = 1")
+    # erratum: 6 -> 7 -- SCHEMA_VERSION is 6 as of spec-v1.9.0 T1, so 6 is no
+    # longer a future/unsupported version; see the T1 note above.
+    conn.execute("UPDATE schema_version SET version = 7 WHERE id = 1")
     with pytest.raises(RuntimeError) as raised:
         storage.init_schema(conn)
-    assert "6" in str(raised.value)
+    assert "7" in str(raised.value)
 
 
 # --------------------------------------------------------------------------

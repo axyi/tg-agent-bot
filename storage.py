@@ -12,10 +12,12 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
+import sqlite_vec
+
 import config
 
 WINDOW_TURNS = 40
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 RECENT_GOAL_CHARS = 200
 # REQ-V180-CONV-02: the SQL bound on `conversation_messages`'s message fetch --
 # four times the maximum page `limit` of 500, so no lawful page ever reaches
@@ -138,6 +140,45 @@ CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans (trace_id, id);
 CREATE INDEX IF NOT EXISTS idx_spans_conv  ON spans (conv_id, id);
 """
 
+# REQ-V190-STO-02: the RAG document/chunk tables. Deliberately NOT folded into
+# `_SCHEMA` the way `_SPANS_DDL` is: `_SCHEMA`'s own `executescript` runs
+# unconditionally, outside any explicit transaction, on every `init_schema`
+# call -- fine for every table before it (`CREATE ... IF NOT EXISTS`, no
+# rollback ever required of them), but `documents`/`chunks` are the one pair
+# a failed migration must be able to make vanish again (REQ-V190-STO-03,
+# `T-V190-STO-09`: "no documents/chunks left behind"). So this constant is
+# reused verbatim by `_MIGRATION_5_TO_6` alone (split into its constituent
+# statements, since `_migrate_5_to_6` executes one statement at a time) --
+# the fresh-database path reaches it too, uniformly, via the 4 -> 5 -> 6
+# chain `init_schema` always completes (`_SCHEMA:151`'s own comment).
+_DOCUMENTS_DDL = """
+CREATE TABLE IF NOT EXISTS documents (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    filename    TEXT    NOT NULL,
+    file_type   TEXT    NOT NULL CHECK (file_type IN ('txt', 'md', 'docx', 'pdf')),
+    created_at  TEXT    NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    text_chars  INTEGER NOT NULL,
+    page_count  INTEGER,
+    chunk_count INTEGER NOT NULL,
+    sha256      TEXT    NOT NULL,
+    UNIQUE (user_id, filename)
+);
+
+CREATE TABLE IF NOT EXISTS chunks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    text        TEXT    NOT NULL,
+    page        INTEGER,
+    char_start  INTEGER NOT NULL,
+    char_end    INTEGER NOT NULL,
+    UNIQUE (document_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks (document_id, chunk_index);
+"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
     id      INTEGER PRIMARY KEY CHECK (id = 1),
@@ -251,6 +292,86 @@ UPDATE schema_version SET version = 5 WHERE id = 1;
 COMMIT;
 """
 
+# REQ-V190-STO-03: the rebuild step of the 5 -> 6 migration. SQLite cannot
+# widen a CHECK constraint in place, so `llm_calls` is rebuilt under a new
+# name with the same columns in the same order (the v4 DDL of
+# `_OBSERVABILITY_DDL` plus the two v5 columns added by `_MIGRATION_4_TO_5`)
+# and the widened `purpose` constraint, then swapped in by rename. The column
+# list is `LLM_CALL_COLUMNS` minus `id` (AUTOINCREMENT owns that one).
+_LLM_CALLS_V6_DDL = """
+CREATE TABLE llm_calls_v6 (
+    id                   INTEGER PRIMARY KEY,
+    conv_id              INTEGER NOT NULL REFERENCES conversations(id),
+    turn_id              INTEGER,
+    purpose              TEXT    NOT NULL CHECK (purpose IN ('agent', 'summary', 'rerank')),
+    round                INTEGER NOT NULL,
+    attempt              INTEGER NOT NULL,
+    ts                   TEXT    NOT NULL,
+    provider             TEXT    NOT NULL,
+    model                TEXT    NOT NULL,
+    prompt_tokens        INTEGER,
+    completion_tokens    INTEGER,
+    total_tokens         INTEGER,
+    cached_tokens        INTEGER,
+    reasoning_tokens     INTEGER,
+    reasoning_chars      INTEGER NOT NULL DEFAULT 0,
+    prompt_chars         INTEGER NOT NULL,
+    prompt_chars_by_role TEXT    NOT NULL,
+    messages_n           INTEGER NOT NULL,
+    tools_exposed        INTEGER NOT NULL,
+    latency_ms           INTEGER NOT NULL,
+    finish_reason        TEXT,
+    tool_calls_n         INTEGER NOT NULL DEFAULT 0,
+    error_kind           TEXT,
+    cost_usd             REAL,
+    cost_basis           TEXT,
+    trace_id             TEXT,
+    span_id              TEXT,
+    reasoning_requested  TEXT,
+    reasoning_honored    INTEGER
+)
+"""
+
+_LLM_CALLS_COLUMN_LIST = ", ".join(LLM_CALL_COLUMNS)
+
+# `_migrate_5_to_6` executes these one at a time via `conn.execute` (never
+# `executescript`, which cannot express a rollback -- REQ-V190-STO-03). Step
+# (1) is `_DOCUMENTS_DDL` split into its own statements; step (2) is the
+# `llm_calls` rename-copy rebuild; step (3) lands the version.
+_MIGRATION_5_TO_6 = (
+    *[statement.strip() for statement in _DOCUMENTS_DDL.strip().split(";") if statement.strip()],
+    _LLM_CALLS_V6_DDL.strip(),
+    f"INSERT INTO llm_calls_v6 ({_LLM_CALLS_COLUMN_LIST}) "
+    f"SELECT {_LLM_CALLS_COLUMN_LIST} FROM llm_calls",
+    "DROP TABLE llm_calls",
+    "ALTER TABLE llm_calls_v6 RENAME TO llm_calls",
+    "CREATE INDEX IF NOT EXISTS idx_llm_calls_conv ON llm_calls (conv_id, id)",
+    "UPDATE schema_version SET version = 6 WHERE id = 1",
+)
+
+
+def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
+    """REQ-V190-STO-03's normative control flow, verbatim: foreign keys are
+    disabled outside any transaction (the pragma is a no-op inside one), the
+    rebuild runs inside one `BEGIN IMMEDIATE` … `COMMIT`, `except BaseException`
+    (not `Exception`) rolls back so a `KeyboardInterrupt`/`SystemExit`
+    mid-rebuild still restores the schema-5 data, and `finally` restores the
+    pragma on every exit. The two assertions run only on the success path."""
+    conn.execute("PRAGMA foreign_keys=OFF")  # no transaction is active here
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for statement in _MIGRATION_5_TO_6:
+            conn.execute(statement)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 _INSERT_MESSAGE = (
     "INSERT INTO messages "
     "(conv_id, turn_id, role, content, tool_calls_json, tool_call_id, created_at) "
@@ -272,6 +393,12 @@ _FETCH_TURNS = (
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), isolation_level=None, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    # REQ-V190-STO-01: loaded on every connection, right after `sqlite3.connect`
+    # and before any PRAGMA -- a schema naming a `vec0` virtual table cannot be
+    # parsed by a connection without the module.
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _restrict_permissions(db_path)
@@ -288,6 +415,11 @@ def connect_readonly(db_path: Path) -> sqlite3.Connection:
         f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0
     )
     conn.row_factory = sqlite3.Row
+    # REQ-V190-STO-01: the read-only handle needs the module too, for the same
+    # reason -- a schema naming `vec0` cannot even be parsed without it.
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
     conn.execute("PRAGMA query_only = ON")
     return conn
 
@@ -307,12 +439,14 @@ def _restrict_permissions(db_path: Path) -> None:
         os.chmod(parent, 0o700)
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
+def init_schema(
+    conn: sqlite3.Connection, *, embedding_dim: int | None = None, embedding_model: str = ""
+) -> None:
     # The version is read before any DDL runs, so a database from a future version
     # is refused untouched and the 1 -> 2 migration is the transaction the spec
     # describes rather than a no-op after the fact.
     existing = _existing_version(conn)
-    if existing is not None and existing not in (1, 2, 3, 4, SCHEMA_VERSION):
+    if existing is not None and existing not in (1, 2, 3, 4, 5, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported database schema version: {existing}")
     if existing == 1:
         conn.executescript(_MIGRATION_1_TO_2)
@@ -328,9 +462,104 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # 4, covers all of them uniformly and never double-adds a column.
     if schema_version(conn) == 4:
         conn.executescript(_MIGRATION_4_TO_5)
+    # REQ-V190-STO-03: the fresh path (4 -> 5 -> 6) and every migrated path
+    # land at 6 uniformly through this one further step.
+    if schema_version(conn) == 5:
+        _migrate_5_to_6(conn)
     version = schema_version(conn)
     if version != SCHEMA_VERSION:
         raise RuntimeError(f"unsupported database schema version: {version}")
+    _apply_embedding_pair(conn, embedding_dim, embedding_model)
+
+
+def _vec_chunks_ddl(dim: int) -> str:
+    """REQ-V190-STO-02's virtual-table DDL, dimension interpolated -- a DDL
+    cannot bind a parameter, and the integer is validated upstream (RET-02's
+    parser, not this module's job)."""
+    return (
+        "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(\n"
+        "    chunk_id  integer primary key,\n"
+        "    user_id   integer partition key,\n"
+        f"    embedding float[{dim}] distance_metric=cosine\n"
+        ")"
+    )
+
+
+def _vec_chunks_exists(conn: sqlite3.Connection) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vec_chunks'"
+    ).fetchone() is not None
+
+
+def _apply_embedding_pair(
+    conn: sqlite3.Connection, embedding_dim: int | None, embedding_model: str
+) -> None:
+    """REQ-V190-STO-04: `vec_chunks`'s dimension is fixed at creation, so the
+    binding moment is creation, not the first insert. `embedding_dim is None`
+    is the existing behaviour (REQ-V190-EC-05) -- no `vec_chunks` DDL at all."""
+    if embedding_dim is None:
+        return
+    stored = get_state(conn, "rag.embedding")
+    desired = f"{embedding_model}:{embedding_dim}"
+    if stored is None:
+        _bind_new_embedding_pair(conn, embedding_dim, desired)
+    elif stored != desired:
+        _rebind_embedding_pair(conn, embedding_dim, desired, stored)
+    else:
+        # A matching pair is idempotent: no drop, no rewrite, no DDL beyond
+        # the `IF NOT EXISTS` creation.
+        conn.execute(_vec_chunks_ddl(embedding_dim))
+
+
+def _bind_new_embedding_pair(conn: sqlite3.Connection, dim: int, desired: str) -> None:
+    """First creation: no `rag.embedding` key yet. One `BEGIN IMMEDIATE …
+    COMMIT` -- an orphaned `vec_chunks` (a crash between the old `CREATE
+    VIRTUAL TABLE` and its `bot_state` write) is recovered when no document
+    exists; a `vec_chunks` with a document existing is a `ConfigError`,
+    raised without altering anything. Table and state write commit together,
+    never separately."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if _vec_chunks_exists(conn):
+            if document_count_all(conn) == 0:
+                conn.execute("DROP TABLE vec_chunks")
+            else:
+                raise config.ConfigError(
+                    "vec_chunks exists without a rag.embedding pair while documents "
+                    "exist; delete the documents (see README Limitations) before "
+                    "configuring EMBEDDING_MODEL/EMBEDDING_DIM"
+                )
+        conn.execute(_vec_chunks_ddl(dim))
+        set_state(conn, "rag.embedding", desired)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _rebind_embedding_pair(conn: sqlite3.Connection, dim: int, desired: str, stored: str) -> None:
+    """Later starts, pair present and differing. `document_count_all` is read
+    before any DDL: a document existing is a `ConfigError` with nothing
+    altered; an empty index performs the atomic rebind (drop, forget the old
+    key, recreate at the configured dimension, write the new pair) in one
+    transaction -- covering a model-only change and a dimension change alike,
+    and the drop-first order means `CREATE VIRTUAL TABLE IF NOT EXISTS` can
+    never silently keep a stale dimension."""
+    if document_count_all(conn) > 0:
+        raise config.ConfigError(
+            f"EMBEDDING_MODEL/EMBEDDING_DIM differ from the indexed pair {stored}; "
+            "delete the documents (see README Limitations) before changing them"
+        )
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("DROP TABLE IF EXISTS vec_chunks")
+        delete_state(conn, "rag.embedding")
+        conn.execute(_vec_chunks_ddl(dim))
+        set_state(conn, "rag.embedding", desired)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -693,6 +922,199 @@ def add_span(
     row_id = _insert_row(conn, "spans", row)
     _log_row("span", SPAN_COLUMNS, row_id, row, {})
     return row_id
+
+
+# ---------------------------------------------------------------------------
+# REQ-V190-STO-05: the RAG storage API. Every statement is scoped by user and
+# parameterised; `document_count_all` is the single named exemption.
+# ---------------------------------------------------------------------------
+
+_INSERT_CHUNK = (
+    "INSERT INTO chunks (document_id, chunk_index, text, page, char_start, char_end) "
+    "VALUES (?, ?, ?, ?, ?, ?)"
+)
+
+
+def add_document(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    filename: str,
+    file_type: str,
+    created_at: str,
+    size_bytes: int,
+    text_chars: int,
+    page_count: int | None,
+    chunk_count: int,
+    sha256: str,
+) -> int:
+    cursor = conn.execute(
+        "INSERT INTO documents "
+        "(user_id, filename, file_type, created_at, size_bytes, text_chars, "
+        " page_count, chunk_count, sha256) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            user_id, filename, file_type, created_at, size_bytes, text_chars,
+            page_count, chunk_count, sha256,
+        ),
+    )
+    return cursor.lastrowid
+
+
+def add_chunks(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    document_id: int,
+    chunks: Sequence[tuple[int, str, int | None, int, int]],
+) -> list[int]:
+    """`(chunk_index, text, page, char_start, char_end)` rows. Ownership is
+    verified first; then one parameterised `INSERT` per chunk, collecting
+    each `cursor.lastrowid` -- never `executemany`, whose cursor exposes no
+    reliable sequence of `lastrowid` values."""
+    owned = conn.execute(
+        "SELECT 1 FROM documents WHERE id = ? AND user_id = ?", (document_id, user_id)
+    ).fetchone()
+    if owned is None:
+        raise ValueError(f"document {document_id} does not belong to user {user_id}")
+    ids = []
+    for chunk_index, text, page, char_start, char_end in chunks:
+        cursor = conn.execute(
+            _INSERT_CHUNK, (document_id, chunk_index, text, page, char_start, char_end)
+        )
+        ids.append(cursor.lastrowid)
+    return ids
+
+
+def add_vectors(
+    conn: sqlite3.Connection, *, user_id: int, rows: Sequence[tuple[int, bytes]]
+) -> None:
+    """Verifies that every chunk id in `rows` belongs to `user_id` via the
+    user-scoped join, over the distinct requested ids, before a single
+    insert -- without this check a caller could file another tenant's
+    `chunks.id` under an arbitrary partition key, which `add_chunks`'s own
+    ownership check would have refused. Only then `executemany` into
+    `vec_chunks`."""
+    requested = {chunk_id for chunk_id, _ in rows}
+    if not requested:
+        return
+    placeholders = ", ".join("?" for _ in requested)
+    owned = {
+        row["id"]
+        for row in conn.execute(
+            f"SELECT c.id FROM chunks c JOIN documents d ON d.id = c.document_id "
+            f"WHERE c.id IN ({placeholders}) AND d.user_id = ?",
+            (*requested, user_id),
+        ).fetchall()
+    }
+    if owned != requested:
+        raise ValueError(
+            f"chunk ids not owned by user {user_id}: {sorted(requested - owned)}"
+        )
+    conn.executemany(
+        "INSERT INTO vec_chunks (chunk_id, user_id, embedding) VALUES (?, ?, ?)",
+        [(chunk_id, user_id, embedding) for chunk_id, embedding in rows],
+    )
+
+
+def document_id_for(conn: sqlite3.Connection, *, user_id: int, filename: str) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM documents WHERE user_id = ? AND filename = ?", (user_id, filename)
+    ).fetchone()
+    return None if row is None else row["id"]
+
+
+def list_documents(conn: sqlite3.Connection, *, user_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM documents WHERE user_id = ? ORDER BY created_at, id", (user_id,)
+    ).fetchall()
+
+
+def delete_document(conn: sqlite3.Connection, *, user_id: int, document_id: int) -> bool:
+    """The ids to delete come from the user-scoped select; each is then
+    removed with the point delete `DELETE FROM vec_chunks WHERE chunk_id = ?`
+    -- vec0's documented delete form, whose ownership is carried by the
+    select that produced the id in this same function (SEC-01) -- and
+    finally the owned document delete (chunks cascade). Runs inside the
+    caller's transaction when one is already open, else opens its own, so
+    vectors and rows never diverge."""
+    own_transaction = not conn.in_transaction
+    if own_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        chunk_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT c.id FROM chunks c JOIN documents d ON d.id = c.document_id "
+                "WHERE d.id = ? AND d.user_id = ?",
+                (document_id, user_id),
+            ).fetchall()
+        ]
+        for chunk_id in chunk_ids:
+            conn.execute("DELETE FROM vec_chunks WHERE chunk_id = ?", (chunk_id,))
+        cursor = conn.execute(
+            "DELETE FROM documents WHERE id = ? AND user_id = ?", (document_id, user_id)
+        )
+        deleted = cursor.rowcount > 0
+        if own_transaction:
+            conn.execute("COMMIT")
+        return deleted
+    except BaseException:
+        if own_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
+def user_chunks(conn: sqlite3.Connection, *, user_id: int) -> list[sqlite3.Row]:
+    """The BM25 corpus."""
+    return conn.execute(
+        "SELECT c.id, c.text, c.page, c.chunk_index, d.filename "
+        "FROM chunks c JOIN documents d ON d.id = c.document_id "
+        "WHERE d.user_id = ? ORDER BY c.id",
+        (user_id,),
+    ).fetchall()
+
+
+def knn_chunk_ids(
+    conn: sqlite3.Connection, *, user_id: int, vector: bytes, k: int
+) -> list[tuple[int, float]]:
+    """STO-02's partition key makes this the only authorised query form."""
+    rows = conn.execute(
+        "SELECT chunk_id, distance FROM vec_chunks "
+        "WHERE embedding MATCH ? AND k = ? AND user_id = ? ORDER BY distance",
+        (vector, k, user_id),
+    ).fetchall()
+    return [(row["chunk_id"], row["distance"]) for row in rows]
+
+
+def chunks_by_ids(
+    conn: sqlite3.Connection, *, user_id: int, ids: Sequence[int]
+) -> list[sqlite3.Row]:
+    """The hydrating query -- the second user predicate, so a KNN row that
+    somehow crossed users is dropped here."""
+    if not ids:
+        return []
+    placeholders = ", ".join("?" for _ in ids)
+    return conn.execute(
+        f"SELECT c.id, c.text, c.page, c.chunk_index, d.filename "
+        f"FROM chunks c JOIN documents d ON d.id = c.document_id "
+        f"WHERE c.id IN ({placeholders}) AND d.user_id = ?",
+        (*ids, user_id),
+    ).fetchall()
+
+
+def document_count(conn: sqlite3.Connection, *, user_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+
+
+def document_count_all(conn: sqlite3.Connection) -> int:
+    """Every row of `documents`, across all users -- the one statement in
+    this set with no owner predicate. It exists solely for STO-04's two
+    start-up checks (orphan-table recovery and the empty-index rebind) and
+    is SEC-01's single named exemption."""
+    return conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
 
 
 def spans_for_trace(conn: sqlite3.Connection, trace_id: str) -> list[sqlite3.Row]:
