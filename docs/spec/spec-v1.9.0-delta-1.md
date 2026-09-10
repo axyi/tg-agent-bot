@@ -1,21 +1,19 @@
 # spec-v1.9.0-delta-1 — the gate matrix, the test table, the assignment traceability, the acceptance scenarios
 
 Companion to `docs/spec/spec-v1.9.0.md` (its size rule, §1 "The spec's own
-budget"): four blocks that file declares normative and points at —
+budget"): the four blocks that file declares normative and points at —
 REQ-V190-EC-12, REQ-V190-TST-03, Appendix A's assignment column, and
-REQ-V190-REV-02's Appendix B. Same status as the main file; never
-`spec-v1.9.1.md`.
+REQ-V190-REV-02's Appendix B. Same status; never `spec-v1.9.1.md`.
 
 ## The gate matrix (REQ-V190-EC-12)
 
 REQ-V170-GATE-03's table, yes/— verbatim, as carried by
-`spec-v1.8.0-delta-1.md:22-45`, plus the `rag_eval.py` and
-`mutation_check.py --select v190-` rows this release adds, minus the `note`
-column the parser never reads. It is load-bearing markup: the parser
-(`tests/test_v15_standards.py:1711-1726`) finds the first line starting with
-the header literal, skips the separator, and takes rows until the first line
-not starting with `|`; every label must match `_GATE_MATRIX_LABEL_TO_NAME`
-(`:1685-1707`) byte-for-byte.
+`spec-v1.8.0-delta-1.md:22-45`, plus this release's `rag_eval.py` and
+`mutation_check.py --select v190-` rows, minus the `note` column the parser
+never reads. Load-bearing markup: the parser
+(`tests/test_v15_standards.py:1711-1726`, EC-12) takes rows until the first
+line not starting with `|`, and every label must match
+`_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`) byte-for-byte.
 
 | gate | pre-commit | pre-push | full |
 |---|:---:|:---:|:---:|
@@ -47,16 +45,15 @@ not starting with `|`; every label must match `_GATE_MATRIX_LABEL_TO_NAME`
 
 ## The test table (REQ-V190-TST-03)
 
-Each id names one test function or a small parametrised set; "negative"
-tests prove a guard by violating it. **55 ids, ten of them negative**, and
-every one is cited in `spec-v1.9.0.md` Appendix A — the two lists are in
-bijection.
+One test function or a small parametrised set per id; "negative" tests prove
+a guard by violating it. **57 ids, twelve of them negative**, every one
+cited in `spec-v1.9.0.md` Appendix A — the two lists are in bijection.
 
 | id | asserts |
 |---|---|
 | `T-V190-DOC-01` | `classify` by lowercase extension for the four types and `None` for `.PDF.exe`, no extension, `mime_type` ignored; `clean_filename` strips separators and control chars, caps at 120, `None` for empty |
 | `T-V190-DOC-02` | `extract`: utf-8-sig and cp1251 txt/md decode; DOCX paragraphs and table cells in document order; PDF per page with empty pages skipped and the physical 1-based number kept on the pages that remain; every result is `Extracted(pages: tuple[ExtractedPage, ...], page_numbered)` with `ExtractedPage.page` `None` for non-PDF and no `page_numbers` field anywhere |
-| `T-V190-DOC-03` | negative: truncated PDF → the corrupted-PDF class; truncated DOCX → `BadZipFile`; a ZIP without `word/document.xml` → `PackageNotFoundError`/`KeyError` — each mapped to ERR-01 rows 2/3; and the DOC-02 pre-parse guards fire **before** `python-docx`/`extract_text()`: an archive over the member, size or ratio bounds and a 501-page PDF each take ERR-01 row 5b |
+| `T-V190-DOC-03` | negative: truncated PDF → the corrupted-PDF class; truncated DOCX → `BadZipFile`; a ZIP without `word/document.xml` → `PackageNotFoundError`/`KeyError` — each mapped to ERR-01 rows 2/3; and the DOC-02 pre-parse guards fire **before** `python-docx`/`extract_text()`: an archive over the member, size or ratio bounds and a 501-page PDF each take ERR-01 row 5b; only exceptions from `PdfReader`, page enumeration or `extract_text()` take row 2 |
 | `T-V190-DOC-04` | `chunk_text`: **every chunk ≤ 1200, tail merge included** — a tail that would push the merged chunk past 1200 stands alone; new material after the first chunk ≤ 1000; overlap of exactly 200 between consecutive chunks; paragraph boundaries preferred; a 5,000-char paragraph split on sentence ends; tail < 50 non-whitespace merged when it fits; determinism (two runs equal); `text == source[char_start:char_end]` for every chunk, separators preserved |
 | `T-V190-DOC-05` | PDF chunks never span pages; `page` is the 1-based physical page; non-PDF `page is None`; `chunk_index` monotonic across pages |
 | `T-V190-DOC-06` | `write_pdf` output is read by `pypdf` with the right page count and text per page; non-ASCII and > 60 lines raise `ValueError` |
@@ -66,31 +63,32 @@ bijection.
 | `T-V190-STO-04` | negative: a stored `rag.embedding` of `m:16`, config `m:32` **and one indexed document** → `ConfigError` before any DDL and no state touched; the same pair → starts idempotently; no config + stored pair → starts |
 | `T-V190-STO-06` | the empty-index rebind, **model change**: `rag.embedding` `m1:16`, no document row, config `m2:16` → one transaction drops and recreates `vec_chunks` at dim 16 and the stored key reads `m2:16`; an insert of a 16-float vector afterwards succeeds |
 | `T-V190-STO-07` | the empty-index rebind, **dimension change**: `rag.embedding` `m:16`, no document row, config `m:32` → `vec_chunks` is recreated at dim 32 (a 16-float insert now fails, a 32-float insert succeeds) and the stored key reads `m:32` — the stale table can never survive `CREATE VIRTUAL TABLE IF NOT EXISTS` |
+| `T-V190-STO-08` | negative: the orphan of a crash between `CREATE VIRTUAL TABLE` and the `bot_state` write — `vec_chunks` at dim 16, **no** `rag.embedding` key — is recovered at first creation: no document row → one transaction drops it, recreates at the configured dim 32 and writes `m:32` (32-float insert succeeds, 16-float fails); a document row → `ConfigError`, table, key and rows untouched |
 | `T-V190-STO-05` | `index_document` twice with the same filename replaces: one document row, new chunk ids, old vectors gone, `replaced=True`; the 21st distinct filename is refused and the 20th's replace is not; `add_chunks` returns one id per chunk in order (`lastrowid` per `INSERT`, no `executemany`) and raises for a `document_id` the `user_id` does not own |
-| `T-V190-RET-01` | `EmbeddingsClient` batches 32 per request, orders by `index`, retries once on transport error, raises `EmbeddingError` on ≠ 200, malformed body, wrong dim; one CLIENT span per request with the five attributes, `conv_id=None` when indexing (`httpx.MockTransport`) |
+| `T-V190-RET-01` | `EmbeddingsClient` batches 32 per request, orders by `index`, retries once on transport error, raises `EmbeddingError` on ≠ 200, malformed body, wrong dim; an exhausted `httpx.TimeoutException` raises `EmbeddingTimeoutError` (exact message `embeddings transport error: <class name>`, an `EmbeddingError`, `__cause__` set) while another transport failure stays a plain `EmbeddingError`; one CLIENT span per request with the five attributes, `conv_id=None` when indexing (`httpx.MockTransport`) |
 | `T-V190-RET-02` | negative: `EMBEDDING_MODEL` without `EMBEDDING_DIM` (and vice versa) → `ConfigError`; `EMBEDDING_DIM=0`/`4097`/`x` → `ConfigError`; defaults: `rag_enabled` false, `rag_top_k` 5, `rag_rerank` `on`, `embedding_timeout_s` 60.0, `embedding_base_url` = the LM Studio URL |
 | `T-V190-RET-03` | vector search over `FakeEmbedder`: the chunk sharing the query's tokens ranks first; `[]` with no rows |
 | `T-V190-RET-04` | `tokenize` stems Russian and passes English through; `bm25_search` returns only score > 0, at most k, deterministic order; `[]` on an empty corpus |
 | `T-V190-RET-05` | `rrf` reproduces assignment 4's ordering on a fixed pair of lists; the fused list is cut to 10; an empty BM25 list yields the vector order |
 | `T-V190-RET-06` | rerank: a scripted `[3, 1, 2]` reply reorders; omitted numbers follow in RRF order; each candidate text cut to 600; `max_tokens == 128`, `timeout_s == 20.0`, `reasoning.value == "off"` on the fake's recorded call; the call is in `llm_calls` with purpose `rerank` |
-| `T-V190-RET-07` | negative: `LLMError`, `"not json"`, `[9]`, `[1, 1]` each return `None`, the caller keeps the RRF order, one warning, and the answer still completes |
+| `T-V190-RET-07` | negative: `LLMError`, `"not json"`, `[9]`, `[1, 1]` each return `None`, the caller keeps the RRF order, one warning, and the answer still completes; **the bookkeeping is inside the guard** — an injected raise from `agent._record_llm_call`, and one from the logger, each still yield the hydrated RRF order and nothing raised out of `Searcher.search` |
 | `T-V190-RET-08` | `Searcher.search` returns ≤ `rag_top_k` hydrated passages, `documents_present` false with no rows, `calls` recorded; `RAG_RERANK=off` makes no LLM call; the reranker receives `list[Passage]` already carrying filename and text (never bare ids), and `chunks_by_ids` is called exactly once per `search` |
 | `T-V190-RET-10` | hydration cannot reorder RRF: with `chunks_by_ids` returning the ten rows in reversed id order, the passages handed to the reranker — and the fallback order when the reranker fails — are still the RRF order of step 2 |
 | `T-V190-RET-09` | `_live_embeddings` (a stubbed `httpx.Client`): FAIL when the pair is unset; FAIL when the model is missing from `/models`; FAIL on a wrong-length vector; OK otherwise |
 | `T-V190-TOOL-01` | the fourth entry is last, serialises ≤ 350 chars, the catalog ≤ 1800; `_known_tool_names()` contains it; `expected_structure()` equality (the EC-03 amendment) |
-| `T-V190-TOOL-02` | envelope texts for no documents, no hits, N hits (header, per-passage format with and without page); the 6,000-char cap; `searcher=None` → the "not available" error; bad `query` refused |
+| `T-V190-TOOL-02` | envelope texts for no documents, no hits, N hits (header, per-passage format with and without page); **five 1,200-char chunks → five complete headers, five 1,000-char bodies each ending in `…`**, the envelope under the 12,000-char cap, `passages: 5`; `searcher=None` → the "not available" error; bad `query` refused |
 | `T-V190-TOOL-03` | `searcher` reaches `execute_tool` from `run_agent_outcome` (a `FakeLLM` scripting one call); `run_agent`'s signature is unchanged (`inspect.signature` equality with a pinned parameter list) |
 | `T-V190-TOOL-04` | the history stub for a `search_documents` message carries `query` and `passages`; the status line renders `⚙️ search_documents: <query>` |
 | `T-V190-TOOL-05` | the prompt line is present, ≤ 140 chars, ASCII; the prompt ≤ 700; every mandatory statement of `test_prefix.py:205-233` still present |
-| `T-V190-TOOL-06` | `attach_sources`: a reply naming no returned filename gets `Sources: a.pdf (page 2), b.md`; a reply naming one is untouched; max 5; pages grouped |
-| `T-V190-TOOL-07` | negative: after a zero-passage search a reply carrying `Source: invented.pdf` loses that line with one warning; with no search call the reply is untouched; the conversation-aware two-turn script reaches the searcher with the previous subject in the query |
+| `T-V190-TOOL-06` | `attach_sources`, structural: no source line → `Sources: a.pdf (page 2), b.md`; a line of returned pairs only → untouched; **an incidental prose mention ("I read policy.pdf") still gets the block**; max 5; pages grouped |
+| `T-V190-TOOL-07` | negative: after a zero-passage search a reply carrying `Source: invented.pdf` loses that line with one warning; **with passages returned, a line naming one returned pair and one invented file is removed and the canonical block appended, while a valid line beside it is kept**; with no search call the reply is untouched; the conversation-aware two-turn script reaches the searcher with the previous subject in the query |
 | `T-V190-CMD-01` | a document update is handled before the text guard, after the allow-list, through the limiter; `NON_TEXT_REPLY` is **not** sent; `embedder=None` → the not-configured line and no `getFile` |
 | `T-V190-CMD-02` | negative: `file_size` over 10 MiB → refused with **no** `get_file` call; a stream over the cap → `DocumentTooLarge` → the same line |
 | `T-V190-CMD-03` | `download_file` streams through `httpx.MockTransport`, stops at the cap, maps ≠ 200 and transport errors to `TelegramError` without the token in the message |
 | `T-V190-CMD-04` | progress: the exact stage strings in order on the fake's `edited`, one deletion on success, one confirmation message with chunks (and pages for a PDF); on failure the last edit is the error line and no deletion |
 | `T-V190-CMD-05` | `/documents` listing format and the empty line; `/delete` usage, unknown, success; both redact a sentinel in a filename |
 | `T-V190-CMD-06` | the typing indicator is started with `ceiling_s=300.0` and stopped on the success, failure and exception paths (a recording fake indicator) |
-| `T-V190-CMD-07` | the indexing budget: a fake clock jumping past 300 s between stages → the timed-out line, no rows |
+| `T-V190-CMD-07` | the indexing budget: a fake clock jumping past 300 s between stages → the timed-out line, no rows; **`IndexBudgetExceeded` raised inside the PDF page loop still gives row 10c's exact message, never row 2's** |
 | `T-V190-CMD-08` | negative: an unexpected exception type → the generic line, no traceback text in any sent message, the next update in the batch still processed |
 | `T-V190-ERR-01` | one test per ERR-01 row 1–7, 10a–c, 11, 13–15: the exact user string, the log line prefix, and `documents`/`chunks`/`vec_chunks` counts unchanged |
 | `T-V190-ERR-02` | negative: a registered secret in a filename and in an exception message reaches neither Telegram nor `caplog` unredacted |
@@ -99,11 +97,12 @@ bijection.
 | `T-V190-SEC-02` | `/documents` for A lists only A's; `document_count` is per user, while `document_count_all` — STO-04's rebind check and the one owner-predicate exemption — counts A's and B's rows together |
 | `T-V190-SEC-03` | negative: A's `/delete <B's filename>` → "No document named"; B's rows intact |
 | `T-V190-SEC-04` | negative: an extra `user_id` key in the tool arguments is ignored; `documents.py` and the handler source contain no `open(`, `Path(`, `tempfile` |
-| `T-V190-SEC-05` | AST walk over `storage.py`/`rag.py`: every **runtime** DML or `SELECT` naming `documents`, `chunks` or `vec_chunks` contains `user_id` and passes a parameter tuple; schema DDL is excluded; the point delete `DELETE FROM vec_chunks WHERE chunk_id = ?` passes **only** because the same function body also holds `WHERE d.id = ? AND d.user_id = ?` (both strings checked in that one function); `document_count_all` is the single allowed exemption |
+| `T-V190-SEC-05` | AST walk over `storage.py`/`rag.py`: every **runtime** DML or `SELECT` naming `documents`, `chunks` or `vec_chunks` contains `user_id` and passes a parameter tuple; schema DDL is excluded; the point delete `DELETE FROM vec_chunks WHERE chunk_id = ?` passes **only** because the same function body also holds `WHERE d.id = ? AND d.user_id = ?` (both strings checked in that one function); `document_count_all` is the single allowed exemption; `add_chunks` **and** `add_vectors` each hold an ownership check before their insert |
+| `T-V190-SEC-06` | negative: two users — `add_vectors(user_id=B, …)` over a chunk id of A's raises **before any insert** (`vec_chunks` unchanged); one own + one foreign id raises too; all-own succeeds |
 | `T-V190-EVAL-01` | `questions.json` shape: 12 items, 10 answerable, ≥ 2 per source, 3 PDF pages, 2 nulls naming no file and no evidence; every source exists in `corpus/`; every answerable item carries a non-empty `expected_evidence` |
-| `T-V190-EVAL-02` | `rag_eval` end-to-end with `FakeEmbedder`/`FakeLLM` on the real corpus: renders DOCX and PDF in memory, indexes for user −1, prints the table, exit 0/1 by the floor, **exit 1 when a scripted rerank failure forces one fallback on an answerable item**, 2 when the embedder raises |
+| `T-V190-EVAL-02` | `rag_eval` end-to-end with `FakeEmbedder`/`FakeLLM` on the real corpus: renders DOCX and PDF in memory, indexes for user −1, prints the table, exit 0/1 by the floor, **exit 2 when a scripted rerank failure forces one fallback on an answerable item**, 2 when the embedder raises or the chat client cannot be built; `vector` and `hybrid` call `chunks_by_ids(user_id=-1)` **once each** and score in ranked-id order, not row order |
 | `T-V190-EVAL-03` | the metric functions: recall@5 and MRR on a scripted rank list equal hand-computed values; page hit-rate counts only PDF items; a passage from `expected_source` **without** `expected_evidence` is not a hit, while one carrying it under different case and spacing is |
-| `T-V190-EVAL-04` | offline, before any live run: every answerable item's `expected_evidence` occurs in the extracted text of its `expected_source` (case-insensitive, whitespace-normalised) — a corpus defect fails here, never at the live gate |
+| `T-V190-EVAL-04` | offline, before any live run: every answerable item's `expected_evidence` occurs in the extracted text of its `expected_source` (case-insensitive, whitespace-normalised) — a corpus defect fails here, never at the live gate; **the override and the exit-2 path**: with `RAG_RERANK=off`, `RAG_TOP_K=3` set the run still reranks and still cuts at 5 (echoed in the printed header); a chat client that cannot be constructed or called, and a fallback on an answerable item, each exit 2; no path returns 0 while the rerank mode reads `n/a` |
 | `T-V190-E2E-01` | upload (txt) → `/documents` → question → the scripted `FakeLLM` calls `search_documents` → the reply carries the filename; `Sources:` appended when it does not |
 | `T-V190-E2E-02` | upload (PDF, 3 pages) → question → the returned passage carries the page → the reply's source line carries `(page N)` |
 | `T-V190-E2E-03` | `/delete` → the same question → "No passages matched." reaches the model → the model's "not covered" reply, no source line |
@@ -212,6 +211,7 @@ Scenario: E6 — the embeddings client batches, retries once, and checks the dim
   When embed is called
   Then four requests were made (one retried) each with at most 32 inputs
   And a response vector of 15 floats for dim 16 raises EmbeddingError
+  And a transport timing out twice raises EmbeddingTimeoutError chained from the httpx timeout
   And each request emitted one CLIENT span named "embeddings <model>"
 
 Scenario: E7 — an oversized file is refused before download
@@ -241,9 +241,10 @@ Scenario: E10 — the agent calls the tool and reads the envelope
 
 Scenario: E11 — the structural Sources line is appended
   Given a turn whose search returned passages from "policy.pdf" page 3
-  And the model's final reply mentions no filename
+  And the model's final reply mentions "policy.pdf" only in prose, with no Source: line
   When attach_sources runs
   Then the delivered reply ends with "Sources: policy.pdf (page 3)"
+  And a source line naming only returned pairs survives, while one also naming "invented.pdf" is removed
 
 Scenario: E12 — an invented source after an empty search is stripped
   Given a turn whose only search returned "No passages matched."
