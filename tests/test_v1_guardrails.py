@@ -1212,17 +1212,27 @@ def test_unknown_slash_text_still_reaches_the_model(conn, tmp_path):
 # --------------------------------------------------------------------------
 
 def live_cfg(tmp_path, **overrides):
+    # REQ-V190-RET-08 erratum (operator-ratified, same precedent class as
+    # test_summary.py's "authorised by the operator, prompt 107" comment):
+    # a valid embedding pair is now a default here so `cfg.rag_enabled` is
+    # True for every test using this fixture unless a test unsets it.
     fields = {
         "db_path": tmp_path / "live.db",
         "telegram_bot_name": "ThisBot",
         "openrouter_api_key": "sk-or-live-selftest-key",
         "openrouter_model": "vendor/model",
+        "embedding_base_url": "http://localhost:1234/v1",
+        "embedding_model": "embed-model",
+        "embedding_dim": 8,
     }
     fields.update(overrides)
     return make_cfg(tmp_path, **fields)
 
 
-def live_handler(seen, *, lmstudio_models=("m",), openrouter_status=200):
+def live_handler(
+    seen, *, lmstudio_models=("m",), openrouter_status=200,
+    embedding_model="embed-model", embedding_dim=8,
+):
     def handler(request):
         seen.append(str(request.url))
         path = request.url.path
@@ -1230,10 +1240,17 @@ def live_handler(seen, *, lmstudio_models=("m",), openrouter_status=200):
             return httpx.Response(200, json={"ok": True, "result": {"username": "thisbot"}})
         if "openrouter.ai" in request.url.host:
             return httpx.Response(openrouter_status, json={"data": []})
-        if path.endswith("/models"):
+        if path.endswith("/embeddings"):
             return httpx.Response(
-                200, json={"data": [{"id": name} for name in lmstudio_models]}
+                200,
+                json={"data": [{"embedding": [0.0] * embedding_dim, "index": 0}]},
             )
+        if path.endswith("/models"):
+            # REQ-V190-RET-08 erratum: `embedding_model` is appended
+            # unconditionally so a test overriding `lmstudio_models` to force
+            # a lmstudio FAIL does not also fail the embeddings check.
+            names = list(lmstudio_models) + [embedding_model]
+            return httpx.Response(200, json={"data": [{"id": name} for name in names]})
         raise AssertionError(f"unexpected request: {request.url}")
     return handler
 
@@ -1258,9 +1275,9 @@ def test_t_v1_lv_01_all_checks_pass(tmp_path, capsys, stub_docker_calls):
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert out.count("live: OK") == 6
+    assert out.count("live: OK") == 7
     assert "live: FAIL" not in out
-    for name in ("config", "db", "docker", "telegram", "lmstudio", "openrouter"):
+    for name in ("config", "db", "docker", "telegram", "lmstudio", "embeddings", "openrouter"):
         assert f"live: OK {name}" in out
     assert not any("chat/completions" in url for url in seen)
 

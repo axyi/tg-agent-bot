@@ -1376,6 +1376,7 @@ def run_selftest_live(
         failures += _live_docker(cfg, probe)
         failures += _live_telegram(cfg, client)
         failures += _live_lmstudio(cfg, client)
+        failures += _live_embeddings(cfg, client)
         failures += _live_openrouter(cfg, client)
     finally:
         if owns_client:
@@ -1464,10 +1465,14 @@ def _live_embeddings(cfg: Config, client: httpx.Client) -> int:
     config level (`Config.rag_enabled`) so the 12 pre-EC-05 test files keep
     passing minimal environments to `load_config`.
 
-    **Not yet wired into `run_selftest_live`** — see the T2 handoff: the
-    unconditional call would fail two pre-existing, non-amendment-listed
-    tests in `tests/test_v1_guardrails.py` whose `live_cfg`/`make_cfg`
-    fixtures build a `Config` with no embedding fields set.
+    Wired into `run_selftest_live` right after `_live_lmstudio`. The T2
+    handoff had left this unwired because the unconditional call broke two
+    pre-existing, non-amendment-listed tests in
+    `tests/test_v1_guardrails.py`; that erratum is now operator-ratified
+    (same precedent class as `tests/test_summary.py`'s "authorised by the
+    operator, prompt 107" comment) and `live_cfg`/`live_handler` were
+    amended to cover it — see
+    `docs/prompts/145-v190-t2-erratum-live-embeddings.md`.
     """
     if not cfg.rag_enabled:
         # REQ-V190-RET-08: the spec's own literal line, not `_live_fail`'s
