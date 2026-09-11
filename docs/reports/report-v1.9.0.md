@@ -1,6 +1,7 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T7 complete, run in progress.**
+**Status: T8 complete, run in progress. Gate 7 red — known limitation,
+disposition deferred to T13 (see T8 section).**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -171,8 +172,90 @@ embeddings check to be true) — appended
 | T5 | yes | general-purpose subagent (+ one orchestrator-direct erratum) | matched map |
 | T6 | yes | general-purpose subagent (one retry after an infra 403; ratified erratum mid-task) | matched map |
 | T7 | yes | general-purpose subagent | matched map |
+| T8 | yes | general-purpose subagent (3 ratified live-tuning attempts) | matched map |
 
 (Filled in as each task lands.)
+
+## T8 — the retrieval evaluation, gate 7 (REQ-V190-EVAL-01…04)
+
+Commits `4d4e02a` (corpus, `questions.json`, `devtools/rag_eval.py`, gate
+wiring, 16 tests) and `80eba90` (the final rerank-timeout deviation and
+writeup). `pytest --collect-only -q` = **1537**. Offline gates: `ruff
+check .` 0, `bot.py --selftest` 0; `pytest` — 1535 passed, 1 skipped,
+**1 known failure** (see below, not a new EC-03 issue).
+
+**Corpus/questions frozen `sha256` (recorded before the first live run, per
+EVAL-03/RPT-02 item 7)**: `vacation_policy.md` `98c6b31b…d687bab`,
+`onboarding.txt` `6b5a42ef…4f811dcef`, `expenses.docx.md`
+`a5e9b1dd…ceab30b`, `security_guidelines.pdf.txt` `0f5272aa…c929a4487`,
+`questions.json` `4efe5b0a…589d14aee`.
+
+**Expected sequencing, not a new EC-03 erratum**: adding `rag-eval` to
+`quality_gates.yaml`'s `full` profile (EVAL-04, MUST) breaks
+`test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`, which pins
+the profile matrix against the pre-v1.9.0 `spec-v1.8.0-delta-1.md` table.
+REQ-V190-EC-12 explicitly assigns this test's fix (repointing it at
+`spec-v1.9.0-delta-1.md`, adding the two new gate labels) to **T9**, the
+very next task — this is anticipated task-ordering, not a spec defect;
+left red on purpose, T9 closes it.
+
+**Live gate-7 results and three operator-ratified attempts at reaching
+exit 0** — retrieval itself is solid throughout (recall@5 = 1.000,
+page_hit_rate = 1.000 on every mode, every one of 6 live runs); only the
+reranker's completion contract is affected:
+
+| mode | recall@5 | MRR | page hit-rate |
+|---|---|---|---|
+| vector | 1.000 | 1.000 | 1.000 |
+| hybrid | 1.000 | 1.000 | 1.000 |
+| hybrid+rerank | 1.000 | 0.950 | 1.000 |
+
+1. **Baseline** (3 runs, `max_tokens=128`, `timeout_s=20.0` — RET-06's
+   literal values): exit 2 every time, same two items failing
+   (`rerank_failure='rerank returned no usable order'`). Root-caused via a
+   direct reproduction: `finish_reason='length'`, `reasoning_chars=556` —
+   the deployed `qwen/qwen3.8-27b` spends its whole token budget on
+   chain-of-thought before ever emitting the JSON answer. Cross-checked
+   against OpenRouter with the identical prompt: valid `'[1]'` in 0.6s,
+   `reasoning_chars=0` — confirms this is model/deployment-specific, not a
+   corpus, question or script defect. Root cause: RET-06's reasoning-off
+   forcing (`resolve_reasoning("off", frozenset(), "final")`) degrades to
+   `"default"` for tag `"final"` (already disclosed at T5 as
+   non-actionable, pre-existing NG-09 machinery) — for a genuine thinking
+   model, that degradation has real functional cost, not just a cosmetic
+   label difference as first assessed at T5.
+2. **`_RERANK_MAX_TOKENS` 128→1024→2048** (operator-ratified, scoped to
+   the rerank call only — RET-06's own language already scopes its
+   reasoning-forcing "for its own call only," extended by analogy): still
+   exit 2. New finding — a generously-timed (240s) direct reproduction at
+   1024 tokens *did* eventually succeed (reasoning_chars=1853) but took
+   89.5s, revealing the real bottleneck was `_RERANK_TIMEOUT_S=20.0`, not
+   the token budget.
+3. **`_RERANK_TIMEOUT_S` 20.0→120.0** (operator-ratified, same scoping
+   rationale): still exit 2, but the failure set changed — a *different*
+   3 of 10 items failed this run (not the same pair as every prior run).
+   This is the decisive finding: raising the timeout doesn't converge on
+   a fixed set of failing prompts, it just relocates the failure —
+   genuine run-to-run stochastic reasoning-length variance in this
+   quantised model, not a fixed budget/timeout defect.
+
+**Disposition, per operator instruction**: no fourth attempt (no further
+token/timeout escalation, no touching the frozen NG-09 reasoning-policy
+machinery, no swapping the deployment's chat model). Gate 7 is recorded
+**red** for this operator's box/model combination as a disclosed,
+diagnosed, non-code known limitation — retrieval quality itself is proven
+solid; only the bonus reranker's live completion guarantee is affected.
+Final parameters left in the tree: `_RERANK_MAX_TOKENS=2048`,
+`_RERANK_TIMEOUT_S=120.0` (both deviations from RET-06's literal
+`128`/`20.0`, operator-ratified and disclosed here and in
+`docs/prompts/153-v190-t8-rag-eval.md`/`154-v190-t8-rerank-timeout-fix.md`).
+**The ship/accept decision for this gate-7 status is deferred to T13**,
+following this project's own v1.7.0 precedent of shipping under an
+explicit operator-accepted gate FAIL, recorded as an "Operator decision"
+section overriding the verdict.
+
+**Conversation-aware smoke (TOOL-06, advisory, never gating)**: pass/fail
+varied across runs — advisory only, does not affect gate 7's exit code.
 
 ## T7 — Telegram document flow and commands (REQ-V190-CMD-01…07, SEC-04)
 
