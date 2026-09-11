@@ -1086,6 +1086,91 @@ MUTATIONS = [
         "it a pathological conversation would render past the 1.5 MiB "
         "page budget instead of paginating",
     },
+    # -- spec-v1.9.0 T9 (REQ-V190-EC-10, section 12): seven v190-* entries --
+    # RAG-over-documents' per-user isolation (SEC-01..03), the delete path's
+    # vector cleanup (STO-03), the upload size precheck (CMD-02) and the
+    # sources-fallback rendering (TOOL-06). ------------------------------
+    {
+        "id": "v190-knn-user-predicate-dropped",
+        "path": "storage.py",
+        "find": (
+            '        "WHERE embedding MATCH ? AND k = ? AND user_id = ? ORDER BY distance",\n'
+            "        (vector, k, user_id),"
+        ),
+        "replace": (
+            '        "WHERE embedding MATCH ? AND k = ? ORDER BY distance",\n'
+            "        (vector, k),"
+        ),
+        "why": "REQ-V190-SEC-01: knn_chunk_ids must scope the vec0 KNN to "
+        "the calling user -- without the user_id predicate (and its bound "
+        "value) the k-nearest search returns other users' chunks",
+    },
+    {
+        "id": "v190-bm25-user-predicate-dropped",
+        "path": "storage.py",
+        "find": '        "WHERE d.user_id = ? ORDER BY c.id",\n        (user_id,),',
+        "replace": '        "ORDER BY c.id",\n        (),',
+        "why": "REQ-V190-SEC-01: user_chunks is the BM25 corpus -- without "
+        "the user predicate it indexes every user's chunks, not just the "
+        "caller's",
+    },
+    {
+        "id": "v190-documents-user-predicate-dropped",
+        "path": "storage.py",
+        "find": '"SELECT * FROM documents WHERE user_id = ? ORDER BY created_at, id", (user_id,)',
+        "replace": '"SELECT * FROM documents ORDER BY created_at, id", ()',
+        "why": "REQ-V190-SEC-02: list_documents must scope to the calling "
+        "user -- without the predicate /documents lists every user's "
+        "files",
+    },
+    {
+        "id": "v190-delete-user-predicate-dropped",
+        "path": "storage.py",
+        "find": (
+            '"SELECT id FROM documents WHERE user_id = ? AND filename = ?", '
+            "(user_id, filename)"
+        ),
+        "replace": '"SELECT id FROM documents WHERE filename = ?", (filename,)',
+        "why": "REQ-V190-SEC-03: document_id_for must scope to the calling "
+        "user -- without the predicate /delete can resolve and remove "
+        "another user's file",
+    },
+    {
+        "id": "v190-delete-vec-skipped",
+        "path": "storage.py",
+        "find": (
+            "        for chunk_id in chunk_ids:\n"
+            '            conn.execute("DELETE FROM vec_chunks WHERE chunk_id = ?", '
+            "(chunk_id,))\n"
+        ),
+        "replace": "",
+        "why": "REQ-V190-STO-03: delete_document must remove the deleted "
+        "document's vec0 rows -- skipping the vec_chunks deletes leaves "
+        "orphaned vectors that a later KNN can still surface",
+    },
+    {
+        "id": "v190-size-precheck-disabled",
+        "path": "bot.py",
+        "find": "    if isinstance(file_size, int) and file_size > DOCUMENT_MAX_BYTES:\n",
+        "replace": "    if False:\n",
+        "why": "REQ-V190-CMD-02: the handler's pre-download size check must "
+        "refuse a document over the 10 MiB cap before ever calling "
+        "getFile -- disabling the comparison lets an oversized upload "
+        "through",
+    },
+    {
+        "id": "v190-sources-fallback-dropped",
+        "path": "rag.py",
+        "find": (
+            "    if not kept_valid:\n"
+            '        new_reply = new_reply + "\\n\\nSources: " + _render_sources(pairs)\n'
+        ),
+        "replace": "    if False:\n        pass\n",
+        "why": "REQ-V190-TOOL-06: attach_sources must append the canonical "
+        "Sources: block when no valid source line survives stripping -- "
+        "without the fallback the reply is returned unchanged and the "
+        "model's citation is silently dropped",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

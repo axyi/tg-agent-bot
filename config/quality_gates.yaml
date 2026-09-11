@@ -8,7 +8,7 @@ profiles:
   pre-commit: [ruff-check, ruff-format, gitleaks-staged, branch-name]
   pre-push:   [ruff-check-all, ruff-format, branch-name, pytest, selftest,
                gitleaks-tree, trivy, semgrep, skylos, mutation-v15, mutation-v160,
-               mutation-v170, mutation-v180, hooks-installed, doctor]
+               mutation-v170, mutation-v180, mutation-v190, hooks-installed, doctor]
   full:       [uv-sync, ruff-check-all, ruff-format, branch-name, pytest,
                selftest, selftest-live, rag-eval, mutation-all, gitleaks-tree,
                trivy, semgrep, skylos, hooks-installed, doctor, lint-docs]
@@ -288,6 +288,23 @@ gates:
     diff_scoped: false
     timeout_seconds: 810
 
+  # spec-v1.9.0 T9 (REQ-V190-EC-10): the seven v190-* entries of task-brief
+  # v190-T9 (RAG-over-documents isolation SEC-01..03, the delete path's
+  # vector cleanup STO-03, the upload size precheck CMD-02, the
+  # sources-fallback rendering TOOL-06). Measured directly 2026-09-11
+  # (`time uv run --locked python devtools/mutation_check.py --select
+  # v190-`, this tree, 7/7 killed): real=8m29.464s (509.464s) -> 2x
+  # ~1018.928s, rounded up to 1020s.
+  mutation-v190:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, "v190-"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 1020
+
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
   # directly on 2026-09-05 (`time uv run --locked python
@@ -319,6 +336,23 @@ gates:
   # not all of it; consistent with this being a shared, contended machine
   # (documented at both earlier re-measurements above), so the fresh number
   # is used as measured rather than adjusted toward a naive extrapolation.
+  #
+  # spec-v1.9.0 T9: seven v190-* entries added (105 total). Re-measured
+  # directly 2026-09-11 (`time uv run --locked python
+  # devtools/mutation_check.py`, no --select, this tree, 105/105 killed):
+  # real=60m58.865s (3658.865s) -> 2x ~7317.73s, rounded up to 7320s. Up
+  # from 5620s at 98 entries -- seven more entries plus a larger pytest
+  # suite per rerun (1537 tests collected vs. 1217 at T6's close) account
+  # for the jump; consistent with the same shared, contended machine noted
+  # at every earlier re-measurement above, so the fresh number is used as
+  # measured rather than adjusted toward a naive extrapolation. The T9
+  # subagent's session was interrupted by an infra rate limit right after
+  # this measurement; the orchestrator resumed the task directly and
+  # re-measured before committing (2026-09-11, same tree, 105/105 killed):
+  # real=65m53.309s (3953.309s) -> 2x ~7906.6s, rounded up to 7910s -- the
+  # higher of the two same-day measurements is used, per the same
+  # shared-machine-variance rationale as every entry above (the 2x margin
+  # exists to absorb exactly this run-to-run spread).
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -327,7 +361,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 5620
+    timeout_seconds: 7910
 
   hooks-installed:
     kind: command
