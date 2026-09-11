@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T3 complete, run in progress.**
+**Status: T4 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -147,8 +147,52 @@ does not block T0 or any later task.
 | T1 | yes | general-purpose subagent | matched map |
 | T2 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
 | T3 | yes | general-purpose subagent (+ one follow-up test-strengthening subagent) | matched map |
+| T4 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
 
 (Filled in as each task lands.)
+
+## T4 — the indexing pipeline (REQ-V190-DOC-04, -05)
+
+Commit `2221543`. 16 new tests (4 storage-side, 12 in new
+`tests/test_v190_errors.py`). `pytest --collect-only -q` = **1378**
+(1362 + 16). Gates: `ruff check .` 0, `pytest` 0, `bot.py --selftest` 0.
+
+**Cross-task note, not an erratum**: DOC-02's between-PDF-pages
+`IndexBudgetExceeded` check (normatively T3's own requirement, §3 lines
+336-342) was not wired by T3 — T4 found it missing and implemented it
+within its own already-granted scope ("thread the same check between
+every other stage boundary" — this task-brief's own instruction), rather
+than stopping. No operator decision needed: this fills a spec requirement
+exactly as written, it does not deviate from one.
+
+**Disclosed gap — a silently unsearchable zero-chunk document (operator-
+ratified fix).** T4 found, while writing a PDF test, that a multi-page PDF
+can pass DOC-04's "≥20 non-whitespace chars" empty-refusal (checked on the
+**summed** extracted text) while each individual page's `chunk_text` call
+(DOC-03 chunks **per page** for PDFs) independently yields zero chunks —
+resulting in a stored `documents` row with `chunk_count=0`, visible in
+`/documents`, permanently unsearchable, and no error surfaced. The spec's
+DOC-04 text does not address this interaction between the aggregate
+extraction-time check and per-page chunking. The orchestrator put this to
+the operator, who chose to add a post-chunking guard: zero total chunks
+after chunking → the same ERR-01 row 4 ("no readable text") refusal,
+document rejected, nothing stored — reusing the existing empty-text
+exception class rather than inventing a second one for the same outcome.
+Implemented as a follow-up commit (see below once landed), test
+reproducing the exact scenario T4 hit by accident.
+
+**Exception classes this task established (for T7's brief, already
+updated with these names)**: `EmptyDocumentError` (row 4, extraction-time
+and now also post-chunking), `ExtractedTextTooLargeError` (row 5b, a
+`DocumentTooLargeError` subclass alongside T3's `DocxArchiveTooLargeError`/
+`PdfTooManyPagesError`), `IndexBudgetExceeded` (row 10c, must be caught
+before any pypdf-corruption clause), `DocumentLimitExceededError` (row 13,
+also reusable by T7's own CMD-03 pre-check for the identical string;
+`documents.DOCUMENT_LIMIT = 20` exported for that reuse). Note for T7:
+`index_document` assumes `classify()` already returned non-`None` — an
+unknown extension reaching it surfaces as a plain `ValueError` (ERR-01 row
+15), not row 1; CMD-03 must filter by extension **before** calling
+`index_document`, exactly as T7's brief already specifies.
 
 ## T3 — document parsing and chunking (REQ-V190-DOC-01…03, -06)
 
