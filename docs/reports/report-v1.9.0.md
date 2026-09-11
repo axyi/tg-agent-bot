@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T1 complete, run in progress.**
+**Status: T2 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -145,8 +145,33 @@ does not block T0 or any later task.
 |---|---|---|---|
 | T0 | no — *artefacts only* | — | matched map |
 | T1 | yes | general-purpose subagent | matched map |
+| T2 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
 
 (Filled in as each task lands.)
+
+## T2 — embeddings client and config (REQ-V190-RET-01, -02, -08)
+
+Commit `aacf067` (client/config), then `92dcce2` (erratum). Test ids:
+`T-V190-RET-01`, `-02`, `-09`. `pytest --collect-only -q` = **1304**
+(1247 + 57 new tests across `test_v190_embeddings.py`/`test_v190_config.py`).
+Gates: `ruff check .` 0, `pytest` 0, `bot.py --selftest` 0.
+
+**Disclosed erratum — REQ-V190-RET-08's live wiring broke two more
+unlisted tests (operator-ratified).** Wiring `_live_embeddings` into
+`run_selftest_live` (a MUST) broke `test_t_v1_lv_01_all_checks_pass` and
+`test_t_v1_lv_01_missing_openrouter_key_is_a_skip` in
+`tests/test_v1_guardrails.py` — their shared `live_cfg`/`live_handler`
+fixtures (local to that one file only, confirmed no wider blast radius)
+didn't configure an embedding pair, and RET-08 mandates FAIL, not SKIP,
+when `rag_enabled` is false (unlike the optional OpenRouter key). The T2
+subagent correctly stopped rather than self-authorizing per its
+instructions; the orchestrator reviewed the fixtures, confirmed the fix
+was narrow and file-local, and put it to the operator, who ratified it as
+a second EC-03 amendment-list extension. A follow-up subagent then: gave
+`live_cfg` a default embedding pair, taught `live_handler` to answer
+`/embeddings`, and updated the two tests' expected OK-line counts
+(6→7). No other test was affected (verified — `run_selftest_live` and
+`live_handler` have no other call sites in the suite).
 
 ## T1 — storage and schema (REQ-V190-STO-01…05)
 
