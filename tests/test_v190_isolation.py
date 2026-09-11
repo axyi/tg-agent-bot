@@ -2,9 +2,11 @@
 half of SEC-02/-03/-06): the user-scoping discipline over `storage.py`'s new
 RAG statements.
 
-`rag.py` does not exist until T5. The spec's `T-V190-SEC-05` reads "AST walk
-over `storage.py`/`rag.py`" -- the walk below is scoped to `storage.py` only
-and MUST be widened once `rag.py` lands.
+The spec's `T-V190-SEC-05` reads "AST walk over `storage.py`/`rag.py`" --
+the walk below covers both modules (widened once `rag.py` landed at T5;
+`rag.py` itself issues no raw SQL of its own, so it contributes zero
+`execute`/`executemany` calls and the walk passes trivially for it while
+still guarding against a future regression).
 
 `T-V190-SEC-02`/`-03` here cover only what T1 owns directly (`list_documents`,
 `document_count`/`document_count_all`, `document_id_for`, `delete_document`);
@@ -21,6 +23,7 @@ import inspect
 import pytest
 import sqlite_vec
 
+import rag
 import storage
 
 
@@ -175,8 +178,9 @@ def _resolve_sql_text(source: str, arg_node: ast.expr) -> str | None:
     return None
 
 
-def test_t_v190_sec_05_every_runtime_statement_is_user_scoped():
-    source = inspect.getsource(storage)
+@pytest.mark.parametrize("module", [storage, rag])
+def test_t_v190_sec_05_every_runtime_statement_is_user_scoped(module):
+    source = inspect.getsource(module)
     tree = ast.parse(source)
 
     function_bodies: dict[str, str] = {
@@ -223,5 +227,9 @@ def test_t_v190_sec_05_every_runtime_statement_is_user_scoped():
             offenders.append((node.name, sql))
 
     assert offenders == []
-    assert "SELECT 1 FROM documents WHERE id = ? AND user_id = ?" in function_bodies["add_chunks"]
-    assert "d.user_id = ?" in function_bodies["add_vectors"]
+    if module is storage:
+        assert (
+            "SELECT 1 FROM documents WHERE id = ? AND user_id = ?"
+            in function_bodies["add_chunks"]
+        )
+        assert "d.user_id = ?" in function_bodies["add_vectors"]
