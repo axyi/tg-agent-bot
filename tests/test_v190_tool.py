@@ -18,6 +18,7 @@ from pathlib import Path
 
 import agent
 import bot
+import documents
 import rag
 import storage
 import tools
@@ -223,6 +224,32 @@ def test_t_v190_tool_02_ten_max_length_passages_all_survive_uncut():
     for i in range(1, 11):
         assert f"[{i}] document-name.pdf — page 99 | chunk {i - 1}: " in payload["text"]
     assert len(payload["text"]) <= 12000
+
+
+def test_t_v190_tool_02_worst_case_envelope_never_bisects_a_passage():
+    """The tools.py:112-131 comment's worst-case proof, checked empirically:
+    a maximum-length filename (`documents.CLEAN_FILENAME_MAX_CHARS`), a
+    3-digit page and chunk_index (the worst-case header, 150 chars), and a
+    body of exactly `RAG_PASSAGE_CHARS`, repeated for the max `rag_top_k`
+    (10, RET-02). The envelope stays under `compact_output`'s 12,000-char
+    cap, so it is returned unmodified -- every passage block survives whole,
+    none truncated or bisected."""
+    filename = "a" * documents.CLEAN_FILENAME_MAX_CHARS
+    body = "b" * tools.RAG_PASSAGE_CHARS
+    passages = [
+        passage(filename=filename, page=500, chunk_index=999, text=body)
+        for _ in range(10)
+    ]
+    searcher = FakeSearcher(result=result(passages))
+    payload = execute(searcher=searcher)
+    text = payload["text"]
+    assert payload["passages"] == 10
+    assert len(text) < tools.RAG_SEARCH_ENVELOPE_MAX_CHARS
+    assert "…" not in text
+    blocks = [tools._render_passage_block(i, p) for i, p in enumerate(passages, start=1)]
+    assert max(len(b) - len(body) for b in blocks) == 150   # worst-case header
+    for block in blocks:
+        assert block in text   # full header + full 1,000-char body, intact
 
 
 # --------------------------------------------------------------------------

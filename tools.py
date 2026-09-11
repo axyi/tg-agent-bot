@@ -111,10 +111,24 @@ HTML_BLOCK_TAGS = frozenset({
 
 # v1.9.0 search_documents (REQ-V190-TOOL-01/02). RAG_PASSAGE_CHARS is a fixed
 # module constant, deliberately not configuration. The 12,000 envelope cap is
-# proven never to bisect a represented passage: rag_top_k is at most 10
-# (RET-02) and a block is at most 1,000 body chars plus a header of at most
-# ~120, so the worst case is 10 * (1,000 + <=120) = <=11,200, plus separators
-# and the header -- still under 12,000.
+# proven never to bisect a represented passage. rag_top_k is at most 10
+# (RET-02, config.py's RAG_TOP_K). A block's header (`_render_passage_block`)
+# is "[{index}] {filename} — " + optional "page {page} | " +
+# "chunk {chunk_index}: ", so its worst case is: index at most 2 digits
+# (top_k <=10) -> "[10] " = 5 chars; filename at most
+# `documents.CLEAN_FILENAME_MAX_CHARS` = 120 chars; " — " = 3 chars;
+# page at most 3 digits (`documents.PDF_MAX_PAGES` = 500) -> "page 500 | " =
+# 11 chars; chunk_index at most 3 digits (MAX_EXTRACTED_TEXT_CHARS /
+# chunk_text's default `target` = 500,000 / 1,000 = 500 chunks, worst case)
+# -> "chunk 999: " = 11 chars. Header total: 5 + 120 + 3 + 11 + 11 = 150
+# chars, not the ~120 this comment used to claim. With a 1,000-char body the
+# worst-case block is 1,150 chars, so 10 blocks = 11,500, plus the
+# "Found 10 passages:" line (18 chars) and 10 "\n\n" separators (20 chars) =
+# 11,538 -- still under 12,000, a ~460-char margin. Confirmed empirically at
+# 11,529 chars (the "[N] " prefix is 1 char shorter for index<10) by
+# test_t_v190_tool_02_worst_case_envelope_never_bisects_a_passage in
+# tests/test_v190_tool.py. The margin is comfortable but not huge: any future
+# header field needs to redo this arithmetic, not just extend the pattern.
 RAG_PASSAGE_CHARS = 1000
 RAG_SEARCH_ENVELOPE_MAX_CHARS = 12000
 NO_DOCUMENTS_TEXT = "No documents uploaded for this user. Supported: .txt .md .docx .pdf"
