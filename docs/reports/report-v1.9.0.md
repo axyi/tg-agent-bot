@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T4 complete, run in progress.**
+**Status: T5 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -148,8 +148,48 @@ does not block T0 or any later task.
 | T2 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
 | T3 | yes | general-purpose subagent (+ one follow-up test-strengthening subagent) | matched map |
 | T4 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
+| T5 | yes | general-purpose subagent (+ one orchestrator-direct erratum) | matched map |
 
 (Filled in as each task lands.)
+
+## T5 — retrieval: vector, BM25, RRF, rerank, Searcher (REQ-V190-RET-03…07, SEC-01)
+
+Commit `e71078c`. 30 new tests, ids `T-V190-RET-03…08`, `-10`, `-11`,
+`T-V190-SEC-01`. `pytest --collect-only -q` = **1409**. Gates: `ruff
+check .` 0, `pytest` 0, `bot.py --selftest` 0. Every `SearchResult` rerank
+flag confirmed tested on the success path and on each named failure class
+(`LLMError`, timeout, unparsable reply, out-of-range index, duplicate
+index, plus `_record_llm_call`/logger failures inside the fallback
+boundary).
+
+**Observed, non-actionable**: `resolve_reasoning("off", frozenset(),
+"final")` — called exactly as RET-06 specifies — empirically resolves to
+`ReasoningRequest("default", None, "final")`, not a `.value == "off"`. The
+orchestrator traced this through `llm/base.py`'s (frozen, NG-09)
+`REASONING_MECHANISMS` table: `"final"` has no defined off-mechanism, so
+`resolve_reasoning`'s own degradation rule (`REQ-V170-POL-03`, "off"
+degrades to `("default", None, tag)` when no mechanism exists for that
+tag "rather than sending a mechanism that does not exist") applies
+regardless of the forced policy — `mechanism=None` either way, so the wire
+request is byte-identical to leaving reasoning unforced. This is
+pre-existing, out-of-scope machinery working exactly as designed; the only
+effect is a cosmetic one — `llm_calls.reasoning_requested` reads
+`"default"` for rerank calls, not `"off"`. No code change made or needed.
+
+**Disclosed erratum, orchestrator-direct (commit `70be14c`)**: T5's brief
+explicitly downgraded widening `T-V190-SEC-05`'s AST walk to cover
+`rag.py` (§9's own text names both `storage.py` and `rag.py`) to a
+self-review, since `rag.py` issues no raw SQL of its own. The orchestrator
+judged this a small, low-risk, mechanical gap worth closing outright
+rather than deferring further — confirmed `rag.py` has zero
+`execute`/`executemany` calls, parametrized the existing walk over both
+modules (trivially green for `rag.py`, now guards against a future
+regression). Handled directly rather than through a subagent, as a
+*single edit under every threshold* (EC-07's fourth exemption). One
+side-note: running `ruff format` on the touched file triggered an
+unrelated whole-file reformat (pre-existing style drift the non-blocking
+`ruff-format` hook check had already tolerated) — discarded, kept the
+narrow diff that passed every blocking gate.
 
 ## T4 — the indexing pipeline (REQ-V190-DOC-04, -05)
 
