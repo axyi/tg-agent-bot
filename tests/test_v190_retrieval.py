@@ -252,7 +252,11 @@ def test_t_v190_ret_06_rerank_reorders_truncates_candidates_and_records_the_call
     # model that can spend the whole budget on undisabled reasoning before
     # ever emitting the JSON answer -- rag.py:_RERANK_MAX_TOKENS.
     assert llm.max_tokens_calls == [2048]
-    assert llm.timeout_s_calls == [20.0]
+    # 120.0, not RET-06's literal 20.0: operator-ratified deviation
+    # (docs/prompts/154-v190-t8-rerank-timeout-fix.md) -- the real
+    # bottleneck a direct reproduction found (a valid answer arriving at
+    # 89.5s), not the token budget above -- rag.py:_RERANK_TIMEOUT_S.
+    assert llm.timeout_s_calls == [120.0]
     # See module docstring: resolve_reasoning("off", frozenset(), "final")
     # degrades to "default", not "off" -- disclosed erratum.
     assert llm.reasoning_calls[0].value == "default"

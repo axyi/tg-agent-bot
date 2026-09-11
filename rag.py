@@ -47,7 +47,18 @@ _RERANK_CANDIDATE_CHARS = 600
 # second and, per the orchestrator's own explicit cap, last token-budget
 # attempt for this call only -- nothing else about RET-06 changes.
 _RERANK_MAX_TOKENS = 2048
-_RERANK_TIMEOUT_S = 20.0
+# Operator-ratified deviation from spec-v1.9.0 T5/RET-06's literal 20.0
+# (docs/prompts/154-v190-t8-rerank-timeout-fix.md): the true bottleneck the
+# `_RERANK_MAX_TOKENS` bump above did not fix -- a direct reproduction
+# showed the same thinking-variant model's valid answer arriving at 89.5s,
+# well past the old 20s budget, not a token-truncation problem. 120.0 gives
+# headroom for that observed latency, for this one call only. Trade-off:
+# when this operator's chat model reasons heavily, a real user's
+# `search_documents` turn with reranking on can now take up to 120s (was
+# 20s) before falling back to the plain RRF order -- still bounded, never
+# unbounded, and still never fatal (Searcher.search's own fallback is
+# unchanged).
+_RERANK_TIMEOUT_S = 120.0
 
 _HYBRID_CANDIDATES = 10  # RRF is cut to this many candidates for the reranker
 
