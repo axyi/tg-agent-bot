@@ -23,6 +23,9 @@ changes behaviour without touching `docs/spec/` is incomplete.
 - Frameworks/libs: `httpx` (Telegram Bot API and LLM HTTP calls),
   `python-dotenv` (config from `.env`); standard library for everything else —
   no bot framework, no agent framework
+- RAG over user documents (spec-v1.9.0): `sqlite-vec` (the vector store),
+  `pypdf`, `python-docx`, `rank-bm25`, `snowballstemmer` — see
+  `README.md`'s `## Documents (RAG)` section
 - Tooling: uv (lockfile-pinned), pytest, ruff; local quality gates add
   gitleaks, semgrep, trivy, skylos (shadow) and rtk (operator
   convenience, not a gate) — see "Local quality gates" below
@@ -51,11 +54,21 @@ changes behaviour without touching `docs/spec/` is incomplete.
   read-only, started as a daemon thread alongside the polling loop; gaining
   `/conversations` and `/conversations/<id>` (plus their `/api/` mirrors) in
   this release
+- `rag.py` — retrieval: vector search, BM25 rebuilt per query, RRF fusion,
+  the optional LLM listwise rerank, and the `Searcher` that sequences them
+- `documents.py` — filename/type classification, in-memory extraction,
+  paragraph-aware chunking, and the indexing pipeline
+- `llm/embeddings.py` — the embeddings client (batched calls to the
+  configured embeddings endpoint)
 - `skills/` — skill definitions loaded by the agent
 - `tests/` — pytest suite
+- `evals/rag/` — the frozen retrieval-evaluation corpus and question set
+  `devtools/rag_eval.py` measures against
 - `devtools/` — operator tooling, never imported by the bot: `bench.py`
   (live token benchmark), `dashboard.py` (static HTML report),
-  `mutation_check.py` (the mutation gate)
+  `mutation_check.py` (the mutation gate), `rag_eval.py` (the retrieval
+  evaluation, gate 7), `pdf_fixture.py` (a synthetic-PDF builder; tests and
+  the eval import it, it is never imported by the bot)
 - `docs/` — spec, prompt log, reports, token accounting
 
 Context boundaries: agents work inside this repository only. NEVER read or edit
@@ -79,7 +92,7 @@ Delegate to a subagent when **any one** of the following holds — inside a
 
 **Brief by file, never by retyping.** Load-bearing content the orchestrator
 already resolved goes into a task-brief file at
-`docs/spec/task-briefs/v180-T<N>.md`, and the subagent gets its path — never
+`docs/spec/task-briefs/v190-T<N>.md`, and the subagent gets its path — never
 a retyped copy. The brief is ~5 lines, carries no history, and names files
 and line ranges. The subagent returns a summary — findings, counts,
 `file:line` — never raw content.
@@ -168,7 +181,10 @@ both `True` — see `evals/rag/` and REQ-V190-EVAL-01..04.
 Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY` (`model-default` | `off` | `by-purpose`, default `by-purpose`) and
 `LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,
 default `tool-round`, read only under `by-purpose`) — see `.env.example` and
-`README.md`'s Reasoning policy section.
+`README.md`'s Reasoning policy section. Six more (spec-v1.9.0, RAG over user
+documents): `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`,
+`EMBEDDING_TIMEOUT_S`, `RAG_TOP_K`, `RAG_RERANK` — see `.env.example` and
+`README.md`'s Documents (RAG) section.
 
 ## Local quality gates (spec-v1.5)
 

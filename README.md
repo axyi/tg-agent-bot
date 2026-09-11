@@ -112,6 +112,8 @@ suppressed — see [Dashboard](#dashboard)) and `--version` (prints
 | `/summary` | summarize the current conversation on demand and show the five-field rendering |
 | `/model [lmstudio\|openrouter\|auto]` | show or change the provider override; the override survives restarts |
 | `/reload_skills` | re-read `skills/` without restarting the bot |
+| `/documents` | list the caller's uploaded documents (filename, type, size, chunk count) |
+| `/delete <filename>` | delete one of the caller's documents, its chunks and its vectors; exact match only |
 
 Any other `/…` text is passed to the model as an ordinary message. Commands are
 reachable only by allowlisted senders and are never stored in the conversation.
@@ -367,6 +369,160 @@ allowlist constrains the **domain**, not the **port** — an allowlisted domain
 answering on a non-standard port is still reachable. Both are narrowed by the
 layers above but not closed by them.
 
+## Documents (RAG)
+
+Retrieval-augmented generation over documents a user uploads to the bot
+(spec-v1.9.0, assignment 6). This is a **partially lifted** earlier
+non-goal (`REQ-NG-05`/`REQ-V1-NG-05`): user-uploaded documents, their
+embeddings and a vector index are now in scope; "vector or semantic memory"
+of the conversation itself, automatic model routing and semantic caching
+stay out (NG-08).
+
+### Architecture
+
+Two pipelines, ingest (on upload) and query (on a `search_documents` tool
+call):
+
+```
+Ingest:
+  Telegram upload -> classify (extension) -> extract (in-memory bytes)
+       -> chunk_text (paragraph-aware; per page for PDF)
+       -> embed (batched, LM Studio) -> storage.add_chunks / add_vectors
+       -> documents row (chunk_count, sha256)
+
+Query:
+  search_documents(query) -> embed query
+       -> vector_search (KNN, k<=20)  --\
+       -> bm25_search (rebuilt fresh, k<=20) --> RRF fuse (k=60), cut to 10
+       -> hydrate (storage.chunks_by_ids, restores RRF order)
+       -> rerank (LLM, optional; falls back to the RRF order on any failure)
+       -> slice to rag_top_k (default 5) -> tool envelope -> "Sources:" line
+```
+
+### Chunking
+
+`documents.chunk_text` is offset-based and paragraph-aware, with four
+numbers: **target 1000** characters, **hard_max 1200** (the ceiling
+everywhere, before and after a tail merge), **overlap 200** (the previous
+chunk's trailing characters repeated at the start of the next one), and a
+**minimum of 50** non-whitespace characters before a trailing tail is
+merged into its predecessor instead of standing alone. For a PDF, chunking
+runs per page — a chunk never spans pages.
+
+Both directions carry a cost: chunks too small lose surrounding context,
+multiply the number of chunks to embed, and weaken BM25's statistics;
+chunks too large dilute the embedding with irrelevant text, yield fewer
+distinct hits within the top-5 (`K`, see Retrieval below), and lengthen
+tool output.
+
+### Embeddings
+
+The operator's confirmed pair for this deployment: `EMBEDDING_MODEL=
+text-embedding-nomic-embed-text-v1.5`, `EMBEDDING_DIM=768` — served locally
+by LM Studio, so retrieval adds no new external dependency and no API cost.
+Texts are embedded in batches of `llm.embeddings.BATCH_SIZE` = 32. The
+active `model:dim` pair is recorded once in `bot_state` under the key
+`rag.embedding` (e.g. `text-embedding-nomic-embed-text-v1.5:768`) — see
+Storage below for what happens when it changes.
+
+### Retrieval
+
+`rag.Searcher.search` runs a fixed five-step funnel: vector search (cosine
+distance) and BM25 (rebuilt fresh per query, see Limitations) each return
+at most 20 chunk ids; Reciprocal Rank Fusion (`k=60`) merges the two
+rankings and the result is cut to the top 10 candidates; those are hydrated
+back into full passages; an optional LLM listwise rerank (`RAG_RERANK`,
+default `on`) reorders them, asking the model for a JSON array of passage
+numbers — any failure (timeout, an unparsable reply, an out-of-range or
+duplicate index, or an exception anywhere in the call's own bookkeeping)
+falls back to the pre-rerank RRF order and is never fatal to the search;
+finally the list is sliced to `RAG_TOP_K` (default **K = 5**) passages. K=5
+is sized so five passage bodies of at most `RAG_PASSAGE_CHARS` (1000)
+characters each fit inside the 12,000-character tool envelope with room
+left for headers and for the model's own reasoning about them.
+
+### Storage
+
+Two tables (`documents`, `chunks`) hold the durable record; a `sqlite-vec`
+virtual table (`vec_chunks`) holds the vectors. `documents` carries one row
+per uploaded file (filename, type, size, extracted character count, page
+count where applicable, chunk count, sha256); `chunks` carries one row per
+chunk (document id, index, text, page, character offsets), cascading on
+delete; `vec_chunks` is a `vec0` virtual table with `chunk_id` as its
+primary key, `user_id` as a **partition key**, and an `embedding
+float[EMBEDDING_DIM]` column using cosine distance. The chain from a search
+hit back to a citation is `vec_chunks.chunk_id -> chunks.id ->
+chunks.document_id -> documents.id -> documents.filename`.
+
+### Security
+
+Every read and write that touches a user's documents, chunks or vectors
+carries a `user_id`/`WHERE d.user_id = ?` predicate — `vec_chunks`'s own
+partition key enforces the same boundary one layer down, so a KNN row that
+somehow crossed users is dropped again at hydration (the second predicate).
+The schema has exactly one interpolated parameter: `EMBEDDING_DIM`, spliced
+into the `vec0` DDL because a `CREATE VIRTUAL TABLE` statement cannot bind
+a parameter (the integer is validated upstream, before it ever reaches
+this string); every other value anywhere in the RAG path is bound.
+Extraction (`documents.py`) runs entirely on in-memory `bytes` — no
+temporary file, no `Path`, no `open()` — and every log line and every
+tool-facing failure reason passes through the same `redact()` the rest of
+the bot uses.
+
+### Limitations
+
+No OCR — extraction reads the text embedded in a file, not the pixels of a
+scanned page. No sharing — every document, chunk and vector is scoped to
+the uploading Telegram user id, with no cross-user visibility. BM25 is
+rebuilt fresh for every query, from scratch, over that user's chunks only —
+no persistent index, no caching across queries. Changing `EMBEDDING_MODEL`/
+`EMBEDDING_DIM` while documents exist is refused with a `ConfigError` that
+names the fix (delete the documents, then reconfigure) — a manual step;
+with no documents present the same change instead rebinds `vec_chunks`
+automatically (drop, recreate at the new dimension, record the new pair).
+Re-uploading a filename a user already has replaces it in place (the old
+document, its chunks and its vectors are deleted first). When a
+`search_documents` call returns no passages, the reply still carries the
+attribution machinery's `Sources:` fallback rather than an empty
+Sources line. The evaluation below reports two items as advisory-only, not
+part of the gating metric — see the eval command and numbers below. The
+300-second indexing budget (`INDEX_BUDGET_S_DEFAULT`) is checked *between*
+stages (extract, chunk, embed, store) and *between individual PDF pages* —
+not by a cancellable worker that can interrupt a single slow operation
+mid-flight; the hard bounds enforced before that budget is even reached
+(10 MiB upload, 500,000 extracted characters, the DOCX archive bounds, the
+500-page PDF ceiling — see Limits below) are what actually caps the worst
+case.
+
+### Evaluation
+
+```bash
+uv run --locked python devtools/rag_eval.py
+```
+
+Measured against the frozen corpus and question set in `evals/rag/` (three
+modes: `vector` alone, `hybrid` = vector + BM25 + RRF, `hybrid+rerank` =
+the full pipeline with reranking forced on):
+
+| mode | recall@5 | MRR | page hit-rate |
+|---|---|---|---|
+| vector | 1.000 | 1.000 | 1.000 |
+| hybrid | 1.000 | 1.000 | 1.000 |
+| hybrid+rerank | 1.000 | 0.950 | 1.000 |
+
+Retrieval itself is solid on every mode: recall@5 and page hit-rate are
+1.000 throughout. Reranking did not help against plain hybrid RRF ordering
+on this corpus — it left recall@5 and page hit-rate unchanged and moved
+MRR down slightly, 1.000 -> 0.950. **Gate 7 (`devtools/rag_eval.py`) is
+currently red for this deployment.** This is not a retrieval-quality
+failure: the deployed chat model (`qwen/qwen3.8-27b`, a thinking variant)
+has genuine run-to-run stochastic reasoning-length variance that
+intermittently exceeds even a generously raised rerank timeout (120 s, up
+from RET-06's literal 20 s), so the reranker's own completion contract —
+not the ranking it produces when it does complete — is what the gate
+catches. See `docs/reports/report-v1.9.0.md`'s T8 section for the full
+diagnosis and the three ratified attempts made to reach exit 0.
+
 ## Add a skill
 
 Create `skills/<name>.md` with `---` frontmatter carrying `name` and
@@ -589,6 +745,16 @@ delivery is not provided and is not claimed.
 | send retries | 3 attempts |
 | summary output cap | 512 tokens for the first attempt; on truncation (`finish_reason == "length"`) one retry at `LLM_SUMMARY_MAX_TOKENS`, default 1536 (256–8192) |
 | failover threshold / cooldown | 3 consecutive failures / 300 s |
+| document upload size | 10 MiB (`DOCUMENT_MAX_BYTES` = 10,485,760 bytes) |
+| document extracted text length | 500,000 characters |
+| documents per user | 20 (`DOCUMENT_LIMIT`) |
+| document indexing budget | 300 s (`INDEX_BUDGET_S_DEFAULT`), checked between stages (extract/chunk/embed/store) and between PDF pages — no cancellable worker |
+| DOCX archive bounds | 2,000 members / 50 MiB total uncompressed / 20 MiB per member / compression ratio 100 |
+| PDF page ceiling | 500 pages |
+| chunk size / overlap | target 1000 chars, hard max 1200, overlap 200, minimum 50 (tail-merge threshold) |
+| retrieval K (passages returned) | 5 (`RAG_TOP_K`, default) |
+| rerank candidates | 10 (RRF cut before the optional listwise rerank) |
+| `search_documents` tool output cap | 12,000 chars total (`RAG_SEARCH_ENVELOPE_MAX_CHARS`), 1,000 chars per passage (`RAG_PASSAGE_CHARS`) |
 
 ## Error behaviour
 
@@ -610,6 +776,21 @@ delivery is not provided and is not claimed.
 | SIGTERM mid-run | the current round finishes, then the run is interrupted | the "shutting down" fallback, best-effort |
 | rate limit exceeded | rejected before storage | the fixed rate-limit message |
 | message too long | rejected before storage, no bucket token spent | the fixed too-long message |
+| document: unsupported extension, or no filename | refused before download, nothing stored | `Unsupported file type. Supported: .txt .md .docx .pdf` |
+| document: corrupted PDF (`PdfReader`/page enumeration/`extract_text()`, not a budget or size limit) | refused, nothing stored | `Could not read this PDF file.` |
+| document: corrupted DOCX (`BadZipFile`/`PackageNotFoundError`/`KeyError`) | refused, nothing stored | `Could not read this DOCX file.` |
+| document: no readable text (< 20 non-whitespace characters extracted; also a PDF whose per-page chunking yields zero chunks overall even though the summed text clears that floor — `documents.EmptyDocumentError`, same string) | refused, nothing stored | `The document contains no readable text.` |
+| document: too large before or during download (over 10 MiB) | refused before indexing, nothing stored | `File too large (over 10 MiB).` |
+| document: too large after extraction (over 500,000 chars), or a DOC-02 pre-parse guard (DOCX archive bounds, PDF > 500 pages) | refused, nothing stored | `Document too large (over 500,000 characters).` |
+| document: embedding service error (non-200, malformed body, wrong dimension, a non-timeout transport failure) | refused, nothing stored | `Embedding service error. Please try again later.` |
+| document: storage error (`sqlite3.Error`) | refused, transaction rolled back | `Storage error. The document was not saved.` |
+| document: Telegram download timeout | refused, nothing stored | `Download timed out. Please try again.` |
+| document: embedding service timeout | refused, nothing stored | `Embedding service timed out. Please try again later.` |
+| document: indexing budget exceeded (300 s, between stages or between PDF pages) | refused, nothing stored | `Indexing timed out (over 300 s). Nothing was saved.` |
+| document: Telegram error on `getFile`/download (not a timeout) | refused, nothing stored | `Telegram error while receiving the file. Please try again.` |
+| document: user already at the 20-document limit (checked before the status message, and re-checked inside the indexing transaction) | refused, nothing stored | `Limit of 20 documents reached. Use /delete <filename>.` |
+| document: RAG not configured (no embedder) | refused, nothing stored | `Document search is not configured on this bot.` |
+| document: any other exception in the handler | logged with traceback (redacted), nothing stored, the poll loop advances normally | `Something went wrong while processing the document.` |
 
 ## Versioning
 
@@ -788,8 +969,13 @@ uv run --locked python devtools/rag_eval.py
 Gates 1–4 and 6 are offline and unconditional; gates 5 and 7 need the live
 environment (gate 7 is spec-v1.9.0 T8's retrieval evaluation — it also
 spends real inference tokens on the reranker and an advisory
-conversation-aware smoke test; see `evals/rag/`). The suite is provably
-offline: any
+conversation-aware smoke test; see `evals/rag/`). **Gate 7 is currently red
+for this deployment**: retrieval quality is solid (recall@5 = 1.000, page
+hit-rate = 1.000 on every mode — see [Documents (RAG)](#documents-rag)),
+but the deployed thinking chat model's stochastic reasoning-length variance
+intermittently exceeds even a generously raised rerank timeout, so the
+reranker's completion contract — not retrieval itself — is what fails.
+The suite is provably offline: any
 real outbound HTTP request fails the test, the LLM and the Telegram client are
 replaced by fakes, the command runner is injected, and even the `docker` binary
 is a stub script on `PATH`. `--selftest` drives one full update through a

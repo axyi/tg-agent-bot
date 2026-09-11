@@ -630,5 +630,10 @@ bypass, through T0 (T0 has made no commit yet — this is the first).
 
 ## Ledger row (paste into `economics.md`)
 
-Not yet reached — filled in provisionally at T12, de-provisionalised at
-T13.
+Provisional — a structurally valid, all-`TBD` row (same precedent as
+v1.8.0 T0's disclosed erratum 3), replaced with the real, complete row at
+T12 and de-provisionalised at T13:
+
+```
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+```
