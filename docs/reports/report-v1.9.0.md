@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T9 complete, run in progress. Gate 7 red — known limitation,
+**Status: T10 complete, run in progress. Gate 7 red — known limitation,
 disposition deferred to T13 (see T8 section).**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
@@ -174,8 +174,53 @@ embeddings check to be true) — appended
 | T7 | yes | general-purpose subagent | matched map |
 | T8 | yes | general-purpose subagent (3 ratified live-tuning attempts) | matched map |
 | T9 | yes | general-purpose subagent (session hit an infra rate limit mid-task, orchestrator finished directly) | matched map |
+| T10 | yes | general-purpose subagent (one ratified erratum mid-task) | matched map |
 
 (Filled in as each task lands.)
+
+## T10 — docs and config catch-up (REQ-V190-RPT-01, RPT-05, EC-13)
+
+Commit `b988755`. 21 new tests (`tests/test_v190_agents.py`). `pytest
+--collect-only -q` = **1558**. Gates: `ruff check .` 0, `pytest` 0,
+`bot.py --selftest` 0, `checks.py lint-docs` 0 (green against the
+much-extended T0 skeleton). `tests/test_v180_agents.py` confirmed still
+green (a constraint, not touched). `AGENTS.md:146`/`:155` confirmed
+untouched (T12's job).
+
+README's `## Documents (RAG)` section lands in the required subsection
+order — Architecture, Chunking, Embeddings, Retrieval, Storage, Security,
+Limitations — plus an Evaluation subsection carrying T8's eval numbers and
+gate 7's status **stated honestly, not glossed over**: *"Gate 7
+(`devtools/rag_eval.py`) is currently red for this deployment… This is not
+a retrieval-quality failure: the deployed chat model (`qwen/qwen3.8-27b`,
+a thinking variant) has genuine run-to-run stochastic reasoning-length
+variance that intermittently exceeds even a generously raised rerank
+timeout (120 s, up from RET-06's literal 20 s), so the reranker's own
+completion contract — not the ranking it produces when it does complete —
+is what the gate catches."*
+
+**Disclosed erratum — a third self-precedented EC-03 extension
+(operator-ratified).** `RPT-01`'s `report_path` repoint (a MUST) breaks
+`tests/test_v170_bench.py`'s `test_t_v180_rpt_01_lint_docs_repointed_to_this_release`
+— but that test's own docstring already discloses it gets renamed and
+repointed at every release (the v1.7.0→v1.8.0 precedent is named inside
+it), making this the cleanest possible case: expected, recurring,
+self-documented, not a new defect. Renamed to
+`test_t_v190_rpt_01_lint_docs_repointed_to_this_release`, docstring and
+asserted path updated to this release.
+
+**A second erratum, applied directly without a stop (docs-only,
+precedent-matched)**: the same `report_path` repoint made `checks.py
+lint-docs` check this report's own "Ledger row" section structurally,
+which was still prose — fixed with a provisional all-`TBD` fenced row,
+identical in shape to `docs/reports/report-v1.8.0.md`'s own documented
+"Disclosed erratum 3" for exactly this situation. T12/T13 replace it with
+the real row.
+
+**Pre-existing drift surfaced, not fixed (outside this task's scope,
+noted for a later pass)**: README's `### Verification` section still says
+"None of the six proves…" (now seven gates); the opening "## What it is"
+paragraph still says "three tools" (now four, since T6).
 
 ## T9 — mutation entries and the gate matrix (REQ-V190-EC-10, EC-12)
 
