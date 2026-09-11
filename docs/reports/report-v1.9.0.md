@@ -160,6 +160,27 @@ embeddings check to be true) — appended
 `bot.py --selftest-live` re-run clean: all seven checks `OK`
 (config/db/docker/telegram/lmstudio/embeddings/openrouter).
 
+## Formal waiver — AGENTS.md's spec-drift rule, for three already-disclosed deviations
+
+T11's clean-context review correctly flagged that AGENTS.md's "a PR that
+changes behaviour without touching `docs/spec/` is incomplete" rule is
+not literally satisfied by three operator-ratified deviations: `rag.py`'s
+`_RERANK_MAX_TOKENS` (128→2048) and `_RERANK_TIMEOUT_S` (20.0→120.0), and
+`documents.py`'s post-chunking `EmptyDocumentError` zero-chunk guard (not
+in DOC-04's original text). All three are fully disclosed with reasoning
+in this report's T4/T8 sections and in their own commits/prompt files,
+and each is clearly commented in-code as an intentional deviation, not
+silent drift. Per the operator's decision — consistent with T3's SEC-04
+precedent, where editing the frozen `spec-v1.9.0.md`/its delta was
+explicitly declined — neither the frozen spec nor its delta (closed to
+exactly four normative blocks) is edited for these three items either.
+**This is a formal, explicit waiver of AGENTS.md's spec-drift rule for
+these three specific, already-disclosed deviations**, not an oversight:
+the record of *why* each happened lives in this report and in the
+individual commits, which this run treats as satisfying the rule's intent
+(a reader can find the reasoning) without touching artefacts this run's
+own contract holds frozen.
+
 ## Per-task delegation record (REQ-V190-EC-07 item 6)
 
 | T | delegated? | to what | map vs actual |
