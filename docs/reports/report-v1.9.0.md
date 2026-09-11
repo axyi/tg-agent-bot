@@ -196,8 +196,44 @@ own contract holds frozen.
 | T8 | yes | general-purpose subagent (3 ratified live-tuning attempts) | matched map |
 | T9 | yes | general-purpose subagent (session hit an infra rate limit mid-task, orchestrator finished directly) | matched map |
 | T10 | yes | general-purpose subagent (one ratified erratum mid-task) | matched map |
+| T11 | yes | `code-reviewer` subagent (clean context) + one general-purpose fix subagent | matched map |
 
 (Filled in as each task lands.)
+
+## T11 — clean-context review (REQ-V190-REV-01)
+
+The `code-reviewer` subagent reviewed the full `<base>..HEAD` diff in its
+own clean context against all nine of REQ-V190-REV-01's specific checklist
+items (SQL scoping, import boundaries, reranker safety, the DOC-04
+transaction, `agent.py`'s surface, the prompt/tool-catalog additions, the
+5→6 migration's control flow, the seven mutation entries, the dependency
+closure) plus attribution, the error matrix, and both operator-ratified
+`rag.py` deviations. **Verdict: request changes — two 🟡 findings**, both
+resolved below; everything else verified clean against primary source
+(itemised findings retained in the review's own transcript, summarized
+here).
+
+**Finding 1 — fixed (commit `9fb8783`).** The `search_documents` envelope's
+"never bisects a passage" comment in `tools.py` understated the worst-case
+passage header length (claimed ≤120 chars; the real worst case — a
+120-char filename plus the `[N] `/` — `/`page NNN | `/`chunk NNN: `
+literals — is 150). The actual runtime invariant was never violated
+(recomputed worst-case total: 11,538 chars, still under the 12,000 cap,
+margin ~470 rather than the ~800 the old comment implied) — this was a
+proof-correctness bug, not a functional one. Fixed: corrected comment
+arithmetic, plus a new empirical test
+(`test_t_v190_tool_02_worst_case_envelope_never_bisects_a_passage`)
+building 10 maximum-length passages and asserting no truncation.
+
+**Finding 2 — formally waived**, see the "Formal waiver" section above.
+
+**Two 🟢 notes, no action needed**: `_migrate_5_to_6`'s two post-rebuild
+integrity checks use bare `assert` (stripped under `python -O`; this
+project's own gates always run un-optimized, so not currently
+exploitable — noted for future awareness, not fixed); a
+`chunk_ids`/`vectors` length mismatch in `add_vectors` correctly surfaces
+as ERR-01 row 15 (the generic catch-all), which is spec-correct, not a
+gap.
 
 ## T10 — docs and config catch-up (REQ-V190-RPT-01, RPT-05, EC-13)
 
