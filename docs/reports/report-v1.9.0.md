@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T5 complete, run in progress.**
+**Status: T6 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -149,8 +149,41 @@ does not block T0 or any later task.
 | T3 | yes | general-purpose subagent (+ one follow-up test-strengthening subagent) | matched map |
 | T4 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
 | T5 | yes | general-purpose subagent (+ one orchestrator-direct erratum) | matched map |
+| T6 | yes | general-purpose subagent (one retry after an infra 403; ratified erratum mid-task) | matched map |
 
 (Filled in as each task lands.)
+
+## T6 — the fourth tool, dispatch, prompt, attribution (REQ-V190-TOOL-01…06)
+
+Commit `933189c`. 53 new tests (`test_v190_tool.py` 32, `test_v190_attribution.py`
+21), ids `T-V190-TOOL-01…08`. `pytest --collect-only -q` = **1463**. Gates:
+`ruff check .` 0, `pytest` 0, `bot.py --selftest` 0. `run_agent`'s signature
+byte-unchanged (confirmed via diff and the existing pinning test). Catalog
+1733/1800 chars, 4th tool entry 343/350, prompt 670/700, new rule line
+137/140 — all within budget. `T-V190-TOOL-08` proven with a
+delimiter-hostile filename (`"a, b (page 9).pdf"`), canonical-rendering
+equality only, never filename parsing.
+
+**Process note — one infra retry.** The first T6 attempt failed with a 403
+authentication error mid-task (unrelated to the work itself, no partial
+commit); relaunched cleanly from the same brief.
+
+**Disclosed erratum — a third EC-03 extension (operator-ratified).**
+`tests/test_observability.py:530` hardcodes `tools_exposed == 3`; the
+fourth tool (TOOL-01, MUST, unconditional) makes every tool-exposing round
+report 4. Same class as T1's `SCHEMA_VERSION` and T2's live-embeddings
+erratum — verified as the single failure across the full suite before
+asking. Operator ratified; fixed with a one-line literal bump and an
+inline comment recording the authorization.
+
+**SEC-04 test split, as anticipated (see T3's disclosed spec-id
+collision, resolved by not editing the spec).** T6 implemented the two
+currently-checkable halves of REQ-V190-SEC-02's/SEC-04's coverage
+(`documents.py`'s AST-based no-file-I/O check, and SEC-02's "extra
+`user_id` key changes nothing" dispatcher check, `T-V190-SEC-04` per
+Appendix A's primary listing). The `bot._handle_document` half of SEC-04's
+grep is correctly left for T7, since that handler doesn't exist yet —
+exactly as T7's brief already anticipates.
 
 ## T5 — retrieval: vector, BM25, RRF, rerank, Searcher (REQ-V190-RET-03…07, SEC-01)
 
