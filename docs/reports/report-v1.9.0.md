@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T6 complete, run in progress.**
+**Status: T7 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -150,8 +150,49 @@ does not block T0 or any later task.
 | T4 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
 | T5 | yes | general-purpose subagent (+ one orchestrator-direct erratum) | matched map |
 | T6 | yes | general-purpose subagent (one retry after an infra 403; ratified erratum mid-task) | matched map |
+| T7 | yes | general-purpose subagent | matched map |
 
 (Filled in as each task lands.)
+
+## T7 — Telegram document flow and commands (REQ-V190-CMD-01…07, SEC-04)
+
+Commit `86f204a`. 58 new tests (`test_v190_commands.py` 55, `test_v190_e2e.py`
+3), ids `T-V190-CMD-01…10`, `T-V190-ERR-01…03`, `T-V190-E2E-01…03`. `pytest
+--collect-only -q` = **1521**. Gates: `ruff check .` 0, `pytest` 0, `bot.py
+--selftest` 0, fully offline (no socket reached).
+
+Confirmed: every ERR-01 row this task owns has its own test; `poll_loop`
+survives an injected exception with a second batched update still
+processed; the 20-document `COUNT` precedes the status message and
+`getFile`; `started_at` is the handler's first action (proved by
+call-order markers); a download timeout arrives as
+`TelegramDownloadTimeout` matched by type at the real `download_file`
+boundary (`httpx.MockTransport`), never by message text.
+
+**A real bug found and fixed during review (advisor-driven, pre-commit,
+not a spec ambiguity)**: `tg.get_file(...)["file_path"]` originally sat
+inside the same `try` as the DOCX-corruption clause, so a `getFile` reply
+missing the optional `file_path` field would have been misreported as
+"Could not read this DOCX file." (row 3) instead of the correct row 11.
+Fixed with an explicit `TelegramError` raise and a dedicated test; also
+hardened `FakeTelegram.download_file` and added explicit `redact()` to
+`/documents`' per-line rendering with a sentinel test.
+
+**Minor deviations, each disclosed with a one-line reason (prompt file
+carries full detail, no operator decision needed)**: the brief's suggested
+filename `tests/test_v190_errors.py` was already claimed by T4, so T7's
+ERR-01 tests landed in `tests/test_v190_commands.py` instead;
+`T-V190-E2E-03` asserts the reachable `NO_DOCUMENTS_TEXT` string rather
+than `NO_PASSAGES_TEXT` (which needs a state — documents present, zero
+KNN hits — unreachable via real vector search with no similarity floor;
+`NO_PASSAGES_TEXT` is separately unit-tested at T6); `_handle_document`
+gained an injectable `monotonic` parameter matching the codebase's
+existing clock-injection convention.
+
+**SEC-04's second half now complete**: `inspect.getsource(bot._handle_document)`
+proves no `open(`/`Path(`/`tempfile`/`write_bytes` in the handler, closing
+the gap T6 left open pending this task (per the SEC-04 test-id-collision
+resolution already recorded above — spec unedited, operator's decision).
 
 ## T6 — the fourth tool, dispatch, prompt, attribution (REQ-V190-TOOL-01…06)
 
