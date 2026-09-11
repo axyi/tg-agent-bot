@@ -235,6 +235,53 @@ exploitable — noted for future awareness, not fixed); a
 as ERR-01 row 15 (the generic catch-all), which is spec-correct, not a
 gap.
 
+## T11 — full gate suite (`checks.py run --profile full --since <base>`)
+
+Run against `<base>` = `d6c13124d8108d6ca23900b91ef30d27d95fc6fc`, on the
+reviewed tree (through commit `9fb8783`). **15 of 16 gates PASS**:
+`uv-sync`, `ruff-check-all`, `ruff-format` (legacy: 36 files would
+reformat — pre-existing, project-wide, non-blocking drift, unrelated to
+this release, unchanged from the pattern already noted at T9), `pytest`,
+`selftest`, `selftest-live`, `mutation-all` (**105/105 killed again**,
+confirming T9's result held through T10/T11's further edits),
+`gitleaks-tree`, `trivy`, `semgrep`, `skylos` (non-blocking, 15 in-scope
+findings — see below), `hooks-installed`, `doctor`, `lint-docs`. **`rag-eval`
+FAILs (exit 2)** — this is gate 7's already-documented, disclosed known
+limitation (§T8), reproduced here, not a new finding; disposition
+deferred to T13.
+
+**Process note — a process-hygiene incident during this run, fully
+recovered.** While waiting for this long-running command, the
+orchestrator lost track of the background process across a couple of
+status checks, launched what turned out to be a **second, duplicate**
+invocation of the same command, and separately ran a third, short-lived
+foreground probe. The duplicate was killed within seconds of starting
+(`kill -TERM`); the foreground probe's 20-second window left one
+mutation-cycle change uncommitted in `agent.py` (`TOOL_REPEAT_REFUSAL_THRESHOLD`
+flipped mid-mutation, from an unrelated pre-existing `v160-*` entry),
+caught via `git status`/`git diff` immediately and reverted (`git checkout
+--`) before the original process's own mutation cycle could be affected.
+The **original** invocation ran undisturbed for its full ~65-minute
+duration and completed cleanly (exit 0 per its own per-gate `[PASS]`/`[FAIL]`
+output) — its `mutation-all` result (105/105) is treated as authoritative
+since the tree was confirmed clean immediately before and after the brief
+overlap window, and the result matches T9's own independent measurement
+exactly.
+
+**`skylos` (non-blocking, diff-scoped) — 15 in-scope findings, all
+pre-existing or intentional, none newly dead.** Every finding sits in a
+file this release touched (`dashboard_server.py`, `agent.py`, `config.py`,
+`devtools/bench.py`, `storage.py`, `bot.py`, `devtools/checks.py`,
+`tools.py`, `tracing.py`) but at lines predating v1.9.0 — e.g.
+`storage.py`'s `_MIGRATION_2_TO_3` (an old migration step, unrelated to
+this release's 5→6) and `dashboard_server.py`'s `_STATIC_ROUTES` (already
+disclosed as pre-existing drift in the handoff's own repository facts).
+The one finding inside genuinely new v1.9.0 code —
+`devtools/rag_eval.py:303`'s unused `argv` parameter on
+`_refusing_runner` — is an intentional, explicitly commented stub
+(`# pragma: no cover -- never invoked`), not an orphan. Nothing removed,
+per "pre-existing dead code — surface, don't delete."
+
 ## T10 — docs and config catch-up (REQ-V190-RPT-01, RPT-05, EC-13)
 
 Commit `b988755`. 21 new tests (`tests/test_v190_agents.py`). `pytest
