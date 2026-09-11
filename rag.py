@@ -11,6 +11,7 @@ bookkeeping helper, the same one the summary path uses); `agent.py` never
 imports this module, so there is no cycle. It does not import `bot`.
 """
 
+import itertools
 import json
 import logging
 import re
@@ -337,3 +338,129 @@ class Searcher:
         )
         self.calls.append(result)
         return result
+
+
+# --------------------------------------------------------------------------
+# Attribution (REQ-V190-TOOL-05, T6): a structural `Sources:` guarantee --
+# never by parsing a filename out of the reply, always by generating the
+# closed set of canonical renderings the returned passages license and
+# checking a candidate line for whole-string equality against it.
+# --------------------------------------------------------------------------
+
+_MAX_SOURCE_PAIRS = 5
+_STRIPPED_SOURCE_WARNING = "stripped an invented source line"
+
+
+def _render_sources(pairs: list[tuple[str, int | None]]) -> str:
+    """Group `pairs` by filename, in first-seen filename order. Each
+    filename is followed by `(page N)` for a single distinct page or
+    `(pages N, M, ...)` for several, in first-seen page order, and by
+    nothing when every occurrence of that filename carries a `NULL` page.
+    Filenames are joined with `, `."""
+    order: list[str] = []
+    pages_by_filename: dict[str, list[int]] = {}
+    for filename, page in pairs:
+        if filename not in pages_by_filename:
+            pages_by_filename[filename] = []
+            order.append(filename)
+        if page is not None and page not in pages_by_filename[filename]:
+            pages_by_filename[filename].append(page)
+
+    parts = []
+    for filename in order:
+        pages = pages_by_filename[filename]
+        if not pages:
+            parts.append(filename)
+        elif len(pages) == 1:
+            parts.append(f"{filename} (page {pages[0]})")
+        else:
+            parts.append(f"{filename} (pages {', '.join(str(p) for p in pages)})")
+    return ", ".join(parts)
+
+
+def _collect_source_pairs(calls: list[SearchResult]) -> list[tuple[str, int | None]]:
+    """Distinct `(filename, page)` pairs across every call of the turn, in
+    first-seen order, capped at `_MAX_SOURCE_PAIRS`."""
+    pairs: list[tuple[str, int | None]] = []
+    seen: set[tuple[str, int | None]] = set()
+    for call in calls:
+        for passage in call.passages:
+            pair = (passage.filename, passage.page)
+            if pair not in seen:
+                seen.add(pair)
+                pairs.append(pair)
+    return pairs[:_MAX_SOURCE_PAIRS]
+
+
+def _valid_source_lines(pairs: list[tuple[str, int | None]]) -> set[str]:
+    """Every non-empty subset of `pairs`, in first-seen order, rendered
+    behind either accepted prefix -- the canonical-rendering set a reply's
+    `Source:`/`Sources:` line is checked against by whole-string equality.
+    At most `_MAX_SOURCE_PAIRS` pairs means at most 31 subsets, computed
+    once per turn; nothing here ever parses a filename back out of a line."""
+    lines: set[str] = set()
+    for size in range(1, len(pairs) + 1):
+        for combo in itertools.combinations(range(len(pairs)), size):
+            rendered = _render_sources([pairs[i] for i in combo])
+            lines.add(f"Source: {rendered}")
+            lines.add(f"Sources: {rendered}")
+    return lines
+
+
+def _is_source_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("Source:") or stripped.startswith("Sources:")
+
+
+def _strip_source_lines(reply: str, *, keep: set[str]) -> tuple[str, bool]:
+    """Removes every `Source:`/`Sources:` line whose stripped text is not in
+    `keep` (an empty set strips all of them). Returns the rebuilt reply and
+    whether a valid line survived. One `log.warning` total for the whole
+    call, regardless of how many lines were removed."""
+    kept_lines = []
+    removed_any = False
+    kept_valid = False
+    for line in reply.split("\n"):
+        if _is_source_line(line):
+            if line.strip() in keep:
+                kept_lines.append(line)
+                kept_valid = True
+            else:
+                removed_any = True
+        else:
+            kept_lines.append(line)
+    if removed_any:
+        try:
+            log.warning(_STRIPPED_SOURCE_WARNING)
+        except Exception:  # noqa: BLE001 -- a failing logger must not escape
+            pass
+    return "\n".join(kept_lines), kept_valid
+
+
+def attach_sources(reply: str, calls: list[SearchResult]) -> tuple[str, bool]:
+    """REQ-V190-TOOL-05: only ever called from `bot.py` when `outcome.failed`
+    is false and this turn's `Searcher` recorded >= 1 call.
+
+    - Any call returned >= 1 passage: every `Source:`/`Sources:` line of
+      `reply` survives only when it exactly equals one of the canonical
+      renderings `_valid_source_lines` generates over the collected pairs;
+      every other such line is stripped. If no valid line remains, the
+      canonical block (`\\n\\nSources: ` + the rendering over every
+      collected pair) is appended.
+    - No call returned any passage: every `Source:`/`Sources:` line is
+      stripped (the model's answer is "the documents do not cover it").
+    - No calls at all: `reply` is returned untouched (`bot.py` does not call
+      this function in that case; the check is defensive).
+
+    Returns `(reply, True)` whenever the reply changed.
+    """
+    if not calls:
+        return reply, False
+    if not any(call.passages for call in calls):
+        new_reply, _ = _strip_source_lines(reply, keep=set())
+        return new_reply, new_reply != reply
+    pairs = _collect_source_pairs(calls)
+    new_reply, kept_valid = _strip_source_lines(reply, keep=_valid_source_lines(pairs))
+    if not kept_valid:
+        new_reply = new_reply + "\n\nSources: " + _render_sources(pairs)
+    return new_reply, new_reply != reply

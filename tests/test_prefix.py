@@ -26,8 +26,8 @@ USER_ID = 424242
 NOW_A = "2026-09-02T10:00:00Z"
 NOW_B = "2026-09-02T18:45:31Z"
 
-PROMPT_LIMIT = 550          # REQ-V13-PFX-01
-SCHEMA_LIMIT = 1400         # REQ-V13-PFX-02
+PROMPT_LIMIT = 700          # REQ-V13-PFX-01, raised by REQ-V190-TOOL-04 (EC-03)
+SCHEMA_LIMIT = 1800         # REQ-V13-PFX-02, raised by REQ-V190-TOOL-01 (EC-03)
 
 # REQ-V13-PFX-02: the schema of spec-v1.2 (commit f0572c8, `tool_specs()` with
 # every `description` removed) — the frozen structural contract. Parameter
@@ -74,6 +74,21 @@ V12_SCHEMA_STRUCTURE = [
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # v1.9.0 (REQ-V190-TOOL-01): the fourth tool, appended after `fetch`. It
+    # carries no REQ-V13-TOO-02/-07-style window -- `query` is its only
+    # property, unconditionally.
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
                 "additionalProperties": False,
             },
         },
@@ -262,8 +277,9 @@ def test_pfx_02_the_descriptions_stay_ascii_and_quote_free():
     found = descriptions(tools.tool_specs())
     # The budget bought the removal of the `argv` and `url` restatements; the
     # five that remain are the ones the model cannot infer from the schema, and
-    # none of them may be emptied to buy room (REQ-V13-TOO-02, TOO-07).
-    assert len(found) == 5
+    # none of them may be emptied to buy room (REQ-V13-TOO-02, TOO-07). v1.9.0
+    # adds `search_documents`'s own description (REQ-V190-TOOL-01) -- six now.
+    assert len(found) == 6
     for text in found:
         assert text.strip(), "an empty description is not a saving"
         assert text.isascii(), text

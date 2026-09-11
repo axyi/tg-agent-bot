@@ -25,10 +25,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 import httpx
 
 import config
+
+if TYPE_CHECKING:
+    # v1.9.0 (REQ-V190-TOOL-02): tools.py never imports rag.py -- rag.py
+    # imports agent.py, which imports this module, so a runtime import here
+    # would cycle. `Searcher` below is declared structurally instead.
+    from rag import SearchResult
 
 EXEC_TIMEOUT_S = 30.0
 EXEC_KILL_GRACE_S = 5.0
@@ -102,6 +109,17 @@ HTML_BLOCK_TAGS = frozenset({
     "blockquote", "section", "article", "header", "footer", "nav", "table",
 })
 
+# v1.9.0 search_documents (REQ-V190-TOOL-01/02). RAG_PASSAGE_CHARS is a fixed
+# module constant, deliberately not configuration. The 12,000 envelope cap is
+# proven never to bisect a represented passage: rag_top_k is at most 10
+# (RET-02) and a block is at most 1,000 body chars plus a header of at most
+# ~120, so the worst case is 10 * (1,000 + <=120) = <=11,200, plus separators
+# and the header -- still under 12,000.
+RAG_PASSAGE_CHARS = 1000
+RAG_SEARCH_ENVELOPE_MAX_CHARS = 12000
+NO_DOCUMENTS_TEXT = "No documents uploaded for this user. Supported: .txt .md .docx .pdf"
+NO_PASSAGES_TEXT = "No passages matched."
+
 log = logging.getLogger("tools")
 
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -110,6 +128,16 @@ _FRONTMATTER_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 CommandRunner = Callable[[list[str]], dict]
 Fetcher = Callable[[str], dict]
 AuditHook = Callable[[dict], None]
+
+
+class Searcher(Protocol):
+    """REQ-V190-TOOL-02: structural typing only, so `tools.py` can depend on
+    the shape of `rag.Searcher` without importing `rag.py` (see the
+    TYPE_CHECKING import above). `user_id` is bound at construction, on the
+    concrete implementation -- not a parameter of `search`, so the model can
+    never choose it (SEC-02)."""
+
+    def search(self, query: str) -> "SearchResult": ...
 
 
 @dataclass(frozen=True)
@@ -1274,6 +1302,22 @@ def tool_specs() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_documents",
+                "description": (
+                    "Search the users uploaded documents; returns the best passages with "
+                    "filename and page. Use it before answering about their files."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        },
     ]
 
 
@@ -1284,6 +1328,7 @@ def execute_tool(
     skills: dict[str, Skill],
     runner: CommandRunner,
     fetcher: Fetcher | None = None,
+    searcher: Searcher | None = None,
     audit: AuditHook | None = None,
     on_size: SizeHook | None = None,
 ) -> str:
@@ -1312,6 +1357,10 @@ def execute_tool(
         payload, record = _run_fetch(parsed, fetcher)
         _audit(audit, record)
         _report_size(on_size, _fetch_size(payload))
+        return _envelope(payload)
+    if name == "search_documents":
+        payload, size = _run_search_documents(parsed, searcher)
+        _report_size(on_size, size)
         return _envelope(payload)
     return _envelope({"error": f"unknown tool: {name}"})
 
@@ -1579,3 +1628,48 @@ def _parse_skill(text: str, source: str) -> Skill:
         body="\n".join(body_lines).rstrip(),
         source=source,
     )
+
+
+# --------------------------------------------------------------------------
+# search_documents (REQ-V190-TOOL-02)
+# --------------------------------------------------------------------------
+
+def _run_search_documents(
+    arguments: dict, searcher: Searcher | None
+) -> tuple[dict, OutputSize | None]:
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip() or len(query) > 1000:
+        payload = {"error": "query must be a non-empty string of at most 1000 characters"}
+        return payload, None
+    if searcher is None:
+        return {"error": "search_documents is not available"}, None
+    result = searcher.search(query)
+    text = _render_search_text(result)
+    compacted = compact_output(text, max_chars=RAG_SEARCH_ENVELOPE_MAX_CHARS)
+    payload = {"text": compacted, "passages": len(result.passages)}
+    return payload, OutputSize(len(text), len(compacted))
+
+
+def _render_search_text(result: "SearchResult") -> str:
+    if not result.documents_present:
+        return NO_DOCUMENTS_TEXT
+    if not result.passages:
+        return NO_PASSAGES_TEXT
+    blocks = [_render_passage_block(i, p) for i, p in enumerate(result.passages, start=1)]
+    return "\n\n".join([f"Found {len(blocks)} passages:", *blocks])
+
+
+def _render_passage_block(index: int, passage) -> str:
+    header = f"[{index}] {passage.filename} — "
+    if passage.page is not None:
+        header += f"page {passage.page} | "
+    header += f"chunk {passage.chunk_index}: "
+    return header + _truncate_passage_text(passage.text)
+
+
+def _truncate_passage_text(text: str) -> str:
+    """REQ-V190-TOOL-02, exact arithmetic: a cut body is exactly
+    `RAG_PASSAGE_CHARS` characters including the ellipsis, never one more."""
+    if len(text) > RAG_PASSAGE_CHARS:
+        return text[: RAG_PASSAGE_CHARS - 1] + "…"
+    return text

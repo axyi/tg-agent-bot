@@ -118,12 +118,16 @@ def test_t_sk_07_missing_directory(tmp_path, caplog):
 
 def test_t_sk_08_tool_specs():
     specs = tools.tool_specs()
-    assert [s["function"]["name"] for s in specs] == ["exec", "load_skill", "fetch"]
+    assert [s["function"]["name"] for s in specs] == [
+        "exec", "load_skill", "fetch", "search_documents",
+    ]
     assert all(s["type"] == "function" for s in specs)
     assert specs[0]["function"]["parameters"]["required"] == ["argv"]
     assert specs[1]["function"]["parameters"]["required"] == ["name"]
     assert specs[2]["function"]["parameters"]["required"] == ["url"]
     assert specs[2]["function"]["parameters"]["additionalProperties"] is False
+    assert specs[3]["function"]["parameters"]["required"] == ["query"]
+    assert specs[3]["function"]["parameters"]["additionalProperties"] is False
 
 
 def test_t_sk_unknown_tool_and_bad_arguments():

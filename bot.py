@@ -29,6 +29,7 @@ import agent
 import config
 import dashboard_server
 import metrics
+import rag
 import storage
 import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
@@ -279,7 +280,7 @@ class _StatusMessage:
             self._start()
             if self._message_id is None:
                 return
-        if name in ("exec", "fetch"):
+        if name in ("exec", "fetch", "search_documents"):
             self._edit(_status_line(name, first_argument))
 
     def finish(self, *, ok: bool) -> None:
@@ -802,6 +803,11 @@ def process_update(
     status = _StatusMessage(tg, chat_id)
     typing = _TypingIndicator(tg, chat_id, ceiling_s=cfg.llm_timeout_s)
     typing.start()
+    # v1.9.0: no `Searcher` is constructed yet -- that is the CMD-01 task's
+    # job (per-turn, bound to `from_id`, once the document flow exists).
+    # `searcher` stays `None` until then, which keeps the attribution branch
+    # below reachable in shape but inert in this release.
+    searcher = None
     try:
         outcome = agent.run_agent_outcome(
             conn=conn,
@@ -812,6 +818,7 @@ def process_update(
             now=storage.utc_now_iso(),
             cfg=cfg,
             fetcher=fetcher,
+            searcher=searcher,
             audit=functools.partial(_write_audit, cfg.audit_log_path, from_id, conv_id),
             recent_goals=storage.recent_goals(conn, from_id),
             should_stop=lambda: _shutdown,
@@ -826,7 +833,10 @@ def process_update(
         status.finish(ok=False)
         raise
     typing.stop()
-    sent_ok = _send(tg, chat_id, split_message(outcome.reply))
+    reply = outcome.reply
+    if not outcome.failed and searcher is not None and searcher.calls:
+        reply, _ = rag.attach_sources(reply, searcher.calls)
+    sent_ok = _send(tg, chat_id, split_message(reply))
     status.finish(ok=sent_ok and not outcome.failed)
 
 

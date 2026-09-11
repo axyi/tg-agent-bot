@@ -527,7 +527,10 @@ def test_obs04_a_successful_tool_round_is_recorded(conn):
     assert set(json.loads(first["prompt_chars_by_role"])) == {
         "system", "tools", "user", "assistant", "tool"}
     assert first["prompt_chars"] == sum(json.loads(first["prompt_chars_by_role"]).values())
-    assert first["tools_exposed"] == 3 and first["messages_n"] >= 2
+    # v1.9.0 T6 (REQ-V190-TOOL-01, operator-ratified EC-03 extension):
+    # tool_specs() gained a fourth entry (search_documents), unconditionally
+    # advertised in every tool-exposing round -- 3 -> 4.
+    assert first["tools_exposed"] == 4 and first["messages_n"] >= 2
     assert first["latency_ms"] >= 0
     assert rows[1]["round"] == 2 and rows[1]["prompt_tokens"] is None
 

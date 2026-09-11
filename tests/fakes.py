@@ -108,6 +108,30 @@ class FakeFetcher:
         return dict(self.result)
 
 
+class FakeSearcher:
+    """Stands in for `rag.Searcher` (structural: this file does not import
+    `rag`, matching `tools.py`'s own `Searcher` Protocol boundary). Replays a
+    scripted list of results (one `search_documents` payload per call, e.g. a
+    `rag.SearchResult`), or one fixed `result` reused for every query.
+    `user_id` is a plain attribute -- the bound identity a real `Searcher`
+    fixes at construction -- so a test can assert it never moves. `.calls`
+    mirrors `rag.Searcher.calls`, the field `bot.py`'s attribution wiring
+    reads."""
+
+    def __init__(self, script=None, *, result=None, user_id=None):
+        self._script = list(script) if script is not None else None
+        self._result = result
+        self.user_id = user_id
+        self.queries = []
+        self.calls = []
+
+    def search(self, query):
+        self.queries.append(query)
+        result = self._script.pop(0) if self._script else self._result
+        self.calls.append(result)
+        return result
+
+
 class FakeTelegram:
     """Records `(chat_id, text)`; can be scripted to raise on the n-th send."""
 
