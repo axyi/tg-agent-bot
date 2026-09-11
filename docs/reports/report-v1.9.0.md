@@ -139,6 +139,26 @@ the spec names — is what T11's candidate run will be compared against.
 Per REQ-V190-EC-06, the benchmark delta is **reported, not gated**, so this
 does not block T0 or any later task.
 
+## Deviation — the GPU box's floating IP moved before T8, and `.env` gained the pair
+
+Before starting T8 (the first task needing live embeddings **and** live
+chat), a reachability probe found `192.168.0.145:1234` (T0's and gates
+5's address through T7) unreachable; re-probing the three known addresses
+found `172.16.50.233:1234` answering, serving the same models including
+`text-embedding-nomic-embed-text-v1.5` and the reranker's chat model
+`qwen/qwen3.8-27b` — the same disposition this project's own precedent
+describes (v1.7.0/v1.8.0's own T0/T1/T5/T10 GPU-box re-pins). `.env`'s
+`LMSTUDIO_BASE_URL` was re-pinned by a single-line `sed -i` (no `cat`, no
+value printed beyond the non-secret address itself). Separately,
+`EMBEDDING_MODEL`/`EMBEDDING_DIM` had never been written to `.env` at all
+(T0 only confirmed the pair live against the box; D3/RET-08 require them
+present in the deployment's own `.env` for `rag_enabled` and gate 5's
+embeddings check to be true) — appended
+`EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5` /
+`EMBEDDING_DIM=768`, the operator-confirmed pair, no other key touched.
+`bot.py --selftest-live` re-run clean: all seven checks `OK`
+(config/db/docker/telegram/lmstudio/embeddings/openrouter).
+
 ## Per-task delegation record (REQ-V190-EC-07 item 6)
 
 | T | delegated? | to what | map vs actual |
