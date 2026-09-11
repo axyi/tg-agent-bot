@@ -388,7 +388,12 @@ DOCUMENT_LIMIT = 20
 
 class EmptyDocumentError(Exception):
     """DOC-04 row 4: fewer than 20 non-whitespace characters were extracted,
-    summed over every page. Raised after extraction, before chunking."""
+    summed over every page -- raised after extraction, before chunking.
+    Also raised after chunking, before embedding, when extraction clears
+    that summed floor but chunking still yields zero chunks overall (a
+    multi-page PDF where every page individually falls under chunk_text's
+    own per-call floor). Both paths are the identical user-facing outcome,
+    so both raise this one class."""
 
 
 class ExtractedTextTooLargeError(DocumentTooLargeError):
@@ -499,6 +504,19 @@ def index_document(
 
     chunk_rows = _document_chunks(extracted)
     progress(f"📄 chunked: {len(chunk_rows)}")
+    if not chunk_rows:
+        # Erratum found by T4 while writing the PDF test: DOC-04's
+        # extraction-time floor sums non-whitespace chars across every page,
+        # but DOC-03 chunks each PDF page independently, and chunk_text()
+        # applies its own single-chunk floor per call. A multi-page PDF can
+        # clear the summed floor while every individual page falls under
+        # chunk_text()'s own floor, yielding zero chunks overall -- the same
+        # user-facing outcome as an empty document, so it raises the same
+        # exception class ERR-01 row 4 already maps downstream.
+        raise EmptyDocumentError(
+            f"chunking yielded 0 chunks from {nonwhitespace_chars} non-whitespace "
+            "chars (each page/section fell under chunk_text's own floor)"
+        )
     _check_budget(monotonic, started_at, budget_s, stage="chunking")
 
     texts = [chunk.text for _, chunk in chunk_rows]

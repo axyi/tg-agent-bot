@@ -90,7 +90,9 @@ def _seq_clock(*values):
 
 
 # ----------------------------------------------------------------------------
-# ERR-01 row 4 -- fewer than 20 non-whitespace characters extracted.
+# ERR-01 row 4 -- fewer than 20 non-whitespace characters extracted, summed
+# over every page; also the post-chunking erratum guard: extraction clears
+# that summed floor but chunking still yields zero chunks overall.
 # ----------------------------------------------------------------------------
 
 
@@ -107,6 +109,42 @@ def test_t_v190_err_01_row_4_empty_document_raises_and_stores_nothing(tmp_path):
 
     _assert_nothing_stored(conn)
     assert embedder.calls == []  # extraction stage: embed never reached
+    conn.close()
+
+
+def test_t_v190_err_01_row_4_pdf_zero_chunks_across_pages_raises_and_stores_nothing(
+    tmp_path,
+):
+    """The gap T4 found by accident while writing the PDF test: each page's
+    non-whitespace count (15) falls under chunk_text's own 20-char
+    single-chunk floor, so `chunk_text` returns `[]` for every page -- but
+    the two pages sum to 30 non-whitespace chars, clearing DOC-04's
+    extraction-time floor. Without the post-chunking guard this would store
+    a document with `chunk_count=0` and no chunks/vectors."""
+    conn = _new_conn(tmp_path)
+    embedder = FakeEmbedder(dim=16)
+    page_text = "a" * 15
+    data = write_pdf([page_text, page_text])
+
+    # Prove the scenario on the *extracted* text, not the input string --
+    # pypdf's own extract_text() is what index_document actually sees, and
+    # is what must clear the summed floor while failing per-page.
+    extracted = documents.extract(data, "pdf")
+    summed_nonwhitespace = sum(
+        documents._nonwhitespace_len(page.text) for page in extracted.pages
+    )
+    assert summed_nonwhitespace >= 20  # clears DOC-04's extraction-time floor
+    assert documents._document_chunks(extracted) == []  # yet every page chunks to nothing
+
+    with pytest.raises(documents.EmptyDocumentError):
+        documents.index_document(
+            conn, user_id=1, filename="thin.pdf", data=data,
+            embedder=embedder, progress=lambda s: None, now=NOW,
+            started_at=0.0, monotonic=lambda: 0.0,
+        )
+
+    _assert_nothing_stored(conn)
+    assert embedder.calls == []  # chunking stage: embed never reached
     conn.close()
 
 
