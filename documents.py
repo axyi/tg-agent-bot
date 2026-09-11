@@ -1,24 +1,32 @@
-"""spec-v1.9.0 T3 (docs/spec/spec-v1.9.0.md Sec.3, REQ-V190-DOC-01, -02, -03):
-filename/type classification, in-memory extraction and paragraph-aware,
-offset-based chunking. `documents.index_document` (DOC-04, DOC-05) is T4's
-job, built on top of the pieces defined here.
+"""spec-v1.9.0 T3+T4 (docs/spec/spec-v1.9.0.md Sec.3, REQ-V190-DOC-01..05):
+filename/type classification, in-memory extraction, paragraph-aware
+offset-based chunking (T3), and the indexing pipeline `index_document` that
+ties classify -> extract -> chunk -> embed -> store together with DOC-04's
+limits and budget (T4).
 
 Extraction runs entirely on in-memory `bytes`: no temporary file, no
 `Path`, no `open()` anywhere in this module (`T-V190-SEC-04` greps it).
 Neither this module nor `rag.py` (T5) imports `bot`.
 """
 
+import hashlib
 import io
 import re
+import sqlite3
+import time
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import docx
 import pypdf
+import sqlite_vec
 from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+
+import storage
 
 # ---------------------------------------------------------------------------
 # REQ-V190-DOC-01: type by lowercase extension; the filename contract.
@@ -105,13 +113,25 @@ DOCX_MAX_COMPRESSION_RATIO = 100
 PDF_MAX_PAGES = 500
 
 
-def extract(data: bytes, file_type: str) -> Extracted:
+def extract(
+    data: bytes,
+    file_type: str,
+    *,
+    monotonic: Callable[[], float] | None = None,
+    started_at: float | None = None,
+    budget_s: float | None = None,
+) -> Extracted:
+    """`monotonic`/`started_at`/`budget_s` are DOC-04's between-pages budget
+    check, threaded through only as far as `_extract_pdf`'s per-page loop --
+    `txt`/`md`/`docx` extraction has no internal loop to check between, so
+    they ignore the three. `started_at is None` (the default, and every T3
+    call site unchanged) skips the check entirely."""
     if file_type in ("txt", "md"):
         return _extract_text(data)
     if file_type == "docx":
         return _extract_docx(data)
     if file_type == "pdf":
-        return _extract_pdf(data)
+        return _extract_pdf(data, monotonic=monotonic, started_at=started_at, budget_s=budget_s)
     raise ValueError(f"unsupported file_type: {file_type!r}")
 
 
@@ -176,12 +196,19 @@ def _extract_docx(data: bytes) -> Extracted:
     return Extracted(pages=(ExtractedPage(text=text, page=None),), page_numbered=False)
 
 
-def _extract_pdf(data: bytes) -> Extracted:
+def _extract_pdf(
+    data: bytes,
+    *,
+    monotonic: Callable[[], float] | None = None,
+    started_at: float | None = None,
+    budget_s: float | None = None,
+) -> Extracted:
     # Only exceptions from PdfReader, from page enumeration or from
     # extract_text() are the corrupted-PDF class (ERR-01 row 2); none of
-    # them is caught here, they propagate to the caller by type. This loop
-    # is deliberately left plain and linear -- T4 threads DOC-04's
-    # between-pages budget check through it without restructuring.
+    # them is caught here, they propagate to the caller by type.
+    # `_check_budget` (raising `IndexBudgetExceeded`) sits outside that
+    # implicit boundary too -- it is never wrapped in a try here, so it can
+    # never be mistaken for a corrupted PDF (DOC-02, ERR-01 row 2 vs 10c).
     reader = pypdf.PdfReader(io.BytesIO(data))
     if len(reader.pages) > PDF_MAX_PAGES:
         raise PdfTooManyPagesError(
@@ -189,6 +216,8 @@ def _extract_pdf(data: bytes) -> Extracted:
         )
     pages = []
     for physical_index, page in enumerate(reader.pages, start=1):
+        if started_at is not None:
+            _check_budget(monotonic, started_at, budget_s, stage="pdf extraction")
         text = page.extract_text()
         if text.strip():
             pages.append(ExtractedPage(text=text, page=physical_index))
@@ -342,3 +371,191 @@ def chunk_text(
             )
             chunks = [*chunks[:-2], merged]
     return chunks
+
+
+# ---------------------------------------------------------------------------
+# REQ-V190-DOC-04/-05: the indexing pipeline. `index_document` never touches
+# Telegram -- `progress` is its only output channel besides the return value
+# and the exceptions below, which are distinguished by type (never by
+# message) so `bot.py` (T7) can match them in its ERR-01 handlers.
+# ---------------------------------------------------------------------------
+
+MAX_EXTRACTED_TEXT_CHARS = 500_000
+EMBED_BATCH_SIZE = 32
+INDEX_BUDGET_S_DEFAULT = 300.0
+DOCUMENT_LIMIT = 20
+
+
+class EmptyDocumentError(Exception):
+    """DOC-04 row 4: fewer than 20 non-whitespace characters were extracted,
+    summed over every page. Raised after extraction, before chunking."""
+
+
+class ExtractedTextTooLargeError(DocumentTooLargeError):
+    """DOC-04 row 5b, the post-extraction half: the extracted text (summed
+    over every page) exceeds `MAX_EXTRACTED_TEXT_CHARS`. Subclasses
+    `DocumentTooLargeError` alongside `DocxArchiveTooLargeError` and
+    `PdfTooManyPagesError` so `except documents.DocumentTooLargeError` in
+    `bot.py` catches every row-5b variant with one clause, while the three
+    concrete classes still let the log line's differing detail be told
+    apart."""
+
+
+class IndexBudgetExceeded(Exception):
+    """DOC-04 row 10c: `monotonic() - started_at > budget_s` at a stage
+    boundary (after extraction, after chunking, after an embeddings batch)
+    or between PDF pages inside extraction. A plain `Exception` subclass,
+    not a `DocumentTooLargeError` and not caught anywhere in this module, so
+    it can never be folded into row 2's corrupted-PDF class or row 5b's
+    too-large class -- it always propagates to the caller unmapped."""
+
+
+class DocumentLimitExceededError(Exception):
+    """ERR-01 row 13: the user already has `DOCUMENT_LIMIT` (20) documents
+    and this filename is not one of them -- so this upload would not be a
+    replace. `index_document` raises this from the transactional recheck
+    immediately before the document row is inserted; `bot.py` (T7) raises
+    the same exception class from CMD-03's earlier, advisory pre-check, so
+    both call sites map to the identical row-13 string through one
+    `except documents.DocumentLimitExceededError` clause."""
+
+
+@dataclass(frozen=True)
+class IndexResult:
+    chunk_count: int
+    page_count: int | None
+    text_chars: int
+    replaced: bool
+
+
+def _check_budget(
+    monotonic: Callable[[], float], started_at: float, budget_s: float, *, stage: str
+) -> None:
+    elapsed = monotonic() - started_at
+    if elapsed > budget_s:
+        raise IndexBudgetExceeded(
+            f"budget exceeded after {stage}: {elapsed:.1f}s > {budget_s}s"
+        )
+
+
+def _document_chunks(extracted: Extracted) -> list[tuple[int | None, Chunk]]:
+    """DOC-03's per-page chunking rule: for a PDF, `chunk_text` runs once per
+    (non-empty) page -- a chunk never spans pages, and the page number
+    carried alongside it is that page's 1-based physical index. For every
+    other type there is exactly one page and `page` is `None`. Order is
+    document order; `index_document` assigns the 0-based `chunk_index`
+    across every page from this order."""
+    rows: list[tuple[int | None, Chunk]] = []
+    for extracted_page in extracted.pages:
+        page_number = extracted_page.page if extracted.page_numbered else None
+        for chunk in chunk_text(extracted_page.text):
+            rows.append((page_number, chunk))
+    return rows
+
+
+def index_document(
+    conn: sqlite3.Connection,
+    *,
+    user_id: int,
+    filename: str,
+    data: bytes,
+    embedder,
+    progress: Callable[[str], None],
+    now: str,
+    started_at: float,
+    monotonic: Callable[[], float] = time.monotonic,
+    budget_s: float = INDEX_BUDGET_S_DEFAULT,
+) -> IndexResult:
+    """DOC-05's pipeline: classify -> extract -> chunk -> embed -> store.
+    `started_at` has no default -- the caller (`bot.py`'s `_handle_document`)
+    must supply its own first-action `monotonic()` reading, so the budget's
+    origin can never be lost by omission. Emits exactly three progress
+    strings (classify and store emit nothing); on any DOC-04 limit or budget
+    failure, raises before any store -- no transaction has opened yet, so
+    nothing is written."""
+    file_type = classify(filename)
+
+    extracted = extract(
+        data, file_type, monotonic=monotonic, started_at=started_at, budget_s=budget_s
+    )
+    text_chars = sum(len(page.text) for page in extracted.pages)
+    if extracted.page_numbered:
+        progress(f"📄 extracted: {len(extracted.pages)} pages, {text_chars} chars")
+    else:
+        progress(f"📄 extracted: {text_chars} chars")
+
+    if text_chars > MAX_EXTRACTED_TEXT_CHARS:
+        raise ExtractedTextTooLargeError(
+            f"extracted text {text_chars} chars exceeds the "
+            f"{MAX_EXTRACTED_TEXT_CHARS}-char bound"
+        )
+    nonwhitespace_chars = sum(_nonwhitespace_len(page.text) for page in extracted.pages)
+    if nonwhitespace_chars < _MIN_NONWHITESPACE_CHARS_FOR_ONE_CHUNK:
+        raise EmptyDocumentError(
+            f"{nonwhitespace_chars} non-whitespace chars extracted, under the "
+            f"{_MIN_NONWHITESPACE_CHARS_FOR_ONE_CHUNK}-char floor"
+        )
+    _check_budget(monotonic, started_at, budget_s, stage="extraction")
+
+    chunk_rows = _document_chunks(extracted)
+    progress(f"📄 chunked: {len(chunk_rows)}")
+    _check_budget(monotonic, started_at, budget_s, stage="chunking")
+
+    texts = [chunk.text for _, chunk in chunk_rows]
+    total_batches = (len(texts) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+    vectors: list[bytes] = []
+    for batch_start in range(0, len(texts), EMBED_BATCH_SIZE):
+        batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
+        batch_vectors = embedder.embed(batch)
+        vectors.extend(sqlite_vec.serialize_float32(vector) for vector in batch_vectors)
+        batch_no = batch_start // EMBED_BATCH_SIZE + 1
+        progress(f"📄 embedding: {batch_no}/{total_batches}")
+        _check_budget(monotonic, started_at, budget_s, stage=f"embedding batch {batch_no}")
+
+    page_count = len(extracted.pages) if extracted.page_numbered else None
+    size_bytes = len(data)
+    sha256 = hashlib.sha256(data).hexdigest()
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        existing_id = storage.document_id_for(conn, user_id=user_id, filename=filename)
+        if existing_id is None and storage.document_count(conn, user_id=user_id) >= DOCUMENT_LIMIT:
+            raise DocumentLimitExceededError(
+                f"user {user_id} already has {DOCUMENT_LIMIT} documents"
+            )
+        replaced = existing_id is not None
+        if replaced:
+            storage.delete_document(conn, user_id=user_id, document_id=existing_id)
+        document_id = storage.add_document(
+            conn,
+            user_id=user_id,
+            filename=filename,
+            file_type=file_type,
+            created_at=now,
+            size_bytes=size_bytes,
+            text_chars=text_chars,
+            page_count=page_count,
+            chunk_count=len(chunk_rows),
+            sha256=sha256,
+        )
+        chunk_ids = storage.add_chunks(
+            conn,
+            user_id=user_id,
+            document_id=document_id,
+            chunks=[
+                (index, chunk.text, page, chunk.char_start, chunk.char_end)
+                for index, (page, chunk) in enumerate(chunk_rows)
+            ],
+        )
+        storage.add_vectors(conn, user_id=user_id, rows=list(zip(chunk_ids, vectors, strict=True)))
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+    return IndexResult(
+        chunk_count=len(chunk_rows),
+        page_count=page_count,
+        text_chars=text_chars,
+        replaced=replaced,
+    )

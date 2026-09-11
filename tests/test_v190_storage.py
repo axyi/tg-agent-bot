@@ -13,13 +13,17 @@ Offline, deterministic, `tmp_path` databases only.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 
 import pytest
 import sqlite_vec
 
 import config
+import documents
 import storage
+from devtools.pdf_fixture import write_pdf
+from tests.fakes import FakeEmbedder
 
 NOW = "2026-09-10T00:00:00Z"
 
@@ -516,4 +520,135 @@ def test_t_v190_sto_05_add_chunks_raises_for_an_unowned_document(tmp_path):
     with pytest.raises(ValueError):
         storage.add_chunks(conn, user_id=2, document_id=doc_id, chunks=[(0, "x", None, 0, 1)])
     assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+    conn.close()
+
+
+# ----------------------------------------------------------------------------
+# T-V190-STO-05 (index_document half) -- documents.index_document (T4): the
+# classify -> extract -> chunk -> embed -> store pipeline, its three-string
+# progress contract, the one storage transaction and replace-on-reupload.
+# Error-matrix / budget / zero-rows-on-failure coverage lives in
+# tests/test_v190_errors.py.
+# ----------------------------------------------------------------------------
+
+
+def _index(conn, embedder, **overrides):
+    fields = {
+        "user_id": 1, "filename": "a.txt", "data": b"hello world. " * 5,
+        "embedder": embedder, "progress": lambda s: None, "now": NOW,
+        "started_at": 0.0, "monotonic": lambda: 0.0,
+    }
+    fields.update(overrides)
+    return documents.index_document(conn, **fields)
+
+
+def test_t_v190_sto_05_index_document_txt_stores_and_reports_progress(tmp_path):
+    conn = storage.connect(tmp_path / "a.db")
+    storage.init_schema(conn, embedding_dim=16, embedding_model="m")
+    embedder = FakeEmbedder(dim=16)
+    data = b"hello world. " * 5
+    calls: list[str] = []
+
+    result = _index(conn, embedder, data=data, progress=calls.append)
+
+    assert isinstance(result, documents.IndexResult)
+    assert result.replaced is False
+    assert result.page_count is None
+    assert result.text_chars == len(data)
+    assert result.chunk_count == len(documents.chunk_text(data.decode()))
+
+    assert calls[0] == f"📄 extracted: {len(data)} chars"
+    assert calls[1] == f"📄 chunked: {result.chunk_count}"
+    assert calls[2:] == ["📄 embedding: 1/1"]
+
+    doc_id = storage.document_id_for(conn, user_id=1, filename="a.txt")
+    assert doc_id is not None
+    row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    assert row["file_type"] == "txt"
+    assert row["chunk_count"] == result.chunk_count
+    assert row["text_chars"] == len(data)
+    assert row["page_count"] is None
+    assert row["size_bytes"] == len(data)
+    assert row["sha256"] == hashlib.sha256(data).hexdigest()
+    assert row["created_at"] == NOW
+    assert conn.execute(
+        "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)
+    ).fetchone()[0] == result.chunk_count
+    vector = sqlite_vec.serialize_float32([0.0] * 16)
+    hits = storage.knn_chunk_ids(conn, user_id=1, vector=vector, k=5)
+    assert len(hits) == result.chunk_count
+    assert len(embedder.calls) == 1
+    conn.close()
+
+
+def test_t_v190_sto_05_index_document_pdf_reports_pages_and_attributes_them(tmp_path):
+    conn = storage.connect(tmp_path / "a.db")
+    storage.init_schema(conn, embedding_dim=16, embedding_model="m")
+    embedder = FakeEmbedder(dim=16)
+    data = write_pdf([
+        "Page one has plenty of readable text on it.", "",
+        "Page three also has plenty of readable text on it.",
+    ])
+    calls: list[str] = []
+
+    result = _index(conn, embedder, filename="a.pdf", data=data, progress=calls.append)
+
+    assert result.page_count == 2  # the blank page is skipped (DOC-02)
+    assert calls[0] == f"📄 extracted: 2 pages, {result.text_chars} chars"
+
+    doc_id = storage.document_id_for(conn, user_id=1, filename="a.pdf")
+    pages = {
+        row["page"]
+        for row in conn.execute(
+            "SELECT DISTINCT page FROM chunks WHERE document_id = ?", (doc_id,)
+        ).fetchall()
+    }
+    assert pages == {1, 3}  # physical page numbers, never a running count
+    conn.close()
+
+
+def test_t_v190_sto_05_index_document_embeds_in_batches_of_32(tmp_path):
+    conn = storage.connect(tmp_path / "a.db")
+    storage.init_schema(conn, embedding_dim=16, embedding_model="m")
+    embedder = FakeEmbedder(dim=16)
+    paragraph = "word " * 260  # well over `target`, no sentence breaks: one chunk
+    text = "\n\n".join(f"para {i} {paragraph}" for i in range(40))
+    expected_chunks = len(documents.chunk_text(text))
+    assert expected_chunks > 32  # the point of this test
+    calls: list[str] = []
+
+    result = _index(conn, embedder, data=text.encode(), progress=calls.append)
+
+    expected_batches = -(-expected_chunks // 32)  # ceiling division
+    assert result.chunk_count == expected_chunks
+    assert all(len(texts) <= 32 for texts, _ in embedder.calls)
+    assert len(embedder.calls) == expected_batches
+    embedding_progress = [c for c in calls if c.startswith("📄 embedding:")]
+    assert embedding_progress == [
+        f"📄 embedding: {i}/{expected_batches}" for i in range(1, expected_batches + 1)
+    ]
+    conn.close()
+
+
+def test_t_v190_sto_05_index_document_replace_on_reupload(tmp_path):
+    conn = storage.connect(tmp_path / "a.db")
+    storage.init_schema(conn, embedding_dim=16, embedding_model="m")
+    embedder = FakeEmbedder(dim=16)
+
+    first = _index(conn, embedder, data=b"first version of the document text.")
+    first_id = storage.document_id_for(conn, user_id=1, filename="a.txt")
+    assert first.replaced is False
+
+    second = _index(conn, embedder, data=b"second, quite different document text.")
+    second_id = storage.document_id_for(conn, user_id=1, filename="a.txt")
+
+    assert second.replaced is True
+    assert second_id != first_id  # AUTOINCREMENT: no row identity carried over
+    assert storage.document_count(conn, user_id=1) == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (first_id,)
+    ).fetchone()[0] == 0
+    vector = sqlite_vec.serialize_float32([0.0] * 16)
+    hits = storage.knn_chunk_ids(conn, user_id=1, vector=vector, k=100)
+    assert len(hits) == second.chunk_count  # no leftover vectors from the replaced doc
     conn.close()
