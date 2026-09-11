@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T2 complete, run in progress.**
+**Status: T3 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -146,8 +146,60 @@ does not block T0 or any later task.
 | T0 | no — *artefacts only* | — | matched map |
 | T1 | yes | general-purpose subagent | matched map |
 | T2 | yes | general-purpose subagent (+ one follow-up erratum subagent) | matched map |
+| T3 | yes | general-purpose subagent (+ one follow-up test-strengthening subagent) | matched map |
 
 (Filled in as each task lands.)
+
+## T3 — document parsing and chunking (REQ-V190-DOC-01…03, -06)
+
+Commit `c53becf`. Test ids `T-V190-DOC-01…06`, 55 new tests. `pytest
+--collect-only -q` = **1359** (1304 + 55). Gates: `ruff check .` 0,
+`pytest` 0, `bot.py --selftest` 0.
+
+**Disclosed spec defect — `T-V190-SEC-04` is assigned to two different
+requirements, spec left unedited (operator decision).** Appendix A row
+(`spec-v1.9.0.md:2120`) assigns test id `T-V190-SEC-04` to
+REQ-V190-SEC-02 ("the model cannot choose the user" — T6's dispatch
+test); separately §1/§3/§9 (lines 54, 345, 1419) and Appendix A row
+`:2122` also cite `T-V190-SEC-04` for REQ-V190-SEC-04 ("no file on disk").
+This contradicts the handoff's claim that "Appendix A is a verified
+bijection in both directions." The orchestrator confirmed this directly
+against Appendix A and the delta file (not a misreading) and put the
+question to the operator, citing the project's own precedent for
+mid-run spec corrections (v1.7.0 T9's gate-matrix-table blocker,
+resolved by an authorised spec edit). **The operator's decision: do not
+edit the spec file — record the defect here instead.** Resolution kept
+for the implementation: `T-V190-SEC-04` stays assigned to REQ-V190-SEC-02
+(T6's test, matching Appendix A's primary listing and the task table's own
+T6 row); REQ-V190-SEC-04's "no file on disk" grep/`inspect.getsource`
+check is implemented and tested under an unambiguous local test name by
+T7 (the only task where both `documents.py` and the handler exist), not
+reusing the colliding spec id. `spec-v1.9.0.md`'s `sha256` remains
+`619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
+(T0's, unchanged — no edit was made).
+
+**Disclosed test-strengthening erratum (operator-ratified).** T3's own
+subagent flagged two of its new tests as weaker than DOC-03's "high
+effort/high care" designation (handoff §Models) warrants: the overlap
+test only exercised the common case, not the `hard_max`-priority clamp
+in `_start_new_chunk` (a paragraph-separator edge case where the full
+200-char overlap must shrink to keep a chunk ≤ 1200 chars — the
+orchestrator reviewed the implementation directly and confirmed this
+clamp is a correct reading of the spec's own stated priority, "1,200 is
+the maximum everywhere... before and after a tail merge," not a bug); and
+the corrupted-PDF test used a bare `pytest.raises(Exception)` that
+wouldn't distinguish a genuine corruption error from a budget/limit
+exception leaking through the wrong path. A follow-up subagent
+strengthened both tests without touching production logic.
+
+**Other deviations (T3's own prompt file,
+`docs/prompts/146-v190-t3-document-parsing.md`, carries full reasoning):**
+exception classes `DocumentTooLargeError` (base), `DocxArchiveTooLargeError`,
+`PdfTooManyPagesError` for the DOCX/PDF size-limit refusals (T4 consumes
+these names). An ordering hazard T3 surfaced for T7: `classify` must run
+on the **cleaned** filename, not the raw one (`clean_filename` strips
+trailing whitespace that would otherwise break extension detection) — T7's
+brief was updated to make this explicit before T7 starts.
 
 ## T2 — embeddings client and config (REQ-V190-RET-01, -02, -08)
 
