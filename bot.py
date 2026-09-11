@@ -20,14 +20,18 @@ import tempfile
 import threading
 import time
 import tomllib
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
+import docx.opc.exceptions
 import httpx
+import pypdf.errors
 
 import agent
 import config
 import dashboard_server
+import documents
 import metrics
 import rag
 import storage
@@ -35,7 +39,7 @@ import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
 from llm import build_llm_client, pricing, provider_is_configured
 from llm.base import REASONING_DEFAULT, CostResolver, LLMResponse, ReasoningRequest, ToolCall
-from llm.embeddings import EmbeddingError, EmbeddingsClient
+from llm.embeddings import EmbeddingError, EmbeddingsClient, EmbeddingTimeoutError
 
 TELEGRAM_API_HOST = "https://api.telegram.org"
 LONG_POLL_TIMEOUT_S = 50
@@ -69,6 +73,29 @@ STATUS_WORKING = "⚙️ working…"
 STATUS_FAILED = "⚠️ failed"
 USAGE = "usage: bot.py [--selftest|--selftest-live|--version] [--no-dashboard]"
 
+# v1.9.0: the document upload flow (REQ-V190-CMD-01..07) and its error matrix
+# (REQ-V190-ERR-01), the Telegram-facing half. `DOCUMENT_MAX_BYTES` is
+# CMD-02/-03's 10 MiB cap, checked both before download (`file_size`) and
+# during it (`TelegramClient.download_file`'s streamed cap).
+DOCUMENT_MAX_BYTES = 10_485_760
+DOC_RAG_NOT_CONFIGURED_REPLY = "Document search is not configured on this bot."
+DOC_TOO_LARGE_REPLY = "File too large (over 10 MiB)."
+DOC_UNSUPPORTED_REPLY = "Unsupported file type. Supported: .txt .md .docx .pdf"
+DOC_LIMIT_REPLY = "Limit of 20 documents reached. Use /delete <filename>."
+DOC_CORRUPTED_PDF_REPLY = "Could not read this PDF file."
+DOC_CORRUPTED_DOCX_REPLY = "Could not read this DOCX file."
+DOC_EMPTY_REPLY = "The document contains no readable text."
+DOC_TEXT_TOO_LARGE_REPLY = "Document too large (over 500,000 characters)."
+DOC_EMBEDDING_ERROR_REPLY = "Embedding service error. Please try again later."
+DOC_EMBEDDING_TIMEOUT_REPLY = "Embedding service timed out. Please try again later."
+DOC_STORAGE_ERROR_REPLY = "Storage error. The document was not saved."
+DOC_DOWNLOAD_TIMEOUT_REPLY = "Download timed out. Please try again."
+DOC_TELEGRAM_ERROR_REPLY = "Telegram error while receiving the file. Please try again."
+DOC_BUDGET_EXCEEDED_REPLY = "Indexing timed out (over 300 s). Nothing was saved."
+DOC_HANDLER_FAILED_REPLY = "Something went wrong while processing the document."
+DOCUMENTS_EMPTY_REPLY = "No documents yet. Send me a .txt, .md, .docx or .pdf file."
+DELETE_USAGE_REPLY = "Usage: /delete <filename>"
+
 log = logging.getLogger("bot")
 
 # httpx logs every request URL at INFO. The Telegram URL embeds the bot token,
@@ -94,6 +121,22 @@ class TelegramError(Exception):
         self.retry_after = retry_after
         self.fatal = fatal
         self.transport = transport
+
+
+class TelegramDownloadTimeout(TelegramError):
+    """REQ-V190-CMD-02: `download_file`'s `httpx.TimeoutException` maps here,
+    `from exc`, in a clause placed **before** the generic `TransportError`
+    one -- `httpx.TimeoutException` subclasses `httpx.TransportError`, so
+    that order is what keeps ERR-01 row 10a reachable at all. Matched by
+    type only, never by parsing a message."""
+
+
+class DocumentTooLarge(Exception):
+    """REQ-V190-CMD-02: raised by `TelegramClient.download_file` (and
+    mimicked by `FakeTelegram`, TST-02) the instant the streamed buffer
+    would exceed `max_bytes` -- ERR-01 row 5a's mid-stream half, alongside
+    the handler's own pre-download `file_size` check. Not a `TelegramError`
+    subclass: this is a size-cap refusal, not a transport failure."""
 
 
 class TelegramClient:
@@ -196,6 +239,37 @@ class TelegramClient:
             "deleteMessage", {"chat_id": chat_id, "message_id": message_id}
         )
 
+    def get_file(self, file_id: str) -> dict:
+        return self.call("getFile", {"file_id": file_id}, read_timeout=DEFAULT_READ_TIMEOUT_S)
+
+    def download_file(self, file_path: str, *, max_bytes: int) -> bytes:
+        """REQ-V190-CMD-02: a streamed GET, capped at `max_bytes` -- the
+        buffer is never allowed to exceed it, not even transiently. Clause
+        order is normative (see `TelegramDownloadTimeout`): the timeout
+        clause must come before the generic `TransportError` one."""
+        url = f"{TELEGRAM_API_HOST}/file/bot{self._token}/{file_path}"
+        timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+        try:
+            with self._client.stream("GET", url, timeout=timeout) as response:
+                if response.status_code != 200:
+                    raise TelegramError(
+                        redact(f"telegram file download http {response.status_code}")
+                    )
+                buffer = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(buffer) + len(chunk) > max_bytes:
+                        response.close()
+                        raise DocumentTooLarge("downloaded file exceeds the size cap")
+                    buffer.extend(chunk)
+        except httpx.TimeoutException as exc:
+            raise TelegramDownloadTimeout("download timed out") from exc
+        except httpx.TransportError as exc:
+            raise TelegramError(
+                redact(f"telegram file download transport error: {exc.__class__.__name__}"),
+                transport=True,
+            ) from exc
+        return bytes(buffer)
+
 
 def _retry_after(response: httpx.Response) -> float | None:
     try:
@@ -283,6 +357,20 @@ class _StatusMessage:
         if name in ("exec", "fetch", "search_documents"):
             self._edit(_status_line(name, first_argument))
 
+    def update(self, text: str) -> bool:
+        """REQ-V190-CMD-04: with no message yet, sends `text` as the first
+        message (the `_start` discipline `on_tool` already uses, just with
+        `text` instead of `STATUS_WORKING`); otherwise edits it. Returns
+        `True` iff the message exists and the call did not fail -- the
+        caller's cue to fall back to `_send` when it returns `False`."""
+        if self._disabled:
+            return False
+        if self._message_id is None:
+            self._start(text)
+        else:
+            self._edit(text)
+        return self._message_id is not None and not self._disabled
+
     def finish(self, *, ok: bool) -> None:
         if self._message_id is None or self._disabled:
             return
@@ -305,9 +393,9 @@ class _StatusMessage:
             # not apply here — only this one delete is given up on.
             log.warning("status message delete failed: %s", redact(str(result)))
 
-    def _start(self) -> None:
+    def _start(self, text: str = STATUS_WORKING) -> None:
         try:
-            result = self._tg.send_message(self._chat_id, STATUS_WORKING)
+            result = self._tg.send_message(self._chat_id, text)
         except Exception as exc:
             self._fail(exc)
             return
@@ -720,6 +808,7 @@ def process_update(
     resolve_cost: CostResolver | None = None,
     summary_llm=None,
     dashboard_status: str = "off (--no-dashboard)",
+    embedder=None,
 ) -> None:
     if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
         log.warning("update without a usable update_id ignored")
@@ -750,6 +839,20 @@ def process_update(
         log.warning("unauthorized update from tg_id=%s", from_id)
         return
     chat_id = chat["id"]
+    document = message.get("document")
+    if isinstance(document, dict):
+        # REQ-V190-CMD-01: the rate limiter applies to a document exactly as
+        # to a text message -- one token, before any download -- but none of
+        # the text-only checks below (length, command dispatch) apply here.
+        if limiter is not None and not limiter.allow(from_id):
+            log.warning("rate limit hit for tg_id=%s", from_id)
+            _send(tg, chat_id, [RATE_LIMIT_REPLY])
+            return
+        _handle_document(
+            document, conn=conn, tg=tg, cfg=cfg, chat_id=chat_id, from_id=from_id,
+            embedder=embedder,
+        )
+        return
     text = message.get("text")
     if not isinstance(text, str) or not text.strip():
         log.info("update %d is not a text message; answered with a hint", update_id)
@@ -797,17 +900,29 @@ def process_update(
         if name == "/reload_skills":
             _handle_reload_skills(tg, skills, chat_id)
             return
+        if name == "/documents":
+            _handle_documents(conn, tg, chat_id, from_id)
+            return
+        if name == "/delete":
+            argument = stripped[len(token):].strip()
+            _handle_delete(conn, tg, chat_id, from_id, argument)
+            return
 
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     storage.add_user_message(conn, conv_id, redact(text))
     status = _StatusMessage(tg, chat_id)
     typing = _TypingIndicator(tg, chat_id, ceiling_s=cfg.llm_timeout_s)
     typing.start()
-    # v1.9.0: no `Searcher` is constructed yet -- that is the CMD-01 task's
-    # job (per-turn, bound to `from_id`, once the document flow exists).
-    # `searcher` stays `None` until then, which keeps the attribution branch
-    # below reachable in shape but inert in this release.
-    searcher = None
+    # REQ-V190-CMD-01: a fresh `Searcher` per turn, bound to `from_id`; with
+    # no embedder configured the tool stays "not available" (TOOL-02).
+    searcher = (
+        rag.Searcher(
+            conn, user_id=from_id, embedder=embedder, llm=llm, cfg=cfg,
+            conv_id=conv_id, resolve_cost=resolve_cost,
+        )
+        if embedder is not None
+        else None
+    )
     try:
         outcome = agent.run_agent_outcome(
             conn=conn,
@@ -1093,6 +1208,204 @@ def _handle_reload_skills(tg, skills: dict, chat_id: int) -> None:
     _send(tg, chat_id, [f"Skills reloaded: {len(skills)} ({names})."])
 
 
+# ---------------------------------------------------------------------------
+# v1.9.0: the document upload flow (REQ-V190-CMD-01..04, -07) and the
+# Telegram-facing half of the error matrix (REQ-V190-ERR-01).
+# ---------------------------------------------------------------------------
+
+
+def _log_ext(filename: str | None) -> str:
+    """The extension for the row-1 log line only -- never for the (fixed,
+    literal) user-facing message (ERR-02). `filename` may be the raw,
+    uncleaned `file_name`, since this never reaches the user."""
+    if not filename or "." not in filename:
+        return "none"
+    return filename.rsplit(".", 1)[-1].lower()[:10]
+
+
+def _document_error_ending(tg, chat_id: int, status: "_StatusMessage", typing, reply: str) -> None:
+    """REQ-V190-CMD-04's failure ending: the typing indicator stops on every
+    path; the status message is edited to `reply` and kept, or -- when no
+    message exists or status work is disabled -- `reply` goes through
+    `_send` instead. Exactly one error message reaches the user either way.
+    """
+    typing.stop()
+    if not status.update(reply):
+        _send(tg, chat_id, [reply])
+
+
+def _document_success_reply(filename: str, result: "documents.IndexResult") -> str:
+    if result.page_count is not None:
+        return (
+            f"✅ {filename}: {result.chunk_count} chunks, "
+            f"{result.page_count} pages. Ask me about it."
+        )
+    return f"✅ {filename}: {result.chunk_count} chunks. Ask me about it."
+
+
+def _handle_document(
+    document: dict,
+    *,
+    conn: sqlite3.Connection,
+    tg,
+    cfg: Config,
+    chat_id: int,
+    from_id: int,
+    embedder,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
+    """REQ-V190-CMD-01..04, -07: the whole document flow. `started_at` is the
+    handler's first action (DOC-04's budget origin); the five pre-checks
+    (CMD-03) return a plain reply with no status message and no `getFile`
+    call; only past them does the one exception boundary (CMD-07) take
+    over, one typed clause per ERR-01 row this task owns."""
+    started_at = monotonic()
+
+    if embedder is None or not cfg.rag_enabled:
+        log.warning("document refused: rag not configured")
+        _send(tg, chat_id, [DOC_RAG_NOT_CONFIGURED_REPLY])
+        return
+
+    file_size = document.get("file_size")
+    if isinstance(file_size, int) and file_size > DOCUMENT_MAX_BYTES:
+        log.warning("document refused: file too large")
+        _send(tg, chat_id, [DOC_TOO_LARGE_REPLY])
+        return
+
+    raw_filename = document.get("file_name")
+    filename = documents.clean_filename(raw_filename)
+    if filename is None:
+        log.warning("document refused: unsupported type %s", _log_ext(raw_filename))
+        _send(tg, chat_id, [DOC_UNSUPPORTED_REPLY])
+        return
+    if documents.classify(filename) is None:
+        log.warning("document refused: unsupported type %s", _log_ext(filename))
+        _send(tg, chat_id, [DOC_UNSUPPORTED_REPLY])
+        return
+
+    existing_id = storage.document_id_for(conn, user_id=from_id, filename=filename)
+    at_limit = existing_id is None and (
+        storage.document_count(conn, user_id=from_id) >= documents.DOCUMENT_LIMIT
+    )
+    if at_limit:
+        log.warning("document refused: limit")
+        _send(tg, chat_id, [DOC_LIMIT_REPLY])
+        return
+
+    status = _StatusMessage(tg, chat_id)
+    typing = _TypingIndicator(tg, chat_id, ceiling_s=documents.INDEX_BUDGET_S_DEFAULT)
+    status.update("📄 received")
+    typing.start()
+
+    try:
+        file_info = tg.get_file(document.get("file_id"))
+        file_path = file_info.get("file_path") if isinstance(file_info, dict) else None
+        if not isinstance(file_path, str) or not file_path:
+            # `file_path` is optional on Telegram's `File` object; treat a
+            # reply without it as a transport failure (row 11), never as a
+            # corrupted-document class further down this chain.
+            raise TelegramError(redact("telegram getFile returned no file_path"))
+        data = tg.download_file(file_path, max_bytes=DOCUMENT_MAX_BYTES)
+        result = documents.index_document(
+            conn, user_id=from_id, filename=filename, data=data, embedder=embedder,
+            progress=status.update, now=storage.utc_now_iso(),
+            started_at=started_at, monotonic=monotonic,
+        )
+    except documents.DocumentLimitExceededError:
+        log.warning("document refused: limit")
+        _document_error_ending(tg, chat_id, status, typing, DOC_LIMIT_REPLY)
+        return
+    except TelegramDownloadTimeout:
+        log.warning("document failed: download timeout")
+        _document_error_ending(tg, chat_id, status, typing, DOC_DOWNLOAD_TIMEOUT_REPLY)
+        return
+    except TelegramError as exc:
+        log.warning("document failed: telegram: %s", redact(str(exc)))
+        _document_error_ending(tg, chat_id, status, typing, DOC_TELEGRAM_ERROR_REPLY)
+        return
+    except EmbeddingTimeoutError:
+        log.warning("document failed: embeddings timeout")
+        _document_error_ending(tg, chat_id, status, typing, DOC_EMBEDDING_TIMEOUT_REPLY)
+        return
+    except documents.IndexBudgetExceeded as exc:
+        log.warning("document failed: %s", redact(str(exc)))
+        _document_error_ending(tg, chat_id, status, typing, DOC_BUDGET_EXCEEDED_REPLY)
+        return
+    except documents.EmptyDocumentError:
+        log.warning("document refused: empty")
+        _document_error_ending(tg, chat_id, status, typing, DOC_EMPTY_REPLY)
+        return
+    except documents.ExtractedTextTooLargeError as exc:
+        log.warning("document refused: text too large %s", redact(str(exc)))
+        _document_error_ending(tg, chat_id, status, typing, DOC_TEXT_TOO_LARGE_REPLY)
+        return
+    except documents.DocxArchiveTooLargeError as exc:
+        log.warning("document refused: docx archive bounds %s", redact(str(exc)))
+        _document_error_ending(tg, chat_id, status, typing, DOC_TEXT_TOO_LARGE_REPLY)
+        return
+    except documents.PdfTooManyPagesError as exc:
+        log.warning("document refused: pdf pages %s", redact(str(exc)))
+        _document_error_ending(tg, chat_id, status, typing, DOC_TEXT_TOO_LARGE_REPLY)
+        return
+    except DocumentTooLarge:
+        log.warning("document refused: file too large")
+        _document_error_ending(tg, chat_id, status, typing, DOC_TOO_LARGE_REPLY)
+        return
+    except (zipfile.BadZipFile, docx.opc.exceptions.PackageNotFoundError, KeyError) as exc:
+        log.warning("document refused: corrupted docx: %s", exc.__class__.__name__)
+        _document_error_ending(tg, chat_id, status, typing, DOC_CORRUPTED_DOCX_REPLY)
+        return
+    except pypdf.errors.PyPdfError as exc:
+        log.warning("document refused: corrupted pdf: %s", exc.__class__.__name__)
+        _document_error_ending(tg, chat_id, status, typing, DOC_CORRUPTED_PDF_REPLY)
+        return
+    except EmbeddingError as exc:
+        log.warning("document failed: embeddings: %s", redact(str(exc)))
+        _document_error_ending(tg, chat_id, status, typing, DOC_EMBEDDING_ERROR_REPLY)
+        return
+    except sqlite3.Error as exc:
+        log.error("document failed: sqlite: %s", exc.__class__.__name__)
+        _document_error_ending(tg, chat_id, status, typing, DOC_STORAGE_ERROR_REPLY)
+        return
+    except Exception:
+        log.exception("document handler failed")
+        _document_error_ending(tg, chat_id, status, typing, DOC_HANDLER_FAILED_REPLY)
+        return
+
+    typing.stop()
+    status.finish(ok=True)
+    _send(tg, chat_id, [_document_success_reply(filename, result)])
+
+
+def _render_document_line(row) -> str:
+    pages = f", {row['page_count']} pages" if row["page_count"] is not None else ""
+    date = str(row["created_at"])[:10]
+    filename = redact(row["filename"])
+    return f"{filename} — {row['file_type']}, {row['chunk_count']} chunks{pages}, {date}"
+
+
+def _handle_documents(conn, tg, chat_id: int, from_id: int) -> None:
+    rows = storage.list_documents(conn, user_id=from_id)
+    if not rows:
+        _send(tg, chat_id, [DOCUMENTS_EMPTY_REPLY])
+        return
+    lines = [f"Your documents ({len(rows)}):"] + [_render_document_line(row) for row in rows]
+    _send(tg, chat_id, split_message("\n".join(lines)))
+
+
+def _handle_delete(conn, tg, chat_id: int, from_id: int, argument: str) -> None:
+    if not argument:
+        _send(tg, chat_id, [DELETE_USAGE_REPLY])
+        return
+    document_id = storage.document_id_for(conn, user_id=from_id, filename=argument)
+    if document_id is None:
+        shown = redact(argument)[:120]
+        _send(tg, chat_id, [f"No document named {shown}."])
+        return
+    storage.delete_document(conn, user_id=from_id, document_id=document_id)
+    _send(tg, chat_id, [f"Deleted {argument}."])
+
+
 def _send(tg, chat_id: int, parts: list[str]) -> bool:
     """Send the parts in order; stop at the first failure (at-most-once)."""
     for part in parts:
@@ -1123,6 +1436,7 @@ def poll_loop(
     resolve_cost: CostResolver | None = None,
     summary_llm=None,
     dashboard_status: str = "off (--no-dashboard)",
+    embedder=None,
 ) -> int:
     raw = storage.get_state(conn, "last_update_id")
     offset = int(raw) + 1 if raw is not None else None
@@ -1164,6 +1478,7 @@ def poll_loop(
                     resolve_cost=resolve_cost,
                     summary_llm=summary_llm,
                     dashboard_status=dashboard_status,
+                    embedder=embedder,
                 )
                 if isinstance(update, dict) and isinstance(update.get("update_id"), int):
                     offset = update["update_id"] + 1
@@ -1641,6 +1956,18 @@ def main(argv: list[str] | None = None) -> int:
     # REQ-V13-PRC-02: once, at startup, and never per message.
     resolve_cost = build_cost_resolver(conn, cfg, client)
 
+    # REQ-V190-CMD-01: one process-wide embeddings client, next to the LLM
+    # client, only when the pair is configured; `None` keeps search_documents
+    # and the document upload flow "not available" (TOOL-02, ERR-01 row 14).
+    embedder = (
+        EmbeddingsClient(
+            cfg.embedding_base_url, cfg.embedding_model, cfg.embedding_dim,
+            cfg.embedding_timeout_s, client,
+        )
+        if cfg.rag_enabled
+        else None
+    )
+
     # REQ-V160-SRV-01/-07: on by default; either switch suffices to turn it
     # off, the flag winning when they disagree. A failure to bind, to create
     # the server, or to start the thread is caught -- broadly, not just
@@ -1716,6 +2043,7 @@ def main(argv: list[str] | None = None) -> int:
             # configuration pins for the life of the process (REQ-V13-RTE-01).
             summary_llm=summary_llm,
             dashboard_status=dashboard_status,
+            embedder=embedder,
         )
     finally:
         if dashboard_srv is not None:

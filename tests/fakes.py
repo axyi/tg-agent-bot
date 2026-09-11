@@ -6,6 +6,7 @@ import zlib
 
 import httpx
 
+import bot
 from llm.base import REASONING_DEFAULT, LLMError, ReasoningRequest
 
 _DEFAULT_ENVELOPE = {
@@ -133,19 +134,60 @@ class FakeSearcher:
 
 
 class FakeTelegram:
-    """Records `(chat_id, text)`; can be scripted to raise on the n-th send."""
+    """Records `(chat_id, text)`; can be scripted to raise on the n-th send.
+
+    Extended per REQ-V190-TST-02: `edited`/`deleted`/`get_file_calls`/
+    `downloads` recorders, and `edit_message_text`/`delete_message`/
+    `get_file`/`download_file` methods so a document-flow test can drive
+    `process_update` through this one fake, never a socket. `files` is
+    seeded by the test (`file_path -> bytes`); `download_errors` scripts a
+    raise for a given `file_path` (checked before `files`, so a timeout or
+    transport failure can be simulated without seeding any bytes at all).
+    """
 
     def __init__(self, fail_on=None, error=None):
         self.sent = []
         self.send_calls = 0
         self._fail_on = fail_on
         self._error = error or RuntimeError("send failed")
+        self.edited = []
+        self.deleted = []
+        self.get_file_calls = []
+        self.downloads = []
+        self.files: dict[str, bytes] = {}
+        self.download_errors: dict[str, Exception] = {}
 
     def send_message(self, chat_id, text):
         self.send_calls += 1
         if self._fail_on is not None and self.send_calls == self._fail_on:
             raise self._error
         self.sent.append((chat_id, text))
+        return {"message_id": 100 + self.send_calls}
+
+    def edit_message_text(self, chat_id, message_id, text):
+        self.edited.append((chat_id, message_id, text))
+        return {"message_id": message_id}
+
+    def delete_message(self, chat_id, message_id):
+        self.deleted.append((chat_id, message_id))
+        return True
+
+    def get_file(self, file_id):
+        self.get_file_calls.append(file_id)
+        return {"file_path": f"documents/{file_id}"}
+
+    def download_file(self, file_path, *, max_bytes):
+        self.downloads.append((file_path, max_bytes))
+        if file_path in self.download_errors:
+            raise self.download_errors[file_path]
+        if file_path not in self.files:
+            # A test bug (forgetting to seed bytes) must never silently
+            # impersonate an ERR-01 row via a bare KeyError.
+            raise AssertionError(f"no seeded bytes for {file_path!r}")
+        data = self.files[file_path]
+        if len(data) > max_bytes:
+            raise bot.DocumentTooLarge("downloaded file exceeds the size cap")
+        return data
 
 
 def mock_llm_transport(handler):
