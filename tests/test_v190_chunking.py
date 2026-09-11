@@ -65,6 +65,54 @@ def test_t_v190_doc_04_overlap_is_exactly_200_between_consecutive_chunks():
         assert prev.char_end - cur.char_start == 200
 
 
+def test_t_v190_doc_04_overlap_is_exactly_200_across_paragraph_boundaries():
+    # Companion to the edge case below: the COMMON case, with real paragraph
+    # separators (not just one giant sentence-split paragraph) and pieces
+    # comfortably under target -- the hard_max clamp in _start_new_chunk
+    # never fires here, so the full 200-char overlap is preserved.
+    para = "word " * 60  # 300 chars, well under target=1000
+    text = "\n\n".join([para] * 6)
+    chunks = documents.chunk_text(text)
+    assert len(chunks) > 1
+    for prev, cur in zip(chunks, chunks[1:]):
+        assert prev.char_end - cur.char_start == 200
+
+
+def test_t_v190_doc_04_overlap_clamped_when_paragraph_gap_pushes_past_hard_max():
+    # Edge case (erratum, DOC-03): _start_new_chunk clamps char_start via
+    # `char_start = max(char_start, span_end - hard_max)`. A single long
+    # paragraph never triggers this -- the clamp only fires when a
+    # paragraph *separator* sits between the previous chunk's end and a
+    # new paragraph close to `target` in length, so that naive-200-overlap
+    # + separator gap + paragraph would exceed hard_max=1200.
+    #
+    # para1 = 1000 chars, para2 = 1000 chars, separated by "\n\n" (a 2-char
+    # gap). The second paragraph alone doesn't fit in the first chunk
+    # (target=1000), so it starts a new chunk. Naively reaching back the
+    # full 200 chars of overlap would put char_start at para1's own end
+    # minus 200 (=800), giving a chunk of span_end(2002) - 800 = 1202
+    # chars -- 2 over hard_max. The clamp pulls char_start forward to 802
+    # instead, landing the chunk at exactly hard_max (1200) and shrinking
+    # the overlap to 198 chars.
+    para1 = "A" * 1000
+    para2 = "B" * 1000
+    text = para1 + "\n\n" + para2
+    chunks = documents.chunk_text(text)
+    assert len(chunks) == 2
+    prev, cur = chunks[0], chunks[1]
+
+    # (a) the primary invariant: hard_max is never exceeded, even though a
+    # naive "always take exactly 200 chars of overlap" implementation would
+    # have exceeded it here.
+    assert cur.char_end - cur.char_start <= 1200
+
+    # (b) the clamp actually fired: char_start reaches back LESS than the
+    # full 200-char overlap -- if it reached back the full 200, char_start
+    # would equal prev.char_end - 200 (or less); instead it lands strictly
+    # above that, proving the clamp shrank the overlap in this case.
+    assert cur.char_start > prev.char_end - 200
+
+
 def test_t_v190_doc_04_long_paragraph_splits_on_sentence_ends():
     sentence = "This is one sentence of moderate length. "
     text = sentence * 150  # ~6,300 chars, one paragraph, no blank lines

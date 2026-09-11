@@ -225,9 +225,30 @@ def test_t_v190_doc_02_pdf_no_page_numbers_field_and_extracted_shape():
 
 
 def test_t_v190_doc_02_pdf_truncated_is_corrupted_pdf_class():
+    # documents._extract_pdf catches nothing from PdfReader/page enumeration/
+    # extract_text() -- the corrupted-PDF class propagates by its own native
+    # type. For this truncation (first 20 bytes: past "%PDF-1.4\n" but into
+    # the middle of the first indirect object, well before any xref/trailer)
+    # pypdf raises PdfStreamError, a PdfReadError, a PyPdfError -- verified
+    # empirically, not assumed: the bare `except Exception` this replaces
+    # would also pass if the wrong exception type leaked through.
     data = write_pdf(["hello world"])
-    with pytest.raises(Exception):  # the exact pypdf exception type is not our contract
+    with pytest.raises(pypdf.errors.PdfStreamError):
         documents.extract(data[:20], "pdf")
+
+
+def test_t_v190_doc_02_too_many_pages_is_not_the_corrupted_pdf_class():
+    # DOC-02's exact exception-boundary rule, which T4 depends on: the
+    # too-many-pages refusal and the corrupted-PDF class must be genuinely
+    # distinguishable by type, not merely by message text -- an `except`
+    # clause written for the corrupted-PDF family (pypdf's own
+    # PdfReadError/PyPdfError, which PdfStreamError above subclasses) must
+    # NOT also swallow PdfTooManyPagesError.
+    data = write_pdf(["x"] * (documents.PDF_MAX_PAGES + 1))
+    with pytest.raises(documents.PdfTooManyPagesError) as exc_info:
+        documents.extract(data, "pdf")
+    assert not isinstance(exc_info.value, pypdf.errors.PdfReadError)
+    assert not isinstance(exc_info.value, pypdf.errors.PyPdfError)
 
 
 def test_t_v190_doc_02_pdf_over_500_pages_refuses_before_extract_text():
