@@ -178,8 +178,18 @@ the operator, who chose to add a post-chunking guard: zero total chunks
 after chunking → the same ERR-01 row 4 ("no readable text") refusal,
 document rejected, nothing stored — reusing the existing empty-text
 exception class rather than inventing a second one for the same outcome.
-Implemented as a follow-up commit (see below once landed), test
-reproducing the exact scenario T4 hit by accident.
+Implemented as follow-up commit `5f90a26` — reuses the existing
+`documents.EmptyDocumentError` class for both raise sites (no second
+exception type for the same outcome), new test
+`test_t_v190_err_01_row_4_pdf_zero_chunks_across_pages_raises_and_stores_nothing`
+verified non-tautologically against `documents.extract`'s actual output
+(30 non-whitespace chars summed, clears the 20-char floor; each of two
+pages individually chunks to zero). `pytest --collect-only -q` = **1379**.
+Per the same precedent as the SEC-04 disclosure, the frozen
+`spec-v1.9.0.md`/its delta are **not** edited for this behavior addition
+(no new user-facing string, and the delta file's four-block scope is
+closed) — T7's and T10's briefs were updated to carry this exception class
+and the README documentation note forward instead.
 
 **Exception classes this task established (for T7's brief, already
 updated with these names)**: `EmptyDocumentError` (row 4, extraction-time
