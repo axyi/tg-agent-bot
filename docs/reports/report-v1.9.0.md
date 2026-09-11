@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T0 complete, run in progress.**
+**Status: T1 complete, run in progress.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -143,9 +143,48 @@ does not block T0 or any later task.
 
 | T | delegated? | to what | map vs actual |
 |---|---|---|---|
-| T0 | no — *artefacts only* | — | in progress |
+| T0 | no — *artefacts only* | — | matched map |
+| T1 | yes | general-purpose subagent | matched map |
 
 (Filled in as each task lands.)
+
+## T1 — storage and schema (REQ-V190-STO-01…05)
+
+Commit `b84f524`. Test-first: `T-V190-STO-01…09`, `T-V190-SEC-02/-03/-05/-06`
+(storage half) — 27 new tests (`tests/test_v190_storage.py`,
+`tests/test_v190_isolation.py`). `pytest --collect-only -q` = **1247**
+(1220 floor + 27). Gates run at this task: `ruff check .` 0, `pytest` 0,
+`bot.py --selftest` 0 (mutation and live gates deferred to T9/T11 by
+design).
+
+**Disclosed erratum — REQ-V190-EC-03's amendment table was incomplete
+(operator-ratified).** T1 found that `SCHEMA_VERSION` moving 5→6 (itself a
+MUST) breaks a hardcoded literal in three test files EC-03's exhaustive
+amendment table does not list: `tests/test_v170_reasoning.py`,
+`tests/test_v160_observability.py`, `tests/test_summary.py` — the same
+class of break the table already authorises for `tests/test_observability.py`.
+The implementing subagent applied the identical mechanical fix (literal
+`5`→`6`, future-boundary `6`→`7`) at these three additional sites,
+disclosed each with an inline erratum comment, without weakening any
+test's assertion or intent. This mirrors the repository's own precedent
+(`tests/test_summary.py`'s pre-existing comment: "authorised by the
+operator, prompt 107" for the identical v1.6.0→v1.7.0 case). The
+orchestrator reviewed the diff line-by-line, confirmed no logic was
+altered (version literals only), and put the question to the operator via
+`AskUserQuestion` before continuing to T2; the operator ratified it as an
+operator-authorised erratum, retroactively, in this session.
+
+**Other disclosed deviations (T1's own prompt file,
+`docs/prompts/143-v190-t1-storage-schema.md`, carries the full reasoning):**
+`_DOCUMENTS_DDL` is kept as a standalone constant rather than folded into
+`_SCHEMA`'s unconditional `executescript`, so a failed 5→6 migration can
+still leave zero trace of `documents`/`chunks` (`T-V190-STO-09`'s
+requirement) — `_SCHEMA`'s script runs outside any transaction and cannot
+be rolled back, so concatenating would have broken the negative-migration
+guarantee. A real pre-existing-in-this-task bug was found and fixed during
+test-writing: `add_vectors`'s `executemany` was passing 2-tuples against a
+3-column `INSERT`; fixed to build `(chunk_id, user_id, embedding)` triples
+before any commit.
 
 ## Assignment checklist (RPT-02 item 8)
 
