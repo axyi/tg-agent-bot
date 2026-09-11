@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T8 complete, run in progress. Gate 7 red — known limitation,
+**Status: T9 complete, run in progress. Gate 7 red — known limitation,
 disposition deferred to T13 (see T8 section).**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
@@ -173,8 +173,56 @@ embeddings check to be true) — appended
 | T6 | yes | general-purpose subagent (one retry after an infra 403; ratified erratum mid-task) | matched map |
 | T7 | yes | general-purpose subagent | matched map |
 | T8 | yes | general-purpose subagent (3 ratified live-tuning attempts) | matched map |
+| T9 | yes | general-purpose subagent (session hit an infra rate limit mid-task, orchestrator finished directly) | matched map |
 
 (Filled in as each task lands.)
+
+## T9 — mutation entries and the gate matrix (REQ-V190-EC-10, EC-12)
+
+Commit `7bc7121`. `pytest --collect-only -q` = **1537** (unchanged — no
+new tests, gate/config wiring only). Gates: `ruff check .` 0, `pytest` 0,
+`bot.py --selftest` 0. **`mutation-v190`: 7/7 killed. `mutation-all`:
+105/105 killed, 0 survived/errored/drifted** (105 = 98 pre-v1.9.0 + 7 new).
+`test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` — T8's
+expected, anticipated carry-over failure — now green.
+
+**Process note — a second infra interruption, cleanly recovered.** The
+implementing subagent's session hit an account-wide rate limit
+(HTTP 429) partway through its own `mutation-all` re-measurement, after
+already landing the seven mutation entries, the gate-matrix fix and a
+provisional `timeout_seconds`. The orchestrator resumed the work directly
+in main context (bounded, mostly-command remaining work: verify, re-run,
+commit) rather than respawning a subagent: fixed one cosmetic
+ruff line-length violation the interrupted session hadn't reached yet,
+re-ran `mutation-v190` (7/7) and the full `mutation-all` (105/105) to
+completion, and re-measured `mutation-all`'s own wall-clock time
+(real=65m53.309s) — higher than the subagent's own already-recorded
+60m58.865s figure. Per this project's own established shared-machine-
+variance rationale (documented at every earlier `mutation-all` timeout
+entry across v1.6.0–v1.9.0), the higher of the two same-day measurements
+was used: `timeout_seconds` raised from the subagent's provisional 7320
+to **7910**.
+
+**Sound engineering judgement, disclosed, no sign-off needed**: the
+subagent's own brief asked it to strip a leftover `| gate | pre-commit`
+header literal from `spec-v1.8.0-delta-1.md` "if it still does" carry
+one — it does, but the subagent correctly declined: that file is a
+released, frozen spec artefact (its own text: "never edited"), and
+`spec-v1.9.0-delta-1.md` cites its line range by number as the provenance
+of a table it carries verbatim, so removing those rows would break that
+citation. The actual goal — the parser finding the gate matrix only in the
+v1.9.0 delta — was already satisfied by the test's own repoint; the
+leftover header in the v1.8.0 file is inert for that test. Also caught and
+self-corrected before the interruption: a first, discarded `--select
+v190-` timing run was contaminated (mutation_check.py's `pytest -x -q`
+runner stops at the first red test, and the gate-04 failure was still
+present at that point, so every "killed" verdict from that run could have
+been the unrelated pre-existing failure rather than the mutation's actual
+target) — re-run clean after the EC-12 fix landed.
+
+**Deferred, correctly out of scope**: `AGENTS.md`'s stale "98 entries"
+and "1220 tests" prose — both are explicitly T12's job per RPT-05
+("written once, in T12"), not T9's or T10's.
 
 ## T8 — the retrieval evaluation, gate 7 (REQ-V190-EVAL-01…04)
 
