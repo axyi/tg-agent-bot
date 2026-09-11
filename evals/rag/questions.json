@@ -1,0 +1,74 @@
+[
+  {
+    "question": "Сколько дней отпуска полагается сотруднику в год?",
+    "expected_source": "vacation_policy.md",
+    "expected_page": null,
+    "expected_evidence": "28 календарных дней оплачиваемого отпуска в год"
+  },
+  {
+    "question": "Сколько дней отпуска можно перенести на следующий год?",
+    "expected_source": "vacation_policy.md",
+    "expected_page": null,
+    "expected_evidence": "не более 10 дней"
+  },
+  {
+    "question": "За сколько дней до отпуска нужно подать заявление?",
+    "expected_source": "vacation_policy.md",
+    "expected_page": null,
+    "expected_evidence": "не позднее чем за 14 дней до предполагаемой даты начала отпуска"
+  },
+  {
+    "question": "Во сколько нужно прийти в офис в первый рабочий день?",
+    "expected_source": "onboarding.txt",
+    "expected_page": null,
+    "expected_evidence": "к 10:00"
+  },
+  {
+    "question": "Сколько длится испытательный срок для новых сотрудников?",
+    "expected_source": "onboarding.txt",
+    "expected_page": null,
+    "expected_evidence": "составляет 3 месяца"
+  },
+  {
+    "question": "Какие суточные положены за командировку по России?",
+    "expected_source": "expenses.docx",
+    "expected_page": null,
+    "expected_evidence": "По России 700"
+  },
+  {
+    "question": "В течение скольких дней нужно сдать авансовый отчёт после возвращения из командировки?",
+    "expected_source": "expenses.docx",
+    "expected_page": null,
+    "expected_evidence": "не позднее 5 рабочих дней после возвращения из командировки"
+  },
+  {
+    "question": "How long must passwords be, at minimum?",
+    "expected_source": "security_guidelines.pdf",
+    "expected_page": 1,
+    "expected_evidence": "at least twelve characters long"
+  },
+  {
+    "question": "How soon must a lost or stolen device be reported to the security team?",
+    "expected_source": "security_guidelines.pdf",
+    "expected_page": 2,
+    "expected_evidence": "within one hour of discovery"
+  },
+  {
+    "question": "How soon must a suspected security incident be reported?",
+    "expected_source": "security_guidelines.pdf",
+    "expected_page": 3,
+    "expected_evidence": "within twenty-four hours"
+  },
+  {
+    "question": "Сколько дней декретного отпуска положено сотруднице?",
+    "expected_source": null,
+    "expected_page": null,
+    "expected_evidence": null
+  },
+  {
+    "question": "What is the guest Wi-Fi password?",
+    "expected_source": null,
+    "expected_page": null,
+    "expected_evidence": null
+  }
+]

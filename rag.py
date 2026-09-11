@@ -37,7 +37,16 @@ _RERANK_SYSTEM = (
     "of passage numbers, most relevant first, nothing else."
 )
 _RERANK_CANDIDATE_CHARS = 600
-_RERANK_MAX_TOKENS = 128
+# Operator-ratified deviation from spec-v1.9.0 T5/RET-06's literal 128
+# (docs/prompts/153-v190-t8-rag-eval.md): a thinking-variant chat model can
+# spend its whole budget on chain-of-thought before ever emitting the JSON
+# answer, because `resolve_reasoning("off", ...)` degrades to "default"
+# rather than truly suppressing reasoning (the erratum T5's own test module
+# docstring already discloses). 1024 was tried first and was still
+# sometimes truncated for the two heaviest-reasoning questions; 2048 is the
+# second and, per the orchestrator's own explicit cap, last token-budget
+# attempt for this call only -- nothing else about RET-06 changes.
+_RERANK_MAX_TOKENS = 2048
 _RERANK_TIMEOUT_S = 20.0
 
 _HYBRID_CANDIDATES = 10  # RRF is cut to this many candidates for the reranker

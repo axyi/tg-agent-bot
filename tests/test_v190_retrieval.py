@@ -247,7 +247,11 @@ def test_t_v190_ret_06_rerank_reorders_truncates_candidates_and_records_the_call
     )
 
     assert [p.chunk_id for p in result] == [3, 1, 2]
-    assert llm.max_tokens_calls == [128]
+    # 2048, not RET-06's literal 128: operator-ratified deviation
+    # (docs/prompts/153-v190-t8-rag-eval.md) for a thinking-variant chat
+    # model that can spend the whole budget on undisabled reasoning before
+    # ever emitting the JSON answer -- rag.py:_RERANK_MAX_TOKENS.
+    assert llm.max_tokens_calls == [2048]
     assert llm.timeout_s_calls == [20.0]
     # See module docstring: resolve_reasoning("off", frozenset(), "final")
     # degrades to "default", not "off" -- disclosed erratum.

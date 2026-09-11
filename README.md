@@ -782,10 +782,14 @@ uv run --locked pytest
 uv run --locked python bot.py --selftest
 uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
+uv run --locked python devtools/rag_eval.py
 ```
 
-Gates 1–4 and 6 are offline and unconditional; only gate 5 needs the live
-environment. The suite is provably offline: any
+Gates 1–4 and 6 are offline and unconditional; gates 5 and 7 need the live
+environment (gate 7 is spec-v1.9.0 T8's retrieval evaluation — it also
+spends real inference tokens on the reranker and an advisory
+conversation-aware smoke test; see `evals/rag/`). The suite is provably
+offline: any
 real outbound HTTP request fails the test, the LLM and the Telegram client are
 replaced by fakes, the command runner is injected, and even the `docker` binary
 is a stub script on `PATH`. `--selftest` drives one full update through a

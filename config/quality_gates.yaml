@@ -10,8 +10,8 @@ profiles:
                gitleaks-tree, trivy, semgrep, skylos, mutation-v15, mutation-v160,
                mutation-v170, mutation-v180, hooks-installed, doctor]
   full:       [uv-sync, ruff-check-all, ruff-format, branch-name, pytest,
-               selftest, selftest-live, mutation-all, gitleaks-tree, trivy,
-               semgrep, skylos, hooks-installed, doctor, lint-docs]
+               selftest, selftest-live, rag-eval, mutation-all, gitleaks-tree,
+               trivy, semgrep, skylos, hooks-installed, doctor, lint-docs]
 
 # T1 writes each pin at its currently-installed version (REQ-V15-DEP-04);
 # trivy and skylos are not installed yet and stay absent from this block
@@ -144,6 +144,19 @@ gates:
     blocking: true
     diff_scoped: false
     timeout_seconds: 60
+
+  # spec-v1.9.0 T8 (REQ-V190-EVAL-04): gate 7, the retrieval evaluation --
+  # the live environment, same shape as selftest-live, but slower (real
+  # embeddings + rerank calls per question) hence the wider timeout.
+  rag-eval:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/rag_eval.py]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 600
 
   # Confirmed against trivy fs --help at 0.74.0 (T4): --scanners, --severity,
   # --exit-code, --ignore-unfixed, --format json, --output all unchanged.

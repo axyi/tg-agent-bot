@@ -132,7 +132,7 @@ shell.
 
 ## Gates — run before reporting success
 
-All six MUST exit 0, run in this order:
+All seven MUST exit 0, run in this order:
 
 ```bash
 uv sync --locked
@@ -141,6 +141,7 @@ uv run --locked pytest
 uv run --locked python bot.py --selftest
 uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
+uv run --locked python devtools/rag_eval.py
 ```
 
 Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1220
@@ -157,7 +158,12 @@ from 92 at spec-v1.7.0's close; T6 added six `v180-*` entries covering
 the chat-status signal, the typing-indicator ceiling, and transcript
 redaction/truncation/budget; see
 `docs/reports/report-v1.8.0.md`); `--select <prefix>` runs a named subset
-(mutually exclusive with `--only`), e.g. `--select v180-`.
+(mutually exclusive with `--only`), e.g. `--select v180-`. Gate 7
+(`devtools/rag_eval.py`, spec-v1.9.0 T8) is the retrieval evaluation: it
+needs the live environment like gate 5, spends real inference on the
+reranker and an advisory conversation smoke, and exits 0 only when
+`hybrid` recall@5 >= 0.8 and every answerable item's rerank flags are
+both `True` — see `evals/rag/` and REQ-V190-EVAL-01..04.
 
 Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY` (`model-default` | `off` | `by-purpose`, default `by-purpose`) and
 `LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,
