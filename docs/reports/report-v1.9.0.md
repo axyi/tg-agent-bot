@@ -152,9 +152,10 @@ does not block T0 or any later task.
 
 ## T3 — document parsing and chunking (REQ-V190-DOC-01…03, -06)
 
-Commit `c53becf`. Test ids `T-V190-DOC-01…06`, 55 new tests. `pytest
---collect-only -q` = **1359** (1304 + 55). Gates: `ruff check .` 0,
-`pytest` 0, `bot.py --selftest` 0.
+Commit `c53becf`, strengthened by erratum commit `771466d` (4 more
+tests). Test ids `T-V190-DOC-01…06`, 59 new tests total. `pytest
+--collect-only -q` = **1362** (1304 + 55 + 4, re-measured directly).
+Gates: `ruff check .` 0, `pytest` 0, `bot.py --selftest` 0.
 
 **Disclosed spec defect — `T-V190-SEC-04` is assigned to two different
 requirements, spec left unedited (operator decision).** Appendix A row
@@ -190,7 +191,15 @@ the maximum everywhere... before and after a tail merge," not a bug); and
 the corrupted-PDF test used a bare `pytest.raises(Exception)` that
 wouldn't distinguish a genuine corruption error from a budget/limit
 exception leaking through the wrong path. A follow-up subagent
-strengthened both tests without touching production logic.
+strengthened both tests without touching production logic (commit
+`771466d`): the overlap clamp is now proven to actually fire (numerically
+verified: `char_start=802` vs. a naive unclamped `800`, overlap 198 not
+200, chunk length exactly 1200) alongside a companion common-case test;
+the corrupted-PDF test now asserts the specific `pypdf.errors.PdfStreamError`
+type (confirmed empirically, stable across truncation lengths) and a new
+negative test proves `PdfTooManyPagesError` is `isinstance`-distinct from
+`pypdf.errors.PdfReadError` — the two failure classes are genuinely
+separable by type, as DOC-02 requires.
 
 **Other deviations (T3's own prompt file,
 `docs/prompts/146-v190-t3-document-parsing.md`, carries full reasoning):**
