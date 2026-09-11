@@ -80,6 +80,9 @@ _TG_AGENT_ATTRIBUTE_KEYS = frozenset(
         # honored verdict is derivable from the existing
         # gen_ai.usage.reasoning.output_tokens -- no second key.
         "tg_agent.reasoning.requested",
+        # v1.9.0 additions (REQ-V190-RET-01): the embeddings CLIENT span.
+        "tg_agent.embeddings.batch_size",
+        "tg_agent.embeddings.dim",
     }
 )
 

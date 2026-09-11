@@ -1,6 +1,8 @@
 """Test doubles. None of them performs I/O."""
 
+import re
 import subprocess
+import zlib
 
 import httpx
 
@@ -125,3 +127,49 @@ class FakeTelegram:
 def mock_llm_transport(handler):
     """An httpx transport that answers from `handler` instead of the network."""
     return httpx.MockTransport(handler)
+
+
+class FakeEmbedder:
+    """Stands in for `llm.embeddings.EmbeddingsClient` (REQ-V190-TST-02):
+    deterministic, no network, same `embed`/`describe` interface. Used by
+    this task's own tests and by T5+ (`rag.py`'s vector search).
+
+    The vector is a token-bucket hash, not random noise: each lowercased
+    word of the text is hashed into one of `dim` buckets and incremented,
+    then L2-normalised. Two texts sharing words land closer in cosine
+    distance than two that share none — the minimum structure a "meaningful
+    ranking offline" test (`T-V190-RET-03`) needs; a per-call random vector
+    would have none.
+    """
+
+    def __init__(self, dim=768, *, script=None):
+        self.dim = dim
+        self.calls = []
+        self._script = list(script) if script is not None else None
+
+    def describe(self):
+        return ("fake", "fake-embedding-model")
+
+    def embed(self, texts, *, conv_id=None):
+        texts = list(texts)
+        self.calls.append((texts, conv_id))
+        if self._script is not None:
+            if not self._script:
+                raise AssertionError("FakeEmbedder script exhausted")
+            item = self._script.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        return [self._vector(text) for text in texts]
+
+    def _vector(self, text):
+        # `zlib.crc32`, not the builtin `hash()`: str hashing is salted per
+        # process (PYTHONHASHSEED), which would make bucket placement -- and
+        # so the whole vector -- non-reproducible across runs.
+        buckets = [0.0] * self.dim
+        for word in re.findall(r"\w+", text.lower()):
+            buckets[zlib.crc32(word.encode("utf-8")) % self.dim] += 1.0
+        norm = sum(x * x for x in buckets) ** 0.5
+        if norm == 0.0:
+            return buckets
+        return [x / norm for x in buckets]

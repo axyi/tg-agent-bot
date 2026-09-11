@@ -540,7 +540,10 @@ def test_t_v160_dsh_09_served_span_attribute_keys_is_the_allowlist_minus_four():
     # authorised class as prompt 107's blocker (a pinned count invalidated by
     # this release's own mandated addition, tg_agent.reasoning.requested).
     # 23 -> 24, one new key.
-    assert len(dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS) == 24
+    # second erratum: spec-v1.9.0 T2, REQ-V190-RET-01's two mandated
+    # tg_agent.embeddings.* keys (tg_agent.embeddings.batch_size,
+    # tg_agent.embeddings.dim). 24 -> 26, two new keys.
+    assert len(dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS) == 26
 
 
 def test_t_v160_dsh_09_served_span_has_no_status_message_field():

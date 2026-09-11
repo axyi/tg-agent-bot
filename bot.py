@@ -34,6 +34,7 @@ import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
 from llm import build_llm_client, pricing, provider_is_configured
 from llm.base import REASONING_DEFAULT, CostResolver, LLMResponse, ReasoningRequest, ToolCall
+from llm.embeddings import EmbeddingError, EmbeddingsClient
 
 TELEGRAM_API_HOST = "https://api.telegram.org"
 LONG_POLL_TIMEOUT_S = 50
@@ -1454,6 +1455,51 @@ def _live_lmstudio(cfg: Config, client: httpx.Client) -> int:
     if cfg.lmstudio_model not in models:
         return _live_fail("lmstudio", f"model {cfg.lmstudio_model} is not loaded")
     print("live: OK lmstudio")
+    return 0
+
+
+def _live_embeddings(cfg: Config, client: httpx.Client) -> int:
+    """REQ-V190-RET-08: D3's "required, no default" is enforced here, at
+    deployment, even though `EMBEDDING_MODEL`/`EMBEDDING_DIM` are optional at
+    config level (`Config.rag_enabled`) so the 12 pre-EC-05 test files keep
+    passing minimal environments to `load_config`.
+
+    **Not yet wired into `run_selftest_live`** — see the T2 handoff: the
+    unconditional call would fail two pre-existing, non-amendment-listed
+    tests in `tests/test_v1_guardrails.py` whose `live_cfg`/`make_cfg`
+    fixtures build a `Config` with no embedding fields set.
+    """
+    if not cfg.rag_enabled:
+        # REQ-V190-RET-08: the spec's own literal line, not `_live_fail`'s
+        # "<check> — <reason>" template -- D3's "required at deployment"
+        # gets one fixed, exact message.
+        print("live: FAIL embeddings (EMBEDDING_MODEL and EMBEDDING_DIM are not set)")
+        return 1
+    try:
+        response = client.get(
+            f"{cfg.embedding_base_url}/models", timeout=LIVE_READ_TIMEOUT_S
+        )
+        if response.status_code != 200:
+            return _live_fail(
+                "embeddings", f"http {response.status_code}: {response.text[:200]}"
+            )
+        body = response.json()
+    except Exception as exc:
+        return _live_fail("embeddings", exc)
+    models = [entry.get("id") for entry in (body.get("data") or [])]
+    if cfg.embedding_model not in models:
+        return _live_fail("embeddings", f"model {cfg.embedding_model} is not loaded")
+    embedder = EmbeddingsClient(
+        cfg.embedding_base_url, cfg.embedding_model, cfg.embedding_dim,
+        LIVE_READ_TIMEOUT_S, client,
+    )
+    try:
+        vectors = embedder.embed(["selftest"])
+    except EmbeddingError as exc:
+        return _live_fail("embeddings", exc)
+    if len(vectors) != 1:
+        return _live_fail("embeddings", f"expected 1 vector, got {len(vectors)}")
+    print("live: OK embeddings")
     return 0
 
 

@@ -62,6 +62,9 @@ _SUMMARY_BUDGET_FLOOR_S = 30.0
 # imports from config at its own module level.
 REASONING_POLICIES = ("model-default", "off", "by-purpose")
 
+# v1.9.0 addition (REQ-V190-RET-02): RAG_RERANK's legal values.
+RAG_RERANK_MODES = ("on", "off")
+
 # v1.2 addition (REQ-V12-SSR-02): scopes `address_scope` can name, and the
 # backstop the six is_* flags alone would miss (finding W-6).
 FORBIDDEN_SCOPES = ("loopback", "private", "link-local", "multicast",
@@ -150,6 +153,24 @@ class Config:
     # until T12 (REQ-V170-POL-07 supersedes this compatibility default then).
     llm_reasoning_policy: str = "by-purpose"
     llm_reasoning_on_purposes: frozenset[str] = frozenset({"tool-round"})
+    # v1.9.0 additions (REQ-V190-RET-02): the embeddings client and retrieval
+    # config. `embedding_model`/`embedding_dim` are required together --
+    # neither has a real default -- but both default to unset so every
+    # existing `load_config` caller and direct `Config()` construction keeps
+    # working (EC-05); `rag_enabled` is then `False` and no error is raised.
+    embedding_base_url: str = ""
+    embedding_model: str = ""
+    embedding_dim: int | None = None
+    embedding_timeout_s: float = 60.0
+    rag_top_k: int = 5
+    rag_rerank: str = "on"
+
+    @property
+    def rag_enabled(self) -> bool:
+        """`True` only once both halves of the required pair are set
+        (REQ-V190-RET-02). D3's "required, no default" is enforced at
+        deployment by RET-08's `_live_embeddings`, not here."""
+        return bool(self.embedding_model) and self.embedding_dim is not None
 
 
 def register_secret(value: str) -> None:
@@ -313,6 +334,37 @@ def load_config(
         source, "LLM_REASONING_ON_PURPOSES", "tool-round"
     )
 
+    # v1.9.0 additions (REQ-V190-RET-02): the embeddings client and retrieval
+    # config, read after LLM_REASONING_ON_PURPOSES.
+    #
+    # Only an explicitly-set EMBEDDING_BASE_URL is validated here: the
+    # inherited LMSTUDIO_BASE_URL default is validated at its own site
+    # above (`:262-263`), and only when the lmstudio provider is actually in
+    # play. An openrouter-only setup with failover off never validates
+    # LMSTUDIO_BASE_URL (the v0 rule) -- inheriting it must not retroactively
+    # demand it be well-formed (test_failover_auto_validates_both_provider_sets).
+    embedding_base_url_raw = _value(source, "EMBEDDING_BASE_URL")
+    if embedding_base_url_raw:
+        if not embedding_base_url_raw.startswith(("http://", "https://")):
+            raise ConfigError("EMBEDDING_BASE_URL must start with http:// or https://")
+        embedding_base_url = embedding_base_url_raw.rstrip("/")
+    else:
+        embedding_base_url = lmstudio_base_url
+
+    embedding_model = _value(source, "EMBEDDING_MODEL")
+    embedding_dim_raw = _value(source, "EMBEDDING_DIM")
+    embedding_dim = (
+        _parse_int(source, "EMBEDDING_DIM", 0, 1, 4096) if embedding_dim_raw else None
+    )
+    if bool(embedding_model) != (embedding_dim is not None):
+        raise ConfigError("EMBEDDING_MODEL and EMBEDDING_DIM must be set together")
+
+    embedding_timeout_s = _parse_timeout(
+        _value(source, "EMBEDDING_TIMEOUT_S"), key="EMBEDDING_TIMEOUT_S", default=60.0
+    )
+    rag_top_k = _parse_int(source, "RAG_TOP_K", 5, 1, 10)
+    rag_rerank = _parse_choice(source, "RAG_RERANK", "on", RAG_RERANK_MODES)
+
     return Config(
         telegram_bot_token=token,
         allowed_tg_ids=allowed_tg_ids,
@@ -364,6 +416,12 @@ def load_config(
         llm_summary_max_tokens=llm_summary_max_tokens,
         llm_reasoning_policy=llm_reasoning_policy,
         llm_reasoning_on_purposes=llm_reasoning_on_purposes,
+        embedding_base_url=embedding_base_url,
+        embedding_model=embedding_model,
+        embedding_dim=embedding_dim,
+        embedding_timeout_s=embedding_timeout_s,
+        rag_top_k=rag_top_k,
+        rag_rerank=rag_rerank,
     )
 
 
@@ -389,17 +447,20 @@ def _parse_allowed_ids(raw: str) -> frozenset[int]:
     return frozenset(int(item) for item in items)
 
 
-def _parse_timeout(raw: str) -> float:
+def _parse_timeout(raw: str, *, key: str = "LLM_TIMEOUT_S", default: float = 240.0) -> float:
+    """`key`/`default` are keyword-only additions (REQ-V190-RET-02, EC-05):
+    the one pre-existing caller (`LLM_TIMEOUT_S`, whose 240.0 default clears
+    REQ-V14-REL-01's latency-model floor at the default LLM_MAX_TOKENS) stays
+    byte-unchanged, and EMBEDDING_TIMEOUT_S gets its own key and default
+    (60.0) without a second copy of this function."""
     if not raw:
-        # REQ-V14-REL-01: 120 no longer clears the latency-model floor at the
-        # default LLM_MAX_TOKENS (2048) — supersedes EC-05 for this field only.
-        return 240.0
+        return default
     try:
         timeout = float(raw)
     except ValueError:
-        raise ConfigError(f"LLM_TIMEOUT_S must be a number, got: {raw}") from None
+        raise ConfigError(f"{key} must be a number, got: {raw}") from None
     if not 0 < timeout <= 600:
-        raise ConfigError(f"LLM_TIMEOUT_S must be greater than 0 and at most 600, got: {raw}")
+        raise ConfigError(f"{key} must be greater than 0 and at most 600, got: {raw}")
     return timeout
 
 
