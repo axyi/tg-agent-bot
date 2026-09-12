@@ -173,3 +173,25 @@ each run a live benchmark (reported, not gated) — strike REQ-V190-EC-06
 before `go` if that inference time is not wanted; and gate 7 is live and
 cannot pass with the reranker off, so the chat model on the box must answer
 the rerank prompts.
+
+## Closing message (run closed 2026-09-12)
+
+Run complete, T0–T13 all landed. `<base>` = `d6c13124d8108d6ca23900b91ef30d27d95fc6fc`,
+`<implementation-tip>` = `5f9c58f3ad49bf3b609df90329db4c7a83296a1f` (T12).
+T13's evidence-only commit: `02b9536a39a4c216b3e5f6fcd59abd46407a7e99`.
+**Tag `v1.9.0` created on that commit**, object `a009dac74647c8b1ae32d6442a75ed2141d77c27`.
+
+Final gate exit codes at T13: gates 1–6 and 8–15 of `checks.py run
+--profile full` all `0`; gate 7 (`rag_eval.py`) **exit 2** — the disclosed,
+diagnosed known limitation (recall@5=1.000 on every retrieval mode across
+every live run; the LLM reranker's completion contract only, root-caused
+to genuine run-to-run stochastic reasoning-length variance in the
+deployed thinking chat model `qwen/qwen3.8-27b`, not this release's code).
+`lint-docs` and `gitleaks-tree`, re-run against the evidence commit
+specifically: both exit `0`. `checks.py replay --range <base>..<implementation-tip>`:
+36/36 commits clean, no `--no-verify` anywhere.
+
+**The operator explicitly accepted the release under gate 7's standing
+FAIL** and authorised the tag — mirroring this project's own v1.7.0
+precedent. Full detail, every disclosed erratum, and the complete
+per-task history: `docs/reports/report-v1.9.0.md`.
