@@ -20,6 +20,7 @@ the assertions below check the value the code actually produces.
 from __future__ import annotations
 
 import logging
+import re
 import types
 
 import sqlite_vec
@@ -251,9 +252,11 @@ def test_t_v190_ret_06_rerank_reorders_truncates_candidates_and_records_the_call
     # measured across every routed model with the JSON schema below, the
     # passing completion length never exceeds 53 tokens.
     assert llm.max_tokens_calls == [128]
-    # v1.9.1 T1: 30.0, not v1.9.0's 120.0 -- measured median 0.83s on the
-    # routed model; 30.0 absorbs a provider hiccup and still fails fast.
-    assert llm.timeout_s_calls == [30.0]
+    # v1.9.1 T3, amended: 15.0 -- three clean sequential gate 7 runs showed
+    # the real tail needs more room than the first T3 value (10.0) gave it
+    # (see tests/test_v191_rerank_contract.py for the pinned attempt/backoff
+    # constants).
+    assert llm.timeout_s_calls == [15.0]
     # See module docstring: resolve_reasoning("off", frozenset(), "final")
     # degrades to "default", not "off" -- disclosed erratum.
     assert llm.reasoning_calls[0].value == "default"
@@ -305,20 +308,110 @@ def test_t_v190_ret_07_rerank_returns_none_on_llm_error(tmp_path):
     )
 
     assert result is None
+    # v1.9.1 T3: a non-retryable failure is never retried.
+    assert len(llm.calls) == 1
     conn.close()
 
 
-def test_t_v190_ret_07_rerank_returns_none_on_timeout(tmp_path):
+def test_t_v190_ret_07_rerank_retries_a_retryable_failure_and_succeeds(tmp_path):
+    """v1.9.1 T3 (docs/spec/task-briefs/v191-T3.md): a retryable LLMError
+    on attempt 1, success on attempt 2 -- rerank() retries and returns the
+    reordered passages, having called the client exactly twice and slept
+    once for the first backoff step."""
     conn = _conn(tmp_path)
     conv_id = storage.get_or_create_active_conversation(conn, 1)
-    llm = FakeLLM([LLMError("timed out", retryable=True, kind="timeout")])
+    llm = FakeLLM([
+        LLMError("boom", retryable=True, kind="http"),
+        LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
+    ])
+    sleeps = []
 
     result = rag.rerank(
         llm, question="q", candidates=_passages(2),
         conn=conn, conv_id=conv_id, resolve_cost=None,
+        sleep=lambda s: sleeps.append(s),
+    )
+
+    assert [p.chunk_id for p in result] == [2, 1]
+    assert len(llm.calls) == 2
+    assert sleeps == [0.5]
+    rows = conn.execute("SELECT attempt FROM llm_calls ORDER BY id").fetchall()
+    assert [r["attempt"] for r in rows] == [1, 2]
+    conn.close()
+
+
+def test_t_v190_ret_07_rerank_logs_a_successful_retry(tmp_path, caplog):
+    """v1.9.1 T3, amended: a retry that succeeds is logged too (not just a
+    retry that fails or gives up) -- attempt number and the successful
+    call's own elapsed seconds, at the same level as the retry-failure
+    warning, so a live gate 7 run can show how close to _RERANK_TIMEOUT_S
+    the real call gets."""
+    conn = _conn(tmp_path)
+    conv_id = storage.get_or_create_active_conversation(conn, 1)
+    llm = FakeLLM([
+        LLMError("boom", retryable=True, kind="http"),
+        LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
+    ])
+
+    with caplog.at_level(logging.WARNING, logger="rag"):
+        result = rag.rerank(
+            llm, question="q", candidates=_passages(2),
+            conn=conn, conv_id=conv_id, resolve_cost=None,
+            sleep=lambda s: None,
+        )
+
+    assert [p.chunk_id for p in result] == [2, 1]
+    success_records = [r for r in caplog.records if "succeeded on attempt" in r.getMessage()]
+    assert len(success_records) == 1
+    message = success_records[0].getMessage()
+    assert "2" in message  # the attempt number the success landed on
+    assert re.search(r"\d+\.\d+s", message)  # the elapsed-seconds value
+    conn.close()
+
+
+def test_t_v190_ret_07_rerank_does_not_log_success_on_the_first_attempt(tmp_path, caplog):
+    """A first-attempt success is the ordinary path, not a recovery -- it
+    must not be logged (the brief's own concern is a silent retry or a
+    silent recovery, not routine success noise)."""
+    conn = _conn(tmp_path)
+    conv_id = storage.get_or_create_active_conversation(conn, 1)
+    llm = FakeLLM([LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop")])
+
+    with caplog.at_level(logging.WARNING, logger="rag"):
+        result = rag.rerank(
+            llm, question="q", candidates=_passages(2),
+            conn=conn, conv_id=conv_id, resolve_cost=None,
+        )
+
+    assert [p.chunk_id for p in result] == [2, 1]
+    success_records = [r for r in caplog.records if "succeeded on attempt" in r.getMessage()]
+    assert len(success_records) == 0
+    conn.close()
+
+
+def test_t_v190_ret_07_rerank_returns_none_on_timeout(tmp_path):
+    """v1.9.1 T3: a `kind="timeout"` LLMError is retryable, so three
+    consecutive timeouts exhaust the attempt budget (_RERANK_MAX_ATTEMPTS)
+    rather than failing on the first one -- exactly three calls, both
+    backoff steps slept, and still None once the budget is spent."""
+    conn = _conn(tmp_path)
+    conv_id = storage.get_or_create_active_conversation(conn, 1)
+    llm = FakeLLM([
+        LLMError("timed out", retryable=True, kind="timeout"),
+        LLMError("timed out", retryable=True, kind="timeout"),
+        LLMError("timed out", retryable=True, kind="timeout"),
+    ])
+    sleeps = []
+
+    result = rag.rerank(
+        llm, question="q", candidates=_passages(2),
+        conn=conn, conv_id=conv_id, resolve_cost=None,
+        sleep=lambda s: sleeps.append(s),
     )
 
     assert result is None
+    assert len(llm.calls) == 3
+    assert sleeps == [0.5, 1.5]
     conn.close()
 
 
@@ -333,6 +426,8 @@ def test_t_v190_ret_07_rerank_returns_none_on_unparsable_reply(tmp_path):
     )
 
     assert result is None
+    # v1.9.1 T3: an unparsable reply is not a transient failure; never retried.
+    assert len(llm.calls) == 1
     conn.close()
 
 
@@ -347,6 +442,7 @@ def test_t_v190_ret_07_rerank_returns_none_on_out_of_range_index(tmp_path):
     )
 
     assert result is None
+    assert len(llm.calls) == 1
     conn.close()
 
 
@@ -361,6 +457,7 @@ def test_t_v190_ret_07_rerank_returns_none_on_duplicate_index(tmp_path):
     )
 
     assert result is None
+    assert len(llm.calls) == 1
     conn.close()
 
 
@@ -385,6 +482,77 @@ def test_t_v190_ret_07_searcher_falls_back_and_logs_exactly_one_warning(tmp_path
     assert [p.chunk_id for p in result.passages] == expected_order
     warnings = [r for r in caplog.records if "rerank fell back to rrf order" in r.getMessage()]
     assert len(warnings) == 1
+    conn.close()
+
+
+def test_t_v190_ret_07_searcher_rerank_retries_then_succeeds(tmp_path, monkeypatch):
+    """v1.9.1 T3: a retryable failure on attempt 1, success on attempt 2,
+    through the full Searcher.search path (rerank()'s default `sleep`
+    parameter, unchanged at this call site per the brief) -- the backoff
+    constant is patched to zero so the suite does not really sleep."""
+    monkeypatch.setattr(rag, "_RERANK_RETRY_BACKOFF_S", (0.0, 0.0))
+    conn = _conn(tmp_path)
+    embedder = FakeEmbedder(dim=16)
+    _index(conn, embedder, 1, "a.txt", ["alpha beta gamma", "alpha beta delta"])
+    conv_id = storage.get_or_create_active_conversation(conn, 1)
+    expected_order = _expected_hybrid_order(conn, embedder, 1, "alpha beta")
+    llm = FakeLLM([
+        LLMError("boom", retryable=True, kind="http"),
+        LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
+    ])
+
+    searcher = rag.Searcher(
+        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id, resolve_cost=None,
+    )
+    result = searcher.search("alpha beta")
+
+    assert result.rerank_attempted is True
+    assert result.rerank_succeeded is True
+    assert result.rerank_failure is None
+    assert [p.chunk_id for p in result.passages] == list(reversed(expected_order))
+    assert len(llm.calls) == 2
+    conn.close()
+
+
+def test_t_v190_ret_07_searcher_rerank_exhausts_retries_and_falls_back(
+    tmp_path, monkeypatch, caplog,
+):
+    """v1.9.1 T3: three retryable failures exhaust _RERANK_MAX_ATTEMPTS --
+    rerank_succeeded False, rerank_failure non-empty, passages fall back to
+    RRF order, and at least one per-retry warning fires in addition to the
+    existing single fallback warning. Backoff patched to zero, same reason
+    as the test above."""
+    monkeypatch.setattr(rag, "_RERANK_RETRY_BACKOFF_S", (0.0, 0.0))
+    conn = _conn(tmp_path)
+    embedder = FakeEmbedder(dim=16)
+    _index(conn, embedder, 1, "a.txt", ["alpha beta gamma", "alpha beta delta"])
+    conv_id = storage.get_or_create_active_conversation(conn, 1)
+    expected_order = _expected_hybrid_order(conn, embedder, 1, "alpha beta")
+    llm = FakeLLM([
+        LLMError("boom", retryable=True, kind="http"),
+        LLMError("boom", retryable=True, kind="http"),
+        LLMError("boom", retryable=True, kind="http"),
+    ])
+
+    searcher = rag.Searcher(
+        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id, resolve_cost=None,
+    )
+    with caplog.at_level(logging.WARNING, logger="rag"):
+        result = searcher.search("alpha beta")
+
+    assert result.rerank_attempted is True
+    assert result.rerank_succeeded is False
+    assert result.rerank_failure
+    assert [p.chunk_id for p in result.passages] == expected_order
+    assert len(llm.calls) == 3
+    retry_warnings = [r for r in caplog.records if "retrying" in r.getMessage()]
+    assert len(retry_warnings) >= 1
+    fallback_warnings = [
+        r for r in caplog.records if "rerank fell back to rrf order" in r.getMessage()
+    ]
+    assert len(fallback_warnings) == 1
     conn.close()
 
 

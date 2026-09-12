@@ -18,10 +18,25 @@ def test_t_v191_rerank_max_tokens_is_pinned_to_the_measured_ceiling():
 
 
 def test_t_v191_rerank_timeout_is_pinned_to_the_measured_ceiling():
-    """Measured (docs/reports/report-v1.9.1.md): median latency 0.83s on
-    the model LLM_RERANK_MODEL routes to. 30.0 is pinned here rather than
-    re-derived from rag.py."""
-    assert rag._RERANK_TIMEOUT_S == 30.0
+    """v1.9.1 T3, amended (docs/spec/task-briefs/v191-T3.md): three clean,
+    sha-verified sequential gate 7 runs all showed the same tail -- one item
+    timing out on attempt 1 and attempt 2 at the constant's first value
+    (10.0) and only succeeding on attempt 3, i.e. zero retry budget left on
+    every passing run. 15.0 restores headroom on that measured tail and is
+    pinned here rather than re-derived from rag.py."""
+    assert rag._RERANK_TIMEOUT_S == 15.0
+
+
+def test_t_v191_rerank_max_attempts_is_pinned():
+    """v1.9.1 T3: one initial try plus two retries, pinned as a literal
+    from the task brief -- never re-derived from rag.py."""
+    assert rag._RERANK_MAX_ATTEMPTS == 3
+
+
+def test_t_v191_rerank_retry_backoff_is_pinned():
+    """v1.9.1 T3: backoff before each retry, 0.5s then 1.5s, pinned as
+    literals from the task brief -- never re-derived from rag.py."""
+    assert tuple(rag._RERANK_RETRY_BACKOFF_S) == (0.5, 1.5)
 
 
 def test_t_v191_rerank_response_format_schema_shape():

@@ -1180,11 +1180,11 @@ MUTATIONS = [
         "id": "v191-rerank-response-format-dropped",
         "path": "rag.py",
         "find": (
-            "                timeout_s=_RERANK_TIMEOUT_S,\n"
-            "                response_format=_rerank_response_format(len(candidates)),\n"
-            "            )"
+            "                    timeout_s=_RERANK_TIMEOUT_S,\n"
+            "                    response_format=_rerank_response_format(len(candidates)),\n"
+            "                )"
         ),
-        "replace": "                timeout_s=_RERANK_TIMEOUT_S,\n            )",
+        "replace": "                    timeout_s=_RERANK_TIMEOUT_S,\n                )",
         "why": "v1.9.1 T1: the rerank call must ask for the JSON schema -- "
         "without response_format the model is free to reply in whatever "
         "shape it likes again, the exact contract gap that made gate 7 "
@@ -1205,6 +1205,20 @@ MUTATIONS = [
         "LLM_RERANK_MODEL -- dropping the branch silently falls through to "
         "the main client, so an operator's routed fast model is never "
         "actually used for reranking",
+    },
+    # -- v1.9.1 T3 (docs/spec/task-briefs/v191-T3.md): the retry-gating
+    # regression that would restore gate 7's flake on a single-upstream
+    # model's transient 429. --------------------------------------------
+    {
+        "id": "v191-rerank-retry-dropped",
+        "path": "rag.py",
+        "find": "if failure.retryable and attempt < _RERANK_MAX_ATTEMPTS:",
+        "replace": "if False:",
+        "why": "v1.9.1 T3: a retryable rerank failure (a 429, a timeout) "
+        "must be retried up to _RERANK_MAX_ATTEMPTS times -- without this "
+        "gate, the first transient upstream error degrades straight to RRF "
+        "fallback, the exact flake gate 7 hit under T1's single-upstream "
+        "model",
     },
 ]
 

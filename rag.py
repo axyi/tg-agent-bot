@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import rank_bm25
@@ -47,16 +48,25 @@ _RERANK_CANDIDATE_CHARS = 600
 # order still applies, so this is a safe, gate-visible degradation (gate 7
 # fails loudly), never a silent one.
 _RERANK_MAX_TOKENS = 128
-# v1.9.1 T1 (docs/reports/report-v1.9.1.md): v1.9.0's 120.0 was sized for the
-# production model's own measured latency (196.9s median) -- itself already
-# past `rag-eval`'s old 600s gate budget once multiplied across ten
-# answerable items, which is why gate 7 was never merely flaky but
-# structurally unable to finish. Measured against the model this call is now
-# routed to (LLM_RERANK_MODEL) instead, the median reply lands at 0.83s;
-# 30.0 gives headroom for a provider hiccup and still fails fast. A model
-# that reasons through this budget anyway degrades exactly as above: a safe
-# fallback to RRF order, caught by gate 7, not a silent one.
-_RERANK_TIMEOUT_S = 30.0
+# v1.9.1 T3 (docs/spec/task-briefs/v191-T3.md, amended): 10.0 (this
+# constant's first T3 value) was measured against a contaminated gate 7 run
+# (concurrent with gate 6's mutation of this file) and turned out too tight
+# for the real tail: three clean, sha-verified sequential gate 7 runs all
+# showed the same shape -- one item's rerank call times out on attempt 1
+# and attempt 2 at 10.0s each, succeeding only on attempt 3, i.e. every one
+# of those passes had zero retry budget left. 15.0 restores real headroom
+# on that measured tail while a 429 still returns fast enough not to matter
+# -- worst case per item is now 3 * 15.0 + (0.5 + 1.5) = 47.0s.
+_RERANK_TIMEOUT_S = 15.0
+# v1.9.1 T3: one initial try plus two retries -- a transient, explicitly
+# `retryable` upstream error (a 429 from a single-upstream model, the exact
+# failure that took gate 7 down under T1) must not degrade straight to RRF
+# fallback on its first occurrence.
+_RERANK_MAX_ATTEMPTS = 3
+# v1.9.1 T3: backoff before each retry, in seconds, indexed by
+# `attempt - 1` (attempt 1 failing waits index 0 before attempt 2, and so
+# on) -- a module constant, never a literal buried in the retry loop.
+_RERANK_RETRY_BACKOFF_S = (0.5, 1.5)
 
 _HYBRID_CANDIDATES = 10  # RRF is cut to this many candidates for the reranker
 
@@ -203,66 +213,97 @@ def rerank(
     conn,
     conv_id: int,
     resolve_cost,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> list[Passage] | None:
-    """REQ-V190-RET-06: one LLM listwise rerank call, recorded in
-    `llm_calls` with `purpose="rerank"`, `round=0`, `attempt=1`,
-    `turn_id=None`, inside a `chat` CLIENT span, through
-    `agent._record_llm_call` -- the same function the summary path uses
-    (`agent.py:1238-1257`'s pattern, mirrored here).
+    """REQ-V190-RET-06/-07 (v1.9.1 T3, docs/spec/task-briefs/v191-T3.md): an
+    LLM listwise rerank call, retried up to `_RERANK_MAX_ATTEMPTS` times
+    when -- and only when -- the raised `LLMError` is `retryable`. Every
+    attempt is recorded in `llm_calls` with `purpose="rerank"`, `round=0`,
+    `attempt=<n>`, `turn_id=None`, inside its own `chat` CLIENT span (one
+    span per attempt -- REQ-V160-TRC-04's rule, mirrored from `agent.py`'s
+    per-attempt loop), through `agent._record_llm_call` -- the same
+    function the summary path uses (`agent.py:1238-1257`'s pattern).
 
     Reasoning is forced off regardless of the operator's policy
     (`resolve_reasoning("off", frozenset(), "final")`, RET-06), not left to
     `cfg.llm_reasoning_policy`.
 
+    A retry that succeeds is logged too (attempt number, elapsed seconds of
+    the successful call) at the same level as a retry that fails -- a
+    silent recovery hides a degraded route as much as a silent retry does.
+
     Returns the candidates reordered per the parsed reply, followed by any
     candidate the reply omitted (in their original order). Returns `None`
-    on **any** failure: `LLMError` (including a timeout, which surfaces as
+    when every attempt is exhausted or the failure is not retryable: a
+    non-retryable `LLMError`, a retryable `LLMError` still failing after
+    `_RERANK_MAX_ATTEMPTS` attempts (including a timeout, which surfaces as
     an `LLMError` with `kind="timeout"`), an unparsable reply, an index
-    outside `1..len(candidates)`, or a duplicate index. Never raises for
-    any of those classes; an unexpected failure in the bookkeeping below
-    (`_record_llm_call`, span finalisation, `resolve_cost`) is deliberately
-    left to propagate -- the caller (`Searcher.search`) is the one that
-    wraps this whole call in `try/except Exception`.
+    outside `1..len(candidates)`, or a duplicate index. An unparsable reply
+    or an out-of-range/duplicate index is never retried -- it is not
+    transient, and a retry would only burn the attempt budget. Never raises
+    for any of those classes; an unexpected failure in the bookkeeping
+    below (`_record_llm_call`, span finalisation, `resolve_cost`) is
+    deliberately left to propagate -- the caller (`Searcher.search`) is the
+    one that wraps this whole call in `try/except Exception`.
     """
     messages = _rerank_messages(question, candidates)
     reasoning = resolve_reasoning("off", frozenset(), "final")
-    ts = storage.utc_now_iso()
-    started = time.monotonic()
+    sink = tracing.SqliteSpanSink(conn)
     response = None
     failure: LLMError | None = None
-    sink = tracing.SqliteSpanSink(conn)
-    with tracing.start_span("chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id) as span:
-        try:
-            response = llm.complete(
-                messages,
-                None,
-                max_tokens=_RERANK_MAX_TOKENS,
+    for attempt in range(1, _RERANK_MAX_ATTEMPTS + 1):
+        ts = storage.utc_now_iso()
+        started = time.monotonic()
+        response = None
+        failure = None
+        with tracing.start_span("chat", tracing.KIND_CLIENT, sink=sink, conv_id=conv_id) as span:
+            try:
+                response = llm.complete(
+                    messages,
+                    None,
+                    max_tokens=_RERANK_MAX_TOKENS,
+                    reasoning=reasoning,
+                    timeout_s=_RERANK_TIMEOUT_S,
+                    response_format=_rerank_response_format(len(candidates)),
+                )
+            except LLMError as exc:
+                span.set_error(exc)
+                failure = exc
+            elapsed_s = time.monotonic() - started
+            agent._record_llm_call(
+                conn,
+                conv_id,
+                llm,
+                resolve_cost,
+                span=span,
+                purpose="rerank",
+                round_no=0,
+                attempt=attempt,
+                ts=ts,
+                latency_ms=max(0, int(elapsed_s * 1000)),
+                turn_id=None,
+                messages=messages,
+                tools=None,
+                response=response,
+                error_kind=None if failure is None else failure.kind,
                 reasoning=reasoning,
-                timeout_s=_RERANK_TIMEOUT_S,
-                response_format=_rerank_response_format(len(candidates)),
             )
-        except LLMError as exc:
-            span.set_error(exc)
-            failure = exc
-        agent._record_llm_call(
-            conn,
-            conv_id,
-            llm,
-            resolve_cost,
-            span=span,
-            purpose="rerank",
-            round_no=0,
-            attempt=1,
-            ts=ts,
-            latency_ms=max(0, int((time.monotonic() - started) * 1000)),
-            turn_id=None,
-            messages=messages,
-            tools=None,
-            response=response,
-            error_kind=None if failure is None else failure.kind,
-            reasoning=reasoning,
-        )
-    if failure is not None:
+        if failure is None:
+            # v1.9.1 T3 (amended): a silent retry is how a degraded route
+            # hides, and so is a silent recovery -- log the attempt it took
+            # and the successful call's own elapsed time, so a future gate 7
+            # run can show how close to _RERANK_TIMEOUT_S the real call gets.
+            if attempt > 1:
+                log.warning(
+                    "rerank succeeded on attempt %d after %.2fs", attempt, elapsed_s,
+                )
+            break
+        if failure.retryable and attempt < _RERANK_MAX_ATTEMPTS:
+            log.warning(
+                "rerank attempt %d failed, retrying: %s", attempt, failure,
+            )
+            sleep(_RERANK_RETRY_BACKOFF_S[attempt - 1])
+            continue
         return None
     order = _parse_rerank_reply(response.content, len(candidates))
     if order is None:
