@@ -160,6 +160,37 @@ embeddings check to be true) — appended
 `bot.py --selftest-live` re-run clean: all seven checks `OK`
 (config/db/docker/telegram/lmstudio/embeddings/openrouter).
 
+## T11 — the v190-candidate benchmark and comparison (REQ-V190-EC-06)
+
+`docs/reports/bench-v190.md` (hand-assembled — full detail there). Both
+the baseline (T0, unchanged tree, aborted at S13) and the candidate (T11,
+reviewed tree through `9fb8783`, aborted at S15) hit `bench.py`'s own
+abort-stops-the-run behavior (`if aborted is not None: break` in its
+scenario loop) — a genuine limitation of the tool's own control flow the
+orchestrator initially mischaracterized in the T0 report as "continues
+rather than wiping the whole run"; **correction**: it does not wipe
+*completed* scenarios' data, but it does **not** continue to the
+remaining ones either. `bench.py report --gate` refuses to compare either
+file while marked `aborted`, so no formal `--gate` verdict exists for this
+release; `bench-v190.md` computes the per-scenario prompt-token delta by
+hand for the 12 scenarios both runs share instead. One operator-authorized
+re-run attempt at baseline with `--timeout-s 1200` (after confirming a
+live GPU-box outage that corrupted an intermediate attempt had cleared)
+ran 110 minutes, reached one scenario further, and showed **more**
+per-scenario failures (86.4% vs. 97.3%) than the original — confirming the
+same stochastic model-latency root cause already diagnosed for gate 7,
+not something a longer timeout reliably fixes. Per the operator's
+decision, the original T0 baseline and T11 candidate are used as-is; no
+further re-run attempted.
+
+**The measured delta**: `meta.prefix_tokens` +110 (842→952, the fourth
+tool's schema cost); single-call scenarios show exactly +110 prompt
+tokens, multi-call scenarios scale roughly linearly with call count —
+both matching EC-06's own prediction exactly. Two scenarios (S05, S09)
+show large negative deltas that are model-instability noise (retry/resend
+variance on this box), not real regressions or savings — disclosed as
+such, not reported as a finding.
+
 ## Formal waiver — AGENTS.md's spec-drift rule, for three already-disclosed deviations
 
 T11's clean-context review correctly flagged that AGENTS.md's "a PR that
