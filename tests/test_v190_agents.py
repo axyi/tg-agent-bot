@@ -123,15 +123,21 @@ def test_t_v190_ec_01_agents_md_layout_bullets_present():
         assert entry in text, f"missing layout bullet: {entry!r}"
 
 
-def test_t_v190_rpt_05_agents_md_count_lines_landed_at_t12():
-    # RPT-05: AGENTS.md:146's test count and :155's mutation count are
-    # written once, in T12. T10 left them at their pre-T10 figures (1220
-    # tests, 98 mutation entries) -- this test's own comment, from T10,
-    # named T12 as the release point for both; T12 has now landed the
-    # real post-run figures (1560 tests, 105 mutation entries).
+def test_t_v191_rpt_05_agents_md_count_lines_landed_at_t2():
+    # RPT-05: AGENTS.md's gate-3 test count and gate-6 mutation count lines
+    # were written for v1.9.0 at T12 (1560 tests, 105 entries) -- this test's
+    # own T12-era predecessor pinned those figures and named T12 as their
+    # landing point. v1.9.1 T1 added tests and two `v191-*` mutation entries,
+    # T3 (fixing gate 7's real 429 failure, found by T2's own authoritative
+    # gate run) added more tests and one more mutation entry
+    # (`v191-rerank-retry-dropped`), none of it updating either line (T1's
+    # and T3's own scope was the rerank contract, not the paperwork); T2
+    # (this task) lands the real, final post-run figures: 1593 tests
+    # (measured via `pytest --collect-only -q` on the tree after T3) and 108
+    # mutation entries.
     text = _read_agents_md()
-    assert "1560" in text
-    assert "105 entries" in text
+    assert "1593" in text
+    assert "108 entries" in text
 
 
 def test_t_v190_ec_01_readme_documents_rag_heading_present():
@@ -265,10 +271,14 @@ def test_t_v190_ec_01_readme_ec_13_partial_lift_sentence():
     assert "ng-05" in normalized or "non-goal" in normalized
 
 
-def test_t_v190_ec_01_quality_gates_yaml_repoints_report_path():
+def test_t_v191_ec_01_quality_gates_yaml_repoints_report_path():
+    # REQ-V190-RPT-01: lint-docs' report_path tracks the current release and
+    # is repointed again at each one (T10 did 1.8.0 -> 1.9.0; this task, T2,
+    # does 1.9.0 -> 1.9.1 -- discovered via pre-flight grep for pins the
+    # version bump would otherwise leave stale, not named in the task brief).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.9.0.md" in text
-    assert "report_path: docs/reports/report-v1.8.0.md" not in text
+    assert "report_path: docs/reports/report-v1.9.1.md" in text
+    assert "report_path: docs/reports/report-v1.9.0.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:

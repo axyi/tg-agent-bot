@@ -417,7 +417,7 @@ gates:
                    38-v14-t8-default-selection.md, 39-v14-t9-mutations.md,
                    40-v14-t9-review.md, 41-v14-t10-report.md,
                    42-v14-t10-advisor-followup.md, 43-v14-verify-run-fixes.md]
-    report_path: docs/reports/report-v1.9.0.md
+    report_path: docs/reports/report-v1.9.1.md
     ledger_header: "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |"
     blocking: true
     diff_scoped: false

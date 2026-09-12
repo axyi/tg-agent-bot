@@ -834,7 +834,8 @@ exactly as they are:
 | v1.5 | 1.5.0 | |
 | v1.5.1 | 1.5.1 | |
 | v1.6.0 | 1.6.0 | |
-| v1.9.0 | 1.9.0 | RAG over user documents; this release |
+| v1.9.0 | 1.9.0 | RAG over user documents |
+| v1.9.1 | 1.9.1 | rerank contract fix (`response_format` JSON schema, `LLM_RERANK_MODEL`) making gate 7 enforceable; this release |
 
 ## Token economy
 
