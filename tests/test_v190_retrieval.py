@@ -259,7 +259,18 @@ def test_t_v190_ret_06_rerank_reorders_truncates_candidates_and_records_the_call
     assert llm.reasoning_calls[0].value == "default"
     # v1.9.1 T1: the rerank call carries a JSON schema whose maximum/maxItems
     # equal the candidate count actually sent (3), not _HYBRID_CANDIDATES.
-    assert llm.response_format_calls == [rag._rerank_response_format(3)]
+    # Asserted against literals, never against _rerank_response_format's own
+    # output: a comparison to the function under test would survive any bug
+    # inside it (clean-context review, v1.9.1 T1 finding 1). The schema's full
+    # shape is pinned independently in tests/test_v191_rerank_contract.py; what
+    # this call site owes is that a schema is sent at all and that it is sized
+    # to the candidates, so that is what is checked here.
+    assert len(llm.response_format_calls) == 1
+    sent = llm.response_format_calls[0]
+    assert sent["type"] == "json_schema"
+    order = sent["json_schema"]["schema"]["properties"]["order"]
+    assert order["items"]["maximum"] == 3
+    assert order["maxItems"] == 3
 
     messages, tools = llm.calls[0]
     assert tools is None
