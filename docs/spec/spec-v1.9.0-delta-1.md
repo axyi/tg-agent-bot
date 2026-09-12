@@ -11,21 +11,29 @@ REQ-V170-GATE-03's table, yes/— verbatim, as carried by
 `spec-v1.8.0-delta-1.md:22-45`, plus this release's `rag_eval.py` and
 `mutation_check.py --select v190-` rows, minus the `note` column the parser
 never reads. Load-bearing markup: the parser
-(`tests/test_v15_standards.py:1711-1726`, EC-12) takes rows until the first
+(`tests/test_v15_standards.py:1718-1732`, EC-12) takes rows until the first
 line not starting with `|`, and every label must match
-`_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`) byte-for-byte.
+`_GATE_MATRIX_LABEL_TO_NAME` (`:1689-1715`) byte-for-byte. (Citations
+refreshed at v1.9.2 T1's review pass, prompt 166 — verified with
+`grep -n` against the tree at that commit; re-verify before trusting them
+against a later one, since line numbers drift with unrelated edits.)
 
 v1.9.2 T1 (REQ-V15-NG-04): the single `ruff format --check` row split into
 `(staged)`/`(tree)`, the same split `ruff check` already has, once the
 whole-tree reformat closed the debt spec-v1.5 parked and `ruff-format-all`
 took over blocking on `pre-push`/`full` in `ruff-format`'s place there.
+v1.9.2 T1's review pass (prompt 166) added `ruff-format-all` to
+`pre-commit` too, alongside `ruff-format` (`config/quality_gates.yaml`'s
+own comment there explains why `ruff-format` itself cannot simply retire:
+`checks.py:892`'s `replay` still reads its `blocking_paths`) -- the
+`(tree)` row's `pre-commit` cell moves from `—` to `yes` to match.
 
 | gate | pre-commit | pre-push | full |
 |---|:---:|:---:|:---:|
 | `ruff check` (staged) | yes | — | — |
 | `ruff check .` (tree) | — | yes | yes |
 | `ruff format --check` (staged) | yes | — | — |
-| `ruff format --check` (tree) | — | yes | yes |
+| `ruff format --check` (tree) | yes | yes | yes |
 | branch-name check | yes | yes | yes |
 | `gitleaks git --staged` | yes | — | — |
 | `gitleaks dir` (tree) | — | yes | yes |

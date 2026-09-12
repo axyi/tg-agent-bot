@@ -75,6 +75,28 @@ verified against its installed source, `skylos/config.py`'s
 | 26 | parameter | `tools.py:1007 attrs` (`handle_startendtag`) | **kept, suppressed** | (1) `html.parser.HTMLParser.handle_startendtag` override |
 | 27 | parameter | `tracing.py:129 span` (`NullSink.write`) | **kept, suppressed** | (1) `SpanSink` `Protocol` (`tracing.py:123`) -- `NullSink` implements `write(self, span) -> None` by design, dropping every span |
 
+**Erratum on row 8 (docs/prompts/166, clean-context review):**
+
+- `6c9a904`'s own commit message still reads the pre-amend text ("1 left
+  unsuppressed ... skylos 1 finding"): the coordinator's ruling on
+  `_MIGRATION_2_TO_3` landed after prompt 164's first pass wrote that
+  message, and this task-brief's own instruction is to close the finding
+  by erratum rather than rewrite `6c9a904`/`d25d664` (docs/spec/task-briefs/
+  v192-T1-review.md: "the erratum path is cheaper than re-citing"). The
+  commit **diff**, not the message, is authoritative: row 8 above and this
+  report's totals reflect what `6c9a904` actually contains -- 7 deleted,
+  20 suppressed, 0 unsuppressed, skylos 0.
+- The deletion supersedes a named non-goal: `docs/spec/spec-v1.7.0.md:2413`,
+  **REQ-V170-NG-14** -- "Deleting `storage._MIGRATION_2_TO_3` or any other
+  pre-existing dead code found in passing" is out of scope there because
+  "pre-existing dead code is reported, never removed as a side effect (lab
+  rule 3)". That non-goal does not bind here: this deletion is not a side
+  effect stumbled into while working on something else -- it is the
+  operator's own whole-tree cleanup order (handoff, verbatim: "исправление
+  всех проблем"), applied deliberately through §A.3's (a)(b)(c) procedure,
+  the same distinction §A.3's own text already draws between passive
+  discovery and an explicit cleanup mandate.
+
 **Totals: 7 deleted (2 functions, 5 variables), 20 kept-and-suppressed, 0
 kept-unsuppressed.** Post-fix `skylos . --gate --strict` count: **0**.
 (Finding #8, `_MIGRATION_2_TO_3`, was initially dispositioned "kept,
@@ -173,6 +195,14 @@ afterward, both still clean. The full 108-entry `mutation_check.py` run
 
 REQ-V15-NG-04 is closed.
 
+**Disposition on the brief's §B.4 doc-update instruction** ("update
+`AGENTS.md:30` and `:213-215` ... and any README line that says format is
+shadow"): instruction moot -- neither line, nor any README line, ever said
+`ruff format` was shadow (both cited spots describe `skylos`, not
+`ruff-format`; grepped for "shadow" and for "ruff format"/"ruff-format" in
+both files to confirm). Nothing there needed changing. `skylos (shadow)`
+wording is kept as-is, per §C.5 above (skylos stays non-blocking).
+
 ### C. Beyond skylos
 
 **C.1 semgrep scanning its own rule pack.** `config/quality_gates.yaml`'s
@@ -183,9 +213,10 @@ own literal argv independently and was already unaffected -- it asserts on
 `--severity ERROR` behaviour that the two INFO-level self-scan findings
 never touched). Verified: `semgrep scan --config .semgrep/ --exclude
 .semgrep ...` now reports 0 findings under `.semgrep/` at any severity,
-and 1 total (the already-reviewed `storage.py:439`).
+and 1 total (the already-reviewed `storage.py:487` -- `:439` before
+prompt 165's whole-tree reformat moved it).
 
-**C.2 `storage.py:439` insecure-file-permissions (WARNING).** Reviewed,
+**C.2 `storage.py:487` insecure-file-permissions (WARNING).** Reviewed,
 dismissed, no code change: `os.chmod(parent, 0o700)` tightens permissions
 (owner-only), which is the intended posture for the sqlite data directory.
 
@@ -283,8 +314,16 @@ clean; this task does not flip it, leaving that call to the operator.
 naming the interface or reference it protects. **0** findings left without
 a suppression comment: `_MIGRATION_2_TO_3` (§A #8) could not carry one
 (the flagged line opens a triple-quoted SQL string) and was deleted
-instead on the operator's explicit ruling. **0** scanner-exclusion-as-fix;
-the one target
+instead on the operator's explicit ruling. A `# skylos: ignore` comment is
+line-scoped (skylos 4.35.0's own `config.py`), so on a `def` line it also
+hides that function's own name from skylos's unused-*function* check, not
+only the parameter finding it was added for -- this affects the eight
+functions where the suppression sits on the `def` line itself:
+`_handle_signal`, `cmd_doctor`, `cmd_lint_docs`, `log_message`,
+`log_error`, `handle_starttag`, `handle_startendtag`, `NullSink.write`; a
+future dead-code pass should check these eight by hand rather than trust
+skylos to still catch them if they ever become genuinely unreferenced.
+**0** scanner-exclusion-as-fix; the one target
 exclusion (`--exclude .semgrep`, §C.1) is a scan-scope correction (the
 tool was scanning its own rule pack, not project code), not a suppression
 of a real finding.
@@ -300,3 +339,6 @@ of a real finding.
 ### Delegation record
 
 - T1 -- delegated, brief `docs/spec/task-briefs/v192-T1.md`.
+- Both `6c9a904` and `d25d664` carry `Co-Authored-By: Claude Sonnet 5`;
+  accurate to the executor model for this task (verified against the
+  session's own model-identity reminder), left as-is.

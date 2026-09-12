@@ -5,7 +5,7 @@ scope:
   zero_sha: "0000000000000000000000000000000000000000"
 
 profiles:
-  pre-commit: [ruff-check, ruff-format, gitleaks-staged, branch-name]
+  pre-commit: [ruff-check, ruff-format, ruff-format-all, gitleaks-staged, branch-name]
   pre-push:   [ruff-check-all, ruff-format-all, branch-name, pytest, selftest,
                gitleaks-tree, trivy, semgrep, skylos, mutation-v15, mutation-v160,
                mutation-v170, mutation-v180, mutation-v190, hooks-installed, doctor]
@@ -58,9 +58,14 @@ gates:
   # (mutation_check.py's re-derived find strings, gate 6 at 0 drifted, every
   # `*.py` in the tree already formatted) -- `ruff-format-all` below is the
   # whole-tree twin, the same shape as `ruff-check-all` next to
-  # `ruff-check`, wired into `pre-push`/`full` in its place. This gate stays
-  # only in `pre-commit`, for a fast per-commit check on the staged diff;
-  # `blocking_paths` still exists for that narrow, already-covered set.
+  # `ruff-check`. `pre-commit` now runs both this gate and `ruff-format-all`
+  # (v1.9.2 T1 review, prompt 166): the tree-formatted world alone doesn't
+  # retire this one, because `devtools/checks.py:892`'s `replay` reads this
+  # gate's own `blocking_paths` to re-verify commits made *before* the
+  # whole-tree reformat existed, when the new/legacy split was still real --
+  # deleting the key would break replaying that history. `pre-push`/`full`
+  # keep only `ruff-format-all`, since a push/full run never needs to
+  # replay a single historical commit through the partitioned shape.
   ruff-format:
     kind: command
     result_mode: exit_status
