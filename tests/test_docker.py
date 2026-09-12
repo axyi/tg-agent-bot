@@ -16,7 +16,7 @@ import pytest
 import bot
 import tools
 
-STUB = '''#!/usr/bin/env python3
+STUB = """#!/usr/bin/env python3
 import json, os, sys, time
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +51,7 @@ if mode.get("sleep"):
 sys.stdout.write(mode.get("stdout", ""))
 sys.stderr.write(mode.get("stderr", ""))
 sys.exit(mode.get("exit", 0))
-'''
+"""
 
 
 @pytest.fixture
@@ -104,26 +104,53 @@ def test_t_v1_dk_01_argv_is_exactly_the_specified_list():
         empty_resolv=Path("/state/.resolv-empty"),
     )
     assert built == [
-        "docker", "run", "--rm", "--pull", "never",
-        "--name", "tgexec-deadbeef",
-        "--label", "tgexec=1",
-        "--network", "none",
-        "--user", "1000:1000",
+        "docker",
+        "run",
+        "--rm",
+        "--pull",
+        "never",
+        "--name",
+        "tgexec-deadbeef",
+        "--label",
+        "tgexec=1",
+        "--network",
+        "none",
+        "--user",
+        "1000:1000",
         "--read-only",
-        "--mount", "type=bind,source=/srv/sandbox,target=/work",
-        "--mount", "type=bind,source=/state/.resolv-empty,target=/etc/resolv.conf,readonly",
-        "--tmpfs", "/tmp:rw,size=67108864,mode=1777",
-        "--workdir", "/work",
-        "--env", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "--env", "LANG=C.UTF-8",
-        "--env", "HOME=/work",
-        "--memory", "512m", "--memory-swap", "512m",
-        "--cpus", "1.0",
-        "--pids-limit", "128",
-        "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges",
+        "--mount",
+        "type=bind,source=/srv/sandbox,target=/work",
+        "--mount",
+        "type=bind,source=/state/.resolv-empty,target=/etc/resolv.conf,readonly",
+        "--tmpfs",
+        "/tmp:rw,size=67108864,mode=1777",
+        "--workdir",
+        "/work",
+        "--env",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "--env",
+        "LANG=C.UTF-8",
+        "--env",
+        "HOME=/work",
+        "--memory",
+        "512m",
+        "--memory-swap",
+        "512m",
+        "--cpus",
+        "1.0",
+        "--pids-limit",
+        "128",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
         "--init",
-        "python:3.13-slim", "timeout", "--kill-after=5", "30", "uname", "-a",
+        "python:3.13-slim",
+        "timeout",
+        "--kill-after=5",
+        "30",
+        "uname",
+        "-a",
     ]
 
 
@@ -177,9 +204,7 @@ def test_t_v1_dk_03_unavailable_backend_never_spawns(sandbox, monkeypatch):
     result = tools.run_command_docker(
         ["uname", "-a"], workdir=sandbox, image="python:3.13-slim", docker_ok=False
     )
-    assert result == {
-        "error": "exec backend unavailable: docker is not available on this host"
-    }
+    assert result == {"error": "exec backend unavailable: docker is not available on this host"}
 
 
 def test_t_v1_dk_04_docker_level_failures_are_distinct(docker_stub, sandbox):
@@ -190,7 +215,7 @@ def test_t_v1_dk_04_docker_level_failures_are_distinct(docker_stub, sandbox):
     prefix = "exec failed (docker exit 125): "
     assert set(result) == {"error"}
     assert result["error"].startswith(prefix + "daemon said no: ")
-    assert len(result["error"][len(prefix):]) <= 200
+    assert len(result["error"][len(prefix) :]) <= 200
 
     docker_stub.set(exit=7, stdout="partial\n", stderr="warned\n")
     normal = tools.run_command_docker(
@@ -217,8 +242,11 @@ def test_t_v1_dk_05_timeout_kills_the_container(docker_stub, sandbox, monkeypatc
     monkeypatch.setattr(tools, "DOCKER_STARTUP_GRACE_S", 0.0)
     docker_stub.set(sleep=30)
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, timeout_s=0.5,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        timeout_s=0.5,
     )
     assert result["timed_out"] is True
     assert result["exit_code"] != 0
@@ -237,13 +265,19 @@ def test_t_v1_dk_05_timeout_kills_the_container(docker_stub, sandbox, monkeypatc
     def spy(full_argv, **kwargs):
         seen["timeout_s"] = kwargs["timeout_s"]
         return {
-            "exit_code": 0, "timed_out": False, "truncated": False,
-            "stdout": "", "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "truncated": False,
+            "stdout": "",
+            "stderr": "",
         }
 
     monkeypatch.setattr(tools, "_run_process", spy)
     tools.run_command_docker(
-        ["true"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+        ["true"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
     )
     assert seen["timeout_s"] == tools.EXEC_TIMEOUT_S + real_grace
 
@@ -266,9 +300,7 @@ def test_t_v1_dk_07_probe_and_runner_share_the_daemon(docker_stub, sandbox, monk
     docker_stub.set(version="27.1.2", exit=0, stdout="ok\n")
 
     assert tools.docker_probe() == "27.1.2"
-    tools.run_command_docker(
-        ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True
-    )
+    tools.run_command_docker(["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True)
 
     seen = {tuple(c["argv"][:1]): c["env"] for c in docker_stub.calls()}
     assert seen[("version",)]["DOCKER_HOST"] == "tcp://198.51.100.7:2376"
@@ -289,9 +321,7 @@ def test_t_v1_dk_08_root_refusal_disables_exec(sandbox, caplog, monkeypatch):
         version, docker_ok = bot.exec_backend_status(probe=lambda: "27.1.2")
     assert version == "27.1.2"
     assert docker_ok is False
-    assert any(
-        "refusing to run exec as root" in record.getMessage() for record in caplog.records
-    )
+    assert any("refusing to run exec as root" in record.getMessage() for record in caplog.records)
 
     result = tools.run_command_docker(
         ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=docker_ok

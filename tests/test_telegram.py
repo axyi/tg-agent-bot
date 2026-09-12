@@ -181,11 +181,17 @@ def test_t_tg_05_retry_after_beats_backoff(conn, tmp_path):
     seen.clear()
     sleeps = []
     code = bot.poll_loop(
-        conn=conn, tg=tg_client(handler), cfg=cfg, llm=FakeLLM([]), skills={},
-        runner=RecordingRunner(), bot_username=BOT_USERNAME, sleep=sleeps.append,
+        conn=conn,
+        tg=tg_client(handler),
+        cfg=cfg,
+        llm=FakeLLM([]),
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
+        sleep=sleeps.append,
     )
     assert code == 2
-    assert sleeps == [8.0]      # retry_after + 1.0, never the generic backoff
+    assert sleeps == [8.0]  # retry_after + 1.0, never the generic backoff
 
 
 def test_t_tg_06_token_never_reaches_logs_or_exceptions(conn, tmp_path, caplog):
@@ -280,7 +286,10 @@ def test_t_tg_10_partial_delivery(conn, tmp_path, caplog):
     tg = FakeTelegram(fail_on=2, error=bot.TelegramError("telegram sendMessage http 500"))
     with caplog.at_level(logging.ERROR):
         tg, llm, runner = process(
-            conn, cfg, update(update_id=3), tg=tg,
+            conn,
+            cfg,
+            update(update_id=3),
+            tg=tg,
             llm=FakeLLM([LLMResponse(long_answer, [], "stop")]),
         )
     assert len(tg.sent) == 1
@@ -292,8 +301,9 @@ def test_t_tg_10_partial_delivery(conn, tmp_path, caplog):
 def test_t_tg_11_at_most_once(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     tg = FakeTelegram(fail_on=1, error=bot.TelegramError("telegram sendMessage http 500"))
-    process(conn, cfg, update(update_id=77), tg=tg,
-            llm=FakeLLM([LLMResponse("lost reply", [], "stop")]))
+    process(
+        conn, cfg, update(update_id=77), tg=tg, llm=FakeLLM([LLMResponse("lost reply", [], "stop")])
+    )
     assert tg.sent == []
     assert storage.get_state(conn, "last_update_id") == "77"
 
@@ -306,8 +316,14 @@ def test_t_tg_11_at_most_once(conn, tmp_path):
 
     second_llm = FakeLLM([])
     code = bot.poll_loop(
-        conn=conn, tg=Restarted(), cfg=cfg, llm=second_llm, skills={},
-        runner=RecordingRunner(), bot_username=BOT_USERNAME, sleep=lambda s: None,
+        conn=conn,
+        tg=Restarted(),
+        cfg=cfg,
+        llm=second_llm,
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
+        sleep=lambda s: None,
     )
     assert code == 2
     assert offsets == [78]
@@ -323,7 +339,13 @@ def test_t_tg_12_fatal_token_error(conn, tmp_path):
         return httpx.Response(401, text="Unauthorized")
 
     code = bot.poll_loop(
-        conn=conn, tg=tg_client(handler), cfg=cfg, llm=FakeLLM([]), skills={},
-        runner=RecordingRunner(), bot_username=BOT_USERNAME, sleep=lambda s: None,
+        conn=conn,
+        tg=tg_client(handler),
+        cfg=cfg,
+        llm=FakeLLM([]),
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
+        sleep=lambda s: None,
     )
     assert code == 2

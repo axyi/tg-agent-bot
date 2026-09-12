@@ -46,14 +46,17 @@ def isolated_secret_registry():
 # 5.1 Minted tool-call identifiers (REQ-V12-ID-01..04)
 # --------------------------------------------------------------------------
 
+
 def test_t_v12_id_01_model_authored_id_and_name_never_stored(conn):
     config.register_secret(SENTINEL)
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hello")
-    llm = FakeLLM([
-        LLMResponse("", [ToolCall(SENTINEL, SENTINEL, EXEC_ARGS)], "tool_calls"),
-        LLMResponse("done", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("", [ToolCall(SENTINEL, SENTINEL, EXEC_ARGS)], "tool_calls"),
+            LLMResponse("done", [], "stop"),
+        ]
+    )
     reply = agent.run_agent(
         conn=conn, conv_id=conv, llm=llm, skills={}, runner=RecordingRunner(), now=NOW
     )
@@ -82,12 +85,17 @@ def test_t_v12_id_01_model_authored_id_and_name_never_stored(conn):
 def test_t_v12_id_02_pairing_survives_a_restart(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hello")
-    llm = FakeLLM([
-        LLMResponse("", [ToolCall("a", "exec", EXEC_ARGS), ToolCall("b", "exec", EXEC_ARGS)],
-                    "tool_calls"),
-        LLMResponse("", [ToolCall("c", "exec", EXEC_ARGS)], "tool_calls"),
-        LLMResponse("done", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse(
+                "",
+                [ToolCall("a", "exec", EXEC_ARGS), ToolCall("b", "exec", EXEC_ARGS)],
+                "tool_calls",
+            ),
+            LLMResponse("", [ToolCall("c", "exec", EXEC_ARGS)], "tool_calls"),
+            LLMResponse("done", [], "stop"),
+        ]
+    )
     agent.run_agent(conn=conn, conv_id=conv, llm=llm, skills={}, runner=RecordingRunner(), now=NOW)
 
     restored = storage.load_context_messages(conn, conv, 30)
@@ -125,14 +133,22 @@ def test_t_v12_id_03_normalize_tool_calls_discards_raw_ids():
 def _seed_selftest_transcript(conn, *, assistant_call_id, tool_row_call_id):
     conv_id = storage.get_or_create_active_conversation(conn, 424242)
     storage.add_user_message(conn, conv_id, "run the selftest")
-    tool_calls = [{
-        "id": assistant_call_id, "type": "function",
-        "function": {"name": "exec", "arguments": "{}"},
-    }]
-    envelope = json.dumps({
-        "exit_code": 0, "stdout": "ok\n", "stderr": "",
-        "timed_out": False, "truncated": False,
-    })
+    tool_calls = [
+        {
+            "id": assistant_call_id,
+            "type": "function",
+            "function": {"name": "exec", "arguments": "{}"},
+        }
+    ]
+    envelope = json.dumps(
+        {
+            "exit_code": 0,
+            "stdout": "ok\n",
+            "stderr": "",
+            "timed_out": False,
+            "truncated": False,
+        }
+    )
     storage.add_tool_turn(conn, conv_id, "", tool_calls, [(tool_row_call_id, envelope)])
     storage.add_assistant_message(conn, conv_id, "selftest ok")
     storage.set_state(conn, "last_update_id", "1")
@@ -152,8 +168,10 @@ def test_t_v12_id_04_selftest_pairing_check(tmp_path):
     storage.init_schema(conn)
     _seed_selftest_transcript(conn, assistant_call_id="call_9_0", tool_row_call_id="call_9_0")
     cfg = make_cfg(
-        tmp_path, db_path=good_db,
-        exec_workdir=tmp_path / "sandbox", audit_log_path=tmp_path / "exec_audit.jsonl",
+        tmp_path,
+        db_path=good_db,
+        exec_workdir=tmp_path / "sandbox",
+        audit_log_path=tmp_path / "exec_audit.jsonl",
     )
     assert bot._selftest_failure(conn, _FakeSelftestTg(), cfg, tmp_path) is None
     conn.close()
@@ -163,8 +181,10 @@ def test_t_v12_id_04_selftest_pairing_check(tmp_path):
     storage.init_schema(conn2)
     _seed_selftest_transcript(conn2, assistant_call_id="call_9_0", tool_row_call_id="call_9_1")
     cfg2 = make_cfg(
-        tmp_path, db_path=bad_db,
-        exec_workdir=tmp_path / "sandbox", audit_log_path=tmp_path / "exec_audit.jsonl",
+        tmp_path,
+        db_path=bad_db,
+        exec_workdir=tmp_path / "sandbox",
+        audit_log_path=tmp_path / "exec_audit.jsonl",
     )
     failure = bot._selftest_failure(conn2, _FakeSelftestTg(), cfg2, tmp_path)
     assert failure == "the stored tool call and its result do not share an identifier"
@@ -174,10 +194,12 @@ def test_t_v12_id_04_selftest_pairing_check(tmp_path):
 def test_t_v12_id_05_unknown_name_stored_as_unknown(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hello")
-    llm = FakeLLM([
-        LLMResponse("", [ToolCall("call_x", "nosuchtool", "{}")], "tool_calls"),
-        LLMResponse("done", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("", [ToolCall("call_x", "nosuchtool", "{}")], "tool_calls"),
+            LLMResponse("done", [], "stop"),
+        ]
+    )
     reply = agent.run_agent(
         conn=conn, conv_id=conv, llm=llm, skills={}, runner=RecordingRunner(), now=NOW
     )
@@ -197,6 +219,7 @@ def test_t_v12_id_05_unknown_name_stored_as_unknown(conn):
 # --------------------------------------------------------------------------
 # 5.2 The tri-state sandbox scan (REQ-V12-QTA-01..03)
 # --------------------------------------------------------------------------
+
 
 def test_t_v12_qta_01_tri_state(tmp_path):
     (tmp_path / "a.txt").write_bytes(b"x" * 10)
@@ -259,14 +282,21 @@ def test_t_v12_qta_02_refusal_envelopes_and_audit_record(tmp_path, monkeypatch):
         captured.append(record)
 
     def run(sandbox_max_bytes):
-        return json.loads(tools.execute_tool(
-            "exec", json.dumps({"argv": ["true"]}), skills={},
-            runner=functools.partial(
-                tools.run_command_docker, workdir=box, image="python:3.13-slim",
-                docker_ok=True, sandbox_max_bytes=sandbox_max_bytes,
-            ),
-            audit=audit,
-        ))
+        return json.loads(
+            tools.execute_tool(
+                "exec",
+                json.dumps({"argv": ["true"]}),
+                skills={},
+                runner=functools.partial(
+                    tools.run_command_docker,
+                    workdir=box,
+                    image="python:3.13-slim",
+                    docker_ok=True,
+                    sandbox_max_bytes=sandbox_max_bytes,
+                ),
+                audit=audit,
+            )
+        )
 
     result = run(1000)
     assert result["error"].startswith("sandbox is full")
@@ -305,7 +335,10 @@ def test_t_v12_qta_03_unreadable_subtree_cannot_bypass_the_quota(tmp_path, monke
     ghost.chmod(0)
     try:
         result = tools.run_command_docker(
-            ["uname"], workdir=box, image="python:3.13-slim", docker_ok=True,
+            ["uname"],
+            workdir=box,
+            image="python:3.13-slim",
+            docker_ok=True,
             sandbox_max_bytes=1000,
         )
     finally:
@@ -333,8 +366,7 @@ def test_t_v12_qta_04_startup_cleanup(tmp_path, caplog):
     assert stat.S_IMODE(box.stat().st_mode) == 0o700
     assert outside.exists()
     assert any(
-        "cleared 3 entries from the sandbox at startup" in r.getMessage()
-        for r in caplog.records
+        "cleared 3 entries from the sandbox at startup" in r.getMessage() for r in caplog.records
     )
 
 
@@ -384,39 +416,58 @@ def test_t_v12_qta_04_a_listing_failure_logs_and_does_not_raise(tmp_path, caplog
 # 5.3 The three-layer fetch allowlist (REQ-V12-SSR-01..03)
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("bad", [
-    "127.1", "127.0.1", "0x7f.1", "0x7f.0.0.1",
-    "-bad.example", "bad-.example", "a..b", "example.123",
-])
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "127.1",
+        "127.0.1",
+        "0x7f.1",
+        "0x7f.0.0.1",
+        "-bad.example",
+        "bad-.example",
+        "a..b",
+        "example.123",
+    ],
+)
 def test_t_v12_ssr_01_rejects_malformed_shapes(bad):
     with pytest.raises(ConfigError):
         config._parse_domains(bad)
 
 
-@pytest.mark.parametrize("good", [
-    "wttr.in", "sub.wttr.in", "example.co.uk", "xn--80a1acny.xn--p1ai",
-    "x" * 63 + ".com",
-])
+@pytest.mark.parametrize(
+    "good",
+    [
+        "wttr.in",
+        "sub.wttr.in",
+        "example.co.uk",
+        "xn--80a1acny.xn--p1ai",
+        "x" * 63 + ".com",
+    ],
+)
 def test_t_v12_ssr_01_accepts_ordinary_shapes(good):
     assert config._parse_domains(good) == frozenset({good})
 
 
-@pytest.mark.parametrize("addr,expected", [
-    ("127.0.0.1", "loopback"),
-    ("::1", "loopback"),
-    ("10.0.0.1", "private"),
-    # link-local addresses are also flagged private by Python's `ipaddress`,
-    # and REQ-V12-SSR-02 checks is_private first — so "private" wins here,
-    # exactly as the six-flag ordering the requirement specifies produces.
-    ("169.254.1.1", "private"),
-    ("224.0.0.1", "multicast"),
-    ("5f00::1", "reserved"),
-    ("0.0.0.0", "private"),
-    ("100.64.0.1", "non-global"),
-    ("::ffff:100.64.0.1", "non-global"),
-    ("8.8.8.8", None),
-    ("not-an-ip", "unparsable"),
-])
+@pytest.mark.parametrize(
+    "addr,expected",
+    [
+        ("127.0.0.1", "loopback"),
+        ("::1", "loopback"),
+        ("10.0.0.1", "private"),
+        # link-local addresses are also flagged private by Python's `ipaddress`,
+        # and REQ-V12-SSR-02 checks is_private first — so "private" wins here,
+        # exactly as the six-flag ordering the requirement specifies produces.
+        ("169.254.1.1", "private"),
+        ("224.0.0.1", "multicast"),
+        ("5f00::1", "reserved"),
+        ("0.0.0.0", "private"),
+        ("100.64.0.1", "non-global"),
+        ("::ffff:100.64.0.1", "non-global"),
+        ("8.8.8.8", None),
+        ("not-an-ip", "unparsable"),
+    ],
+)
 def test_t_v12_ssr_02_address_scope(addr, expected):
     assert config.address_scope(addr) == expected
 
@@ -437,9 +488,7 @@ def test_t_v12_ssr_03_startup_resolution_check_refuses_and_warns(tmp_path, caplo
 
     with caplog.at_level(logging.WARNING):
         bot._check_allowlist_resolution(cfg, raises)  # must not raise
-    assert any(
-        "could not resolve allowlisted domain" in r.getMessage() for r in caplog.records
-    )
+    assert any("could not resolve allowlisted domain" in r.getMessage() for r in caplog.records)
 
 
 def test_t_v12_ssr_04_fetch_url_refuses_a_forbidden_resolved_address():
@@ -448,7 +497,9 @@ def test_t_v12_ssr_04_fetch_url_refuses_a_forbidden_resolved_address():
 
     client = httpx.Client(transport=mock_llm_transport(transport_forbidden))
     result = tools.fetch_url(
-        "https://wttr.in/x", allowed_domains=ALLOWED, client=client,
+        "https://wttr.in/x",
+        allowed_domains=ALLOWED,
+        client=client,
         resolve=lambda host: ["127.0.0.1"],
     )
     assert result["error"] == "url resolves to a loopback address: wttr.in"
@@ -472,7 +523,9 @@ def test_t_v12_ssr_04_redirect_hop_is_also_checked():
 
     client = httpx.Client(transport=mock_llm_transport(redirecting))
     result = tools.fetch_url(
-        "https://wttr.in/start", allowed_domains=ALLOWED, client=client,
+        "https://wttr.in/start",
+        allowed_domains=ALLOWED,
+        client=client,
         resolve=flaky_resolver,
     )
     assert result["error"] == "url resolves to a loopback address: wttr.in"
@@ -497,6 +550,7 @@ def test_t_v12_ssr_04_resolve_none_is_exactly_v11_behaviour():
 # --------------------------------------------------------------------------
 # 5.4 The hardened resolv file (REQ-V12-INF-01)
 # --------------------------------------------------------------------------
+
 
 def test_t_v12_inf_01_comprehensive(tmp_path):
     state = tmp_path / "state"
@@ -536,6 +590,7 @@ def test_t_v12_inf_01_comprehensive(tmp_path):
 # 5.5 The ownership-aware reap (REQ-V12-ORP-01..03)
 # --------------------------------------------------------------------------
 
+
 def test_t_v12_orp_01_start_ticks_survives_a_space_in_comm(monkeypatch):
     # A foreign process's /proc/<pid>/stat field 2 (comm, in parens) is
     # controlled by that process and may itself contain spaces and
@@ -568,8 +623,13 @@ def test_t_v12_orp_01_owner_key_round_trip():
 
 def test_t_v12_orp_01_owner_label_placement():
     argv = tools.build_docker_argv(
-        ["uname"], image="python:3.13-slim", sandbox="/srv/sandbox",
-        uid=1000, gid=1000, container_name="tgexec-x", owner="123-456",
+        ["uname"],
+        image="python:3.13-slim",
+        sandbox="/srv/sandbox",
+        uid=1000,
+        gid=1000,
+        container_name="tgexec-x",
+        owner="123-456",
     )
     idx = argv.index(tools.CONTAINER_LABEL)
     assert argv[idx - 1] == "--label"
@@ -580,41 +640,51 @@ def test_t_v12_orp_01_owner_label_placement():
 def test_t_v12_orp_02_three_containers(docker_stub, caplog):  # noqa: F811
     live = tools.owner_key()
     dead = "999999999-1"
-    docker_stub.set(ps_entries=[
-        ["unlabelled1", ""],
-        ["dead1", dead],
-        ["alive1", live],
-    ])
+    docker_stub.set(
+        ps_entries=[
+            ["unlabelled1", ""],
+            ["dead1", dead],
+            ["alive1", live],
+        ]
+    )
     with caplog.at_level(logging.INFO):
         bot._reap_orphaned_containers()
     rm_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["rm"]]
     assert rm_calls == [["rm", "-f", "unlabelled1", "dead1"]]
     assert any(
-        "skipped 1 container(s) owned by a live process" in r.getMessage()
-        for r in caplog.records
+        "skipped 1 container(s) owned by a live process" in r.getMessage() for r in caplog.records
     )
 
 
 def test_t_v12_orp_03_137_mapping(docker_stub, sandbox):  # noqa: F811
     docker_stub.set(exit=137, stdout="ignored sigterm\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=True,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=True,
     )
     assert result["timed_out"] is True
     assert result["exit_code"] == 137
 
     docker_stub.set(exit=137, stdout="own choice\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=False,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=False,
     )
     assert result["timed_out"] is False
 
     docker_stub.set(exit=124, stdout="wrapper hit its own budget\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=True,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=True,
     )
     assert result["timed_out"] is True
 
@@ -623,6 +693,7 @@ def test_t_v12_orp_03_137_mapping(docker_stub, sandbox):  # noqa: F811
 # 5.6 The audit hook receives redacted records (REQ-V12-AUD-01)
 # --------------------------------------------------------------------------
 
+
 def test_t_v12_aud_01_hook_receives_redacted_record():
     config.register_secret(SENTINEL)
     captured = {}
@@ -630,11 +701,21 @@ def test_t_v12_aud_01_hook_receives_redacted_record():
     def hook(record):
         captured.update(record)
 
-    runner = RecordingRunner({
-        "exit_code": 0, "timed_out": False, "truncated": False, "stdout": "", "stderr": "",
-    })
+    runner = RecordingRunner(
+        {
+            "exit_code": 0,
+            "timed_out": False,
+            "truncated": False,
+            "stdout": "",
+            "stderr": "",
+        }
+    )
     tools.execute_tool(
-        "exec", json.dumps({"argv": [SENTINEL, "-x"]}), skills={}, runner=runner, audit=hook,
+        "exec",
+        json.dumps({"argv": [SENTINEL, "-x"]}),
+        skills={},
+        runner=runner,
+        audit=hook,
     )
     assert SENTINEL not in json.dumps(captured)
     assert captured["exit_code"] == 0
@@ -656,6 +737,7 @@ def test_t_v12_aud_01_non_serialisable_record_logs_and_does_not_raise(caplog):
 # --------------------------------------------------------------------------
 # 5.7 A configuration refusal looks like one (REQ-V12-ERR-01)
 # --------------------------------------------------------------------------
+
 
 def test_t_v12_err_01_config_error_from_seam_is_caught(tmp_path, monkeypatch, caplog):
     cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db")
@@ -681,6 +763,7 @@ def test_t_v12_err_01_config_error_from_seam_is_caught(tmp_path, monkeypatch, ca
 # The offline DNS guard (REQ-V12-OFF-01)
 # --------------------------------------------------------------------------
 
+
 def test_t_v12_off_01_dns_guard_fires():
     with pytest.raises(AssertionError, match="unexpected DNS lookup"):
         socket.getaddrinfo("example.com", 443)
@@ -691,6 +774,7 @@ def test_t_v12_off_01_dns_guard_fires():
 # already covered by an amended v1.1 test.
 # --------------------------------------------------------------------------
 
+
 def test_t_v12_cov_01_live_docker_passes_configured_quota(tmp_path, monkeypatch):
     cfg = make_cfg(tmp_path, exec_sandbox_max_bytes=12345678)
     captured = {}
@@ -698,8 +782,11 @@ def test_t_v12_cov_01_live_docker_passes_configured_quota(tmp_path, monkeypatch)
     def spy(argv, **kwargs):
         captured.update(kwargs)
         return {
-            "exit_code": 0, "timed_out": False, "truncated": False,
-            "stdout": "live-ok\n", "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "truncated": False,
+            "stdout": "live-ok\n",
+            "stderr": "",
         }
 
     monkeypatch.setattr(bot.tools, "run_command_docker", spy)
@@ -712,12 +799,17 @@ def test_t_v12_cov_01_live_docker_passes_configured_quota(tmp_path, monkeypatch)
 # exercised in full by test_t_v12_qta_02_refusal_envelopes_and_audit_record
 # above.
 
+
 def test_t_v12_cov_03_post_run_quota_recorded_on_timeout(docker_stub, sandbox, monkeypatch):  # noqa: F811
     monkeypatch.setattr(tools, "DOCKER_STARTUP_GRACE_S", 0.0)
     docker_stub.set(write_bytes=2000, sleep=30)
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, timeout_s=0.5, sandbox_max_bytes=1000,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        timeout_s=0.5,
+        sandbox_max_bytes=1000,
     )
     assert result["timed_out"] is True
     assert result["sandbox_over_quota"] is True
@@ -726,17 +818,26 @@ def test_t_v12_cov_03_post_run_quota_recorded_on_timeout(docker_stub, sandbox, m
 def test_t_v12_cov_04_post_run_quota_recorded_on_docker_exit(docker_stub, sandbox):  # noqa: F811
     docker_stub.set(exit=125, stderr="boom", write_bytes=2000)
     runner = functools.partial(
-        tools.run_command_docker, workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, sandbox_max_bytes=1000,
+        tools.run_command_docker,
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        sandbox_max_bytes=1000,
     )
     captured = {}
 
     def audit(record):
         captured.update(record)
 
-    envelope = json.loads(tools.execute_tool(
-        "exec", json.dumps({"argv": ["broken"]}), skills={}, runner=runner, audit=audit,
-    ))
+    envelope = json.loads(
+        tools.execute_tool(
+            "exec",
+            json.dumps({"argv": ["broken"]}),
+            skills={},
+            runner=runner,
+            audit=audit,
+        )
+    )
     assert envelope["error"].startswith("exec failed (docker exit 125)")
     assert captured["sandbox_over_quota"] is True
 
@@ -744,17 +845,26 @@ def test_t_v12_cov_04_post_run_quota_recorded_on_docker_exit(docker_stub, sandbo
 def test_t_v12_cov_05_pop_happens_before_the_envelope(docker_stub, sandbox):  # noqa: F811
     docker_stub.set(exit=125, stderr="boom", write_bytes=2000)
     runner = functools.partial(
-        tools.run_command_docker, workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, sandbox_max_bytes=1000,
+        tools.run_command_docker,
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        sandbox_max_bytes=1000,
     )
     captured = {}
 
     def audit(record):
         captured.update(record)
 
-    envelope = json.loads(tools.execute_tool(
-        "exec", json.dumps({"argv": ["broken"]}), skills={}, runner=runner, audit=audit,
-    ))
+    envelope = json.loads(
+        tools.execute_tool(
+            "exec",
+            json.dumps({"argv": ["broken"]}),
+            skills={},
+            runner=runner,
+            audit=audit,
+        )
+    )
     assert set(envelope) == {"error"}
     assert captured["sandbox_over_quota"] is True
     assert captured["sandbox_scan"] == tools.SCAN_OK
@@ -796,12 +906,23 @@ def test_t_v12_cov_08_summarize_conversation_redacts_before_returning(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hi")
     storage.add_assistant_message(conn, conv, "hello")
-    llm = FakeLLM([LLMResponse(
-        json.dumps({
-            "goal": SENTINEL, "files": [], "decisions": [], "errors": [], "next_action": "",
-        }),
-        [], "stop",
-    )])
+    llm = FakeLLM(
+        [
+            LLMResponse(
+                json.dumps(
+                    {
+                        "goal": SENTINEL,
+                        "files": [],
+                        "decisions": [],
+                        "errors": [],
+                        "next_action": "",
+                    }
+                ),
+                [],
+                "stop",
+            )
+        ]
+    )
     result = agent.summarize_conversation(conn, conv, llm, None)
     assert SENTINEL not in result
     assert "***REDACTED***" in result
@@ -810,6 +931,7 @@ def test_t_v12_cov_08_summarize_conversation_redacts_before_returning(conn):
 # COV-09 (--user in image_has_timeout's argv) is covered by the amended
 # test_t_v11_orp_03_image_has_timeout_argv_and_hardening in
 # tests/test_v11_patch.py.
+
 
 def test_t_v12_cov_10_sandbox_usage_never_follows_directory_symlinks(tmp_path):
     real_dir = tmp_path / "real"

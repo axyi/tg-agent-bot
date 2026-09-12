@@ -71,9 +71,7 @@ def test_t_cfg_06_timeout_invalid(value):
 
 
 def test_t_cfg_06_timeout_valid():
-    cfg = load_config(
-        env=base_env(LLM_TIMEOUT_S="220.5", LLM_MAX_TOKENS="1"), load_env_file=False
-    )
+    cfg = load_config(env=base_env(LLM_TIMEOUT_S="220.5", LLM_MAX_TOKENS="1"), load_env_file=False)
     assert cfg.llm_timeout_s == 220.5
 
 
@@ -161,8 +159,9 @@ def test_obs_capture_content_rejects_anything_else(value):
         # "not raw -> default" branch, exercised the same way `test_t_cfg_05`
         # and `test_history_tool_stub_defaults_to_on` exercise their siblings).
         assert (
-            load_config(env=base_env(OBS_CAPTURE_CONTENT=value), load_env_file=False)
-            .obs_capture_content
+            load_config(
+                env=base_env(OBS_CAPTURE_CONTENT=value), load_env_file=False
+            ).obs_capture_content
             is False
         )
         return

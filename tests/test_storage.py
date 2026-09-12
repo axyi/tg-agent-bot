@@ -151,9 +151,9 @@ def test_t_db_10_check_constraints(conn):
     conv = storage.get_or_create_active_conversation(conn, 7)
     now = storage.utc_now_iso()
     bad_rows = [
-        ("tool", "x", None, None),          # tool without tool_call_id
-        ("user", "x", "[]", None),          # user carrying tool_calls_json
-        ("x", "x", None, None),             # unknown role
+        ("tool", "x", None, None),  # tool without tool_call_id
+        ("user", "x", "[]", None),  # user carrying tool_calls_json
+        ("x", "x", None, None),  # unknown role
         ("assistant", "x", "not json", None),  # tool_calls_json is not JSON
     ]
     for role, content, tool_calls_json, tool_call_id in bad_rows:
@@ -206,8 +206,7 @@ def test_t_db_12b_oversized_group_is_never_cut(conn):
         storage.add_user_message(conn, conv, f"u{i}")
     now = storage.utc_now_iso()
     calls = [
-        {"id": f"big{i}", "type": "function",
-         "function": {"name": "exec", "arguments": "{}"}}
+        {"id": f"big{i}", "type": "function", "function": {"name": "exec", "arguments": "{}"}}
         for i in range(200)
     ]
     conn.execute(

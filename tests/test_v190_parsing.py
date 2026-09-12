@@ -96,9 +96,7 @@ def test_t_v190_doc_02_md_decodes_cp1251_fallback():
     with pytest.raises(UnicodeDecodeError):
         data.decode("utf-8-sig")
     extracted = documents.extract(data, "md")
-    assert extracted.pages == (
-        documents.ExtractedPage(text="Привет", page=None),
-    )
+    assert extracted.pages == (documents.ExtractedPage(text="Привет", page=None),)
     assert extracted.page_numbered is False
 
 
@@ -134,9 +132,7 @@ def test_t_v190_doc_02_docx_paragraphs_and_tables_in_document_order():
     data = _docx_bytes(build)
     extracted = documents.extract(data, "docx")
     assert extracted.pages == (
-        documents.ExtractedPage(
-            text="First paragraph\na\tb\nc\td\nLast paragraph", page=None
-        ),
+        documents.ExtractedPage(text="First paragraph\na\tb\nc\td\nLast paragraph", page=None),
     )
     assert extracted.page_numbered is False
 

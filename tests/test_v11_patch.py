@@ -60,17 +60,20 @@ def isolated_secret_registry():
 # 5.1 Redaction of model-authored content (REQ-V11-RED-01/02)
 # --------------------------------------------------------------------------
 
+
 def test_t_v11_red_01_model_authored_content_and_args_are_redacted(conn, tmp_path):
     config.register_secret(SENTINEL)
     cfg = make_cfg(tmp_path)
-    llm = FakeLLM([
-        LLMResponse(
-            f"noted: {SENTINEL}",
-            [ToolCall("call_1", "exec", json.dumps({"argv": ["echo", SENTINEL]}))],
-            "tool_calls",
-        ),
-        LLMResponse("done", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse(
+                f"noted: {SENTINEL}",
+                [ToolCall("call_1", "exec", json.dumps({"argv": ["echo", SENTINEL]}))],
+                "tool_calls",
+            ),
+            LLMResponse("done", [], "stop"),
+        ]
+    )
     process(conn, cfg, update(), llm=llm)
 
     rows = conn.execute(
@@ -113,12 +116,18 @@ def test_t_v11_red_02_add_assistant_message_redacts(conn):
 def test_t_v11_red_02_add_tool_turn_redacts_content_calls_and_results(conn):
     config.register_secret(SENTINEL)
     conv_id = storage.get_or_create_active_conversation(conn, USER_ID)
-    tool_calls = [{
-        "id": "call_1", "type": "function",
-        "function": {"name": "exec", "arguments": json.dumps({"argv": [SENTINEL]})},
-    }]
+    tool_calls = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "exec", "arguments": json.dumps({"argv": [SENTINEL]})},
+        }
+    ]
     storage.add_tool_turn(
-        conn, conv_id, f"assistant said {SENTINEL}", tool_calls,
+        conn,
+        conv_id,
+        f"assistant said {SENTINEL}",
+        tool_calls,
         [("call_1", f"result {SENTINEL}")],
     )
     rows = conn.execute(
@@ -149,11 +158,13 @@ def test_t_v11_red_03_redact_tool_calls_preserves_shape():
     config.register_secret(SENTINEL)
     calls = [
         {
-            "id": "call_1", "type": "function",
+            "id": "call_1",
+            "type": "function",
             "function": {"name": "exec", "arguments": json.dumps({"argv": [SENTINEL]})},
         },
         {
-            "id": "call_2", "type": "function",
+            "id": "call_2",
+            "type": "function",
             "function": {"name": "fetch", "arguments": json.dumps({"url": "https://wttr.in/x"})},
         },
     ]
@@ -177,27 +188,33 @@ def test_t_v11_red_04_summary_reply_redacted_only_by_send(conn, tmp_path, monkey
     # included: a mismatch would raise inside `_handle_summary`'s `except
     # Exception`, quietly routing this test down the SUMMARY_FAILED_REPLY path
     # where the redaction below is vacuously true.
-    monkeypatch.setattr(
-        agent, "summarize_conversation",
-        lambda conn, conv_id, llm, cfg, *, resolve_cost=None, retry_max_tokens=None,
-        budget_s=None: json.dumps({
-            "goal": SENTINEL, "files": [], "decisions": [], "errors": [], "next_action": "",
-        }),
-    )
+    def _fake_summarize(
+        conn, conv_id, llm, cfg, *, resolve_cost=None, retry_max_tokens=None, budget_s=None
+    ):
+        return json.dumps(
+            {
+                "goal": SENTINEL,
+                "files": [],
+                "decisions": [],
+                "errors": [],
+                "next_action": "",
+            }
+        )
+
+    monkeypatch.setattr(agent, "summarize_conversation", _fake_summarize)
     tg = RecordingTelegram()
     bot._handle_summary(conn, tg, cfg, object(), USER_ID, USER_ID)
     texts = [text for _chat, text in tg.sent]
     # Pin the success path: only the rendered summary carries the secret that
     # `_send` has to redact (REQ-V11-RED-04).
-    assert texts == [
-        "Goal: ***REDACTED***\nFiles: -\nDecisions: -\nErrors: -\nNext: "
-    ]
+    assert texts == ["Goal: ***REDACTED***\nFiles: -\nDecisions: -\nErrors: -\nNext: "]
     assert all(SENTINEL not in text for text in texts)
 
 
 # --------------------------------------------------------------------------
 # 5.2 Truncation headroom (REQ-V11-TRN-01/02)
 # --------------------------------------------------------------------------
+
 
 def test_t_v11_trn_01_max_secret_length_and_strip_fragment():
     assert config.max_secret_length() == 0
@@ -255,7 +272,7 @@ def test_t_v11_trn_03_fetch_url_headroom_strips_straddling_secret():
         # loop's cut lands genuinely inside the sentinel rather than safely
         # past it.
         for start in range(0, len(data), size):
-            yield data[start:start + size]
+            yield data[start : start + size]
 
     def handler(request):
         return httpx.Response(200, content=chunked(body))
@@ -286,7 +303,7 @@ def test_t_v11_trn_03_fetch_url_strips_a_fragment_left_by_a_short_response():
 
     def chunked(data: bytes, size: int = 8):
         for start in range(0, len(data), size):
-            yield data[start:start + size]
+            yield data[start : start + size]
 
     def handler(request):
         return httpx.Response(200, content=chunked(body))
@@ -311,16 +328,23 @@ def test_t_v11_trn_04_no_secrets_registered_matches_v1_behaviour(tmp_path):
 # 5.3 Orphaned containers (REQ-V11-ORP-01..04, REQ-V11-WIR-01)
 # --------------------------------------------------------------------------
 
+
 def test_t_v11_orp_01_wrap_timeout_prefix_and_label():
     base = dict(
-        image="python:3.13-slim", sandbox="/srv/sandbox", uid=1000, gid=1000,
+        image="python:3.13-slim",
+        sandbox="/srv/sandbox",
+        uid=1000,
+        gid=1000,
         container_name="tgexec-deadbeef",
     )
     with_wrap = tools.build_docker_argv(["uname"], wrap_timeout=True, **base)
     without_wrap = tools.build_docker_argv(["uname"], wrap_timeout=False, **base)
 
     assert with_wrap[-4:] == [
-        "timeout", "--kill-after=5", str(int(tools.EXEC_TIMEOUT_S)), "uname",
+        "timeout",
+        "--kill-after=5",
+        str(int(tools.EXEC_TIMEOUT_S)),
+        "uname",
     ]
     assert without_wrap[-1] == "uname"
     assert "timeout" not in without_wrap
@@ -340,8 +364,14 @@ def test_t_v11_orp_02_startup_reap_removes_labelled_orphans(docker_stub, caplog)
         bot._reap_orphaned_containers()
     ps_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["ps"]]
     assert ps_calls == [
-        ["ps", "-a", "--filter", "label=tgexec=1", "--format",
-         '{{.ID}}\t{{.Label "tgexec-owner"}}'],
+        [
+            "ps",
+            "-a",
+            "--filter",
+            "label=tgexec=1",
+            "--format",
+            '{{.ID}}\t{{.Label "tgexec-owner"}}',
+        ],
     ]
     rm_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["rm"]]
     assert rm_calls == [["rm", "-f", "deadbeef1"]]
@@ -367,7 +397,7 @@ def test_t_v11_orp_02_failing_reap_logs_and_continues(monkeypatch, caplog):
 
     monkeypatch.setattr(bot.subprocess, "run", forbidden)
     with caplog.at_level(logging.WARNING):
-        bot._reap_orphaned_containers()          # must not raise
+        bot._reap_orphaned_containers()  # must not raise
     assert any("reap" in record.getMessage() for record in caplog.records)
 
 
@@ -406,9 +436,7 @@ def test_t_v11_orp_03_image_has_timeout_argv_and_hardening(docker_stub):  # noqa
     # REQ-V12-ORP-04: the probe is named and labelled like every other
     # container, so it can never become an unreapable orphan.
     assert ("--label", tools.CONTAINER_LABEL) in pairs
-    assert any(
-        flag == "--label" and value.startswith("tgexec-owner=") for flag, value in pairs
-    )
+    assert any(flag == "--label" and value.startswith("tgexec-owner=") for flag, value in pairs)
     name = argv[argv.index("--name") + 1]
     assert re.fullmatch(r"tgexec-probe-[0-9a-f]{8}", name)
     assert ("--user", f"{os.getuid()}:{os.getgid()}") in pairs
@@ -428,16 +456,22 @@ def test_t_v11_orp_03_false_result_disables_wrap_and_warns(docker_stub, tmp_path
 def test_t_v11_orp_04_exit_124_mapping_depends_on_wrap_timeout(docker_stub, sandbox):  # noqa: F811
     docker_stub.set(exit=124, stdout="killed by wrapper\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=True,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=True,
     )
     assert result["timed_out"] is True
     assert result["exit_code"] == 124
 
     docker_stub.set(exit=124, stdout="own exit code\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=False,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=False,
     )
     assert result["timed_out"] is False
     assert result["exit_code"] == 124
@@ -446,16 +480,22 @@ def test_t_v11_orp_04_exit_124_mapping_depends_on_wrap_timeout(docker_stub, sand
     # `--kill-after` exits 137, which maps the same way 124 does.
     docker_stub.set(exit=137, stdout="killed by sigkill\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=True,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=True,
     )
     assert result["timed_out"] is True
     assert result["exit_code"] == 137
 
     docker_stub.set(exit=137, stdout="own exit code\n")
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, wrap_timeout=False,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        wrap_timeout=False,
     )
     assert result["timed_out"] is False
     assert result["exit_code"] == 137
@@ -465,8 +505,12 @@ def test_t_v11_orp_04_outer_kill_path_still_times_out(docker_stub, sandbox, monk
     monkeypatch.setattr(tools, "DOCKER_STARTUP_GRACE_S", 0.0)
     docker_stub.set(sleep=30)
     result = tools.run_command_docker(
-        ["sleep", "30"], workdir=sandbox, image="python:3.13-slim",
-        docker_ok=True, timeout_s=0.5, wrap_timeout=True,
+        ["sleep", "30"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
+        timeout_s=0.5,
+        wrap_timeout=True,
     )
     assert result["timed_out"] is True
 
@@ -501,6 +545,7 @@ def test_t_v11_wir_01_docker_ok_reaps_probes_and_creates_the_file_once(docker_st
 # --------------------------------------------------------------------------
 # 5.4 Sandbox disk quota (REQ-V11-QTA-01..05)
 # --------------------------------------------------------------------------
+
 
 def test_t_v11_qta_01_sums_regular_files_and_ignores_symlink_targets(tmp_path):
     (tmp_path / "a.txt").write_bytes(b"x" * 100)
@@ -551,12 +596,15 @@ def test_t_v11_qta_02_full_sandbox_refuses_without_spawning(sandbox, monkeypatch
 
     monkeypatch.setattr(tools, "_run_process", forbidden)
     result = tools.run_command_docker(
-        ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+        ["uname"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
         sandbox_max_bytes=1000,
     )
     assert result == {
         "error": "sandbox is full: 1000 bytes of 1000 allowed; "
-                 "ask the operator to clear the sandbox directory"
+        "ask the operator to clear the sandbox directory"
     }
 
     # REQ-V12-QTA-02: the cut-short and incomplete-scan cases get their own
@@ -564,12 +612,15 @@ def test_t_v11_qta_02_full_sandbox_refuses_without_spawning(sandbox, monkeypatch
     with pytest.MonkeyPatch.context() as cut_mp:
         cut_mp.setattr(tools, "SANDBOX_SCAN_MAX_ENTRIES", 0)
         result = tools.run_command_docker(
-            ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+            ["uname"],
+            workdir=sandbox,
+            image="python:3.13-slim",
+            docker_ok=True,
             sandbox_max_bytes=10_000_000,
         )
     assert result == {
         "error": "sandbox holds too many files to measure (over 0 entries); "
-                 "ask the operator to clear the sandbox directory",
+        "ask the operator to clear the sandbox directory",
         "sandbox_scan": tools.SCAN_CUT_SHORT,
     }
 
@@ -579,14 +630,17 @@ def test_t_v11_qta_02_full_sandbox_refuses_without_spawning(sandbox, monkeypatch
     ghost.chmod(0)
     try:
         result = tools.run_command_docker(
-            ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+            ["uname"],
+            workdir=sandbox,
+            image="python:3.13-slim",
+            docker_ok=True,
             sandbox_max_bytes=10_000_000,
         )
     finally:
         ghost.chmod(0o700)
     assert result == {
         "error": "sandbox size could not be measured; ask the operator to "
-                 "inspect the sandbox directory",
+        "inspect the sandbox directory",
         "sandbox_scan": tools.SCAN_INCOMPLETE,
     }
 
@@ -595,7 +649,10 @@ def test_t_v11_qta_02_below_limit_proceeds(docker_stub, sandbox):  # noqa: F811
     (sandbox / "small.bin").write_bytes(b"x" * 10)
     docker_stub.set(exit=0, stdout="ok\n")
     result = tools.run_command_docker(
-        ["true"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+        ["true"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
         sandbox_max_bytes=1000,
     )
     assert result["exit_code"] == 0
@@ -605,20 +662,24 @@ def test_t_v11_qta_03_run_command_docker_flags_over_quota(docker_stub, sandbox, 
     docker_stub.set(exit=0, stdout="ok\n", write_bytes=2000)
     with caplog.at_level(logging.WARNING):
         result = tools.run_command_docker(
-            ["true"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+            ["true"],
+            workdir=sandbox,
+            image="python:3.13-slim",
+            docker_ok=True,
             sandbox_max_bytes=1000,
         )
     assert result["exit_code"] == 0
     assert result["sandbox_over_quota"] is True
-    assert any(
-        "sandbox over quota after exec" in record.getMessage() for record in caplog.records
-    )
+    assert any("sandbox over quota after exec" in record.getMessage() for record in caplog.records)
 
 
 def test_t_v11_qta_03_run_command_docker_omits_key_when_under_quota(docker_stub, sandbox):  # noqa: F811
     docker_stub.set(exit=0, stdout="ok\n", write_bytes=10)
     result = tools.run_command_docker(
-        ["true"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+        ["true"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
         sandbox_max_bytes=1000,
     )
     assert "sandbox_over_quota" not in result
@@ -629,24 +690,42 @@ def test_t_v11_qta_03_run_exec_pops_the_key_before_the_model_sees_it(docker_stub
     box1.mkdir()
     docker_stub.set(exit=0, stdout="ok\n", write_bytes=2000)
     runner1 = functools.partial(
-        tools.run_command_docker, workdir=box1, image="python:3.13-slim",
-        docker_ok=True, sandbox_max_bytes=1000,
+        tools.run_command_docker,
+        workdir=box1,
+        image="python:3.13-slim",
+        docker_ok=True,
+        sandbox_max_bytes=1000,
     )
-    envelope = json.loads(tools.execute_tool(
-        "exec", json.dumps({"argv": ["true"]}), skills={}, runner=runner1,
-    ))
+    envelope = json.loads(
+        tools.execute_tool(
+            "exec",
+            json.dumps({"argv": ["true"]}),
+            skills={},
+            runner=runner1,
+        )
+    )
     assert set(envelope) == {
-        "exit_code", "timed_out", "truncated", "stdout", "stderr", "notice",
+        "exit_code",
+        "timed_out",
+        "truncated",
+        "stdout",
+        "stderr",
+        "notice",
         # REQ-V13-TOO-02 additions; `output_default_chars` is popped like the
         # quota keys and must not appear here.
-        "compacted", "stdout_bytes_total", "stderr_bytes_total",
+        "compacted",
+        "stdout_bytes_total",
+        "stderr_bytes_total",
     }
 
     box2 = tmp_path / "box2"
     box2.mkdir()
     runner2 = functools.partial(
-        tools.run_command_docker, workdir=box2, image="python:3.13-slim",
-        docker_ok=True, sandbox_max_bytes=1000,
+        tools.run_command_docker,
+        workdir=box2,
+        image="python:3.13-slim",
+        docker_ok=True,
+        sandbox_max_bytes=1000,
     )
     captured = {}
 
@@ -654,7 +733,11 @@ def test_t_v11_qta_03_run_exec_pops_the_key_before_the_model_sees_it(docker_stub
         captured.update(record)
 
     tools.execute_tool(
-        "exec", json.dumps({"argv": ["true"]}), skills={}, runner=runner2, audit=audit,
+        "exec",
+        json.dumps({"argv": ["true"]}),
+        skills={},
+        runner=runner2,
+        audit=audit,
     )
     assert captured["sandbox_over_quota"] is True
     # REQ-V12-QTA-02: the audit record always carries the scan status; a
@@ -681,14 +764,27 @@ def test_t_v11_qta_04_exec_sandbox_max_bytes_parsing():
 # 5.5 Configuration hardening (REQ-V11-CFV-01/02)
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("entry", [
-    "169.254.169.254", "127.0.0.1", "[::1]", "localhost", "sub.localhost",
-    "internalhost", "example.com:8080", "example.com/path",
-    # REQ-V12-SSR-01: shortened and hexadecimal IPv4 forms (finding W-6) —
-    # none of these parse as an `ipaddress` literal, so only the strict shape
-    # check catches them.
-    "127.1", "127.0.1", "0x7f.1", "0x7f.0.0.1",
-])
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "169.254.169.254",
+        "127.0.0.1",
+        "[::1]",
+        "localhost",
+        "sub.localhost",
+        "internalhost",
+        "example.com:8080",
+        "example.com/path",
+        # REQ-V12-SSR-01: shortened and hexadecimal IPv4 forms (finding W-6) —
+        # none of these parse as an `ipaddress` literal, so only the strict shape
+        # check catches them.
+        "127.1",
+        "127.0.1",
+        "0x7f.1",
+        "0x7f.0.0.1",
+    ],
+)
 def test_t_v11_cfv_01_rejects_ssrf_shaped_domains(entry):
     with pytest.raises(ConfigError) as raised:
         load_config(env=env(FETCH_ALLOWED_DOMAINS=entry), load_env_file=False)
@@ -724,6 +820,7 @@ def test_t_v11_cfv_02_default_sandbox_and_v1_cases_still_work(tmp_path):
 # 5.6 Information disclosure (REQ-V11-INF-01)
 # --------------------------------------------------------------------------
 
+
 def test_t_v11_inf_01_empty_resolv_file_created_and_reused(tmp_path):
     db_path = tmp_path / "state" / "bot.db"
     db_path.parent.mkdir(parents=True)
@@ -754,8 +851,13 @@ def test_t_v11_inf_01_empty_resolv_file_created_and_reused(tmp_path):
 def test_t_v11_inf_01_mount_flag_ordering_and_omission():
     resolv = Path("/state/.resolv-empty")
     with_resolv = tools.build_docker_argv(
-        ["uname"], image="python:3.13-slim", sandbox="/srv/sandbox",
-        uid=1000, gid=1000, container_name="tgexec-x", empty_resolv=resolv,
+        ["uname"],
+        image="python:3.13-slim",
+        sandbox="/srv/sandbox",
+        uid=1000,
+        gid=1000,
+        container_name="tgexec-x",
+        empty_resolv=resolv,
     )
     mounts = [
         value
@@ -768,8 +870,12 @@ def test_t_v11_inf_01_mount_flag_ordering_and_omission():
     ]
 
     without_resolv = tools.build_docker_argv(
-        ["uname"], image="python:3.13-slim", sandbox="/srv/sandbox",
-        uid=1000, gid=1000, container_name="tgexec-x",
+        ["uname"],
+        image="python:3.13-slim",
+        sandbox="/srv/sandbox",
+        uid=1000,
+        gid=1000,
+        container_name="tgexec-x",
     )
     mounts2 = [
         value
@@ -782,6 +888,7 @@ def test_t_v11_inf_01_mount_flag_ordering_and_omission():
 # --------------------------------------------------------------------------
 # 7 Documentation corrections with test coverage (REQ-V11-DOC-04)
 # --------------------------------------------------------------------------
+
 
 def test_t_v11_url_01_malformed_url_vs_not_https():
     client = httpx.Client(transport=mock_llm_transport(lambda request: httpx.Response(200)))

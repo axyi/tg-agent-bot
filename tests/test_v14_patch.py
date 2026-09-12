@@ -29,14 +29,31 @@ _S01_ONLY = [s for s in bench_scenarios.SCENARIOS if s.id == "S01"]
 # column set (REQUIRED_LLM_ROW_KEYS) — hand-authored, not derived from
 # `bench.REQUIRED_LLM_ROW_KEYS` or `bench.LLM_ROW_KEYS`.
 _V13_SHAPED_LLM_ROW = {
-    "id": 1, "conv_seq": 1, "turn_id": 1, "purpose": "agent", "round": 1,
-    "attempt": 1, "ts": "2026-01-01T00:00:00Z", "provider": "lmstudio",
-    "model": "m", "prompt_tokens": 100, "completion_tokens": 20,
-    "total_tokens": 120, "cached_tokens": None, "reasoning_tokens": None,
-    "reasoning_chars": 0, "prompt_chars": 300, "prompt_chars_by_role": "{}",
-    "messages_n": 2, "tools_exposed": 3, "latency_ms": 500,
-    "finish_reason": "stop", "tool_calls_n": 0, "error_kind": None,
-    "cost_usd": None, "cost_basis": None,
+    "id": 1,
+    "conv_seq": 1,
+    "turn_id": 1,
+    "purpose": "agent",
+    "round": 1,
+    "attempt": 1,
+    "ts": "2026-01-01T00:00:00Z",
+    "provider": "lmstudio",
+    "model": "m",
+    "prompt_tokens": 100,
+    "completion_tokens": 20,
+    "total_tokens": 120,
+    "cached_tokens": None,
+    "reasoning_tokens": None,
+    "reasoning_chars": 0,
+    "prompt_chars": 300,
+    "prompt_chars_by_role": "{}",
+    "messages_n": 2,
+    "tools_exposed": 3,
+    "latency_ms": 500,
+    "finish_reason": "stop",
+    "tool_calls_n": 0,
+    "error_kind": None,
+    "cost_usd": None,
+    "cost_basis": None,
 }
 
 
@@ -45,8 +62,7 @@ def test_t_v14_ben_01_row_key_rule_accepts_a_v13_shaped_row():
     reasoning_requested/reasoning_honored — those land later, OBS-01)
     validates; a row missing a required key is rejected naming it; a row
     with an unknown key is rejected naming it."""
-    valid = fake_doc([fake_run("S01", llm_rows=[dict(_V13_SHAPED_LLM_ROW)])],
-                     repeats=1)
+    valid = fake_doc([fake_run("S01", llm_rows=[dict(_V13_SHAPED_LLM_ROW)])], repeats=1)
     assert bench.check_document(valid, _S01_ONLY) == (0, "valid")
 
     missing_row = {k: v for k, v in _V13_SHAPED_LLM_ROW.items() if k != "cost_basis"}
@@ -79,9 +95,14 @@ def test_t_v14_ben_02_env_flags_holds_nine_keys_null_for_a_stage_a_config(tmp_pa
     flags = bench.env_flags(make_config(tmp_path))
     assert len(flags) == 9
     assert set(flags) == {
-        "HISTORY_TOOL_STUB", "EXEC_OUTPUT_DEFAULT_CHARS",
-        "FETCH_INLINE_DEFAULT_CHARS", "LLM_REASONING", "LLM_SUMMARY_MODEL",
-        "LLM_FAILOVER", "LLM_MAX_TOKENS", "LLM_REASONING_POLICY",
+        "HISTORY_TOOL_STUB",
+        "EXEC_OUTPUT_DEFAULT_CHARS",
+        "FETCH_INLINE_DEFAULT_CHARS",
+        "LLM_REASONING",
+        "LLM_SUMMARY_MODEL",
+        "LLM_FAILOVER",
+        "LLM_MAX_TOKENS",
+        "LLM_REASONING_POLICY",
         "LLM_REASONING_ON_PURPOSES",
     }
     default_policy = next(
@@ -101,9 +122,7 @@ def test_t_v14_ben_03_constants_and_summarize_are_policy_independent():
         bench.constants(), sort_keys=True
     )
     assert "reasoning" not in {key.lower() for key in bench.constants()}
-    assert "reasoning" not in {
-        key.lower() for key in bench.llm_base.REQUEST_DEFAULTS
-    }
+    assert "reasoning" not in {key.lower() for key in bench.llm_base.REQUEST_DEFAULTS}
 
     run = fake_run("S01", llm_rows=[dict(_V13_SHAPED_LLM_ROW)])
     summary = bench.summarize([run], [], 1)
@@ -134,9 +153,7 @@ def test_t_v14_rel_01_timeout_max_tokens_boundary():
     message = str(exc.value)
     assert "LLM_TIMEOUT_S" in message and "LLM_MAX_TOKENS" in message
 
-    cfg = load_config(
-        env=base_env(LLM_TIMEOUT_S="600", LLM_MAX_TOKENS="6224"), load_env_file=False
-    )
+    cfg = load_config(env=base_env(LLM_TIMEOUT_S="600", LLM_MAX_TOKENS="6224"), load_env_file=False)
     assert cfg.llm_timeout_s == 600.0 and cfg.llm_max_tokens == 6224
 
     cfg = load_config(env=base_env(), load_env_file=False)
@@ -186,10 +203,7 @@ def test_t_v14_scn_01_s01_check_accepts_capability_paraphrase():
     for answer in v13_baseline_answers:
         assert re.search(pattern, answer, re.I | re.S), answer
 
-    off_topic = (
-        "Сегодня хорошая погода, а как у тебя дела? Расскажи о своих планах "
-        "на выходные."
-    )
+    off_topic = "Сегодня хорошая погода, а как у тебя дела? Расскажи о своих планах на выходные."
     refusing = "Извините, я не могу ответить на этот вопрос."
     assert re.search(pattern, off_topic, re.I | re.S) is None
     assert re.search(pattern, refusing, re.I | re.S) is None

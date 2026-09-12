@@ -50,8 +50,14 @@ def test_t_sk_02_invalid_files_are_skipped(tmp_path, caplog):
     assert skills == {}
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 6
-    for name in ("a-no-open.md", "b-no-close.md", "c-no-name.md",
-                 "d-no-description.md", "e-bad-name.md", "f-bad-bytes.md"):
+    for name in (
+        "a-no-open.md",
+        "b-no-close.md",
+        "c-no-name.md",
+        "d-no-description.md",
+        "e-bad-name.md",
+        "f-bad-bytes.md",
+    ):
         assert any(name in w for w in warnings)
 
 
@@ -63,8 +69,9 @@ def test_t_sk_03_duplicate_names(tmp_path, caplog):
     assert set(skills) == {"dup"}
     assert skills["dup"].source == "aaa.md"
     assert skills["dup"].description == "first"
-    assert any("duplicate skill name 'dup' in bbb.md ignored" in r.getMessage()
-               for r in caplog.records)
+    assert any(
+        "duplicate skill name 'dup' in bbb.md ignored" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_t_sk_04_shipped_skills_load():
@@ -105,9 +112,9 @@ def test_t_sk_06_load_skill_dispatch():
     assert json.loads(
         tools.execute_tool("load_skill", '{"name": 7}', skills=skills, runner=runner)
     ) == {"error": "name is required and must be a string"}
-    assert json.loads(
-        tools.execute_tool("load_skill", "{}", skills=skills, runner=runner)
-    ) == {"error": "name is required and must be a string"}
+    assert json.loads(tools.execute_tool("load_skill", "{}", skills=skills, runner=runner)) == {
+        "error": "name is required and must be a string"
+    }
 
 
 def test_t_sk_07_missing_directory(tmp_path, caplog):
@@ -119,7 +126,10 @@ def test_t_sk_07_missing_directory(tmp_path, caplog):
 def test_t_sk_08_tool_specs():
     specs = tools.tool_specs()
     assert [s["function"]["name"] for s in specs] == [
-        "exec", "load_skill", "fetch", "search_documents",
+        "exec",
+        "load_skill",
+        "fetch",
+        "search_documents",
     ]
     assert all(s["type"] == "function" for s in specs)
     assert specs[0]["function"]["parameters"]["required"] == ["argv"]
@@ -131,16 +141,16 @@ def test_t_sk_08_tool_specs():
 
 
 def test_t_sk_unknown_tool_and_bad_arguments():
-    assert json.loads(
-        tools.execute_tool("nope", "{}", skills={}, runner=lambda argv: {})
-    ) == {"error": "unknown tool: nope"}
-    assert json.loads(
-        tools.execute_tool("exec", "{oops", skills={}, runner=lambda argv: {})
-    ) == {"error": "arguments are not valid JSON"}
-    assert json.loads(
-        tools.execute_tool("exec", "[1]", skills={}, runner=lambda argv: {})
-    ) == {"error": "arguments must be a JSON object"}
+    assert json.loads(tools.execute_tool("nope", "{}", skills={}, runner=lambda argv: {})) == {
+        "error": "unknown tool: nope"
+    }
+    assert json.loads(tools.execute_tool("exec", "{oops", skills={}, runner=lambda argv: {})) == {
+        "error": "arguments are not valid JSON"
+    }
+    assert json.loads(tools.execute_tool("exec", "[1]", skills={}, runner=lambda argv: {})) == {
+        "error": "arguments must be a JSON object"
+    }
     # Arguments are parsed before the tool name is looked at (REQ-TOOL-03 order).
-    assert json.loads(
-        tools.execute_tool("nope", "{oops", skills={}, runner=lambda argv: {})
-    ) == {"error": "arguments are not valid JSON"}
+    assert json.loads(tools.execute_tool("nope", "{oops", skills={}, runner=lambda argv: {})) == {
+        "error": "arguments are not valid JSON"
+    }

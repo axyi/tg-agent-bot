@@ -20,7 +20,7 @@ import config
 class ToolCall:
     id: str
     name: str
-    arguments: str            # raw JSON text as returned by the provider
+    arguments: str  # raw JSON text as returned by the provider
 
 
 @dataclass(frozen=True)
@@ -47,11 +47,11 @@ CostResolver = Callable[[str, str, "Usage | None"], tuple[float | None, str | No
 
 @dataclass(frozen=True)
 class LLMResponse:
-    content: str              # "" when the provider returns null/absent
+    content: str  # "" when the provider returns null/absent
     tool_calls: list[ToolCall]
-    finish_reason: str        # "" when absent
-    usage: Usage | None = None            # None when the provider reports nothing
-    reasoning_chars: int = 0              # thinking text seen and withheld
+    finish_reason: str  # "" when absent
+    usage: Usage | None = None  # None when the provider reports nothing
+    reasoning_chars: int = 0  # thinking text seen and withheld
 
 
 class LLMError(Exception):
@@ -89,16 +89,16 @@ FrozenJSON = str | int | float | bool | None | tuple[tuple[str, "FrozenJSON"], .
 
 @dataclass(frozen=True, slots=True)
 class ReasoningMechanism:
-    label: str                                       # "<letter>:<payload summary>"
-    fields: tuple[tuple[str, FrozenJSON], ...] = ()   # -> build_payload(reasoning_fields=...)
-    message_patch: tuple[str, str] | None = None      # (patch kind, text) -- see POL-05
+    label: str  # "<letter>:<payload summary>"
+    fields: tuple[tuple[str, FrozenJSON], ...] = ()  # -> build_payload(reasoning_fields=...)
+    message_patch: tuple[str, str] | None = None  # (patch kind, text) -- see POL-05
 
 
 @dataclass(frozen=True, slots=True)
 class ReasoningRequest:
-    value: str                                       # "on", "off" or "default"
-    mechanism: ReasoningMechanism | None             # None <=> send nothing, patch nothing
-    tag: str                                         # one of REASONING_TAGS
+    value: str  # "on", "off" or "default"
+    mechanism: ReasoningMechanism | None  # None <=> send nothing, patch nothing
+    tag: str  # one of REASONING_TAGS
 
 
 REASONING_DEFAULT = ReasoningRequest("default", None, "final")
@@ -113,14 +113,16 @@ REASONING_DEFAULT = ReasoningRequest("default", None, "final")
 # honored and shippable for `summary` only -- RSN-04's own message-array
 # judgement and, independently, RSN-07's TTFT fallback (the OpenAI-compatible
 # route reports `stats: {}`, absent, T1) both forbid it for the agent tags.
-REASONING_MECHANISMS: Mapping[str, "ReasoningMechanism | None"] = MappingProxyType({
-    "tool-round": None,
-    "final": None,
-    "summary": ReasoningMechanism(
-        "c:assistant-prefill",
-        message_patch=("append_assistant", "<think>\n\n</think>\n\n"),
-    ),
-})
+REASONING_MECHANISMS: Mapping[str, "ReasoningMechanism | None"] = MappingProxyType(
+    {
+        "tool-round": None,
+        "final": None,
+        "summary": ReasoningMechanism(
+            "c:assistant-prefill",
+            message_patch=("append_assistant", "<think>\n\n</think>\n\n"),
+        ),
+    }
+)
 
 
 def resolve_reasoning(
@@ -221,9 +223,17 @@ def describe_client(client: object) -> tuple[str, str]:
     return UNKNOWN_CLIENT, str(getattr(client, "model", "") or UNKNOWN_CLIENT)
 
 
-_PROTECTED_PAYLOAD_KEYS = frozenset({
-    "model", "messages", "temperature", "max_tokens", "stream", "tools", "tool_choice",
-})
+_PROTECTED_PAYLOAD_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "temperature",
+        "max_tokens",
+        "stream",
+        "tools",
+        "tool_choice",
+    }
+)
 
 
 def build_payload(

@@ -741,9 +741,7 @@ def conversation_list_section(rows: Sequence[Any]) -> str:
         conv_id = _row_field(row, "id")
         active = bool(_row_field(row, "active"))
         active_word = "yes" if active else "no"
-        active_html = (
-            f'<span class="ok">{esc(active_word)}</span>' if active else esc(active_word)
-        )
+        active_html = f'<span class="ok">{esc(active_word)}</span>' if active else esc(active_word)
         last_activity = _row_field(row, "last_activity")
         last_activity_html = "—" if last_activity is None else esc(last_activity)
         id_html = f'<a href="/conversations/{esc(conv_id)}">{esc(conv_id)}</a>'
@@ -904,9 +902,7 @@ def conversation_transcript_section(
     for turn_id, turn_messages in groups:
         trace_link_html = _trace_link_html(turn_id, trace_map)
         turn_html = "".join(
-            _message_html(
-                msg, trace_link_html=(trace_link_html if i == 0 else "")
-            )
+            _message_html(msg, trace_link_html=(trace_link_html if i == 0 else ""))
             for i, msg in enumerate(turn_messages)
         )
         turn_bytes = len(turn_html.encode("utf-8"))
@@ -928,9 +924,7 @@ def conversation_transcript_section(
         partial_bytes = 0
         withheld_cursor: tuple[int, int] | None = None
         for i, msg in enumerate(turn_messages):
-            msg_html = _message_html(
-                msg, trace_link_html=(trace_link_html if i == 0 else "")
-            )
+            msg_html = _message_html(msg, trace_link_html=(trace_link_html if i == 0 else ""))
             msg_bytes = len(msg_html.encode("utf-8"))
             if not partial_html or accumulator + partial_bytes + msg_bytes <= budget_bytes:
                 partial_html.append(msg_html)

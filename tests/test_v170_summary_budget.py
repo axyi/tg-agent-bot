@@ -42,9 +42,7 @@ def test_t_v170_sum_05_raises_below_the_summary_floor():
     # merely satisfies the older check must not also satisfy this one.
     with pytest.raises(ConfigError) as exc:
         load_config(
-            env=base_env(
-                LLM_TIMEOUT_S="180", LLM_MAX_TOKENS="1536", LLM_SUMMARY_MAX_TOKENS="1536"
-            ),
+            env=base_env(LLM_TIMEOUT_S="180", LLM_MAX_TOKENS="1536", LLM_SUMMARY_MAX_TOKENS="1536"),
             load_env_file=False,
         )
     message = str(exc.value)
@@ -57,9 +55,7 @@ def test_t_v170_sum_05_does_not_raise_at_shipped_defaults():
 
 
 def test_t_v170_sum_05_does_not_raise_at_the_1_7_0_instrument():
-    cfg = load_config(
-        env=base_env(LLM_TIMEOUT_S="600", LLM_MAX_TOKENS="4096"), load_env_file=False
-    )
+    cfg = load_config(env=base_env(LLM_TIMEOUT_S="600", LLM_MAX_TOKENS="4096"), load_env_file=False)
     assert cfg.llm_timeout_s == 600.0
 
 
@@ -101,8 +97,9 @@ class _ClockAdvancingLLM:
     def describe(self):
         return ("fake", "fake-model")
 
-    def complete(self, messages, tools, *, max_tokens=None, reasoning=REASONING_DEFAULT,
-                 timeout_s=None):
+    def complete(
+        self, messages, tools, *, max_tokens=None, reasoning=REASONING_DEFAULT, timeout_s=None
+    ):
         self.calls.append((reasoning, timeout_s))
         advance, item = self.script.pop(0)
         self.clock.t += advance
@@ -121,12 +118,20 @@ def _summary_conn_with_content(conn):
 def test_t_v170_sum_01_deadline_taken_once_both_requests_issued(conn):
     clock = _FakeClock(0.0)
     conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (40.0, LLMResponse("cut off", [], "length")),
-        (50.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-    ])
+    llm = _ClockAdvancingLLM(
+        clock,
+        [
+            (40.0, LLMResponse("cut off", [], "length")),
+            (50.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+        ],
+    )
     result = summarize_conversation(
-        conn, conv, llm, None, budget_s=100.0, clock=clock,
+        conn,
+        conv,
+        llm,
+        None,
+        budget_s=100.0,
+        clock=clock,
     )
     assert result is not None
     assert len(llm.calls) == 2  # both issued: 100 - 40 = 60 >= 30 floor
@@ -143,9 +148,12 @@ def test_t_v170_sum_01_budget_s_none_is_byte_identical_to_todays_behaviour(conn)
 def test_t_v170_sum_02_retry_skipped_below_floor_returns_none_one_row(conn, caplog):
     clock = _FakeClock(0.0)
     conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (80.0, LLMResponse("cut off", [], "length")),
-    ])
+    llm = _ClockAdvancingLLM(
+        clock,
+        [
+            (80.0, LLMResponse("cut off", [], "length")),
+        ],
+    )
     with caplog.at_level("WARNING"):
         result = summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
     assert result is None
@@ -157,9 +165,12 @@ def test_t_v170_sum_02_retry_skipped_below_floor_returns_none_one_row(conn, capl
 def test_t_v170_sum_02_repair_skipped_below_floor_returns_none_one_row(conn, caplog):
     clock = _FakeClock(0.0)
     conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (80.0, LLMResponse("not json at all", [], "stop")),
-    ])
+    llm = _ClockAdvancingLLM(
+        clock,
+        [
+            (80.0, LLMResponse("not json at all", [], "stop")),
+        ],
+    )
     with caplog.at_level("WARNING"):
         result = summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
     assert result is None
@@ -171,9 +182,12 @@ def test_t_v170_sum_02_repair_skipped_below_floor_returns_none_one_row(conn, cap
 def test_t_v170_sum_03_attempt_1_timeout_is_the_remaining_budget_not_none_not_client_own(conn):
     clock = _FakeClock(0.0)
     conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-    ])
+    llm = _ClockAdvancingLLM(
+        clock,
+        [
+            (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+        ],
+    )
     summarize_conversation(conn, conv, llm, None, budget_s=10.0, clock=clock)
     assert len(llm.calls) == 1
     _, timeout_s = llm.calls[0]
@@ -183,10 +197,13 @@ def test_t_v170_sum_03_attempt_1_timeout_is_the_remaining_budget_not_none_not_cl
 def test_t_v170_sum_03_retrys_timeout_equals_the_budget_remaining_then(conn):
     clock = _FakeClock(0.0)
     conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (40.0, LLMResponse("cut off", [], "length")),
-        (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-    ])
+    llm = _ClockAdvancingLLM(
+        clock,
+        [
+            (40.0, LLMResponse("cut off", [], "length")),
+            (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+        ],
+    )
     summarize_conversation(conn, conv, llm, None, budget_s=100.0, clock=clock)
     assert len(llm.calls) == 2
     _, second_timeout = llm.calls[1]
@@ -196,9 +213,12 @@ def test_t_v170_sum_03_retrys_timeout_equals_the_budget_remaining_then(conn):
 def test_n5_attempt_1_issued_at_10s_no_retry_below_floor(conn, caplog):
     clock = _FakeClock(0.0)
     conv = _summary_conn_with_content(conn)
-    llm = _ClockAdvancingLLM(clock, [
-        (0.0, LLMResponse("cut off", [], "length")),
-    ])
+    llm = _ClockAdvancingLLM(
+        clock,
+        [
+            (0.0, LLMResponse("cut off", [], "length")),
+        ],
+    )
     with caplog.at_level("WARNING"):
         result = summarize_conversation(conn, conv, llm, None, budget_s=10.0, clock=clock)
     assert len(llm.calls) == 1  # attempt 1 WAS issued -- 10s remain, positive
@@ -216,15 +236,22 @@ def test_t_v170_sum_04_retry_and_repair_forced_off_under_every_policy(conn):
         conv = storage.get_or_create_active_conversation(conn, 42)
         storage.add_user_message(conn, conv, "hello")
         clock = _FakeClock(0.0)
-        llm = _ClockAdvancingLLM(clock, [
-            (0.0, LLMResponse("cut off", [], "length")),
-            (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
-        ])
-        cfg_stub = type("Cfg", (), {
-            "obs_capture_content": False,
-            "llm_reasoning_policy": policy,
-            "llm_reasoning_on_purposes": on_purposes,
-        })()
+        llm = _ClockAdvancingLLM(
+            clock,
+            [
+                (0.0, LLMResponse("cut off", [], "length")),
+                (0.0, LLMResponse(json.dumps(VALID_SUMMARY), [], "stop")),
+            ],
+        )
+        cfg_stub = type(
+            "Cfg",
+            (),
+            {
+                "obs_capture_content": False,
+                "llm_reasoning_policy": policy,
+                "llm_reasoning_on_purposes": on_purposes,
+            },
+        )()
         summarize_conversation(conn, conv, llm, cfg_stub, budget_s=1000.0, clock=clock)
         assert len(llm.calls) == 2
         attempt1_reasoning, _ = llm.calls[0]
@@ -237,4 +264,5 @@ def test_t_v170_sum_04_retry_and_repair_forced_off_under_every_policy(conn):
 def test_t_v170_sum_05_module_constant_matches_config_local_copy():
     from agent import SUMMARY_BUDGET_FLOOR_S
     from config import _SUMMARY_BUDGET_FLOOR_S
+
     assert SUMMARY_BUDGET_FLOOR_S == _SUMMARY_BUDGET_FLOOR_S == 30.0

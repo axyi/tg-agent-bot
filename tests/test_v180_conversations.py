@@ -92,7 +92,12 @@ def test_t_v180_conv_01_six_fields_newest_first_bounded(conn):
     assert len(rows) == 3
     for row in rows:
         assert set(row.keys()) == {
-            "id", "tg_user_id", "created_at", "active", "message_count", "last_activity",
+            "id",
+            "tg_user_id",
+            "created_at",
+            "active",
+            "message_count",
+            "last_activity",
         }
 
     # newest first -- created_at ties broken by id, so ids must be strictly

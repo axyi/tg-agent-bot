@@ -23,9 +23,7 @@ TOKEN = "123456789:sentinel-telegram-token-for-routing-tests"
 OR_KEY = "sk-or-sentinel-openrouter-key-for-routing-tests"
 USER_ID = 424242
 BOT_USERNAME = "ThisBot"
-SUMMARY_JSON = (
-    '{"goal": "g", "files": [], "decisions": [], "errors": [], "next_action": ""}'
-)
+SUMMARY_JSON = '{"goal": "g", "files": [], "decisions": [], "errors": [], "next_action": ""}'
 
 
 def base_env(**overrides):
@@ -98,8 +96,13 @@ def process(conn, cfg, text, llm, summary_llm):
     tg = RecordingTelegram()
     bot.process_update(
         update(text),
-        conn=conn, tg=tg, cfg=cfg, llm=llm, skills={},
-        runner=RecordingRunner(), bot_username=BOT_USERNAME,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        llm=llm,
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
         summary_llm=summary_llm,
     )
     return tg
@@ -108,6 +111,7 @@ def process(conn, cfg, text, llm, summary_llm):
 # --------------------------------------------------------------------------
 # Validation (config.py)
 # --------------------------------------------------------------------------
+
 
 def test_rte_01_the_default_is_no_routing():
     cfg = load_config(env=base_env(), load_env_file=False)
@@ -141,7 +145,8 @@ def test_rte_01_an_empty_model_is_refused(value):
 
 def test_rte_01_an_unconfigured_openrouter_is_refused():
     env = base_env(
-        OPENROUTER_API_KEY=None, OPENROUTER_MODEL=None,
+        OPENROUTER_API_KEY=None,
+        OPENROUTER_MODEL=None,
         LLM_SUMMARY_MODEL="openrouter:cheap/model",
     )
     with pytest.raises(ConfigError) as exc:
@@ -152,7 +157,8 @@ def test_rte_01_an_unconfigured_openrouter_is_refused():
 
 def test_rte_01_an_unconfigured_lmstudio_is_refused():
     env = base_env(
-        LLM_PROVIDER="openrouter", LMSTUDIO_MODEL=None,
+        LLM_PROVIDER="openrouter",
+        LMSTUDIO_MODEL=None,
         LLM_SUMMARY_MODEL="lmstudio:small",
     )
     with pytest.raises(ConfigError) as exc:
@@ -164,6 +170,7 @@ def test_rte_01_an_unconfigured_lmstudio_is_refused():
 # --------------------------------------------------------------------------
 # The second client (llm/__init__.py)
 # --------------------------------------------------------------------------
+
 
 def test_rte_01_the_summary_purpose_gets_the_routed_client_and_no_failover(tmp_path):
     cfg = make_cfg(tmp_path, llm_summary_model="openrouter:cheap/model")
@@ -207,6 +214,7 @@ def test_rte_01_the_main_purpose_ignores_the_variable(tmp_path):
 # --------------------------------------------------------------------------
 # Routing the summary call, and only it (bot.py)
 # --------------------------------------------------------------------------
+
 
 def test_rte_01_the_summary_command_goes_to_the_routed_client(conn, tmp_path):
     cfg = make_cfg(tmp_path, llm_summary_model="openrouter:cheap/model")
@@ -267,6 +275,7 @@ def test_rte_01_without_a_routed_client_the_summary_stays_on_the_main_one(conn, 
 # Startup wiring (bot.main)
 # --------------------------------------------------------------------------
 
+
 def _stub_startup(monkeypatch, cfg, captured, built):
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
@@ -321,12 +330,11 @@ def test_t_v191_rerank_default_is_no_routing():
 
 
 def test_t_v191_rerank_a_configured_provider_and_model_are_accepted():
-    cfg = load_config(
-        env=base_env(LLM_RERANK_MODEL=" OpenRouter:fast/model "), load_env_file=False
-    )
+    cfg = load_config(env=base_env(LLM_RERANK_MODEL=" OpenRouter:fast/model "), load_env_file=False)
     assert cfg.llm_rerank_model == "openrouter:fast/model"
     assert config.parse_routed_model(cfg.llm_rerank_model, "LLM_RERANK_MODEL") == (
-        "openrouter", "fast/model",
+        "openrouter",
+        "fast/model",
     )
 
 
@@ -346,7 +354,8 @@ def test_t_v191_rerank_an_empty_model_is_refused(value):
 
 def test_t_v191_rerank_an_unconfigured_openrouter_is_refused():
     env = base_env(
-        OPENROUTER_API_KEY=None, OPENROUTER_MODEL=None,
+        OPENROUTER_API_KEY=None,
+        OPENROUTER_MODEL=None,
         LLM_RERANK_MODEL="openrouter:fast/model",
     )
     with pytest.raises(ConfigError) as exc:
@@ -357,7 +366,8 @@ def test_t_v191_rerank_an_unconfigured_openrouter_is_refused():
 
 def test_t_v191_rerank_an_unconfigured_lmstudio_is_refused():
     env = base_env(
-        LLM_PROVIDER="openrouter", LMSTUDIO_MODEL=None,
+        LLM_PROVIDER="openrouter",
+        LMSTUDIO_MODEL=None,
         LLM_RERANK_MODEL="lmstudio:small",
     )
     with pytest.raises(ConfigError) as exc:
@@ -405,9 +415,7 @@ def test_t_v191_an_unset_variable_leaves_the_rerank_purpose_on_the_main_client(t
 
 
 def test_t_v191_main_builds_a_third_client_for_the_rerank_purpose(tmp_path, monkeypatch):
-    cfg = make_cfg(
-        tmp_path, db_path=tmp_path / "main.db", llm_rerank_model="openrouter:fast/model"
-    )
+    cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db", llm_rerank_model="openrouter:fast/model")
     captured, built = {}, []
     _stub_startup(monkeypatch, cfg, captured, built)
 

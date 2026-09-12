@@ -110,9 +110,7 @@ def freeze(corpus_dir: Path, questions_path: Path) -> dict[str, str]:
     """REQ-V190-EVAL-01/-02's freeze: sha256 of every corpus file and of
     `questions.json`, computed once, before the first live call."""
     hashes = {
-        path.name: sha256_file(path)
-        for path in sorted(corpus_dir.glob("*"))
-        if path.is_file()
+        path.name: sha256_file(path) for path in sorted(corpus_dir.glob("*")) if path.is_file()
     }
     hashes[questions_path.name] = sha256_file(questions_path)
     return hashes
@@ -209,7 +207,10 @@ def load_questions(path: Path) -> list[dict]:
 
 
 def index_corpus(
-    conn, *, embedder, documents_to_index: list[tuple[str, bytes]],
+    conn,
+    *,
+    embedder,
+    documents_to_index: list[tuple[str, bytes]],
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     for filename, data in documents_to_index:
@@ -307,7 +308,13 @@ def _refusing_runner(  # pragma: no cover -- never invoked
 
 
 def conversation_smoke(
-    conn, *, question: str, embedder, llm, cfg, resolve_cost=None,
+    conn,
+    *,
+    question: str,
+    embedder,
+    llm,
+    cfg,
+    resolve_cost=None,
     run_agent_outcome: Callable = agent.run_agent_outcome,
 ) -> tuple[bool, str]:
     """Two live turns: `question` (a real answerable item's text -- the
@@ -322,22 +329,39 @@ def conversation_smoke(
     def _turn(text: str, searcher) -> None:
         storage.add_user_message(conn, conv_id, text)
         run_agent_outcome(
-            conn=conn, conv_id=conv_id, llm=llm, skills={}, runner=_refusing_runner,
-            now=storage.utc_now_iso(), cfg=cfg, searcher=searcher, resolve_cost=resolve_cost,
+            conn=conn,
+            conv_id=conv_id,
+            llm=llm,
+            skills={},
+            runner=_refusing_runner,
+            now=storage.utc_now_iso(),
+            cfg=cfg,
+            searcher=searcher,
+            resolve_cost=resolve_cost,
         )
 
     searcher1 = _RecordingSearcher(
         rag.Searcher(
-            conn, user_id=EVAL_USER_ID, embedder=embedder, llm=llm, cfg=cfg,
-            conv_id=conv_id, resolve_cost=resolve_cost,
+            conn,
+            user_id=EVAL_USER_ID,
+            embedder=embedder,
+            llm=llm,
+            cfg=cfg,
+            conv_id=conv_id,
+            resolve_cost=resolve_cost,
         )
     )
     _turn(question, searcher1)
 
     searcher2 = _RecordingSearcher(
         rag.Searcher(
-            conn, user_id=EVAL_USER_ID, embedder=embedder, llm=llm, cfg=cfg,
-            conv_id=conv_id, resolve_cost=resolve_cost,
+            conn,
+            user_id=EVAL_USER_ID,
+            embedder=embedder,
+            llm=llm,
+            cfg=cfg,
+            conv_id=conv_id,
+            resolve_cost=resolve_cost,
         )
     )
     _turn(_SMOKE_FOLLOWUP, searcher2)
@@ -396,7 +420,11 @@ def run(
     ranks: dict[str, list[tuple[int | None, int | None]]] = {mode: [] for mode in MODES}
     rerank_flags: list[tuple[dict, rag.SearchResult]] = []
     hybrid_rerank_searcher = rag.Searcher(
-        conn, user_id=EVAL_USER_ID, embedder=embedder, llm=rerank_llm or llm, cfg=cfg,
+        conn,
+        user_id=EVAL_USER_ID,
+        embedder=embedder,
+        llm=rerank_llm or llm,
+        cfg=cfg,
         conv_id=storage.get_or_create_active_conversation(conn, EVAL_USER_ID),
         resolve_cost=resolve_cost,
     )
@@ -412,19 +440,22 @@ def run(
 
             ranks["vector"].append(
                 first_hit(
-                    vector_items, expected_source=question["expected_source"],
+                    vector_items,
+                    expected_source=question["expected_source"],
                     expected_evidence=question["expected_evidence"],
                 )
             )
             ranks["hybrid"].append(
                 first_hit(
-                    hybrid_items, expected_source=question["expected_source"],
+                    hybrid_items,
+                    expected_source=question["expected_source"],
                     expected_evidence=question["expected_evidence"],
                 )
             )
             ranks["hybrid+rerank"].append(
                 first_hit(
-                    rerank_items, expected_source=question["expected_source"],
+                    rerank_items,
+                    expected_source=question["expected_source"],
                     expected_evidence=question["expected_evidence"],
                 )
             )
@@ -439,27 +470,26 @@ def run(
         hybrid_items = hybrid_mode(conn, embedder=embedder, query=q_text)
         rerank_items = _passages_as_dicts(hybrid_rerank_searcher.search(q_text).passages)
         for mode, items in (
-            ("vector", vector_items), ("hybrid", hybrid_items), ("hybrid+rerank", rerank_items),
+            ("vector", vector_items),
+            ("hybrid", hybrid_items),
+            ("hybrid+rerank", rerank_items),
         ):
             verdict = "passages returned" if items else "no passage from any file"
             null_advisory[mode].append(f"{q_text!r}: {verdict}")
 
     # ---- metrics ------------------------------------------------------
     n = len(answerable)
-    pdf_indices = [
-        i for i, q in enumerate(answerable) if q["expected_page"] is not None
-    ]
+    pdf_indices = [i for i, q in enumerate(answerable) if q["expected_page"] is not None]
     metrics: dict[str, dict[str, float]] = {}
     for mode in MODES:
         mode_ranks = ranks[mode]
         hits = sum(1 for rank, _page in mode_ranks if rank is not None)
         recall = hits / n if n else 0.0
-        reciprocal_sum = sum(
-            1.0 / rank if rank is not None else 0.0 for rank, _page in mode_ranks
-        )
+        reciprocal_sum = sum(1.0 / rank if rank is not None else 0.0 for rank, _page in mode_ranks)
         mrr = reciprocal_sum / n if n else 0.0
         page_hits = sum(
-            1 for i in pdf_indices
+            1
+            for i in pdf_indices
             if mode_ranks[i][0] is not None and mode_ranks[i][1] == answerable[i]["expected_page"]
         )
         page_hit_rate = page_hits / len(pdf_indices) if pdf_indices else 0.0
@@ -499,12 +529,15 @@ def run(
     )
     if answerable:
         smoke_ok, smoke_detail = conversation_smoke(
-            conn, question=answerable[0]["question"], embedder=embedder, llm=llm, cfg=cfg,
-            resolve_cost=resolve_cost, run_agent_outcome=run_agent_outcome,
+            conn,
+            question=answerable[0]["question"],
+            embedder=embedder,
+            llm=llm,
+            cfg=cfg,
+            resolve_cost=resolve_cost,
+            run_agent_outcome=run_agent_outcome,
         )
-        print_fn(
-            f"  conversation-aware smoke: {'pass' if smoke_ok else 'fail'} -- {smoke_detail}"
-        )
+        print_fn(f"  conversation-aware smoke: {'pass' if smoke_ok else 'fail'} -- {smoke_detail}")
     else:  # pragma: no cover -- questions.json always carries >= 1 answerable item
         print_fn("  conversation-aware smoke: skipped -- no answerable question to seed it")
 
@@ -568,15 +601,20 @@ def main() -> int:
             print(f"gate-7: FAIL constructing the chat model -- {config.redact(str(exc))}")
             return 2
         embedder = EmbeddingsClient(
-            cfg.embedding_base_url, cfg.embedding_model, cfg.embedding_dim,
-            cfg.embedding_timeout_s, client,
+            cfg.embedding_base_url,
+            cfg.embedding_model,
+            cfg.embedding_dim,
+            cfg.embedding_timeout_s,
+            client,
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "rag_eval.db"
             conn = storage.connect(db_path)
             try:
                 storage.init_schema(
-                    conn, embedding_dim=cfg.embedding_dim, embedding_model=cfg.embedding_model,
+                    conn,
+                    embedding_dim=cfg.embedding_dim,
+                    embedding_model=cfg.embedding_model,
                 )
                 return run(conn=conn, cfg=cfg, embedder=embedder, llm=llm, rerank_llm=rerank_llm)
             finally:

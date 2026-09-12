@@ -26,8 +26,8 @@ USER_ID = 424242
 NOW_A = "2026-09-02T10:00:00Z"
 NOW_B = "2026-09-02T18:45:31Z"
 
-PROMPT_LIMIT = 700          # REQ-V13-PFX-01, raised by REQ-V190-TOOL-04 (EC-03)
-SCHEMA_LIMIT = 1800         # REQ-V13-PFX-02, raised by REQ-V190-TOOL-01 (EC-03)
+PROMPT_LIMIT = 700  # REQ-V13-PFX-01, raised by REQ-V190-TOOL-04 (EC-03)
+SCHEMA_LIMIT = 1800  # REQ-V13-PFX-02, raised by REQ-V190-TOOL-01 (EC-03)
 
 # REQ-V13-PFX-02: the schema of spec-v1.2 (commit f0572c8, `tool_specs()` with
 # every `description` removed) — the frozen structural contract. Parameter
@@ -115,9 +115,7 @@ def expected_structure() -> list[dict]:
 def without_descriptions(value):
     if isinstance(value, dict):
         return {
-            key: without_descriptions(item)
-            for key, item in value.items()
-            if key != "description"
+            key: without_descriptions(item) for key, item in value.items() if key != "description"
         }
     if isinstance(value, list):
         return [without_descriptions(item) for item in value]
@@ -150,9 +148,7 @@ def answer(content: str = "done") -> LLMResponse:
 
 
 def exec_round(index: int) -> LLMResponse:
-    return LLMResponse(
-        "", [ToolCall(f"raw_{index}", "exec", '{"argv": ["true"]}')], "tool_calls"
-    )
+    return LLMResponse("", [ToolCall(f"raw_{index}", "exec", '{"argv": ["true"]}')], "tool_calls")
 
 
 def run(conn, conv, script, *, skills=None, now=NOW_A) -> FakeLLM:
@@ -182,8 +178,9 @@ class BudgetedLLM(FakeLLM):
         self.context_length = context_length
 
 
-def run_budgeted(conn, conv, script, *, context_length: int,
-                 skills=None, now=NOW_A, goals=None) -> FakeLLM:
+def run_budgeted(
+    conn, conv, script, *, context_length: int, skills=None, now=NOW_A, goals=None
+) -> FakeLLM:
     llm = BudgetedLLM(script, context_length)
     agent.run_agent(
         conn=conn,
@@ -211,6 +208,7 @@ def system_of(llm: FakeLLM, index: int = 0) -> str:
 # --------------------------------------------------------------------------
 # REQ-V13-PFX-01 — the compressed system prompt
 # --------------------------------------------------------------------------
+
 
 def test_pfx_01_system_prompt_fits_the_budget():
     measured = len(agent.SYSTEM_PROMPT.replace("{skill_lines}", ""))
@@ -263,6 +261,7 @@ def test_pfx_01_the_empty_catalog_keeps_its_sentinel():
 # REQ-V13-PFX-02 — the compressed tool catalog
 # --------------------------------------------------------------------------
 
+
 def test_pfx_02_schema_fits_the_budget():
     measured = len(json.dumps(tools.tool_specs()))
     assert measured <= SCHEMA_LIMIT, f"tool catalog is {measured} chars"
@@ -290,6 +289,7 @@ def test_pfx_02_the_descriptions_stay_ascii_and_quote_free():
 # REQ-V13-PFX-03 — the compressed prompt still drives the loop
 # --------------------------------------------------------------------------
 
+
 def test_pfx_03_the_prompt_still_drives_the_agent(conn):
     skills = {"weather": skill("weather", "current weather for a city")}
     conv = conversation(conn, "weather in Cologne?")
@@ -297,9 +297,7 @@ def test_pfx_03_the_prompt_still_drives_the_agent(conn):
         conn,
         conv,
         [
-            LLMResponse(
-                "", [ToolCall("raw", "load_skill", '{"name": "weather"}')], "tool_calls"
-            ),
+            LLMResponse("", [ToolCall("raw", "load_skill", '{"name": "weather"}')], "tool_calls"),
             answer("Cologne: sunny"),
         ],
         skills=skills,
@@ -318,6 +316,7 @@ def test_pfx_03_the_prompt_still_drives_the_agent(conn):
 # --------------------------------------------------------------------------
 # REQ-V13-CCH-01 — the prefix is byte-stable; the clock moves to the user turn
 # --------------------------------------------------------------------------
+
 
 def test_cch_01_the_clock_left_the_system_prompt(conn):
     conv = conversation(conn)
@@ -350,9 +349,7 @@ def test_cch_01_the_now_line_is_appended_to_the_last_user_message(conn):
     assert first.calls[0][0][-1]["content"].endswith("(now: 2026-09-02 10:00 UTC)")
 
     # The stored rows never learn about the clock (REQ-V13-CCH-01).
-    stored = conn.execute(
-        "SELECT content FROM messages WHERE role = 'user' ORDER BY id"
-    ).fetchall()
+    stored = conn.execute("SELECT content FROM messages WHERE role = 'user' ORDER BY id").fetchall()
     assert [row["content"] for row in stored] == ["first question", "second question"]
 
 
@@ -377,14 +374,17 @@ def test_cch_01_the_budgeted_branch_keeps_the_prefix_byte_stable(conn):
     goals = ["ask about the weather in Koln", "check the host uptime"]
     ample = (
         agent.estimate_tokens(agent.build_system_prompt(skills, NOW_A, goals))
-        + agent.TOKEN_BUDGET_MARGIN + 1000
+        + agent.TOKEN_BUDGET_MARGIN
+        + 1000
     )
     conv = conversation(conn, "first question")
-    first = run_budgeted(conn, conv, [answer("a")], context_length=ample,
-                         skills=skills, now=NOW_A, goals=goals)
+    first = run_budgeted(
+        conn, conv, [answer("a")], context_length=ample, skills=skills, now=NOW_A, goals=goals
+    )
     storage.add_user_message(conn, conv, "second question")
-    second = run_budgeted(conn, conv, [answer("b")], context_length=ample,
-                          skills=skills, now=NOW_B, goals=goals)
+    second = run_budgeted(
+        conn, conv, [answer("b")], context_length=ample, skills=skills, now=NOW_B, goals=goals
+    )
 
     assert system_of(first) == system_of(second)
     assert agent.GOALS_BLOCK in system_of(first)
@@ -404,11 +404,13 @@ def test_cch_01_the_dropped_goals_rebuild_is_byte_stable(conn):
     exhausted = with_goals + agent.TOKEN_BUDGET_MARGIN
 
     conv = conversation(conn, "first question")
-    first = run_budgeted(conn, conv, [answer("a")], context_length=exhausted,
-                         skills=skills, now=NOW_A, goals=goals)
+    first = run_budgeted(
+        conn, conv, [answer("a")], context_length=exhausted, skills=skills, now=NOW_A, goals=goals
+    )
     storage.add_user_message(conn, conv, "second question")
-    second = run_budgeted(conn, conv, [answer("b")], context_length=exhausted,
-                          skills=skills, now=NOW_B, goals=goals)
+    second = run_budgeted(
+        conn, conv, [answer("b")], context_length=exhausted, skills=skills, now=NOW_B, goals=goals
+    )
 
     assert agent.GOALS_BLOCK not in system_of(first)
     assert system_of(first) == system_of(second)
@@ -446,6 +448,7 @@ def test_cch_01_reload_skills_is_the_only_invalidation(conn):
 # REQ-V13-CCH-02 — inside one invocation the request only grows
 # --------------------------------------------------------------------------
 
+
 def rounds(conn) -> FakeLLM:
     """Seven tool rounds, then the tools-withheld final request of round 8."""
     conv = conversation(conn)
@@ -481,13 +484,18 @@ def test_cch_02_b_the_tool_catalog_is_byte_identical_on_every_round(conn):
 # https://openrouter.ai/docs/guides/best-practices/prompt-caching
 # --------------------------------------------------------------------------
 
+
 def openrouter(model: str, seen: list):
     def handler(request):
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={
-            "choices": [{"finish_reason": "stop",
-                         "message": {"role": "assistant", "content": "hi"}}]
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"finish_reason": "stop", "message": {"role": "assistant", "content": "hi"}}
+                ]
+            },
+        )
 
     return OpenRouterClient(
         "sk-or-test-key", model, 5.0, httpx.Client(transport=mock_llm_transport(handler))
@@ -508,9 +516,7 @@ def test_cch_03_anthropic_models_get_a_cache_breakpoint():
     sent = seen[0]["messages"]
     assert sent[0] == {
         "role": "system",
-        "content": [
-            {"type": "text", "text": "PREFIX", "cache_control": {"type": "ephemeral"}}
-        ],
+        "content": [{"type": "text", "text": "PREFIX", "cache_control": {"type": "ephemeral"}}],
     }
     # Only the cacheable prefix is marked; the request-time nudge stays plain.
     assert sent[2] == {"role": "system", "content": agent.FINAL_INSTRUCTION}

@@ -168,9 +168,7 @@ def make_resolver(
     manual = _manual_price(cfg)
     reference_model = str(getattr(cfg, "llm_price_ref_model", "") or "")
 
-    def resolve(
-        provider: str, model: str, usage: Usage | None
-    ) -> tuple[float | None, str | None]:
+    def resolve(provider: str, model: str, usage: Usage | None) -> tuple[float | None, str | None]:
         if usage is not None and usage.provider_cost_usd is not None:
             return float(usage.provider_cost_usd), BASIS_PROVIDER
         found = _lookup(fresh, snapshot_basis, provider, model, reference_model)
@@ -230,9 +228,7 @@ def _lookup(
     return price, basis_override or f"{REFERENCE_PREFIX}{reference_model}"
 
 
-def _priced(
-    usage: Usage | None, price: Price, basis: str
-) -> tuple[float | None, str | None]:
+def _priced(usage: Usage | None, price: Price, basis: str) -> tuple[float | None, str | None]:
     """A basis labels a cost; without a cost there is nothing to label."""
     cost = cost_usd(usage, price)
     return (None, None) if cost is None else (cost, basis)
@@ -240,7 +236,7 @@ def _priced(
 
 def _stale_form(basis: str) -> str:
     if basis.startswith(REFERENCE_PREFIX):
-        return REFERENCE_STALE_PREFIX + basis[len(REFERENCE_PREFIX):]
+        return REFERENCE_STALE_PREFIX + basis[len(REFERENCE_PREFIX) :]
     return basis + STALE_SUFFIX
 
 

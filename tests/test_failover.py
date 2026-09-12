@@ -203,16 +203,20 @@ def test_t_v1_fo_05_model_command(conn, tmp_path):
         tg = RecordingTelegram()
         bot.process_update(
             command(text, update_id),
-            conn=conn, tg=tg, cfg=cfg, llm=llm, skills={},
-            runner=RecordingRunner(), bot_username=BOT_USERNAME,
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            llm=llm,
+            skills={},
+            runner=RecordingRunner(),
+            bot_username=BOT_USERNAME,
             set_provider=set_provider,
         )
         return tg.sent
 
     active = wrapper(StubClient("lmstudio"), StubClient("openrouter"))
     assert process("/model", active, 1) == [
-        (USER_ID, "Provider: lmstudio (override: none, "
-                  "failures: lmstudio=0, openrouter=0)")
+        (USER_ID, "Provider: lmstudio (override: none, failures: lmstudio=0, openrouter=0)")
     ]
 
     assert process("/model openrouter", active, 2) == [
@@ -227,8 +231,7 @@ def test_t_v1_fo_05_model_command(conn, tmp_path):
     switched = wrapper(StubClient("openrouter"), StubClient("lmstudio"))
     switched.failure_counts["openrouter"] = 2
     assert process("/model", switched, 3) == [
-        (USER_ID, "Provider: openrouter (override: openrouter, "
-                  "failures: lmstudio=0, openrouter=2)")
+        (USER_ID, "Provider: openrouter (override: openrouter, failures: lmstudio=0, openrouter=2)")
     ]
 
     assert process("/model auto", active, 4) == [(USER_ID, "Provider override cleared.")]
@@ -244,8 +247,13 @@ def test_t_v1_fo_05_model_command(conn, tmp_path):
     tg = RecordingTelegram()
     bot.process_update(
         command("/model openrouter", 6),
-        conn=conn, tg=tg, cfg=bare, llm=active, skills={},
-        runner=RecordingRunner(), bot_username=BOT_USERNAME,
+        conn=conn,
+        tg=tg,
+        cfg=bare,
+        llm=active,
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
         set_provider=set_provider,
     )
     assert tg.sent == [(USER_ID, "Provider openrouter is not configured.")]

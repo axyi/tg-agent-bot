@@ -108,9 +108,7 @@ def bm25_search(rows, query: str, k: int = 20) -> list[int]:
     corpus = [tokenize(row["text"]) for row in rows]
     bm25 = rank_bm25.BM25Okapi(corpus)
     scores = bm25.get_scores(tokenize(query))
-    scored = [
-        (row["id"], score) for row, score in zip(rows, scores, strict=True) if score > 0
-    ]
+    scored = [(row["id"], score) for row, score in zip(rows, scores, strict=True) if score > 0]
     scored.sort(key=lambda pair: (-pair[1], pair[0]))
     return [chunk_id for chunk_id, _score in scored[:k]]
 
@@ -297,12 +295,16 @@ def rerank(
             # run can show how close to _RERANK_TIMEOUT_S the real call gets.
             if attempt > 1:
                 log.warning(
-                    "rerank succeeded on attempt %d after %.2fs", attempt, elapsed_s,
+                    "rerank succeeded on attempt %d after %.2fs",
+                    attempt,
+                    elapsed_s,
                 )
             break
         if failure.retryable and attempt < _RERANK_MAX_ATTEMPTS:
             log.warning(
-                "rerank attempt %d failed, retrying: %s", attempt, failure,
+                "rerank attempt %d failed, retrying: %s",
+                attempt,
+                failure,
             )
             sleep(_RERANK_RETRY_BACKOFF_S[attempt - 1])
             continue
@@ -360,7 +362,10 @@ class Searcher:
         # Step 1: vector retrieval (RET-03) and BM25 retrieval (RET-04),
         # each at most 20 ids.
         vector_ids = vector_search(
-            self.conn, user_id=self.user_id, embedder=self.embedder, query=query,
+            self.conn,
+            user_id=self.user_id,
+            embedder=self.embedder,
+            query=query,
             conv_id=self.conv_id,
         )
         rows = storage.user_chunks(self.conn, user_id=self.user_id)

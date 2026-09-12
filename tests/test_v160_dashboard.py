@@ -727,7 +727,10 @@ def _request(port, method, path, *, host=None, extra_headers=None):
 
 
 SECURITY_HEADER_NAMES = (
-    "Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy", "Cache-Control",
+    "Content-Security-Policy",
+    "X-Content-Type-Options",
+    "Referrer-Policy",
+    "Cache-Control",
 )
 
 
@@ -761,8 +764,12 @@ def test_t_v160_srv_03_405_carries_allow_header(live_server):
 def test_n4_unlisted_paths_are_404_no_traversal_no_normalisation(live_server):
     port, _ = live_server
     for path in (
-        "/../etc/passwd", "/traces/../..", "/api/usage/../health", "/tools/",
-        "/index.html", "/%2e%2e/",
+        "/../etc/passwd",
+        "/traces/../..",
+        "/api/usage/../health",
+        "/tools/",
+        "/index.html",
+        "/%2e%2e/",
     ):
         status, _, _ = _request(port, "GET", path)
         assert status == 404, path
@@ -785,9 +792,14 @@ def test_t_v160_srv_10_host_header_rejected_cases(live_server):
 def test_n5_bad_params_400_names_only_the_parameter(live_server):
     port, _ = live_server
     cases = [
-        "/api/usage?group=nope", "/api/usage?since=2026-13-45", "/api/usage?since=yesterday",
-        "/api/traces?limit=0", "/api/traces?limit=9999", "/api/traces?conv=-1",
-        "/api/usage?unknown=1", "/api/usage?group=model&group=day",
+        "/api/usage?group=nope",
+        "/api/usage?since=2026-13-45",
+        "/api/usage?since=yesterday",
+        "/api/traces?limit=0",
+        "/api/traces?limit=9999",
+        "/api/traces?conv=-1",
+        "/api/usage?unknown=1",
+        "/api/usage?group=model&group=day",
     ]
     for path in cases:
         status, _, body = _request(port, "GET", path)
@@ -808,7 +820,13 @@ def test_t_v160_api_01_health_shape(live_server):
     assert headers["Content-Type"] == "application/json; charset=utf-8"
     payload = json.loads(body)
     assert set(payload.keys()) == {
-        "status", "version", "schema_version", "spans", "spans_dropped", "traces", "generated_at",
+        "status",
+        "version",
+        "schema_version",
+        "spans",
+        "spans_dropped",
+        "traces",
+        "generated_at",
     }
     assert payload["status"] == "ok"
     assert payload["schema_version"] == storage.SCHEMA_VERSION
@@ -897,10 +915,20 @@ def test_a_trace_page_and_api_serve_real_spans(live_server):
     conn = storage.connect(db_path)
     trace_id = "b" * 32
     storage.add_span(
-        conn, trace_id=trace_id, span_id="1" * 16, parent_span_id=None, conv_id=1,
-        turn_id=None, name="invoke_agent tg-agent-bot", kind="INTERNAL",
-        ts=storage.utc_now_iso(), start_ns=0, duration_ms=5, status="ok",
-        status_message=None, attributes_json=json.dumps({"gen_ai.conversation.id": 1}),
+        conn,
+        trace_id=trace_id,
+        span_id="1" * 16,
+        parent_span_id=None,
+        conv_id=1,
+        turn_id=None,
+        name="invoke_agent tg-agent-bot",
+        kind="INTERNAL",
+        ts=storage.utc_now_iso(),
+        start_ns=0,
+        duration_ms=5,
+        status="ok",
+        status_message=None,
+        attributes_json=json.dumps({"gen_ai.conversation.id": 1}),
     )
     conn.close()
     status, _, body = _request(port, "GET", f"/api/traces/{trace_id}")
@@ -955,10 +983,13 @@ def _seed_canary(db_path, *, with_content_attribute: bool):
         storage.add_user_message(conn, conv, f"remember: {CANARY}")
         storage.add_summary(conn, conv, USER_ID, json.dumps({"goal": CANARY}))
         storage.add_tool_turn(
-            conn, conv, "",
+            conn,
+            conv,
+            "",
             [
                 {
-                    "id": "c0", "type": "function",
+                    "id": "c0",
+                    "type": "function",
                     "function": {"name": "exec", "arguments": json.dumps({"argv": [CANARY]})},
                 }
             ],
@@ -968,9 +999,18 @@ def _seed_canary(db_path, *, with_content_attribute: bool):
         if with_content_attribute:
             attributes["gen_ai.output.messages"] = CANARY
         storage.add_span(
-            conn, trace_id=_SWEEP_TRACE_ID, span_id="a" * 16, parent_span_id=None,
-            conv_id=conv, turn_id=None, name="invoke_agent tg-agent-bot", kind="INTERNAL",
-            ts=storage.utc_now_iso(), start_ns=0, duration_ms=1, status="error",
+            conn,
+            trace_id=_SWEEP_TRACE_ID,
+            span_id="a" * 16,
+            parent_span_id=None,
+            conv_id=conv,
+            turn_id=None,
+            name="invoke_agent tg-agent-bot",
+            kind="INTERNAL",
+            ts=storage.utc_now_iso(),
+            start_ns=0,
+            duration_ms=1,
+            status="error",
             status_message=f"leaked: {CANARY}",
             attributes_json=json.dumps(attributes),
         )
@@ -1001,8 +1041,8 @@ def _sweep_routes(port):
         ("GET", "/api/traces"),
         ("GET", "/api/tools"),
         ("GET", f"/api/traces/{_SWEEP_TRACE_ID}"),
-        ("GET", "/nope"),          # 404
-        ("POST", "/"),             # 405
+        ("GET", "/nope"),  # 404
+        ("POST", "/"),  # 405
     ]
     results = []
     for method, path in cases:
@@ -1072,8 +1112,9 @@ import config  # noqa: E402
 def test_t_v160_srv_01_dashboard_port_validation():
     for bad in ("80", "70000", "abc"):
         with pytest.raises(config.ConfigError, match="DASHBOARD_PORT"):
-            config.load_config(env={**base_env_for_config(), "DASHBOARD_PORT": bad},
-                                load_env_file=False)
+            config.load_config(
+                env={**base_env_for_config(), "DASHBOARD_PORT": bad}, load_env_file=False
+            )
     cfg = config.load_config(env=base_env_for_config(), load_env_file=False)
     assert cfg.dashboard_port == 8765
     assert cfg.dashboard_enabled is True
@@ -1134,7 +1175,7 @@ def _stub_bot_startup(monkeypatch):
     monkeypatch.setattr(bot_module, "_startup_docker_wiring", lambda cfg, docker_ok: (False, None))
     monkeypatch.setattr(bot_module.signal, "signal", lambda signum, handler: None)
     monkeypatch.setattr(
-        bot_module, "build_cost_resolver", lambda conn, cfg, client: (lambda *a, **k: (None, None))
+        bot_module, "build_cost_resolver", lambda conn, cfg, client: lambda *a, **k: (None, None)
     )
 
 
@@ -1164,8 +1205,10 @@ def test_t_v160_srv_09_status_line_each_state(tmp_path):
     storage.init_schema(conn)
     cfg = make_cfg_for_bot(tmp_path)
     for status_value in (
-        "http://127.0.0.1:8765/", "off (--no-dashboard)",
-        "off (DASHBOARD_ENABLED=false)", "off (bind failed)",
+        "http://127.0.0.1:8765/",
+        "off (--no-dashboard)",
+        "off (DASHBOARD_ENABLED=false)",
+        "off (bind failed)",
     ):
         rendered = bot_module._render_status(
             conn, cfg, object(), {}, None, False, None, 1, status_value
@@ -1178,8 +1221,11 @@ def test_t_v160_srv_09_status_line_each_state(tmp_path):
 
 def test_n9_usage_errors_exit_2(monkeypatch):
     for bad_args in (
-        ["--selftest", "--version"], ["--selftest", "--no-dashboard"],
-        ["--no-dashboard", "--no-dashboard"], ["extra"], ["--bogus"],
+        ["--selftest", "--version"],
+        ["--selftest", "--no-dashboard"],
+        ["--no-dashboard", "--no-dashboard"],
+        ["extra"],
+        ["--bogus"],
     ):
         assert bot_module.main(bad_args) == 2
 

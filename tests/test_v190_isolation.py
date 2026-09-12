@@ -29,9 +29,15 @@ import storage
 
 def _document(conn, user_id, filename, **overrides):
     fields = {
-        "user_id": user_id, "filename": filename, "file_type": "txt",
-        "created_at": "x", "size_bytes": 1, "text_chars": 5,
-        "page_count": None, "chunk_count": 1, "sha256": "x" * 8,
+        "user_id": user_id,
+        "filename": filename,
+        "file_type": "txt",
+        "created_at": "x",
+        "size_bytes": 1,
+        "text_chars": 5,
+        "page_count": None,
+        "chunk_count": 1,
+        "sha256": "x" * 8,
     }
     fields.update(overrides)
     return storage.add_document(conn, **fields)
@@ -134,7 +140,9 @@ def test_t_v190_sec_06_all_own_ids_succeed(tmp_path):
     storage.init_schema(conn, embedding_dim=16, embedding_model="m")
     doc_id = _document(conn, 1, "a.txt")
     chunk_ids = storage.add_chunks(
-        conn, user_id=1, document_id=doc_id,
+        conn,
+        user_id=1,
+        document_id=doc_id,
         chunks=[(0, "hello", None, 0, 5), (1, "world", None, 5, 10)],
     )
 
@@ -155,8 +163,16 @@ def test_t_v190_sec_06_all_own_ids_succeed(tmp_path):
 
 _TABLES = ("documents", "chunks", "vec_chunks")
 _DDL_MARKERS = (
-    "CREATE TABLE", "CREATE INDEX", "CREATE VIRTUAL TABLE", "DROP TABLE",
-    "ALTER TABLE", "PRAGMA", "sqlite_master", "BEGIN", "COMMIT", "ROLLBACK",
+    "CREATE TABLE",
+    "CREATE INDEX",
+    "CREATE VIRTUAL TABLE",
+    "DROP TABLE",
+    "ALTER TABLE",
+    "PRAGMA",
+    "sqlite_master",
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
 )
 _EXEMPT_FUNCTIONS = {"document_count_all"}
 
@@ -229,7 +245,6 @@ def test_t_v190_sec_05_every_runtime_statement_is_user_scoped(module):
     assert offenders == []
     if module is storage:
         assert (
-            "SELECT 1 FROM documents WHERE id = ? AND user_id = ?"
-            in function_bodies["add_chunks"]
+            "SELECT 1 FROM documents WHERE id = ? AND user_id = ?" in function_bodies["add_chunks"]
         )
         assert "d.user_id = ?" in function_bodies["add_vectors"]

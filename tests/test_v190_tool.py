@@ -32,18 +32,29 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def passage(**overrides):
     fields = {
-        "chunk_id": 1, "filename": "policy.pdf", "page": 3,
-        "chunk_index": 0, "text": "passage text",
+        "chunk_id": 1,
+        "filename": "policy.pdf",
+        "page": 3,
+        "chunk_index": 0,
+        "text": "passage text",
     }
     fields.update(overrides)
     return rag.Passage(**fields)
 
 
-def result(passages=(), *, documents_present=True, rerank_attempted=False,
-           rerank_succeeded=False, rerank_failure=None):
+def result(
+    passages=(),
+    *,
+    documents_present=True,
+    rerank_attempted=False,
+    rerank_succeeded=False,
+    rerank_failure=None,
+):
     return rag.SearchResult(
-        passages=list(passages), documents_present=documents_present,
-        rerank_attempted=rerank_attempted, rerank_succeeded=rerank_succeeded,
+        passages=list(passages),
+        documents_present=documents_present,
+        rerank_attempted=rerank_attempted,
+        rerank_succeeded=rerank_succeeded,
         rerank_failure=rerank_failure,
     )
 
@@ -77,7 +88,10 @@ SEARCH_SPEC = {
 def test_t_v190_tool_01_the_fourth_entry_is_appended_last_and_exact():
     specs = tools.tool_specs()
     assert [s["function"]["name"] for s in specs] == [
-        "exec", "load_skill", "fetch", "search_documents",
+        "exec",
+        "load_skill",
+        "fetch",
+        "search_documents",
     ]
     assert specs[3] == SEARCH_SPEC
 
@@ -106,11 +120,15 @@ def test_t_v190_tool_01_known_tool_names_picks_it_up_by_construction():
 # T-V190-TOOL-02 -- dispatch, the result envelope, exact truncation
 # --------------------------------------------------------------------------
 
+
 def execute(query="find it", *, searcher=None):
     return json.loads(
         tools.execute_tool(
-            "search_documents", json.dumps({"query": query}),
-            skills={}, runner=RecordingRunner(), searcher=searcher,
+            "search_documents",
+            json.dumps({"query": query}),
+            skills={},
+            runner=RecordingRunner(),
+            searcher=searcher,
         )
     )
 
@@ -130,8 +148,11 @@ def test_t_v190_tool_02_whitespace_only_query_refused():
 def test_t_v190_tool_02_non_string_query_refused():
     payload = json.loads(
         tools.execute_tool(
-            "search_documents", json.dumps({"query": 7}),
-            skills={}, runner=RecordingRunner(), searcher=FakeSearcher(),
+            "search_documents",
+            json.dumps({"query": 7}),
+            skills={},
+            runner=RecordingRunner(),
+            searcher=FakeSearcher(),
         )
     )
     assert payload == {"error": "query must be a non-empty string of at most 1000 characters"}
@@ -187,9 +208,7 @@ def test_t_v190_tool_02_two_passages_are_blank_line_separated():
     searcher = FakeSearcher(result=result([p1, p2]))
     payload = execute(searcher=searcher)
     assert payload["text"] == (
-        "Found 2 passages:\n\n"
-        "[1] a.txt — chunk 0: one\n\n"
-        "[2] b.txt — page 2 | chunk 1: two"
+        "Found 2 passages:\n\n[1] a.txt — chunk 0: one\n\n[2] b.txt — page 2 | chunk 1: two"
     )
 
 
@@ -198,8 +217,8 @@ def test_t_v190_tool_02_a_passage_body_over_1000_chars_is_cut_to_exactly_1000():
     searcher = FakeSearcher(result=result([p]))
     payload = execute(searcher=searcher)
     header = "Found 1 passages:\n\n[1] policy.pdf — page 3 | chunk 0: "
-    assert payload["text"].startswith(header)   # the header is never truncated
-    body = payload["text"][len(header):]
+    assert payload["text"].startswith(header)  # the header is never truncated
+    body = payload["text"][len(header) :]
     assert len(body) == 1000
     assert body == ("y" * 999) + "…"
 
@@ -236,10 +255,7 @@ def test_t_v190_tool_02_worst_case_envelope_never_bisects_a_passage():
     none truncated or bisected."""
     filename = "a" * documents.CLEAN_FILENAME_MAX_CHARS
     body = "b" * tools.RAG_PASSAGE_CHARS
-    passages = [
-        passage(filename=filename, page=500, chunk_index=999, text=body)
-        for _ in range(10)
-    ]
+    passages = [passage(filename=filename, page=500, chunk_index=999, text=body) for _ in range(10)]
     searcher = FakeSearcher(result=result(passages))
     payload = execute(searcher=searcher)
     text = payload["text"]
@@ -247,9 +263,9 @@ def test_t_v190_tool_02_worst_case_envelope_never_bisects_a_passage():
     assert len(text) < tools.RAG_SEARCH_ENVELOPE_MAX_CHARS
     assert "…" not in text
     blocks = [tools._render_passage_block(i, p) for i, p in enumerate(passages, start=1)]
-    assert max(len(b) - len(body) for b in blocks) == 150   # worst-case header
+    assert max(len(b) - len(body) for b in blocks) == 150  # worst-case header
     for block in blocks:
-        assert block in text   # full header + full 1,000-char body, intact
+        assert block in text  # full header + full 1,000-char body, intact
 
 
 # --------------------------------------------------------------------------
@@ -257,18 +273,27 @@ def test_t_v190_tool_02_worst_case_envelope_never_bisects_a_passage():
 # stub, `_first_argument`, `run_agent`'s frozen signature (EC-05)
 # --------------------------------------------------------------------------
 
+
 def test_t_v190_tool_03_run_agent_outcome_threads_searcher_to_execute_tool(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "how many vacation days do I have?")
     p = passage(filename="hr.pdf", page=4, text="30 days per year")
     searcher = FakeSearcher(result=result([p]))
-    llm = FakeLLM([
-        LLMResponse("", [search_call()], "tool_calls"),
-        LLMResponse("You have 30 days.", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("", [search_call()], "tool_calls"),
+            LLMResponse("You have 30 days.", [], "stop"),
+        ]
+    )
     outcome = agent.run_agent_outcome(
-        conn=conn, conv_id=conv, llm=llm, skills={}, runner=RecordingRunner(),
-        now=NOW, sleep=lambda _s: None, searcher=searcher,
+        conn=conn,
+        conv_id=conv,
+        llm=llm,
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda _s: None,
+        searcher=searcher,
     )
     assert outcome.reply == "You have 30 days."
     assert searcher.queries == ["vacation days"]
@@ -292,8 +317,10 @@ def test_t_v190_tool_03_the_history_stub_shape():
     arguments = {"query": "x" * 200}
     stub = json.loads(agent._tool_stub(message, ("search_documents", arguments)))
     assert stub == {
-        "stub": True, "tool": "search_documents",
-        "query": ("x" * 200)[:120], "passages": 1,
+        "stub": True,
+        "tool": "search_documents",
+        "query": ("x" * 200)[:120],
+        "passages": 1,
     }
 
 
@@ -310,6 +337,7 @@ def test_t_v190_tool_03_first_argument_reads_the_query():
 # --------------------------------------------------------------------------
 # T-V190-TOOL-04 -- the status line
 # --------------------------------------------------------------------------
+
 
 class _StatusTg:
     def __init__(self):
@@ -360,6 +388,7 @@ def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_700_chars():
     measured = len(agent.SYSTEM_PROMPT.replace("{skill_lines}", ""))
     assert measured <= 700, measured
 
+
 # tests/test_prefix.py::test_pfx_01_every_mandatory_statement_survives is the
 # guard for the v1.3 prompt compression's mandatory statements; it is not
 # re-imported here (that would double-collect it) -- it is run explicitly as
@@ -370,27 +399,44 @@ def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_700_chars():
 # REQ-V190-TOOL-06 -- conversation-aware RAG, pinned offline (T-V190-TOOL-07)
 # --------------------------------------------------------------------------
 
+
 def test_t_v190_tool_07_the_second_turns_query_and_history_carry_the_subject(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "Сколько дней отпуска?")
     p = passage(filename="hr.pdf", page=1, text="28 дней в год")
     searcher = FakeSearcher(script=[result([p]), result([p])])
-    llm1 = FakeLLM([
-        LLMResponse("", [search_call(query="дни отпуска")], "tool_calls"),
-        LLMResponse("28 дней.", [], "stop"),
-    ])
+    llm1 = FakeLLM(
+        [
+            LLMResponse("", [search_call(query="дни отпуска")], "tool_calls"),
+            LLMResponse("28 дней.", [], "stop"),
+        ]
+    )
     agent.run_agent_outcome(
-        conn=conn, conv_id=conv, llm=llm1, skills={}, runner=RecordingRunner(),
-        now=NOW, sleep=lambda _s: None, searcher=searcher,
+        conn=conn,
+        conv_id=conv,
+        llm=llm1,
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda _s: None,
+        searcher=searcher,
     )
     storage.add_user_message(conn, conv, "а в неделях?")
-    llm2 = FakeLLM([
-        LLMResponse("", [search_call(index=1, query="отпуск в неделях")], "tool_calls"),
-        LLMResponse("4 недели.", [], "stop"),
-    ])
+    llm2 = FakeLLM(
+        [
+            LLMResponse("", [search_call(index=1, query="отпуск в неделях")], "tool_calls"),
+            LLMResponse("4 недели.", [], "stop"),
+        ]
+    )
     outcome2 = agent.run_agent_outcome(
-        conn=conn, conv_id=conv, llm=llm2, skills={}, runner=RecordingRunner(),
-        now=NOW, sleep=lambda _s: None, searcher=searcher,
+        conn=conn,
+        conv_id=conv,
+        llm=llm2,
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda _s: None,
+        searcher=searcher,
     )
     assert outcome2.reply == "4 недели."
     # No query-rewriting layer exists (NG-07's spirit): the harness passes
@@ -401,7 +447,8 @@ def test_t_v190_tool_07_the_second_turns_query_and_history_carry_the_subject(con
     # second turn's request.
     first_round_messages = llm2.calls[0][0]
     contents = [
-        message.get("content", "") for message in first_round_messages
+        message.get("content", "")
+        for message in first_round_messages
         if isinstance(message.get("content"), str)
     ]
     assert any("Сколько дней отпуска" in c for c in contents)
@@ -417,6 +464,7 @@ def test_t_v190_tool_07_the_second_turns_query_and_history_carry_the_subject(con
 # (spec-v1.9.0.md:1416-1421); that handler does not exist yet -- it lands in
 # the CMD task -- so only the two halves below are implementable now.
 # --------------------------------------------------------------------------
+
 
 def _forbidden_file_io(source: str) -> set[str]:
     """AST-walked, not text-grepped: `documents.py`'s own module docstring
@@ -458,10 +506,13 @@ def test_t_v190_sec_04_the_extra_key_changes_nothing():
     searcher = FakeSearcher(result=result([]), user_id=USER_ID)
     payload = json.loads(
         tools.execute_tool(
-            "search_documents", json.dumps({"query": "x", "user_id": 7}),
-            skills={}, runner=RecordingRunner(), searcher=searcher,
+            "search_documents",
+            json.dumps({"query": "x", "user_id": 7}),
+            skills={},
+            runner=RecordingRunner(),
+            searcher=searcher,
         )
     )
     assert "error" not in payload
     assert searcher.queries == ["x"]
-    assert searcher.user_id == USER_ID   # unaffected by the arguments' user_id
+    assert searcher.user_id == USER_ID  # unaffected by the arguments' user_id

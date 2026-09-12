@@ -41,9 +41,15 @@ def _conn(tmp_path, dim=16, name="a.db"):
 
 def _document(conn, user_id, filename, **overrides):
     fields = {
-        "user_id": user_id, "filename": filename, "file_type": "txt",
-        "created_at": NOW, "size_bytes": 5, "text_chars": 5,
-        "page_count": None, "chunk_count": 1, "sha256": "x" * 8,
+        "user_id": user_id,
+        "filename": filename,
+        "file_type": "txt",
+        "created_at": NOW,
+        "size_bytes": 5,
+        "text_chars": 5,
+        "page_count": None,
+        "chunk_count": 1,
+        "sha256": "x" * 8,
     }
     fields.update(overrides)
     return storage.add_document(conn, **fields)
@@ -55,12 +61,15 @@ def _index(conn, embedder, user_id, filename, texts):
     pick exact chunk text without going through parsing/chunking."""
     doc_id = _document(conn, user_id, filename, chunk_count=len(texts))
     chunk_ids = storage.add_chunks(
-        conn, user_id=user_id, document_id=doc_id,
+        conn,
+        user_id=user_id,
+        document_id=doc_id,
         chunks=[(i, text, None, 0, len(text)) for i, text in enumerate(texts)],
     )
     vectors = embedder.embed(texts)
     storage.add_vectors(
-        conn, user_id=user_id,
+        conn,
+        user_id=user_id,
         rows=[
             (cid, sqlite_vec.serialize_float32(v))
             for cid, v in zip(chunk_ids, vectors, strict=True)
@@ -102,7 +111,10 @@ def test_t_v190_ret_03_vector_search_ranks_shared_tokens_first(tmp_path):
     conn = _conn(tmp_path)
     embedder = FakeEmbedder(dim=16)
     _, chunk_ids = _index(
-        conn, embedder, 1, "a.txt",
+        conn,
+        embedder,
+        1,
+        "a.txt",
         ["python programming language", "cooking recipes for dinner"],
     )
 
@@ -140,8 +152,13 @@ def test_t_v190_ret_03_searcher_threads_its_own_conv_id_into_vector_search(tmp_p
     llm = FakeLLM([])
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="off"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="off"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     searcher.search("alpha token")
 
@@ -165,7 +182,9 @@ def test_t_v190_ret_04_bm25_search_drops_zero_score_rows_and_orders_by_score(tmp
     conn = _conn(tmp_path)
     doc_id = _document(conn, 1, "a.txt", chunk_count=3)
     chunk_ids = storage.add_chunks(
-        conn, user_id=1, document_id=doc_id,
+        conn,
+        user_id=1,
+        document_id=doc_id,
         chunks=[
             (0, "кошки любят рыбу", None, 0, 10),
             (1, "собаки любят кости", None, 10, 20),
@@ -186,7 +205,9 @@ def test_t_v190_ret_04_bm25_search_respects_k_and_breaks_ties_by_ascending_id(tm
     conn = _conn(tmp_path)
     doc_id = _document(conn, 1, "a.txt", chunk_count=4)
     chunk_ids = storage.add_chunks(
-        conn, user_id=1, document_id=doc_id,
+        conn,
+        user_id=1,
+        document_id=doc_id,
         chunks=(
             [(i, "яблоко груша слива", None, 0, 10) for i in range(3)]
             # a distractor sharing no query token -- without it "яблоко" is
@@ -246,8 +267,12 @@ def test_t_v190_ret_06_rerank_reorders_truncates_candidates_and_records_the_call
     llm = FakeLLM([LLMResponse(content="[3, 1, 2]", tool_calls=[], finish_reason="stop")])
 
     result = rag.rerank(
-        llm, question="what is x?", candidates=candidates,
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="what is x?",
+        candidates=candidates,
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
     )
 
     assert [p.chunk_id for p in result] == [3, 1, 2]
@@ -306,8 +331,12 @@ def test_t_v190_ret_07_rerank_returns_none_on_llm_error(tmp_path):
     llm = FakeLLM([LLMError("boom", retryable=False, kind="http")])
 
     result = rag.rerank(
-        llm, question="q", candidates=_passages(2),
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="q",
+        candidates=_passages(2),
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
     )
 
     assert result is None
@@ -323,15 +352,21 @@ def test_t_v190_ret_07_rerank_retries_a_retryable_failure_and_succeeds(tmp_path)
     once for the first backoff step."""
     conn = _conn(tmp_path)
     conv_id = storage.get_or_create_active_conversation(conn, 1)
-    llm = FakeLLM([
-        LLMError("boom", retryable=True, kind="http"),
-        LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMError("boom", retryable=True, kind="http"),
+            LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
+        ]
+    )
     sleeps = []
 
     result = rag.rerank(
-        llm, question="q", candidates=_passages(2),
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="q",
+        candidates=_passages(2),
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
         sleep=lambda s: sleeps.append(s),
     )
 
@@ -351,15 +386,21 @@ def test_t_v190_ret_07_rerank_logs_a_successful_retry(tmp_path, caplog):
     the real call gets."""
     conn = _conn(tmp_path)
     conv_id = storage.get_or_create_active_conversation(conn, 1)
-    llm = FakeLLM([
-        LLMError("boom", retryable=True, kind="http"),
-        LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMError("boom", retryable=True, kind="http"),
+            LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
+        ]
+    )
 
     with caplog.at_level(logging.WARNING, logger="rag"):
         result = rag.rerank(
-            llm, question="q", candidates=_passages(2),
-            conn=conn, conv_id=conv_id, resolve_cost=None,
+            llm,
+            question="q",
+            candidates=_passages(2),
+            conn=conn,
+            conv_id=conv_id,
+            resolve_cost=None,
             sleep=lambda s: None,
         )
 
@@ -382,8 +423,12 @@ def test_t_v190_ret_07_rerank_does_not_log_success_on_the_first_attempt(tmp_path
 
     with caplog.at_level(logging.WARNING, logger="rag"):
         result = rag.rerank(
-            llm, question="q", candidates=_passages(2),
-            conn=conn, conv_id=conv_id, resolve_cost=None,
+            llm,
+            question="q",
+            candidates=_passages(2),
+            conn=conn,
+            conv_id=conv_id,
+            resolve_cost=None,
         )
 
     assert [p.chunk_id for p in result] == [2, 1]
@@ -399,16 +444,22 @@ def test_t_v190_ret_07_rerank_returns_none_on_timeout(tmp_path):
     backoff steps slept, and still None once the budget is spent."""
     conn = _conn(tmp_path)
     conv_id = storage.get_or_create_active_conversation(conn, 1)
-    llm = FakeLLM([
-        LLMError("timed out", retryable=True, kind="timeout"),
-        LLMError("timed out", retryable=True, kind="timeout"),
-        LLMError("timed out", retryable=True, kind="timeout"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMError("timed out", retryable=True, kind="timeout"),
+            LLMError("timed out", retryable=True, kind="timeout"),
+            LLMError("timed out", retryable=True, kind="timeout"),
+        ]
+    )
     sleeps = []
 
     result = rag.rerank(
-        llm, question="q", candidates=_passages(2),
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="q",
+        candidates=_passages(2),
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
         sleep=lambda s: sleeps.append(s),
     )
 
@@ -424,8 +475,12 @@ def test_t_v190_ret_07_rerank_returns_none_on_unparsable_reply(tmp_path):
     llm = FakeLLM([LLMResponse(content="not json", tool_calls=[], finish_reason="stop")])
 
     result = rag.rerank(
-        llm, question="q", candidates=_passages(2),
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="q",
+        candidates=_passages(2),
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
     )
 
     assert result is None
@@ -440,8 +495,12 @@ def test_t_v190_ret_07_rerank_returns_none_on_out_of_range_index(tmp_path):
     llm = FakeLLM([LLMResponse(content="[9]", tool_calls=[], finish_reason="stop")])
 
     result = rag.rerank(
-        llm, question="q", candidates=_passages(2),
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="q",
+        candidates=_passages(2),
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
     )
 
     assert result is None
@@ -455,8 +514,12 @@ def test_t_v190_ret_07_rerank_returns_none_on_duplicate_index(tmp_path):
     llm = FakeLLM([LLMResponse(content="[1, 1]", tool_calls=[], finish_reason="stop")])
 
     result = rag.rerank(
-        llm, question="q", candidates=_passages(2),
-        conn=conn, conv_id=conv_id, resolve_cost=None,
+        llm,
+        question="q",
+        candidates=_passages(2),
+        conn=conn,
+        conv_id=conv_id,
+        resolve_cost=None,
     )
 
     assert result is None
@@ -473,8 +536,13 @@ def test_t_v190_ret_07_searcher_falls_back_and_logs_exactly_one_warning(tmp_path
     llm = FakeLLM([LLMError("boom", retryable=False, kind="http")])
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     with caplog.at_level(logging.WARNING, logger="rag"):
         result = searcher.search("alpha beta")
@@ -499,14 +567,21 @@ def test_t_v190_ret_07_searcher_rerank_retries_then_succeeds(tmp_path, monkeypat
     _index(conn, embedder, 1, "a.txt", ["alpha beta gamma", "alpha beta delta"])
     conv_id = storage.get_or_create_active_conversation(conn, 1)
     expected_order = _expected_hybrid_order(conn, embedder, 1, "alpha beta")
-    llm = FakeLLM([
-        LLMError("boom", retryable=True, kind="http"),
-        LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMError("boom", retryable=True, kind="http"),
+            LLMResponse(content="[2, 1]", tool_calls=[], finish_reason="stop"),
+        ]
+    )
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("alpha beta")
 
@@ -519,7 +594,9 @@ def test_t_v190_ret_07_searcher_rerank_retries_then_succeeds(tmp_path, monkeypat
 
 
 def test_t_v190_ret_07_searcher_rerank_exhausts_retries_and_falls_back(
-    tmp_path, monkeypatch, caplog,
+    tmp_path,
+    monkeypatch,
+    caplog,
 ):
     """v1.9.1 T3: three retryable failures exhaust _RERANK_MAX_ATTEMPTS --
     rerank_succeeded False, rerank_failure non-empty, passages fall back to
@@ -532,15 +609,22 @@ def test_t_v190_ret_07_searcher_rerank_exhausts_retries_and_falls_back(
     _index(conn, embedder, 1, "a.txt", ["alpha beta gamma", "alpha beta delta"])
     conv_id = storage.get_or_create_active_conversation(conn, 1)
     expected_order = _expected_hybrid_order(conn, embedder, 1, "alpha beta")
-    llm = FakeLLM([
-        LLMError("boom", retryable=True, kind="http"),
-        LLMError("boom", retryable=True, kind="http"),
-        LLMError("boom", retryable=True, kind="http"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMError("boom", retryable=True, kind="http"),
+            LLMError("boom", retryable=True, kind="http"),
+            LLMError("boom", retryable=True, kind="http"),
+        ]
+    )
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     with caplog.at_level(logging.WARNING, logger="rag"):
         result = searcher.search("alpha beta")
@@ -573,8 +657,13 @@ def test_t_v190_ret_07_searcher_falls_back_when_record_llm_call_raises(tmp_path,
     monkeypatch.setattr(rag.agent, "_record_llm_call", _boom)
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("alpha beta")  # must not raise
 
@@ -599,8 +688,13 @@ def test_t_v190_ret_07_searcher_falls_back_when_the_logger_raises(tmp_path, monk
     monkeypatch.setattr(rag.log, "warning", _boom)
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("alpha beta")  # must not raise
 
@@ -624,8 +718,13 @@ def test_t_v190_ret_08_searcher_slices_to_top_k_with_rerank_off(tmp_path):
     llm = FakeLLM([])  # must never be called
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="off", rag_top_k=3),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="off", rag_top_k=3),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("shared token")
 
@@ -645,8 +744,13 @@ def test_t_v190_ret_08_documents_present_is_false_with_no_rows(tmp_path):
     llm = FakeLLM([])
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("anything")
 
@@ -664,8 +768,13 @@ def test_t_v190_ret_08_single_candidate_with_rerank_on_is_not_attempted(tmp_path
     llm = FakeLLM([])
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("only one chunk")
 
@@ -704,8 +813,13 @@ def test_t_v190_ret_08_clean_rerank_succeeds_and_reranker_sees_hydrated_passages
     monkeypatch.setattr(rag, "rerank", _recording_rerank)
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("alpha token")
 
@@ -751,8 +865,13 @@ def test_t_v190_ret_10_hydration_does_not_reorder_rrf_when_rerank_is_off(tmp_pat
 
     llm = FakeLLM([])
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="off", rag_top_k=10),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="off", rag_top_k=10),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("shared")
 
@@ -782,8 +901,13 @@ def test_t_v190_ret_10_reranker_receives_rrf_order_despite_reversed_hydration(
     # still proves the RRF order survived hydration, whatever the DB gave back.
     llm = FakeLLM([LLMError("boom", retryable=False, kind="http")])
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on", rag_top_k=10),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on", rag_top_k=10),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("shared")
 
@@ -807,8 +931,13 @@ def test_t_v190_ret_11_malformed_json_reply_yields_correct_flags_and_rrf_order(t
     llm = FakeLLM([LLMResponse(content="not json at all", tool_calls=[], finish_reason="stop")])
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("shared")
 
@@ -840,8 +969,13 @@ def test_t_v190_ret_11_record_llm_call_raising_after_a_well_formed_reply_still_f
     monkeypatch.setattr(rag.agent, "_record_llm_call", _boom)
 
     searcher = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="on"),
-        conv_id=conv_id, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="on"),
+        conv_id=conv_id,
+        resolve_cost=None,
     )
     result = searcher.search("shared")  # must not raise
 
@@ -870,12 +1004,22 @@ def test_t_v190_sec_01_search_is_isolated_per_user_with_the_same_filename(tmp_pa
     llm = FakeLLM([])
 
     searcher_a = rag.Searcher(
-        conn, user_id=1, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="off"),
-        conv_id=conv_id_a, resolve_cost=None,
+        conn,
+        user_id=1,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="off"),
+        conv_id=conv_id_a,
+        resolve_cost=None,
     )
     searcher_b = rag.Searcher(
-        conn, user_id=2, embedder=embedder, llm=llm, cfg=_cfg(rag_rerank="off"),
-        conv_id=conv_id_b, resolve_cost=None,
+        conn,
+        user_id=2,
+        embedder=embedder,
+        llm=llm,
+        cfg=_cfg(rag_rerank="off"),
+        conv_id=conv_id_b,
+        resolve_cost=None,
     )
 
     result_a = searcher_a.search("shared secret alpha")
@@ -897,15 +1041,23 @@ def test_t_v190_sec_01_search_is_isolated_per_user_with_the_same_filename(tmp_pa
     # each still scoped to its own owner.
     distractor_a = _document(conn, 1, "distractor-a.txt")
     storage.add_chunks(
-        conn, user_id=1, document_id=distractor_a,
-        chunks=[(0, "unrelated filler text zzz one", None, 0, 10),
-                (1, "unrelated filler text zzz two", None, 0, 10)],
+        conn,
+        user_id=1,
+        document_id=distractor_a,
+        chunks=[
+            (0, "unrelated filler text zzz one", None, 0, 10),
+            (1, "unrelated filler text zzz two", None, 0, 10),
+        ],
     )
     distractor_b = _document(conn, 2, "distractor-b.txt")
     storage.add_chunks(
-        conn, user_id=2, document_id=distractor_b,
-        chunks=[(0, "unrelated filler text zzz one", None, 0, 10),
-                (1, "unrelated filler text zzz two", None, 0, 10)],
+        conn,
+        user_id=2,
+        document_id=distractor_b,
+        chunks=[
+            (0, "unrelated filler text zzz one", None, 0, 10),
+            (1, "unrelated filler text zzz two", None, 0, 10),
+        ],
     )
 
     bm25_a = rag.bm25_search(storage.user_chunks(conn, user_id=1), "shared secret alpha")

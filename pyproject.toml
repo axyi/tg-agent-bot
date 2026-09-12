@@ -29,6 +29,25 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "RUF100"]
 
+# v1.9.2 T1 (REQ-V15-NG-04): `docs/` was already out of scope for
+# formatting at spec-v1.5 (spec-v1.5.md:951 -- "ruff format also reaches
+# into fenced blocks in docs/spec/*.md, so the shadow report is scoped to
+# *.py and docs/ is excluded outright"), enforced until now by the runner
+# filtering scope to *.py before invoking ruff. `ruff-format-all` (the new
+# whole-tree gate, config/quality_gates.yaml) passes ruff a literal "."
+# with no runner-side filtering, so that pre-existing policy is formalised
+# here instead -- not a new exception, the same one spec-v1.5 named.
+#
+# devtools/bench_scenarios.py IS a new exception (REQ-V13-BEN-12):
+# devtools/bench.py:335-340's scenarios_sha256() hashes this file's raw
+# bytes, and that hash is pinned inside every committed
+# docs/assets/bench/*.json benchmark artefact -- a frozen measurement
+# record, never edited to match new bytes. Reformatting the file would
+# silently invalidate all of them. Lint (ruff check) still covers both
+# exclusions below; only the formatter skips them.
+[tool.ruff.format]
+exclude = ["docs/**", "devtools/bench_scenarios.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

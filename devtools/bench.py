@@ -140,21 +140,39 @@ STAGE_C_KEYS = tuple(STAGE_C_DEFAULTS)
 # `llm_max_tokens` is deliberately NOT excluded: it is pinned equal by
 # `env_flags`, and hashing it makes a silent change to it a locked-field
 # mismatch rather than an invisible one.
-CONFIG_HASH_EXCLUDED = frozenset({
-    "telegram_bot_token", "openrouter_api_key",          # secrets
-    "allowed_tg_ids", "telegram_bot_name",               # identifiers
-    "lmstudio_base_url",                                 # location
-    "exec_workdir", "db_path", "audit_log_path",         # per-run paths
-    "llm_failover", "llm_summary_model", "history_tool_stub",
-    "exec_output_default_chars", "fetch_inline_default_chars", "llm_reasoning",
-    # v1.7.0 additions (REQ-V170-BEN-02): the treatment, not the instrument --
-    # keeps the locked `config_sha256` stable across a policy-only pair.
-    "llm_reasoning_policy", "llm_reasoning_on_purposes",
-})
+CONFIG_HASH_EXCLUDED = frozenset(
+    {
+        "telegram_bot_token",
+        "openrouter_api_key",  # secrets
+        "allowed_tg_ids",
+        "telegram_bot_name",  # identifiers
+        "lmstudio_base_url",  # location
+        "exec_workdir",
+        "db_path",
+        "audit_log_path",  # per-run paths
+        "llm_failover",
+        "llm_summary_model",
+        "history_tool_stub",
+        "exec_output_default_chars",
+        "fetch_inline_default_chars",
+        "llm_reasoning",
+        # v1.7.0 additions (REQ-V170-BEN-02): the treatment, not the instrument --
+        # keeps the locked `config_sha256` stable across a policy-only pair.
+        "llm_reasoning_policy",
+        "llm_reasoning_on_purposes",
+    }
+)
 
 LOCKED_META_FIELDS = (
-    "provider", "model", "context_length", "repeats", "timeout_s",
-    "scenarios_sha256", "skipped_scenarios", "constants", "config_sha256",
+    "provider",
+    "model",
+    "context_length",
+    "repeats",
+    "timeout_s",
+    "scenarios_sha256",
+    "skipped_scenarios",
+    "constants",
+    "config_sha256",
     # `only` is not in the 7.4 list; it is the documented reconciliation of
     # REQ-V13-BEN-01's run-set rule with REQ-V13-AUD-03 / REQ-V13-RSN-02, which
     # both require `report` to render a file produced by `--only`. Locking it
@@ -164,14 +182,28 @@ LOCKED_META_FIELDS = (
     # NOT here — it is provenance, always a later commit on the candidate
     # side, and locking it would make every baseline/candidate pair
     # non-comparable by construction.
-    "lmstudio_version", "served_model_id", "lmstudio_context_length",
-    "generation_settings", "prompt_tools_sha256", "obs_capture_content",
+    "lmstudio_version",
+    "served_model_id",
+    "lmstudio_context_length",
+    "generation_settings",
+    "prompt_tools_sha256",
+    "obs_capture_content",
 )
 
 TOTALS_KEYS = (
-    "calls", "failed_calls", "prompt_tokens", "completion_tokens", "cached_tokens",
-    "reasoning_tokens", "tool_calls", "tool_output_tokens_est", "latency_ms",
-    "cost_usd", "resent_tokens", "new_tokens", "wall_ms",
+    "calls",
+    "failed_calls",
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "tool_calls",
+    "tool_output_tokens_est",
+    "latency_ms",
+    "cost_usd",
+    "resent_tokens",
+    "new_tokens",
+    "wall_ms",
 )
 AVG_KEYS = ("tokens", "rounds", "tool_calls", "latency_ms")
 
@@ -182,9 +214,10 @@ TOOL_ROW_KEYS = frozenset(storage.TOOL_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"
 # subtracted because REQ-V160-BEN-04 emits the *parsed* object under
 # `attributes` instead — `attributes_json` therefore appears in no key set
 # in this file, by design.
-SPAN_ROW_KEYS = (
-    frozenset(storage.SPAN_COLUMNS) - {"conv_id", "attributes_json"} | {"conv_seq", "attributes"}
-)
+SPAN_ROW_KEYS = frozenset(storage.SPAN_COLUMNS) - {"conv_id", "attributes_json"} | {
+    "conv_seq",
+    "attributes",
+}
 
 # REQ-V14-BEN-03: a literal frozen tuple spelling out the v1.3 `llm_calls` row
 # shape — deliberately NOT derived from `storage`, which would drift forward
@@ -192,13 +225,35 @@ SPAN_ROW_KEYS = (
 # (e.g. `baseline-v1.4`'s stage-A worktree, `69ebc75`) carries exactly this
 # set; a row from the running tree may carry more (REQ-V14-OBS-01's two new
 # columns) without being rejected.
-REQUIRED_LLM_ROW_KEYS = frozenset({
-    "id", "conv_seq", "turn_id", "purpose", "round", "attempt", "ts",
-    "provider", "model", "prompt_tokens", "completion_tokens", "total_tokens",
-    "cached_tokens", "reasoning_tokens", "reasoning_chars", "prompt_chars",
-    "prompt_chars_by_role", "messages_n", "tools_exposed", "latency_ms",
-    "finish_reason", "tool_calls_n", "error_kind", "cost_usd", "cost_basis",
-})
+REQUIRED_LLM_ROW_KEYS = frozenset(
+    {
+        "id",
+        "conv_seq",
+        "turn_id",
+        "purpose",
+        "round",
+        "attempt",
+        "ts",
+        "provider",
+        "model",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cached_tokens",
+        "reasoning_tokens",
+        "reasoning_chars",
+        "prompt_chars",
+        "prompt_chars_by_role",
+        "messages_n",
+        "tools_exposed",
+        "latency_ms",
+        "finish_reason",
+        "tool_calls_n",
+        "error_kind",
+        "cost_usd",
+        "cost_basis",
+    }
+)
 
 # T11: `TOOL_ROW_KEYS`'s own comment used to claim it "needs no separate
 # REQUIRED constant: that schema is unchanged by this spec, so REQUIRED ==
@@ -210,10 +265,22 @@ REQUIRED_LLM_ROW_KEYS = frozenset({
 # because a bare `bench_schema` mismatch always raised first, before this
 # loop ever ran. Spelled out the same way `REQUIRED_LLM_ROW_KEYS` already is,
 # for the same reason.
-REQUIRED_TOOL_ROW_KEYS = frozenset({
-    "id", "conv_seq", "turn_id", "tool_call_id", "tool", "ts", "input_chars",
-    "raw_output_chars", "output_chars", "output_tokens_est", "duration_ms", "outcome",
-})
+REQUIRED_TOOL_ROW_KEYS = frozenset(
+    {
+        "id",
+        "conv_seq",
+        "turn_id",
+        "tool_call_id",
+        "tool",
+        "ts",
+        "input_chars",
+        "raw_output_chars",
+        "output_chars",
+        "output_tokens_est",
+        "duration_ms",
+        "outcome",
+    }
+)
 
 # REQ-V160-BEN-03: `spans` is new at this schema — there is no older tree
 # to stay readable against, so every column of `SPAN_ROW_KEYS` is required.
@@ -221,11 +288,24 @@ REQUIRED_TOOL_ROW_KEYS = frozenset({
 # construction, not by definition, exactly as `REQUIRED_LLM_ROW_KEYS` is
 # spelled out rather than aliased to `LLM_ROW_KEYS`. Names `attributes`;
 # never `attributes_json`, which belongs in no key set in this file.
-REQUIRED_SPAN_ROW_KEYS = frozenset({
-    "id", "trace_id", "span_id", "parent_span_id", "conv_seq", "turn_id",
-    "name", "kind", "ts", "start_ns", "duration_ms", "status",
-    "status_message", "attributes",
-})
+REQUIRED_SPAN_ROW_KEYS = frozenset(
+    {
+        "id",
+        "trace_id",
+        "span_id",
+        "parent_span_id",
+        "conv_seq",
+        "turn_id",
+        "name",
+        "kind",
+        "ts",
+        "start_ns",
+        "duration_ms",
+        "status",
+        "status_message",
+        "attributes",
+    }
+)
 
 FLOAT_REL_TOL = 1e-9
 FLOAT_ABS_TOL = 1e-12
@@ -250,6 +330,7 @@ _TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 # --------------------------------------------------------------------------
 # meta: what was measured
 # --------------------------------------------------------------------------
+
 
 def scenarios_sha256() -> str:
     """The sha256 of `devtools/bench_scenarios.py`'s bytes (REQ-V13-BEN-12).
@@ -349,6 +430,7 @@ def context_length(cfg: Config) -> int:
 # checks (section 7.3): evaluated against one run's observation
 # --------------------------------------------------------------------------
 
+
 @dataclass
 class Observation:
     """Everything a check may look at. `answers` holds one entry per
@@ -368,8 +450,7 @@ def evaluate_checks(scenario: Scenario, observation: Observation) -> list[dict]:
     """One `{kind, ok, detail}` per check. `detail` is a bounded reason code —
     never an excerpt of the answer (REQ-V13-BEN-10)."""
     return [
-        {"kind": check.kind, **_evaluate(check, scenario, observation)}
-        for check in scenario.checks
+        {"kind": check.kind, **_evaluate(check, scenario, observation)} for check in scenario.checks
     ]
 
 
@@ -392,9 +473,7 @@ def _evaluate(check, scenario: Scenario, obs: Observation) -> dict:
         return _outcome(bool(goals), f"{len(obs.summary_goals)} summary row(s), no goal")
     if kind == bench_scenarios.TOOL_CALLS_MAX:
         count = len(obs.tool_rows)
-        return _outcome(
-            count <= check.max_calls, f"{count} tool call(s) > max {check.max_calls}"
-        )
+        return _outcome(count <= check.max_calls, f"{count} tool call(s) > max {check.max_calls}")
 
     answer = _answer_for(check, scenario, obs)
     if answer is None:
@@ -445,7 +524,7 @@ def _first_json_object(text: str) -> str | None:
             elif char == "}":
                 depth -= 1
                 if depth == 0:
-                    return text[start:index + 1]
+                    return text[start : index + 1]
         start = text.find("{", start + 1)
     return None
 
@@ -462,9 +541,7 @@ def _json_keys_outcome(check, answer: str) -> dict:
     if not isinstance(parsed, dict):
         return _outcome(False, "the json value is not an object")
     matched = sum(1 for key, value in expected.items() if parsed.get(key) == value)
-    return _outcome(
-        matched == len(expected), f"{matched} of {len(expected)} keys matched"
-    )
+    return _outcome(matched == len(expected), f"{matched} of {len(expected)} keys matched")
 
 
 def _answer_for(check, scenario: Scenario, obs: Observation) -> str | None:
@@ -484,6 +561,7 @@ def _outcome(ok: bool, detail: str) -> dict:
 # arithmetic (section 7.4) — one implementation, used by the writer *and* by
 # `check`, which never reads a stored aggregate
 # --------------------------------------------------------------------------
+
 
 def _conv_groups(rows: Sequence[dict]) -> list[list[dict]]:
     """The run's `llm_calls` rows split by `conv_seq`, each group ordered by
@@ -545,9 +623,7 @@ def summarize(runs: Sequence[dict], skipped_scenarios: Sequence[str], repeats: i
             totals[key] = sum(present)
 
     tokens = totals["prompt_tokens"] + totals["completion_tokens"]
-    rounds = sum(
-        1 for row in llm_rows if row["purpose"] == "agent" and row["error_kind"] is None
-    )
+    rounds = sum(1 for row in llm_rows if row["purpose"] == "agent" and row["error_kind"] is None)
     prompt_total = totals["prompt_tokens"]
     cached_reported = any(row["cached_tokens"] is not None for row in llm_rows)
 
@@ -591,8 +667,7 @@ def _per_scenario(runs: Sequence[dict]) -> dict:
             "success": sum(1 for run in entries if run["success"]),
             "of": len(entries),
             "median": {
-                key: _median([run["totals"][key] for run in entries])
-                for key in TOTALS_KEYS
+                key: _median([run["totals"][key] for run in entries]) for key in TOTALS_KEYS
             },
         }
         for scenario_id, entries in grouped.items()
@@ -614,8 +689,9 @@ def top_tools(tool_rows: Sequence[dict]) -> list[dict]:
     """
     totals: dict[str, dict] = {}
     for row in tool_rows:
-        entry = totals.setdefault(row["tool"], {"name": row["tool"], "calls": 0,
-                                                "output_tokens_est": 0})
+        entry = totals.setdefault(
+            row["tool"], {"name": row["tool"], "calls": 0, "output_tokens_est": 0}
+        )
         entry["calls"] += 1
         entry["output_tokens_est"] += int(row["output_tokens_est"] or 0)
     return sorted(totals.values(), key=lambda item: (-item["output_tokens_est"], item["name"]))
@@ -644,15 +720,13 @@ def _context_growth(runs: Sequence[dict]) -> dict:
     if not runs:
         return {role: 0.0 for role in roles}
     per_run = [metrics.context_growth(run["llm_calls"]) for run in runs]
-    return {
-        role: sum(growth.get(role, 0.0) for growth in per_run) / len(per_run)
-        for role in roles
-    }
+    return {role: sum(growth.get(role, 0.0) for growth in per_run) / len(per_run) for role in roles}
 
 
 # --------------------------------------------------------------------------
 # redaction (REQ-V13-BEN-10)
 # --------------------------------------------------------------------------
+
 
 def redact_document(document: Any, tg_ids: Sequence[int]) -> Any:
     """Every string value in the whole document, recursively: registered
@@ -680,6 +754,7 @@ def redact_document(document: Any, tg_ids: Sequence[int]) -> Any:
 # --------------------------------------------------------------------------
 # the run mechanics (section 7.2)
 # --------------------------------------------------------------------------
+
 
 @dataclass
 class BenchResult:
@@ -792,11 +867,19 @@ def run_bench(
             if runs:
                 sleep(INTER_RUN_SLEEP_S)
             record, aborted = _execute_run(
-                scenario, repeat,
-                cfg=cfg, runs_root=runs_root, llm_factory=llm_factory,
-                runner_factory=runner_factory, fetcher_factory=fetcher_factory,
-                telegram_factory=telegram_factory, timeout_s=timeout_s, clock=clock,
-                skills=skills, resolve_cost=resolve_cost, tag=tag,
+                scenario,
+                repeat,
+                cfg=cfg,
+                runs_root=runs_root,
+                llm_factory=llm_factory,
+                runner_factory=runner_factory,
+                fetcher_factory=fetcher_factory,
+                telegram_factory=telegram_factory,
+                timeout_s=timeout_s,
+                clock=clock,
+                skills=skills,
+                resolve_cost=resolve_cost,
+                tag=tag,
             )
             runs.append(record)
             if aborted is not None:
@@ -817,7 +900,7 @@ def run_bench(
 def _preflight(network_preflight: Callable[[], bool]) -> bool:
     try:
         return bool(network_preflight())
-    except Exception as exc:                       # a probe must never abort a run
+    except Exception as exc:  # a probe must never abort a run
         log.warning("network preflight failed: %s", config.redact(str(exc)))
         return False
 
@@ -847,8 +930,9 @@ def _execute_run(
     try:
         run_cfg = _run_config(cfg, run_dir)
     except Exception as exc:
-        log.error("run %s-%d could not be prepared: %s", scenario.id, repeat,
-                  config.redact(str(exc)))
+        log.error(
+            "run %s-%d could not be prepared: %s", scenario.id, repeat, config.redact(str(exc))
+        )
         return _run_record(scenario, repeat, Observation(), 0, FAIL_HARNESS_ERROR), None
 
     recorder = telegram_factory()
@@ -861,10 +945,16 @@ def _execute_run(
     worker = threading.Thread(
         target=_run_turns,
         kwargs={
-            "scenario": scenario, "cfg": run_cfg, "llm_factory": llm_factory,
-            "runner_factory": runner_factory, "fetcher_factory": fetcher_factory,
-            "recorder": recorder, "skills": skills, "resolve_cost": resolve_cost,
-            "answers": answers, "outcome": outcome,
+            "scenario": scenario,
+            "cfg": run_cfg,
+            "llm_factory": llm_factory,
+            "runner_factory": runner_factory,
+            "fetcher_factory": fetcher_factory,
+            "recorder": recorder,
+            "skills": skills,
+            "resolve_cost": resolve_cost,
+            "answers": answers,
+            "outcome": outcome,
         },
         name=f"bench-{scenario.id}-{repeat}",
         daemon=True,
@@ -914,8 +1004,17 @@ def _run_config(cfg: Config, run_dir: Path) -> Config:
 
 
 def _run_turns(
-    *, scenario: Scenario, cfg: Config, llm_factory, runner_factory, fetcher_factory,
-    recorder, skills: dict, resolve_cost, answers: list[str], outcome: dict,
+    *,
+    scenario: Scenario,
+    cfg: Config,
+    llm_factory,
+    runner_factory,
+    fetcher_factory,
+    recorder,
+    skills: dict,
+    resolve_cost,
+    answers: list[str],
+    outcome: dict,
 ) -> None:
     """The worker thread. It owns the run's SQLite connection end to end —
     `sqlite3` connections belong to the thread that created them, and the main
@@ -932,8 +1031,14 @@ def _run_turns(
             before = len(recorder.sent)
             bot.process_update(
                 _update(index, tg_id, text),
-                conn=conn, tg=recorder, cfg=cfg, llm=llm, skills=skills,
-                runner=runner, bot_username=BOT_USERNAME, fetcher=fetcher,
+                conn=conn,
+                tg=recorder,
+                cfg=cfg,
+                llm=llm,
+                skills=skills,
+                runner=runner,
+                bot_username=BOT_USERNAME,
+                fetcher=fetcher,
                 resolve_cost=resolve_cost,
             )
             if not bench_scenarios.is_command(text):
@@ -969,8 +1074,12 @@ def _observe(
     span_rows = _read_spans(cfg.db_path, scenario_id=scenario_id, bench_tag=bench_tag)
     exit_codes, audit_read = _read_exit_codes(cfg.audit_log_path)
     return Observation(
-        answers=list(answers), llm_rows=llm_rows, tool_rows=tool_rows,
-        span_rows=span_rows, exit_codes=exit_codes, summary_goals=goals,
+        answers=list(answers),
+        llm_rows=llm_rows,
+        tool_rows=tool_rows,
+        span_rows=span_rows,
+        exit_codes=exit_codes,
+        summary_goals=goals,
         audit_read=audit_read,
     )
 
@@ -1012,9 +1121,7 @@ def _summary_goal(summary_json: str) -> str:
     return goal if isinstance(goal, str) else ""
 
 
-def _with_conv_seq(
-    llm_rows: list[dict], tool_rows: list[dict]
-) -> tuple[list[dict], list[dict]]:
+def _with_conv_seq(llm_rows: list[dict], tool_rows: list[dict]) -> tuple[list[dict], list[dict]]:
     """`conv_id` never leaves this function: the rows carry `conv_seq`, the
     1-based ordinal of the conversation in order of first appearance, so a
     `/new` turn is visible without any database identifier being published."""
@@ -1033,9 +1140,7 @@ def _with_conv_seq(
     return convert(llm_rows), convert(tool_rows)
 
 
-def _read_spans(
-    db_path: Path, *, scenario_id: str, bench_tag: str | None
-) -> list[dict]:
+def _read_spans(db_path: Path, *, scenario_id: str, bench_tag: str | None) -> list[dict]:
     """The `spans` rows of the trace(s) belonging to this scenario run
     (REQ-V160-BEN-04): the ones whose trace's **root** span (`parent_span_id`
     is `None`) carries the matching `tg_agent.scenario_id` /
@@ -1063,8 +1168,10 @@ def _read_spans(
         if row["parent_span_id"] is not None:
             continue
         attributes = json.loads(row["attributes_json"])
-        if (attributes.get("tg_agent.scenario_id") == scenario_id
-                and attributes.get("tg_agent.bench_tag") == bench_tag):
+        if (
+            attributes.get("tg_agent.scenario_id") == scenario_id
+            and attributes.get("tg_agent.bench_tag") == bench_tag
+        ):
             trace_ids.add(row["trace_id"])
     selected = [row for row in rows if row["trace_id"] in trace_ids]
 
@@ -1147,6 +1254,7 @@ def _remove_run_dir(run_dir: Path) -> None:
 # `check` (REQ-V13-BEN-01): schema, field contract, run set, arithmetic
 # --------------------------------------------------------------------------
 
+
 class _Invalid(Exception):
     def __init__(self, reason: str, code: int = EXIT_ERROR) -> None:
         super().__init__(reason)
@@ -1216,29 +1324,47 @@ def _need(condition: bool, reason: str, code: int = EXIT_ERROR) -> None:
 
 
 def _validate_meta(meta: dict) -> None:
-    for key in ("tag", "started_at", "finished_at", "git_commit", "provider", "model",
-                "scenarios_sha256", "config_sha256"):
+    for key in (
+        "tag",
+        "started_at",
+        "finished_at",
+        "git_commit",
+        "provider",
+        "model",
+        "scenarios_sha256",
+        "config_sha256",
+    ):
         _need(isinstance(meta.get(key), str), f"meta.{key} must be a string")
     for key in ("context_length", "repeats"):
         _need(_is_int(meta.get(key)) and meta[key] > 0, f"meta.{key} must be a positive int")
     _need(_is_number(meta.get("timeout_s")), "meta.timeout_s must be a number")
-    _need(meta.get("prefix_tokens") is None or _is_int(meta["prefix_tokens"]),
-          "meta.prefix_tokens must be an int or null")
+    _need(
+        meta.get("prefix_tokens") is None or _is_int(meta["prefix_tokens"]),
+        "meta.prefix_tokens must be an int or null",
+    )
     skipped = meta.get("skipped_scenarios")
-    _need(isinstance(skipped, list) and all(isinstance(item, str) for item in skipped),
-          "meta.skipped_scenarios must be an array of strings")
+    _need(
+        isinstance(skipped, list) and all(isinstance(item, str) for item in skipped),
+        "meta.skipped_scenarios must be an array of strings",
+    )
     _need("only" in meta, "meta.only is missing")
     only = meta["only"]
-    _need(only is None or (isinstance(only, list) and only
-                           and all(isinstance(item, str) for item in only)),
-          "meta.only must be null or a non-empty array of strings")
+    _need(
+        only is None
+        or (isinstance(only, list) and only and all(isinstance(item, str) for item in only)),
+        "meta.only must be null or a non-empty array of strings",
+    )
     flags = meta.get("env_flags")
-    _need(isinstance(flags, dict) and set(flags) == set(ENV_FLAG_KEYS),
-          f"meta.env_flags must hold exactly the {len(ENV_FLAG_KEYS)} documented keys")
+    _need(
+        isinstance(flags, dict) and set(flags) == set(ENV_FLAG_KEYS),
+        f"meta.env_flags must hold exactly the {len(ENV_FLAG_KEYS)} documented keys",
+    )
     constants_meta = meta.get("constants")
     _need(isinstance(constants_meta, dict), "meta.constants must be an object")
-    _need(isinstance(constants_meta.get("REQUEST_DEFAULTS"), dict),
-          "meta.constants.REQUEST_DEFAULTS must be an object")
+    _need(
+        isinstance(constants_meta.get("REQUEST_DEFAULTS"), dict),
+        "meta.constants.REQUEST_DEFAULTS must be an object",
+    )
     _validate_pricing(meta.get("pricing"))
 
 
@@ -1252,42 +1378,60 @@ def _validate_pricing(price: Any) -> None:
         value = price.get(key)
         _need(_is_number(value) and value >= 0, f"meta.pricing.{key} must be a rate >= 0")
     cached = price.get("cached_input_usd_per_mtok")
-    _need(cached is None or (_is_number(cached) and cached >= 0),
-          "meta.pricing.cached_input_usd_per_mtok must be a rate >= 0 or null")
+    _need(
+        cached is None or (_is_number(cached) and cached >= 0),
+        "meta.pricing.cached_input_usd_per_mtok must be a rate >= 0 or null",
+    )
     if basis == "manual":
         _need(price.get("model") is None, "meta.pricing.model must be null for basis manual")
-        _need(price.get("fetched_at") is None,
-              "meta.pricing.fetched_at must be null for basis manual")
+        _need(
+            price.get("fetched_at") is None, "meta.pricing.fetched_at must be null for basis manual"
+        )
         return
-    _need(isinstance(price.get("model"), str) and price["model"],
-          f"meta.pricing.model is required for basis {basis}")
-    _need(isinstance(price.get("fetched_at"), str) and price["fetched_at"],
-          f"meta.pricing.fetched_at is required for basis {basis}")
+    _need(
+        isinstance(price.get("model"), str) and price["model"],
+        f"meta.pricing.model is required for basis {basis}",
+    )
+    _need(
+        isinstance(price.get("fetched_at"), str) and price["fetched_at"],
+        f"meta.pricing.fetched_at is required for basis {basis}",
+    )
 
 
 def _validate_run(run: Any, schema: Any = BENCH_SCHEMA) -> None:
     _need(isinstance(run, dict), "a runs[] entry is not an object")
     _need(isinstance(run.get("scenario"), str), "runs[].scenario must be a string")
-    _need(_is_int(run.get("repeat")) and run["repeat"] > 0,
-          "runs[].repeat must be a positive int")
+    _need(_is_int(run.get("repeat")) and run["repeat"] > 0, "runs[].repeat must be a positive int")
     _need(isinstance(run.get("success"), bool), "runs[].success must be a boolean")
     failure = run.get("failure")
-    _need(failure is None or failure in FAILURES,
-          f"runs[].failure must be null or one of {', '.join(FAILURES)}")
-    _need(run["success"] == (failure is None),
-          "runs[].success must be true exactly when failure is null")
+    _need(
+        failure is None or failure in FAILURES,
+        f"runs[].failure must be null or one of {', '.join(FAILURES)}",
+    )
+    _need(
+        run["success"] == (failure is None),
+        "runs[].success must be true exactly when failure is null",
+    )
     checks = run.get("checks")
     _need(isinstance(checks, list) and checks, "runs[].checks must be a non-empty array")
     for check in checks:
-        _need(isinstance(check, dict) and isinstance(check.get("kind"), str)
-              and isinstance(check.get("ok"), bool) and isinstance(check.get("detail"), str)
-              and len(check["detail"]) <= 120,
-              "runs[].checks[] must be {kind, ok, detail<=120}")
-    _need(isinstance(run.get("answers"), list)
-          and all(isinstance(item, str) for item in run["answers"]),
-          "runs[].answers must be an array of strings")
-    _need(not run["success"] or all(check["ok"] for check in checks),
-          "a successful run cannot carry a failing check")
+        _need(
+            isinstance(check, dict)
+            and isinstance(check.get("kind"), str)
+            and isinstance(check.get("ok"), bool)
+            and isinstance(check.get("detail"), str)
+            and len(check["detail"]) <= 120,
+            "runs[].checks[] must be {kind, ok, detail<=120}",
+        )
+    _need(
+        isinstance(run.get("answers"), list)
+        and all(isinstance(item, str) for item in run["answers"]),
+        "runs[].answers must be an array of strings",
+    )
+    _need(
+        not run["success"] or all(check["ok"] for check in checks),
+        "a successful run cannot carry a failing check",
+    )
 
     # REQ-V14-BEN-03: `REQUIRED ⊆ set(row) ⊆ allowed`, not `==`. A row from an
     # older tree (fewer columns than `allowed`) is accepted as long as it
@@ -1314,33 +1458,52 @@ def _validate_run(run: Any, schema: Any = BENCH_SCHEMA) -> None:
             _need(isinstance(row, dict), f"runs[].{name}[] must be an object")
             row_keys = set(row)
             missing = required - row_keys
-            _need(not missing,
-                  f"runs[].{name}[] is missing required column(s): {', '.join(sorted(missing))}")
+            _need(
+                not missing,
+                f"runs[].{name}[] is missing required column(s): {', '.join(sorted(missing))}",
+            )
             unknown = row_keys - allowed
-            _need(not unknown,
-                  f"runs[].{name}[] carries unknown column(s): {', '.join(sorted(unknown))}")
-            _need(_is_int(row.get("conv_seq")) and row["conv_seq"] >= 1,
-                  f"runs[].{name}[].conv_seq must be a positive int")
+            _need(
+                not unknown,
+                f"runs[].{name}[] carries unknown column(s): {', '.join(sorted(unknown))}",
+            )
+            _need(
+                _is_int(row.get("conv_seq")) and row["conv_seq"] >= 1,
+                f"runs[].{name}[].conv_seq must be a positive int",
+            )
     for row in run["llm_calls"]:
-        _need(isinstance(row.get("prompt_chars_by_role"), (str, dict)),
-              "llm_calls[].prompt_chars_by_role must be the stored JSON text")
-        _need(isinstance(_by_role(row), dict),
-              "llm_calls[].prompt_chars_by_role must decode to an object")
-        _need(row.get("purpose") in ("agent", "summary"),
-              "llm_calls[].purpose must be 'agent' or 'summary'")
+        _need(
+            isinstance(row.get("prompt_chars_by_role"), (str, dict)),
+            "llm_calls[].prompt_chars_by_role must be the stored JSON text",
+        )
+        _need(
+            isinstance(_by_role(row), dict),
+            "llm_calls[].prompt_chars_by_role must decode to an object",
+        )
+        _need(
+            row.get("purpose") in ("agent", "summary"),
+            "llm_calls[].purpose must be 'agent' or 'summary'",
+        )
         _need(_is_int(row.get("latency_ms")), "llm_calls[].latency_ms must be an int")
-        _need(row.get("cost_usd") is None or _is_number(row["cost_usd"]),
-              "llm_calls[].cost_usd must be a number or null")
+        _need(
+            row.get("cost_usd") is None or _is_number(row["cost_usd"]),
+            "llm_calls[].cost_usd must be a number or null",
+        )
     for row in run["tool_calls"]:
         _need(isinstance(row.get("tool"), str), "tool_calls[].tool must be a string")
-        _need(_is_int(row.get("output_tokens_est")),
-              "tool_calls[].output_tokens_est must be an int")
+        _need(
+            _is_int(row.get("output_tokens_est")), "tool_calls[].output_tokens_est must be an int"
+        )
 
     totals = run.get("totals")
-    _need(isinstance(totals, dict) and set(totals) == set(TOTALS_KEYS),
-          "runs[].totals must carry exactly the documented keys")
-    _need(_is_int(totals["wall_ms"]) and totals["wall_ms"] >= 0,
-          "runs[].totals.wall_ms must be a non-negative int")
+    _need(
+        isinstance(totals, dict) and set(totals) == set(TOTALS_KEYS),
+        "runs[].totals must carry exactly the documented keys",
+    )
+    _need(
+        _is_int(totals["wall_ms"]) and totals["wall_ms"] >= 0,
+        "runs[].totals.wall_ms must be a non-negative int",
+    )
 
 
 def _by_role(row: dict) -> Any:
@@ -1357,19 +1520,28 @@ def _validate_tokens(runs: Sequence[dict]) -> None:
     """Exit 3: a token count that cannot be summed honestly (section 13.3)."""
     for run in runs:
         for row in run["llm_calls"]:
-            for column in ("prompt_tokens", "completion_tokens", "cached_tokens",
-                           "reasoning_tokens", "total_tokens"):
+            for column in (
+                "prompt_tokens",
+                "completion_tokens",
+                "cached_tokens",
+                "reasoning_tokens",
+                "total_tokens",
+            ):
                 value = row.get(column)
                 if value is None:
                     continue
-                _need(_is_int(value) and value >= 0,
-                      f"{run['scenario']}-{run['repeat']}: negative {column}",
-                      EXIT_USAGE_MISSING)
+                _need(
+                    _is_int(value) and value >= 0,
+                    f"{run['scenario']}-{run['repeat']}: negative {column}",
+                    EXIT_USAGE_MISSING,
+                )
             prompt, cached = row.get("prompt_tokens"), row.get("cached_tokens")
             if prompt is not None and cached is not None:
-                _need(cached <= prompt,
-                      f"{run['scenario']}-{run['repeat']}: cached_tokens > prompt_tokens",
-                      EXIT_USAGE_MISSING)
+                _need(
+                    cached <= prompt,
+                    f"{run['scenario']}-{run['repeat']}: cached_tokens > prompt_tokens",
+                    EXIT_USAGE_MISSING,
+                )
         if run["success"] and _usage_missing(run["llm_calls"]):
             raise _Invalid(
                 f"{run['scenario']}-{run['repeat']}: usage_missing on a successful run",
@@ -1386,14 +1558,15 @@ def _validate_run_set(
     # A narrowed run (`--only`) is validated against its own selection; a full
     # run against the whole catalog, exactly as REQ-V13-BEN-01 states. Either
     # way a dropped, duplicated or unknown scenario is exit 1.
-    _need(only is None or set(only) <= set(catalog),
-          "meta.only names an id that is not in the scenario catalog")
-    known = catalog if only is None else {
-        scenario_id: catalog[scenario_id] for scenario_id in only
-    }
+    _need(
+        only is None or set(only) <= set(catalog),
+        "meta.only names an id that is not in the scenario catalog",
+    )
+    known = catalog if only is None else {scenario_id: catalog[scenario_id] for scenario_id in only}
     skipped = set(meta["skipped_scenarios"])
-    _need(skipped <= network_ids,
-          "meta.skipped_scenarios holds an id that is not a network scenario")
+    _need(
+        skipped <= network_ids, "meta.skipped_scenarios holds an id that is not a network scenario"
+    )
     expected = {
         (scenario_id, repeat)
         for scenario_id in known
@@ -1404,8 +1577,7 @@ def _validate_run_set(
     for run in runs:
         pair = (run["scenario"], run["repeat"])
         _need(run["scenario"] in catalog, f"unknown scenario id: {run['scenario']}")
-        _need(run["scenario"] in known,
-              f"unexpected run outside meta.only: {run['scenario']}")
+        _need(run["scenario"] in known, f"unexpected run outside meta.only: {run['scenario']}")
         _need(pair not in seen, f"duplicate run: {pair[0]}-{pair[1]}")
         seen.add(pair)
     missing = sorted(expected - seen)
@@ -1415,8 +1587,10 @@ def _validate_run_set(
 
     per_scenario = summary.get("per_scenario")
     _need(isinstance(per_scenario, dict), "summary.per_scenario must be an object")
-    _need(set(per_scenario) == {scenario_id for scenario_id, _ in expected},
-          "summary.per_scenario must hold exactly the non-skipped scenario ids")
+    _need(
+        set(per_scenario) == {scenario_id for scenario_id, _ in expected},
+        "summary.per_scenario must hold exactly the non-skipped scenario ids",
+    )
 
 
 def _validate_arithmetic(meta: dict, runs: Sequence[dict], summary: dict) -> None:
@@ -1426,27 +1600,32 @@ def _validate_arithmetic(meta: dict, runs: Sequence[dict], summary: dict) -> Non
     tampered file, or totals a buggy writer produced, cannot pass.
     """
     for run in runs:
-        expected = totals_from_rows(run["llm_calls"], run["tool_calls"],
-                                    run["totals"]["wall_ms"])
+        expected = totals_from_rows(run["llm_calls"], run["tool_calls"], run["totals"]["wall_ms"])
         for key in TOTALS_KEYS:
-            _need(_equal(run["totals"][key], expected[key]),
-                  f"{run['scenario']}-{run['repeat']}: totals.{key} is "
-                  f"{run['totals'][key]!r}, recomputed {expected[key]!r}")
+            _need(
+                _equal(run["totals"][key], expected[key]),
+                f"{run['scenario']}-{run['repeat']}: totals.{key} is "
+                f"{run['totals'][key]!r}, recomputed {expected[key]!r}",
+            )
     expected_summary = summarize(runs, meta["skipped_scenarios"], meta["repeats"])
     _compare_summary(summary, expected_summary, "summary")
 
 
 def _compare_summary(actual: Any, expected: Any, path: str) -> None:
     if isinstance(expected, dict):
-        _need(isinstance(actual, dict) and set(actual) == set(expected),
-              f"{path} does not hold the documented keys")
+        _need(
+            isinstance(actual, dict) and set(actual) == set(expected),
+            f"{path} does not hold the documented keys",
+        )
         for key, value in expected.items():
             _compare_summary(actual[key], value, f"{path}.{key}")
         return
     if isinstance(expected, list):
-        _need(isinstance(actual, list) and len(actual) == len(expected),
-              f"{path} has {len(actual) if isinstance(actual, list) else '?'} entries, "
-              f"recomputed {len(expected)}")
+        _need(
+            isinstance(actual, list) and len(actual) == len(expected),
+            f"{path} has {len(actual) if isinstance(actual, list) else '?'} entries, "
+            f"recomputed {len(expected)}",
+        )
         for index, value in enumerate(expected):
             _compare_summary(actual[index], value, f"{path}[{index}]")
         return
@@ -1474,6 +1653,7 @@ def _is_number(value: Any) -> bool:
 # --------------------------------------------------------------------------
 # `report` (section 7.8) and the verdict (section 13.3)
 # --------------------------------------------------------------------------
+
 
 def comparability(baseline: dict, candidate: dict) -> str | None:
     """The one-line reason two files may not be compared, or `None`."""
@@ -1521,7 +1701,8 @@ def _price_from_meta(meta_pricing: dict | None):
         input_usd_per_mtok=float(meta_pricing["input_usd_per_mtok"]),
         output_usd_per_mtok=float(meta_pricing["output_usd_per_mtok"]),
         cached_input_usd_per_mtok=(
-            None if meta_pricing.get("cached_input_usd_per_mtok") is None
+            None
+            if meta_pricing.get("cached_input_usd_per_mtok") is None
             else float(meta_pricing["cached_input_usd_per_mtok"])
         ),
         source=str(meta_pricing.get("basis") or ""),
@@ -1554,10 +1735,14 @@ def verdict(baseline: dict, candidate: dict) -> Verdict:
     # check_document(mode="strict") (EXIT_NOT_COMPARABLE) -- this is the
     # quality gate's own, independent guard for any direct verdict() caller.
     if candidate["meta"].get("aborted"):
-        return Verdict(False, "quality gate failed", [
-            f"ABORTED candidate: {candidate['meta']['aborted']}",
-            "verdict: **FAIL**",
-        ])
+        return Verdict(
+            False,
+            "quality gate failed",
+            [
+                f"ABORTED candidate: {candidate['meta']['aborted']}",
+                "verdict: **FAIL**",
+            ],
+        )
 
     price = _price_from_meta(baseline["meta"].get("pricing"))
     unit = "$" if price is not None else " tokens"
@@ -1622,8 +1807,9 @@ def verdict(baseline: dict, candidate: dict) -> Verdict:
     for scenario_id, entry in baseline["summary"]["per_scenario"].items():
         after = candidate["summary"]["per_scenario"].get(scenario_id, {"success": 0, "of": 0})
         if after["success"] < entry["success"] - 1:
-            regressed.append(f"{scenario_id} {entry['success']}/{entry['of']} → "
-                             f"{after['success']}/{after['of']}")
+            regressed.append(
+                f"{scenario_id} {entry['success']}/{entry['of']} → {after['success']}/{after['of']}"
+            )
     if regressed:
         lines.append("regressed scenarios: " + ", ".join(regressed))
         quality_ok = False
@@ -1640,9 +1826,7 @@ def verdict(baseline: dict, candidate: dict) -> Verdict:
             of = 0 if entry is None else entry.get("of", 0)
             not_full.append(f"{scenario_id} {success}/{of}")
     if not_full:
-        lines.append(
-            "not blocking-3/3 on the candidate (REQ-V170-BEN-06): " + ", ".join(not_full)
-        )
+        lines.append("not blocking-3/3 on the candidate (REQ-V170-BEN-06): " + ", ".join(not_full))
         quality_ok = False
 
     passed = cost_ok and quality_ok
@@ -1675,9 +1859,11 @@ def render_report(baseline: dict, candidate: dict | None = None) -> str:
         _failures_section(baseline, candidate),
     ]
     if candidate is not None:
-        parts.append("## Verdict\n\n" + "\n".join(
-            f"- {line}" for line in verdict(baseline, candidate).lines
-        ) + "\n")
+        parts.append(
+            "## Verdict\n\n"
+            + "\n".join(f"- {line}" for line in verdict(baseline, candidate).lines)
+            + "\n"
+        )
     tag = baseline["meta"]["tag"]
     header = f"# Benchmark report — {tag}"
     if candidate is not None:
@@ -1693,8 +1879,7 @@ def _sides(baseline: dict, candidate: dict | None) -> list[tuple[str, dict]]:
 
 
 def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
-    lines = ["| " + " | ".join(header) + " |",
-             "|" + "|".join("---" for _ in header) + "|"]
+    lines = ["| " + " | ".join(header) + " |", "|" + "|".join("---" for _ in header) + "|"]
     lines += ["| " + " | ".join(cell for cell in row) + " |" for row in rows]
     return "\n".join(lines) + "\n"
 
@@ -1703,23 +1888,54 @@ def _meta_section(baseline: dict, candidate: dict | None) -> str:
     sides = _sides(baseline, candidate)
     header = ["field", *(name for name, _ in sides)]
     rows = []
-    for key in ("tag", "started_at", "finished_at", "git_commit", *LOCKED_META_FIELDS,
-                "prefix_tokens"):
+    for key in (
+        "tag",
+        "started_at",
+        "finished_at",
+        "git_commit",
+        *LOCKED_META_FIELDS,
+        "prefix_tokens",
+    ):
         rows.append([key, *(_cell(document["meta"].get(key)) for _, document in sides)])
     for key in ENV_FLAG_KEYS:
-        rows.append([f"env_flags.{key}",
-                     *(_cell(document["meta"]["env_flags"].get(key)) for _, document in sides)])
-    for key in ("basis", "model", "input_usd_per_mtok", "output_usd_per_mtok",
-                "cached_input_usd_per_mtok", "fetched_at"):
-        rows.append([f"pricing.{key}",
-                     *(_cell((document["meta"].get("pricing") or {}).get(key))
-                       for _, document in sides)])
+        rows.append(
+            [
+                f"env_flags.{key}",
+                *(_cell(document["meta"]["env_flags"].get(key)) for _, document in sides),
+            ]
+        )
+    for key in (
+        "basis",
+        "model",
+        "input_usd_per_mtok",
+        "output_usd_per_mtok",
+        "cached_input_usd_per_mtok",
+        "fetched_at",
+    ):
+        rows.append(
+            [
+                f"pricing.{key}",
+                *(_cell((document["meta"].get("pricing") or {}).get(key)) for _, document in sides),
+            ]
+        )
     return "## Meta\n\n" + _table(header, rows)
 
 
-_MEDIAN_KEYS = ("prompt_tokens", "completion_tokens", "cached_tokens", "reasoning_tokens",
-                "resent_tokens", "new_tokens", "tool_calls", "tool_output_tokens_est",
-                "latency_ms", "wall_ms", "cost_usd", "calls", "failed_calls")
+_MEDIAN_KEYS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "resent_tokens",
+    "new_tokens",
+    "tool_calls",
+    "tool_output_tokens_est",
+    "latency_ms",
+    "wall_ms",
+    "cost_usd",
+    "calls",
+    "failed_calls",
+)
 
 
 def _per_scenario_section(baseline: dict, candidate: dict | None) -> str:
@@ -1731,15 +1947,25 @@ def _per_scenario_section(baseline: dict, candidate: dict | None) -> str:
             if entry is None:
                 rows.append([scenario_id, name, "—", *("—" for _ in _MEDIAN_KEYS)])
                 continue
-            rows.append([
-                scenario_id, name, f"{entry['success']}/{entry['of']}",
-                *(_cell(entry["median"][key]) for key in _MEDIAN_KEYS),
-            ])
+            rows.append(
+                [
+                    scenario_id,
+                    name,
+                    f"{entry['success']}/{entry['of']}",
+                    *(_cell(entry["median"][key]) for key in _MEDIAN_KEYS),
+                ]
+            )
         if candidate is not None:
             base = baseline["summary"]["per_scenario"][scenario_id]["median"]
             cand = (candidate["summary"]["per_scenario"].get(scenario_id) or {}).get("median", {})
-            rows.append([scenario_id, "Δ", "",
-                         *(_delta(base.get(key), cand.get(key)) for key in _MEDIAN_KEYS)])
+            rows.append(
+                [
+                    scenario_id,
+                    "Δ",
+                    "",
+                    *(_delta(base.get(key), cand.get(key)) for key in _MEDIAN_KEYS),
+                ]
+            )
     return "## Per scenario\n\n" + _table(header, rows)
 
 
@@ -1749,15 +1975,35 @@ def _totals_section(baseline: dict, candidate: dict | None) -> str:
         header += ["Δ", "Δ%"]
     rows = []
     for key in TOTALS_KEYS:
-        rows.append(_metric_row(key, baseline, candidate,
-                                lambda document, key=key: document["summary"]["totals"][key]))
-    for key in ("success_rate", "cost_per_success", "tokens_per_success", "resent_share",
-                "cache_hit_rate"):
-        rows.append(_metric_row(key, baseline, candidate,
-                                lambda document, key=key: document["summary"][key]))
+        rows.append(
+            _metric_row(
+                key,
+                baseline,
+                candidate,
+                lambda document, key=key: document["summary"]["totals"][key],
+            )
+        )
+    for key in (
+        "success_rate",
+        "cost_per_success",
+        "tokens_per_success",
+        "resent_share",
+        "cache_hit_rate",
+    ):
+        rows.append(
+            _metric_row(
+                key, baseline, candidate, lambda document, key=key: document["summary"][key]
+            )
+        )
     for key in AVG_KEYS:
-        rows.append(_metric_row(f"avg_per_task.{key}", baseline, candidate,
-                                lambda document, key=key: document["summary"]["avg_per_task"][key]))
+        rows.append(
+            _metric_row(
+                f"avg_per_task.{key}",
+                baseline,
+                candidate,
+                lambda document, key=key: document["summary"]["avg_per_task"][key],
+            )
+        )
     rows.append(_metric_row("prefix_share", baseline, candidate, metrics.prefix_share))
     return "## Totals\n\n" + _table(header, rows)
 
@@ -1776,10 +2022,16 @@ def _purpose_section(baseline: dict, candidate: dict | None) -> str:
     rows = []
     for purpose in ("agent", "summary"):
         for metric in ("calls", "prompt_tokens", "completion_tokens"):
-            rows.append([purpose, metric, *(
-                _cell(_purpose_value(document, purpose, metric))
-                for _, document in _sides(baseline, candidate)
-            )])
+            rows.append(
+                [
+                    purpose,
+                    metric,
+                    *(
+                        _cell(_purpose_value(document, purpose, metric))
+                        for _, document in _sides(baseline, candidate)
+                    ),
+                ]
+            )
     return "## Totals by purpose\n\n" + _table(header, rows)
 
 
@@ -1797,15 +2049,25 @@ def _all_llm_rows(document: dict) -> list[dict]:
 def _audit_section(baseline: dict, candidate: dict | None) -> str:
     header = ["question", *(name for name, _ in _sides(baseline, candidate))]
     rows = [
-        ["most expensive tool (output tokens)",
-         *(_top_tool_cell(document) for _, document in _sides(baseline, candidate))],
-        ["most expensive turn/round",
-         *(_top_turn_cell(document) for _, document in _sides(baseline, candidate))],
-        ["fastest-growing context category",
-         *(_growth_cell(document) for _, document in _sides(baseline, candidate))],
-        ["re-sent share",
-         *(_cell(document["summary"]["resent_share"])
-           for _, document in _sides(baseline, candidate))],
+        [
+            "most expensive tool (output tokens)",
+            *(_top_tool_cell(document) for _, document in _sides(baseline, candidate)),
+        ],
+        [
+            "most expensive turn/round",
+            *(_top_turn_cell(document) for _, document in _sides(baseline, candidate)),
+        ],
+        [
+            "fastest-growing context category",
+            *(_growth_cell(document) for _, document in _sides(baseline, candidate)),
+        ],
+        [
+            "re-sent share",
+            *(
+                _cell(document["summary"]["resent_share"])
+                for _, document in _sides(baseline, candidate)
+            ),
+        ],
     ]
     return "## Audit\n\n" + _table(header, rows)
 
@@ -1821,8 +2083,10 @@ def _top_turn_cell(document: dict) -> str:
     turn = document["summary"]["top_turn"]
     if turn is None:
         return "none"
-    return (f"{turn['scenario']}-{turn['repeat']} turn {turn['turn']} round {turn['round']}: "
-            f"{turn['prompt_tokens']} prompt tokens")
+    return (
+        f"{turn['scenario']}-{turn['repeat']} turn {turn['turn']} round {turn['round']}: "
+        f"{turn['prompt_tokens']} prompt tokens"
+    )
 
 
 def _growth_cell(document: dict) -> str:
@@ -1842,14 +2106,16 @@ def _reasoning_section(baseline: dict, candidate: dict | None) -> str:
         # `tools_exposed` is the size of the toolset the request carried (it
         # parallels `messages_n`), so a normal agent round holds the whole
         # catalog, not 1 — the group is "any tool at all" (REQ-V13-RSN-02).
-        body.append("- tool-exposed calls: "
-                    + _reasoning_line([row for row in rows
-                                       if (row["tools_exposed"] or 0) > 0],
-                                      with_calls=True))
-        body.append("- tools-withheld calls: "
-                    + _reasoning_line([row for row in rows
-                                       if not row["tools_exposed"]],
-                                      with_calls=True))
+        body.append(
+            "- tool-exposed calls: "
+            + _reasoning_line(
+                [row for row in rows if (row["tools_exposed"] or 0) > 0], with_calls=True
+            )
+        )
+        body.append(
+            "- tools-withheld calls: "
+            + _reasoning_line([row for row in rows if not row["tools_exposed"]], with_calls=True)
+        )
         body.append("")
     return "\n".join(body) + "\n"
 
@@ -1884,18 +2150,31 @@ def _reasoning_line(rows: Sequence[dict], *, with_calls: bool = False) -> str:
 def _latency_section(baseline: dict, candidate: dict | None) -> str:
     header = ["scope", *(name for name, _ in _sides(baseline, candidate))]
     sides = _sides(baseline, candidate)
-    rows = [["median latency_ms per call",
-             *(_cell(_median_latency(document, None)) for _, document in sides)]]
+    rows = [
+        [
+            "median latency_ms per call",
+            *(_cell(_median_latency(document, None)) for _, document in sides),
+        ]
+    ]
     for purpose in ("agent", "summary"):
-        rows.append([f"median latency_ms ({purpose})",
-                     *(_cell(_median_latency(document, purpose))
-                       for _, document in _sides(baseline, candidate))])
+        rows.append(
+            [
+                f"median latency_ms ({purpose})",
+                *(
+                    _cell(_median_latency(document, purpose))
+                    for _, document in _sides(baseline, candidate)
+                ),
+            ]
+        )
     return "## Latency\n\n" + _table(header, rows)
 
 
 def _median_latency(document: dict, purpose: str | None) -> float | None:
-    values = [int(row["latency_ms"] or 0) for row in _all_llm_rows(document)
-              if purpose is None or row["purpose"] == purpose]
+    values = [
+        int(row["latency_ms"] or 0)
+        for row in _all_llm_rows(document)
+        if purpose is None or row["purpose"] == purpose
+    ]
     return statistics.median(values) if values else None
 
 
@@ -1909,13 +2188,24 @@ def _failures_section(baseline: dict, candidate: dict | None) -> str:
             continue
         rows = []
         for run in failed:
-            failing = "; ".join(
-                f"{check['kind']}: {check['detail']}"
-                for check in run["checks"] if not check["ok"]
-            ) or "—"
+            failing = (
+                "; ".join(
+                    f"{check['kind']}: {check['detail']}"
+                    for check in run["checks"]
+                    if not check["ok"]
+                )
+                or "—"
+            )
             answers = " ⏎ ".join(run["answers"])[:300]
-            rows.append([run["scenario"], str(run["repeat"]), str(run["failure"]),
-                         failing, answers.replace("|", "\\|")])
+            rows.append(
+                [
+                    run["scenario"],
+                    str(run["repeat"]),
+                    str(run["failure"]),
+                    failing,
+                    answers.replace("|", "\\|"),
+                ]
+            )
         body.append(_table(["scenario", "repeat", "failure", "checks", "answers"], rows))
     return "\n".join(body) + "\n"
 
@@ -1953,6 +2243,7 @@ def _delta(left: Any, right: Any) -> str:
 # --------------------------------------------------------------------------
 # the console summary (section 7.7)
 # --------------------------------------------------------------------------
+
 
 def console_summary(document: dict, out_path: Path) -> list[str]:
     meta = document["meta"]
@@ -2022,10 +2313,9 @@ def _secs(value: float | None) -> str:
 # CLI
 # --------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="bench.py", description="the spec-v1.3 benchmark harness"
-    )
+    parser = argparse.ArgumentParser(prog="bench.py", description="the spec-v1.3 benchmark harness")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="execute the scenarios and write a benchmark file")
@@ -2117,8 +2407,10 @@ def _cmd_report(arguments) -> int:
             return EXIT_NOT_COMPARABLE
 
     for note in notes:
-        print(f"informational comparison: {note}; deltas are indicative, not measured",
-              file=sys.stderr)
+        print(
+            f"informational comparison: {note}; deltas are indicative, not measured",
+            file=sys.stderr,
+        )
 
     text = render_report(baseline, candidate)
     if arguments.out:
@@ -2173,7 +2465,7 @@ def _harness_env(provider: str | None) -> dict:
 def _base_config(tag: str, provider: str | None) -> Config:
     """`.env` for the provider, model, URLs, keys, ids and timeouts; the harness
     for the treatment and the three per-run paths."""
-    config.load_config()                      # loads `.env` into the environment once
+    config.load_config()  # loads `.env` into the environment once
     base_dir = BENCH_ROOT / tag / "_base"
     env = {
         **os.environ,
@@ -2204,6 +2496,7 @@ def _network_preflight(client: httpx.Client) -> Callable[[], bool]:
         except httpx.HTTPError:
             return False
         return True
+
     return probe
 
 
@@ -2244,6 +2537,7 @@ def _real_fetcher_factory(client: httpx.Client) -> Callable[[Config], Any]:
             resolve=tools.resolve_host,
             **extra,
         )
+
     return build
 
 
@@ -2251,8 +2545,7 @@ def _prefix_tokens(client, skills: dict) -> int | None:
     """REQ-V13-BEN-06: one `max_tokens=1` call with the system prompt and the
     tool catalog, made outside `run_agent` so it writes no `llm_calls` row."""
     messages = [
-        {"role": "system",
-         "content": agent.build_system_prompt(skills, storage.utc_now_iso())},
+        {"role": "system", "content": agent.build_system_prompt(skills, storage.utc_now_iso())},
         {"role": "user", "content": PREFIX_PROBE_MESSAGE},
     ]
     try:
@@ -2260,8 +2553,11 @@ def _prefix_tokens(client, skills: dict) -> int | None:
         # signature change must not silently give the probe a different
         # treatment from the run it warms up.
         response = client.complete(
-            messages, tools.tool_specs(), max_tokens=1,
-            reasoning=llm_base.REASONING_DEFAULT, timeout_s=None,
+            messages,
+            tools.tool_specs(),
+            max_tokens=1,
+            reasoning=llm_base.REASONING_DEFAULT,
+            timeout_s=None,
         )
     except Exception as exc:
         log.warning("prefix calibration failed: %s", config.redact(str(exc)))
@@ -2332,8 +2628,11 @@ def _tree_is_dirty() -> bool:
     dirty-tree guard REQ-V160-BEN-05 puts on a `baseline-*` run: `git_commit`
     would otherwise name a commit that is not actually what ran."""
     result = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=REPO_ROOT,
-        capture_output=True, text=True, check=False,
+        ["git", "status", "--porcelain"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return bool(result.stdout.strip())
 
@@ -2343,12 +2642,22 @@ def _generation_settings(cfg: Config) -> dict:
     (llm/base.py) and its call sites actually send today — never a live
     call. `provider_defaults` documents what is sent **nowhere**."""
     return {
-        "agent": {"temperature": 0, "max_tokens": cfg.llm_max_tokens,
-                   "stream": False, "tool_choice": "auto"},
-        "summary_initial": {"temperature": 0, "max_tokens": agent.SUMMARY_MAX_TOKENS,
-                             "stream": False},
-        "summary_retry": {"temperature": 0, "max_tokens": cfg.llm_summary_max_tokens,
-                           "stream": False},
+        "agent": {
+            "temperature": 0,
+            "max_tokens": cfg.llm_max_tokens,
+            "stream": False,
+            "tool_choice": "auto",
+        },
+        "summary_initial": {
+            "temperature": 0,
+            "max_tokens": agent.SUMMARY_MAX_TOKENS,
+            "stream": False,
+        },
+        "summary_retry": {
+            "temperature": 0,
+            "max_tokens": cfg.llm_summary_max_tokens,
+            "stream": False,
+        },
         "provider_defaults": ["seed", "stop", "top_p"],
     }
 
@@ -2373,7 +2682,8 @@ def _instrument_meta(cfg: Config, arguments) -> dict:
     line; off `lmstudio` (or when not supplied) they are `null`."""
     if cfg.llm_provider != "lmstudio":
         return {
-            "lmstudio_version": None, "served_model_id": None,
+            "lmstudio_version": None,
+            "served_model_id": None,
             "lmstudio_context_length": None,
         }
     return {
@@ -2402,8 +2712,10 @@ def _cmd_run(arguments) -> int:
     # would otherwise name a commit that is not actually what ran. Any other
     # tag, `smoke-v160` included, is unaffected regardless of tree state.
     if arguments.tag.startswith("baseline-") and _tree_is_dirty():
-        print("a baseline run refuses a dirty tree (git status --porcelain "
-              "is non-empty)", file=sys.stderr)
+        print(
+            "a baseline run refuses a dirty tree (git status --porcelain is non-empty)",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
     # REQ-V160-BEN-08: remove only this run's own tag directory. Wiping the
@@ -2458,25 +2770,26 @@ def _cmd_run(arguments) -> int:
     finally:
         client.close()
 
-    result.meta.update({
-        "only": sorted(scenario.id for scenario in scenarios) if arguments.only.strip()
-        else None,
-        "tag": arguments.tag,
-        "started_at": started_at,
-        "finished_at": storage.utc_now_iso(),
-        "git_commit": _git_commit(),
-        "prefix_tokens": prefix,
-        "pricing": meta_pricing,
-        **_instrument_meta(cfg, arguments),
-        "generation_settings": _generation_settings(cfg),
-        "prompt_tools_sha256": _prompt_tools_sha256(skills),
-        "obs_capture_content": cfg.obs_capture_content,
-    })
+    result.meta.update(
+        {
+            "only": sorted(scenario.id for scenario in scenarios)
+            if arguments.only.strip()
+            else None,
+            "tag": arguments.tag,
+            "started_at": started_at,
+            "finished_at": storage.utc_now_iso(),
+            "git_commit": _git_commit(),
+            "prefix_tokens": prefix,
+            "pricing": meta_pricing,
+            **_instrument_meta(cfg, arguments),
+            "generation_settings": _generation_settings(cfg),
+            "prompt_tools_sha256": _prompt_tools_sha256(skills),
+            "obs_capture_content": cfg.obs_capture_content,
+        }
+    )
     document = _ordered(result)
     document = redact_document(document, sorted(cfg.allowed_tg_ids))
-    out_path.write_text(
-        json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    out_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for line in console_summary(document, out_path):
         print(line)
 
@@ -2500,13 +2813,32 @@ def _cmd_run(arguments) -> int:
 def _ordered(result: BenchResult) -> dict:
     """`meta` in the order of the 7.4 schema — a benchmark file is read by
     people as well as by `check`."""
-    order = ("tag", "started_at", "finished_at", "git_commit", "provider", "model",
-             "context_length", "repeats", "only", "timeout_s", "prefix_tokens",
-             "scenarios_sha256", "pricing", "skipped_scenarios", "env_flags",
-             "config_sha256", "constants",
-             "lmstudio_version", "served_model_id", "lmstudio_context_length",
-             "generation_settings", "prompt_tools_sha256", "obs_capture_content",
-             "aborted")
+    order = (
+        "tag",
+        "started_at",
+        "finished_at",
+        "git_commit",
+        "provider",
+        "model",
+        "context_length",
+        "repeats",
+        "only",
+        "timeout_s",
+        "prefix_tokens",
+        "scenarios_sha256",
+        "pricing",
+        "skipped_scenarios",
+        "env_flags",
+        "config_sha256",
+        "constants",
+        "lmstudio_version",
+        "served_model_id",
+        "lmstudio_context_length",
+        "generation_settings",
+        "prompt_tools_sha256",
+        "obs_capture_content",
+        "aborted",
+    )
     meta = {key: result.meta[key] for key in order if key in result.meta}
     meta.update({key: value for key, value in result.meta.items() if key not in meta})
     return {

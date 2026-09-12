@@ -47,6 +47,7 @@ def body_handler(body=b"sunny", status=200, content_type="text/plain"):
     def handler(request):
         headers = {"content-type": content_type} if content_type else {}
         return httpx.Response(status, content=body, headers=headers)
+
     return handler
 
 
@@ -58,6 +59,7 @@ def marker_for(omitted: list[str]) -> str:
 # --------------------------------------------------------------------------
 # REQ-V13-TOO-01 — the compaction algorithm
 # --------------------------------------------------------------------------
+
 
 def test_too_01_short_text_passes_through_with_ansi_removed():
     assert tools.compact_output("plain\ntext\n", max_chars=200) == "plain\ntext\n"
@@ -109,7 +111,7 @@ def traceback_lines() -> list[str]:
     """A long stderr whose traceback sits far enough from the end that the plain
     tail window cannot reach it — otherwise `error_context` would be a no-op and
     the fixture would prove nothing."""
-    noise = [f"warn {i:04d}" for i in range(100)]                 # cost 10 each
+    noise = [f"warn {i:04d}" for i in range(100)]  # cost 10 each
     trace = [
         "Traceback (most recent call last):",
         '  File "/work/job.py", line 42, in main',
@@ -127,9 +129,9 @@ def test_too_04_error_context_keeps_the_traceback_whole():
 
     costs = [len(line) + 1 for line in lines]
     budget = 1500 - tools.MARKER_RESERVE
-    anchor = 100                              # the last ERROR_RE match: "Traceback"
+    anchor = 100  # the last ERROR_RE match: "Traceback"
     assert tools.ERROR_RE.search(lines[anchor]) and not any(
-        tools.ERROR_RE.search(line) for line in lines[anchor + 1:]
+        tools.ERROR_RE.search(line) for line in lines[anchor + 1 :]
     )
     # Without the error context the anchor is dropped: that is what step 5 is
     # for, and it is what makes this fixture exercise it.
@@ -137,18 +139,16 @@ def test_too_04_error_context_keeps_the_traceback_whole():
 
     start = anchor - tools.ERROR_CONTEXT_LINES
     tail_cost = sum(costs[start:])
-    assert tail_cost <= budget                # the window fits whole, nothing
-    assert set(costs[:100]) == {10}           # is dropped from its front
+    assert tail_cost <= budget  # the window fits whole, nothing
+    assert set(costs[:100]) == {10}  # is dropped from its front
     head_count = (budget - tail_cost) // 10
 
     result = tools.compact_output(stderr, max_chars=1500, error_context=True)
-    expected = "\n".join(
-        lines[:head_count] + [marker_for(lines[head_count:start])] + lines[start:]
-    )
+    expected = "\n".join(lines[:head_count] + [marker_for(lines[head_count:start])] + lines[start:])
     assert result == expected
     assert len(result) <= 1500
     assert "ZeroDivisionError: division by zero" in result
-    assert "[… " not in result[result.index("Traceback"):]
+    assert "[… " not in result[result.index("Traceback") :]
 
 
 def test_too_04_without_error_context_the_same_stderr_is_windowed():
@@ -178,28 +178,29 @@ def test_too_01_length_invariant_over_random_inputs():
     for case in range(400):
         max_chars = rng.randint(200, 4096)
         shape = case % 4
-        if shape == 0:                                   # one very long line
+        if shape == 0:  # one very long line
             text = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 9000)))
-        elif shape == 1:                                 # many short lines
+        elif shape == 1:  # many short lines
             text = "\n".join(
                 "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
                 for _ in range(rng.randint(0, 400))
             )
-        elif shape == 2:                                 # duplicate-heavy
+        elif shape == 2:  # duplicate-heavy
             text = "\n".join(
                 rng.choice(["same line", "same line", "same line", "other"])
                 for _ in range(rng.randint(0, 500))
             ) + rng.choice(["", "\n"])
-        else:                                            # mixed, with an error
+        else:  # mixed, with an error
             text = "\n".join(
-                ["Traceback (most recent call last):" if rng.random() < 0.1
-                 else "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 90)))
-                 for _ in range(rng.randint(0, 200))]
+                [
+                    "Traceback (most recent call last):"
+                    if rng.random() < 0.1
+                    else "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 90)))
+                    for _ in range(rng.randint(0, 200))
+                ]
             )
         for error_context in (False, True):
-            result = tools.compact_output(
-                text, max_chars=max_chars, error_context=error_context
-            )
+            result = tools.compact_output(text, max_chars=max_chars, error_context=error_context)
             assert len(result) <= max_chars, (case, max_chars, error_context)
 
 
@@ -209,7 +210,7 @@ def test_too_01_boundary_contract_a_head_cut_never_ends_in_a_secret_prefix(only_
     first_line = "token=" + CANARY[:10]
     filler = [f"filler line {i:02d} " + "F" * 30 for i in range(10)]
     for line in filler:
-        assert len(line) == 45                            # cost 46
+        assert len(line) == 45  # cost 46
     lines = [first_line] + filler
     text = "\n".join(lines)
     assert CANARY not in text
@@ -220,7 +221,7 @@ def test_too_01_boundary_contract_a_head_cut_never_ends_in_a_secret_prefix(only_
     # Tail: 90 // 46 = 1 filler line.
     assert len(first_line) + 1 == 17
     head_part, tail_part = ["token="], filler[-1:]
-    omitted = lines[1:len(lines) - 1]
+    omitted = lines[1 : len(lines) - 1]
     assert result == "\n".join(head_part + [marker_for(omitted)] + tail_part)
     assert result.split("\n")[0] == "token="
     for length in range(config.SECRET_FRAGMENT_MIN, len(CANARY)):
@@ -253,11 +254,10 @@ def test_too_01_head_strip_happens_before_the_marker(only_canary):
 # REQ-V13-TOO-02/03/04 — the exec envelope
 # --------------------------------------------------------------------------
 
+
 def exec_envelope(arguments: dict, result: dict) -> dict:
     runner = RecordingRunner(result)
-    return json.loads(tools.execute_tool(
-        "exec", json.dumps(arguments), skills={}, runner=runner
-    ))
+    return json.loads(tools.execute_tool("exec", json.dumps(arguments), skills={}, runner=runner))
 
 
 def stream_result(stdout="", stderr="", exit_code=0, **extra) -> dict:
@@ -284,15 +284,22 @@ def test_too_02_envelope_compacts_both_streams_end_to_end():
     )
     assert envelope["stdout"] == "INFO heartbeat ok [×200]\n"
     assert "ZeroDivisionError: division by zero" in envelope["stderr"]
-    assert "[… " not in envelope["stderr"][envelope["stderr"].index("Traceback"):]
+    assert "[… " not in envelope["stderr"][envelope["stderr"].index("Traceback") :]
     assert envelope["compacted"] is True
     assert envelope["truncated"] is False
     assert envelope["stdout_bytes_total"] == 3600
     assert envelope["exit_code"] == 1
     assert envelope["notice"] == tools.UNTRUSTED_NOTICE
     assert set(envelope) == {
-        "exit_code", "timed_out", "truncated", "stdout", "stderr", "notice",
-        "compacted", "stdout_bytes_total", "stderr_bytes_total",
+        "exit_code",
+        "timed_out",
+        "truncated",
+        "stdout",
+        "stderr",
+        "notice",
+        "compacted",
+        "stdout_bytes_total",
+        "stderr_bytes_total",
     }
 
 
@@ -331,9 +338,10 @@ def test_too_02_error_context_is_the_exit_code_alone():
         stream_result(stderr=stderr, exit_code=0, timed_out=True),
     )
     assert "Traceback (most recent call last):" not in envelope["stderr"]
-    assert envelope["stderr"] == exec_envelope(
-        {"argv": ["job.py"]}, stream_result(stderr=stderr, exit_code=0)
-    )["stderr"]
+    assert (
+        envelope["stderr"]
+        == exec_envelope({"argv": ["job.py"]}, stream_result(stderr=stderr, exit_code=0))["stderr"]
+    )
 
 
 def test_too_02_and_07_the_six_window_constants_are_the_spec_literals():
@@ -350,13 +358,13 @@ def test_too_02_and_07_the_six_window_constants_are_the_spec_literals():
 
 
 def test_too_02_max_output_chars_is_clamped_to_its_range():
-    stdout = "\n".join(f"line {i:04d}" for i in range(600))    # 10 chars a line
+    stdout = "\n".join(f"line {i:04d}" for i in range(600))  # 10 chars a line
     cases = [
-        (1, config.MIN_EXEC_OUTPUT_CHARS),            # below the floor
-        (99999, config.MAX_EXEC_OUTPUT_CHARS),        # above the ceiling
-        ("big", config.DEFAULT_EXEC_OUTPUT_CHARS),    # not an integer
-        (True, config.DEFAULT_EXEC_OUTPUT_CHARS),     # bool is not an integer
-        (None, config.DEFAULT_EXEC_OUTPUT_CHARS),     # explicit null
+        (1, config.MIN_EXEC_OUTPUT_CHARS),  # below the floor
+        (99999, config.MAX_EXEC_OUTPUT_CHARS),  # above the ceiling
+        ("big", config.DEFAULT_EXEC_OUTPUT_CHARS),  # not an integer
+        (True, config.DEFAULT_EXEC_OUTPUT_CHARS),  # bool is not an integer
+        (None, config.DEFAULT_EXEC_OUTPUT_CHARS),  # explicit null
         (800, 800),
     ]
     for requested, effective in cases:
@@ -375,7 +383,7 @@ def test_too_02_max_output_chars_is_clamped_to_its_range():
 def test_too_02_the_runner_carries_the_configured_default():
     """`output_default_chars` is the runner's bookkeeping key: popped before the
     model sees the envelope, exactly like `sandbox_over_quota`."""
-    stdout = "\n".join(f"line {i:04d}" for i in range(600))    # 10 chars a line
+    stdout = "\n".join(f"line {i:04d}" for i in range(600))  # 10 chars a line
     envelope = exec_envelope(
         {"argv": ["job.py"]},
         stream_result(stdout=stdout, output_default_chars=700),
@@ -417,9 +425,7 @@ def test_too_02_run_process_reports_the_byte_totals(tmp_path):
 
 
 def test_too_02_exec_schema_advertises_the_window():
-    exec_spec = next(
-        spec for spec in tools.tool_specs() if spec["function"]["name"] == "exec"
-    )
+    exec_spec = next(spec for spec in tools.tool_specs() if spec["function"]["name"] == "exec")
     parameter = exec_spec["function"]["parameters"]["properties"]["max_output_chars"]
     assert parameter["type"] == "integer"
     assert parameter["minimum"] == config.MIN_EXEC_OUTPUT_CHARS
@@ -442,9 +448,11 @@ def test_too_04_the_exec_caps_and_the_exit_code_mapping_are_untouched():
 def test_too_10_load_skill_output_is_never_compacted(tmp_path):
     body = "\n".join(f"step {i}: do the thing" for i in range(500))
     skill = tools.Skill(name="big", description="a big skill", body=body, source="big.md")
-    envelope = json.loads(tools.execute_tool(
-        "load_skill", '{"name": "big"}', skills={"big": skill}, runner=RecordingRunner()
-    ))
+    envelope = json.loads(
+        tools.execute_tool(
+            "load_skill", '{"name": "big"}', skills={"big": skill}, runner=RecordingRunner()
+        )
+    )
     assert envelope == {"name": "big", "body": body}
     assert len(body) > config.DEFAULT_EXEC_OUTPUT_CHARS
 
@@ -454,8 +462,15 @@ def test_too_10_load_skill_output_is_never_compacted(tmp_path):
 # --------------------------------------------------------------------------
 
 FETCH_KEYS = [
-    "url", "status", "content_type", "chars_total", "returned_chars",
-    "truncated", "saved_to", "save_error", "text",
+    "url",
+    "status",
+    "content_type",
+    "chars_total",
+    "returned_chars",
+    "truncated",
+    "saved_to",
+    "save_error",
+    "text",
 ]
 HTML_PAGE = (
     "<!doctype html><html><head><title>Weather report</title>"
@@ -467,16 +482,29 @@ HTML_PAGE = (
 )
 
 
-def fetched(tmp_path, body, *, content_type="text/html", max_chars=500,
-            sandbox_max_bytes=config.DEFAULT_EXEC_SANDBOX_MAX_BYTES, url=URL,
-            max_bytes=tools.FETCH_MAX_BYTES):
-    client = fetch_client(body_handler(
-        body.encode("utf-8") if isinstance(body, str) else body,
-        content_type=content_type,
-    ))
+def fetched(
+    tmp_path,
+    body,
+    *,
+    content_type="text/html",
+    max_chars=500,
+    sandbox_max_bytes=config.DEFAULT_EXEC_SANDBOX_MAX_BYTES,
+    url=URL,
+    max_bytes=tools.FETCH_MAX_BYTES,
+):
+    client = fetch_client(
+        body_handler(
+            body.encode("utf-8") if isinstance(body, str) else body,
+            content_type=content_type,
+        )
+    )
     return tools.fetch_url(
-        url, allowed_domains=ALLOWED, client=client, workdir=tmp_path,
-        sandbox_max_bytes=sandbox_max_bytes, max_chars=max_chars,
+        url,
+        allowed_domains=ALLOWED,
+        client=client,
+        workdir=tmp_path,
+        sandbox_max_bytes=sandbox_max_bytes,
+        max_chars=max_chars,
         max_bytes=max_bytes,
     )
 
@@ -493,7 +521,7 @@ def test_too_05_html_becomes_text_and_too_07_pins_the_envelope(tmp_path):
     assert envelope["status"] == 200
     assert envelope["content_type"] == "text/html"
     assert envelope["text"].startswith("Weather report")
-    assert "Köln" in envelope["text"]                 # entities are decoded
+    assert "Köln" in envelope["text"]  # entities are decoded
     assert "do-not-show-this" not in envelope["text"]
     assert "color: red" not in envelope["text"]
     assert "enable js" not in envelope["text"]
@@ -523,17 +551,29 @@ def test_too_05_block_tags_and_whitespace_collapse(tmp_path):
     # Adjacent block tags are one break, never a blank line; the blank line in
     # the middle is the document's own, collapsed to a single one.
     assert text.split("\n") == [
-        "Title line", "one", "two", "a", "b", "a", "b", "", "kept",
+        "Title line",
+        "one",
+        "two",
+        "a",
+        "b",
+        "a",
+        "b",
+        "",
+        "kept",
     ]
 
 
 def test_too_05_html_is_recognised_without_a_content_type(tmp_path):
-    envelope = fetched(tmp_path, "<HTML><body><p>hi there</p></body></html>",
-                       content_type="application/octet-stream")
+    envelope = fetched(
+        tmp_path,
+        "<HTML><body><p>hi there</p></body></html>",
+        content_type="application/octet-stream",
+    )
     # A binary content type wins: the sniff only helps when the type is text.
     assert set(envelope) == {"error"}
-    envelope = fetched(tmp_path, "<HTML><body><p>hi there</p></body></html>",
-                       content_type="text/plain")
+    envelope = fetched(
+        tmp_path, "<HTML><body><p>hi there</p></body></html>", content_type="text/plain"
+    )
     assert envelope["text"] == "hi there"
 
 
@@ -563,8 +603,7 @@ def test_too_06_an_untruncated_fetch_writes_nothing(tmp_path):
 
 def test_too_06_quota_refuses_the_save(tmp_path):
     (tmp_path / "already-full.bin").write_bytes(b"F" * 4096)
-    envelope = fetched(tmp_path, "y" * 3000, content_type="text/plain",
-                       sandbox_max_bytes=4096)
+    envelope = fetched(tmp_path, "y" * 3000, content_type="text/plain", sandbox_max_bytes=4096)
     assert envelope["truncated"] is True
     assert envelope["saved_to"] is None
     assert envelope["save_error"] == "sandbox quota"
@@ -643,15 +682,20 @@ def test_too_07_error_outcomes_keep_the_single_key_shape(tmp_path):
 
     client = httpx.Client(transport=mock_llm_transport(raising))
     envelope = tools.fetch_url(
-        URL, allowed_domains=ALLOWED, client=client, workdir=tmp_path,
+        URL,
+        allowed_domains=ALLOWED,
+        client=client,
+        workdir=tmp_path,
     )
     assert set(envelope) == {"error"}
     assert envelope["error"] == "fetch failed: ConnectError"
     assert not (tmp_path / "fetch").exists()
 
     refused = tools.fetch_url(
-        "https://example.com/x", allowed_domains=ALLOWED,
-        client=fetch_client(body_handler()), workdir=tmp_path,
+        "https://example.com/x",
+        allowed_domains=ALLOWED,
+        client=fetch_client(body_handler()),
+        workdir=tmp_path,
     )
     assert set(refused) == {"error"}
     assert not (tmp_path / "fetch").exists()
@@ -666,8 +710,7 @@ def test_too_07_max_chars_is_clamped_to_its_range(tmp_path):
         ("wide", config.DEFAULT_FETCH_INLINE_CHARS),
     ]
     for requested, effective in cases:
-        envelope = fetched(tmp_path, body, content_type="text/plain",
-                           max_chars=requested)
+        envelope = fetched(tmp_path, body, content_type="text/plain", max_chars=requested)
         assert envelope["returned_chars"] == effective, requested
 
 
@@ -680,22 +723,26 @@ def test_too_07_the_tool_argument_reaches_the_fetcher():
         return {"error": "stopped here"}
 
     tools.execute_tool(
-        "fetch", json.dumps({"url": URL, "max_chars": 900}), skills={},
-        runner=RecordingRunner(), fetcher=fetcher,
+        "fetch",
+        json.dumps({"url": URL, "max_chars": 900}),
+        skills={},
+        runner=RecordingRunner(),
+        fetcher=fetcher,
     )
     assert seen == {"url": URL, "max_chars": 900}
     seen.clear()
     tools.execute_tool(
-        "fetch", json.dumps({"url": URL}), skills={},
-        runner=RecordingRunner(), fetcher=fetcher,
+        "fetch",
+        json.dumps({"url": URL}),
+        skills={},
+        runner=RecordingRunner(),
+        fetcher=fetcher,
     )
-    assert seen == {"url": URL}          # the bound default of the partial wins
+    assert seen == {"url": URL}  # the bound default of the partial wins
 
 
 def test_too_07_fetch_schema_advertises_the_window_and_the_saved_file():
-    fetch_spec = next(
-        spec for spec in tools.tool_specs() if spec["function"]["name"] == "fetch"
-    )
+    fetch_spec = next(spec for spec in tools.tool_specs() if spec["function"]["name"] == "fetch")
     parameter = fetch_spec["function"]["parameters"]["properties"]["max_chars"]
     assert parameter["minimum"] == config.MIN_FETCH_INLINE_CHARS
     assert parameter["maximum"] == config.MAX_FETCH_INLINE_CHARS
@@ -704,13 +751,8 @@ def test_too_07_fetch_schema_advertises_the_window_and_the_saved_file():
     assert fetch_spec["function"]["parameters"]["required"] == ["url"]
 
 
-def test_too_09_a_canary_never_reaches_the_inline_text_or_the_saved_file(
-    tmp_path, only_canary
-):
-    page = (
-        "<html><body><p>key is " + CANARY + "</p><p>"
-        + "filler " * 600 + "</p></body></html>"
-    )
+def test_too_09_a_canary_never_reaches_the_inline_text_or_the_saved_file(tmp_path, only_canary):
+    page = "<html><body><p>key is " + CANARY + "</p><p>" + "filler " * 600 + "</p></body></html>"
     envelope = fetched(tmp_path, page)
     saved = (tmp_path / "fetch" / hashed_name()).read_text(encoding="utf-8")
     assert CANARY not in envelope["text"]
@@ -729,9 +771,7 @@ def test_too_09_a_canary_prefix_at_the_inline_cut_is_stripped(tmp_path, only_can
         assert CANARY[:length] not in envelope["text"], length
 
 
-def test_too_09_entities_that_spell_a_canary_are_redacted_after_extraction(
-    tmp_path, only_canary
-):
+def test_too_09_entities_that_spell_a_canary_are_redacted_after_extraction(tmp_path, only_canary):
     encoded = "".join(f"&#{ord(char)};" for char in CANARY)
     page = f"<html><body><p>{encoded}</p><p>{'filler ' * 600}</p></body></html>"
     envelope = fetched(tmp_path, page)
@@ -747,9 +787,7 @@ def no_fragment_at_the_end(text: str) -> None:
         assert not text.endswith(CANARY[:length]), length
 
 
-def test_too_09_the_byte_cut_fragment_never_reaches_the_saved_file(
-    tmp_path, only_canary
-):
+def test_too_09_the_byte_cut_fragment_never_reaches_the_saved_file(tmp_path, only_canary):
     """REQ-V13-TOO-09 is redact -> cut -> strip. A page longer than
     `FETCH_MAX_BYTES` that itself prints an incomplete secret straddling byte
     65536 gives `config.redact` nothing to replace, so only a strip *after* the
@@ -765,7 +803,7 @@ def test_too_09_the_byte_cut_fragment_never_reaches_the_saved_file(
     assert len(saved) == tools.FETCH_MAX_BYTES - len(fragment)
     no_fragment_at_the_end(saved)
     no_fragment_at_the_end(envelope["text"])
-    assert CANARY[:config.SECRET_FRAGMENT_MIN] not in saved
+    assert CANARY[: config.SECRET_FRAGMENT_MIN] not in saved
 
 
 def test_too_09_an_untruncated_excerpt_is_stripped_too(tmp_path, only_canary):
@@ -774,11 +812,12 @@ def test_too_09_an_untruncated_excerpt_is_stripped_too(tmp_path, only_canary):
     `truncated` is false and nothing is saved — the fragment the byte cut left
     would go straight into the model's context."""
     fragment = CANARY[:20]
-    wide = "\N{MUSICAL SYMBOL G CLEF}"                # four bytes each
+    wide = "\N{MUSICAL SYMBOL G CLEF}"  # four bytes each
     filler = (tools.FETCH_MAX_BYTES - len(fragment)) // 4
     body = wide * filler + fragment + "b" * 3000
-    envelope = fetched(tmp_path, body, content_type="text/plain",
-                       max_chars=config.MAX_FETCH_INLINE_CHARS)
+    envelope = fetched(
+        tmp_path, body, content_type="text/plain", max_chars=config.MAX_FETCH_INLINE_CHARS
+    )
 
     assert envelope["truncated"] is False
     assert envelope["saved_to"] is None and envelope["save_error"] is None
@@ -790,6 +829,7 @@ def test_too_09_an_untruncated_excerpt_is_stripped_too(tmp_path, only_canary):
 # --------------------------------------------------------------------------
 # REQ-V13-TOO-08 — the sandbox cleanup treats `fetch/` like any other entry
 # --------------------------------------------------------------------------
+
 
 def test_too_08_startup_cleanup_removes_the_fetch_directory(tmp_path):
     cfg = make_cfg(tmp_path)
@@ -819,11 +859,14 @@ def measured(conn, call, *, runner=None, fetcher=None, skills=None):
     conv = storage.get_or_create_active_conversation(conn, TOO_03_USER)
     storage.add_user_message(conn, conv, "go")
     agent.run_agent(
-        conn=conn, conv_id=conv,
-        llm=FakeLLM([LLMResponse("", [call], "tool_calls"),
-                     LLMResponse("done", [], "stop")]),
-        skills=skills or {}, runner=runner or RecordingRunner(),
-        now="2026-09-02T10:00:00Z", sleep=lambda _seconds: None, fetcher=fetcher,
+        conn=conn,
+        conv_id=conv,
+        llm=FakeLLM([LLMResponse("", [call], "tool_calls"), LLMResponse("done", [], "stop")]),
+        skills=skills or {},
+        runner=runner or RecordingRunner(),
+        now="2026-09-02T10:00:00Z",
+        sleep=lambda _seconds: None,
+        fetcher=fetcher,
     )
     row = conn.execute("SELECT * FROM tool_calls ORDER BY id").fetchone()
     content = conn.execute(
@@ -854,21 +897,27 @@ def test_too_03_exec_is_measured_on_the_streams_around_compaction(conn):
 
 def test_too_03_an_uncompacted_exec_measures_equal(conn):
     runner = RecordingRunner(stream_result(stdout="ok\n", stderr="warn\n"))
-    row, content = measured(conn, ToolCall("c", "exec", '{"argv": ["true"]}'),
-                            runner=runner)
+    row, content = measured(conn, ToolCall("c", "exec", '{"argv": ["true"]}'), runner=runner)
     assert json.loads(content)["compacted"] is False
     assert row["raw_output_chars"] == row["output_chars"] == len("ok\n") + len("warn\n")
 
 
 def test_too_03_fetch_is_measured_on_chars_total_and_the_inline_excerpt(conn):
     text = "sunny " * 400
-    fetcher = FakeFetcher({
-        "url": URL, "status": 200, "content_type": "text/plain",
-        "chars_total": 12000, "returned_chars": len(text), "truncated": True,
-        "saved_to": "fetch/" + "0" * 16 + ".txt", "save_error": None, "text": text,
-    })
-    row, content = measured(conn, ToolCall("c", "fetch", json.dumps({"url": URL})),
-                            fetcher=fetcher)
+    fetcher = FakeFetcher(
+        {
+            "url": URL,
+            "status": 200,
+            "content_type": "text/plain",
+            "chars_total": 12000,
+            "returned_chars": len(text),
+            "truncated": True,
+            "saved_to": "fetch/" + "0" * 16 + ".txt",
+            "save_error": None,
+            "text": text,
+        }
+    )
+    row, content = measured(conn, ToolCall("c", "fetch", json.dumps({"url": URL})), fetcher=fetcher)
     assert row["raw_output_chars"] == 12000
     assert row["output_chars"] == len(text)
     assert row["raw_output_chars"] > row["output_chars"]
@@ -878,8 +927,9 @@ def test_too_03_fetch_is_measured_on_chars_total_and_the_inline_excerpt(conn):
 def test_too_03_load_skill_measures_the_body_and_never_shrinks(conn):
     body = "\n".join(f"step {i}: do the thing" for i in range(500))
     skill = tools.Skill(name="big", description="a big skill", body=body, source="big.md")
-    row, content = measured(conn, ToolCall("c", "load_skill", '{"name": "big"}'),
-                            skills={"big": skill})
+    row, content = measured(
+        conn, ToolCall("c", "load_skill", '{"name": "big"}'), skills={"big": skill}
+    )
     assert json.loads(content)["body"] == body
     assert row["raw_output_chars"] == row["output_chars"] == len(body)
 

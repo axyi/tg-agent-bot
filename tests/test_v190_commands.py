@@ -84,7 +84,8 @@ def document_update(*, file_id="f1", file_name="notes.txt", file_size=20, update
     return {
         "update_id": update_id,
         "message": {
-            "message_id": update_id, "date": 0,
+            "message_id": update_id,
+            "date": 0,
             "chat": {"id": USER_ID, "type": "private"},
             "from": {"id": USER_ID, "is_bot": False},
             "document": {"file_id": file_id, "file_name": file_name, "file_size": file_size},
@@ -96,7 +97,8 @@ def text_update(text, update_id=1):
     return {
         "update_id": update_id,
         "message": {
-            "message_id": update_id, "date": 0,
+            "message_id": update_id,
+            "date": 0,
             "chat": {"id": USER_ID, "type": "private"},
             "from": {"id": USER_ID, "is_bot": False},
             "text": text,
@@ -108,8 +110,16 @@ def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None, **kwargs):
     tg = tg if tg is not None else FakeTelegram()
     llm = llm if llm is not None else FakeLLM([])
     bot.process_update(
-        upd, conn=conn, tg=tg, cfg=cfg, llm=llm, skills={}, runner=RecordingRunner(),
-        bot_username=BOT_USERNAME, embedder=embedder, **kwargs,
+        upd,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        llm=llm,
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
+        embedder=embedder,
+        **kwargs,
     )
     return tg
 
@@ -129,6 +139,7 @@ def _seq_clock(*values):
 def _raise(exc):
     def _fn(*_a, **_k):
         raise exc
+
     return _fn
 
 
@@ -205,7 +216,11 @@ def test_t_v190_cmd_01_searcher_not_constructed_when_no_embedder(tmp_path, monke
     monkeypatch.setattr(rag, "Searcher", _forbidden)
     tg = FakeTelegram()
     process(
-        conn, cfg, text_update("hello"), tg=tg, embedder=None,
+        conn,
+        cfg,
+        text_update("hello"),
+        tg=tg,
+        embedder=None,
         llm=FakeLLM([LLMResponse("hi", [], "stop")]),
     )
     assert tg.sent == [(USER_ID, "hi")]
@@ -228,7 +243,11 @@ def test_t_v190_cmd_01_searcher_constructed_per_turn_bound_to_from_id(tmp_path, 
     embedder = FakeEmbedder(dim=16)
     tg = FakeTelegram()
     process(
-        conn, cfg, text_update("hello"), tg=tg, embedder=embedder,
+        conn,
+        cfg,
+        text_update("hello"),
+        tg=tg,
+        embedder=embedder,
         llm=FakeLLM([LLMResponse("hi", [], "stop")]),
     )
     assert captured["user_id"] == USER_ID
@@ -339,8 +358,13 @@ def test_t_v190_cmd_03_started_at_is_the_handlers_first_action(tmp_path):
     # but `started_at` must still have been captured before it.
     bot._handle_document(
         {"file_id": "f1", "file_name": "a.txt", "file_size": 10},
-        conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
-        embedder=None, monotonic=clock,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=None,
+        monotonic=clock,
     )
     assert markers == ["monotonic", "send"]
     conn.close()
@@ -362,7 +386,12 @@ def test_t_v190_cmd_03_classify_runs_on_the_cleaned_name_not_the_raw_one(tmp_pat
 
     doc = {"file_id": "f1", "file_name": raw_name, "file_size": len(data)}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     # Proceeded past the type check to a real download+index, not refused.
@@ -376,21 +405,40 @@ def test_t_v190_err_01_row_13_pre_check_replace_at_20_is_not_the_limit(tmp_path)
     cfg = make_cfg(tmp_path)
     for i in range(19):
         storage.add_document(
-            conn, user_id=USER_ID, filename=f"d{i}.txt", file_type="txt",
-            created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-            chunk_count=1, sha256="x" * 8,
+            conn,
+            user_id=USER_ID,
+            filename=f"d{i}.txt",
+            file_type="txt",
+            created_at=NOW,
+            size_bytes=5,
+            text_chars=5,
+            page_count=None,
+            chunk_count=1,
+            sha256="x" * 8,
         )
     storage.add_document(
-        conn, user_id=USER_ID, filename="existing.txt", file_type="txt",
-        created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-        chunk_count=1, sha256="x" * 8,
+        conn,
+        user_id=USER_ID,
+        filename="existing.txt",
+        file_type="txt",
+        created_at=NOW,
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
     )
     tg = FakeTelegram()
     data = b"Fresh content that replaces the existing file, long enough to chunk."
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "existing.txt", "file_size": len(data)}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     assert tg.get_file_calls == ["f1"]  # not refused -- proceeded to download
@@ -411,7 +459,12 @@ def test_t_v190_cmd_04_progress_strings_and_success_ending_txt(tmp_path):
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "policy.txt", "file_size": len(data)}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     edited_texts = [t for _c, _m, t in tg.edited]
@@ -432,7 +485,12 @@ def test_t_v190_cmd_04_success_ending_pdf_carries_pages(tmp_path):
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "report.pdf", "file_size": len(data)}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     assert tg.sent[-1][1] == "✅ report.pdf: 1 chunks, 1 pages. Ask me about it."
@@ -457,7 +515,12 @@ def test_t_v190_cmd_04_typing_indicator_ceiling_is_the_index_budget(tmp_path, mo
     tg.files["documents/f1"] = b"short but valid enough content for one chunk to be produced okay."
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     assert captured["ceiling_s"] == documents.INDEX_BUDGET_S_DEFAULT == 300.0
@@ -471,7 +534,12 @@ def test_t_v190_cmd_04_status_disabled_falls_back_to_send_exactly_one_error(tmp_
     tg.files["documents/f1"] = b"hi"
     doc = {"file_id": "f1", "file_name": "empty.txt", "file_size": 2}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     assert tg.sent == [(USER_ID, bot.DOC_EMPTY_REPLY)]
@@ -496,14 +564,28 @@ def test_t_v190_cmd_05_documents_lists_uploaded_files(tmp_path):
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
     storage.add_document(
-        conn, user_id=USER_ID, filename="a.txt", file_type="txt",
-        created_at="2026-01-02T03:04:05Z", size_bytes=5, text_chars=5,
-        page_count=None, chunk_count=2, sha256="x" * 8,
+        conn,
+        user_id=USER_ID,
+        filename="a.txt",
+        file_type="txt",
+        created_at="2026-01-02T03:04:05Z",
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=2,
+        sha256="x" * 8,
     )
     storage.add_document(
-        conn, user_id=USER_ID, filename="b.pdf", file_type="pdf",
-        created_at="2026-01-03T00:00:00Z", size_bytes=5, text_chars=5,
-        page_count=3, chunk_count=4, sha256="y" * 8,
+        conn,
+        user_id=USER_ID,
+        filename="b.pdf",
+        file_type="pdf",
+        created_at="2026-01-03T00:00:00Z",
+        size_bytes=5,
+        text_chars=5,
+        page_count=3,
+        chunk_count=4,
+        sha256="y" * 8,
     )
     tg = process(conn, cfg, text_update("/documents"))
     reply = tg.sent[0][1]
@@ -519,9 +601,16 @@ def test_t_v190_cmd_05_filenames_are_redacted(tmp_path):
     sentinel = "CANARY-documents-listing-filename-secret-should-not-leak-here"
     config.register_secret(sentinel)
     storage.add_document(
-        conn, user_id=USER_ID, filename=sentinel, file_type="txt",
-        created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-        chunk_count=1, sha256="x" * 8,
+        conn,
+        user_id=USER_ID,
+        filename=sentinel,
+        file_type="txt",
+        created_at=NOW,
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
     )
     tg = process(conn, cfg, text_update("/documents"))
     assert sentinel not in tg.sent[0][1]
@@ -553,9 +642,16 @@ def test_t_v190_cmd_06_delete_exact_match_removes_it(tmp_path):
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
     doc_id = storage.add_document(
-        conn, user_id=USER_ID, filename="my file.txt", file_type="txt",
-        created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-        chunk_count=1, sha256="x" * 8,
+        conn,
+        user_id=USER_ID,
+        filename="my file.txt",
+        file_type="txt",
+        created_at=NOW,
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
     )
     storage.add_chunks(conn, user_id=USER_ID, document_id=doc_id, chunks=[(0, "hi", None, 0, 2)])
     tg = process(conn, cfg, text_update("/delete my file.txt"))
@@ -568,9 +664,16 @@ def test_t_v190_cmd_06_delete_is_exact_no_casefold_no_prefix(tmp_path):
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
     storage.add_document(
-        conn, user_id=USER_ID, filename="Report.TXT", file_type="txt",
-        created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-        chunk_count=1, sha256="x" * 8,
+        conn,
+        user_id=USER_ID,
+        filename="Report.TXT",
+        file_type="txt",
+        created_at=NOW,
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
     )
     tg = process(conn, cfg, text_update("/delete report.txt"))
     assert tg.sent == [(USER_ID, "No document named report.txt.")]
@@ -583,9 +686,16 @@ def test_t_v190_cmd_06_delete_is_scoped_to_the_caller(tmp_path):
     cfg = make_cfg(tmp_path)
     other_user = USER_ID + 1
     storage.add_document(
-        conn, user_id=other_user, filename="a.txt", file_type="txt",
-        created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-        chunk_count=1, sha256="x" * 8,
+        conn,
+        user_id=other_user,
+        filename="a.txt",
+        file_type="txt",
+        created_at=NOW,
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
     )
     tg = process(conn, cfg, text_update("/delete a.txt"))
     assert tg.sent == [(USER_ID, "No document named a.txt.")]
@@ -597,9 +707,16 @@ def test_t_v190_cmd_06_delete_argument_may_contain_spaces(tmp_path):
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
     storage.add_document(
-        conn, user_id=USER_ID, filename="quarterly report v2.docx", file_type="docx",
-        created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-        chunk_count=1, sha256="x" * 8,
+        conn,
+        user_id=USER_ID,
+        filename="quarterly report v2.docx",
+        file_type="docx",
+        created_at=NOW,
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
     )
     tg = process(conn, cfg, text_update("/delete quarterly report v2.docx"))
     assert tg.sent == [(USER_ID, "Deleted quarterly report v2.docx.")]
@@ -617,7 +734,12 @@ def test_t_v190_err_01_row_1_no_filename_is_unsupported(tmp_path):
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": None, "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_prechecked_refused(tg, bot.DOC_UNSUPPORTED_REPLY)
@@ -630,7 +752,12 @@ def test_t_v190_err_01_row_1_unknown_extension_is_unsupported(tmp_path):
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "notes.exe", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_prechecked_refused(tg, bot.DOC_UNSUPPORTED_REPLY)
@@ -645,7 +772,12 @@ def test_t_v190_err_01_row_2_corrupted_pdf(tmp_path, monkeypatch):
     monkeypatch.setattr(documents, "extract", _raise(pypdf.errors.PdfStreamError("boom")))
     doc = {"file_id": "f1", "file_name": "report.pdf", "file_size": 60}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_CORRUPTED_PDF_REPLY)
@@ -660,7 +792,12 @@ def test_t_v190_err_01_row_3_corrupted_docx(tmp_path, monkeypatch):
     monkeypatch.setattr(documents, "extract", _raise(zipfile.BadZipFile("boom")))
     doc = {"file_id": "f1", "file_name": "report.docx", "file_size": 60}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_CORRUPTED_DOCX_REPLY)
@@ -674,7 +811,12 @@ def test_t_v190_err_01_row_4_empty_document(tmp_path):
     tg.files["documents/f1"] = b"hi"
     doc = {"file_id": "f1", "file_name": "empty.txt", "file_size": 2}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_EMPTY_REPLY)
@@ -688,7 +830,12 @@ def test_t_v190_err_01_row_5a_pre_file_size_too_large(tmp_path):
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "big.txt", "file_size": bot.DOCUMENT_MAX_BYTES + 1}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_prechecked_refused(tg, bot.DOC_TOO_LARGE_REPLY)
@@ -702,18 +849,26 @@ def test_t_v190_err_01_row_5a_mid_stream_exceeds_the_cap(tmp_path):
     tg.files["documents/f1"] = b"x" * (bot.DOCUMENT_MAX_BYTES + 1)
     doc = {"file_id": "f1", "file_name": "big.txt", "file_size": 10}  # understates its own size
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_TOO_LARGE_REPLY)
     conn.close()
 
 
-@pytest.mark.parametrize("exc", [
-    documents.ExtractedTextTooLargeError("text too large"),
-    documents.DocxArchiveTooLargeError("archive too large"),
-    documents.PdfTooManyPagesError("too many pages"),
-])
+@pytest.mark.parametrize(
+    "exc",
+    [
+        documents.ExtractedTextTooLargeError("text too large"),
+        documents.DocxArchiveTooLargeError("archive too large"),
+        documents.PdfTooManyPagesError("too many pages"),
+    ],
+)
 def test_t_v190_err_01_row_5b_variants_map_to_the_same_reply(tmp_path, monkeypatch, exc):
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
@@ -722,7 +877,12 @@ def test_t_v190_err_01_row_5b_variants_map_to_the_same_reply(tmp_path, monkeypat
     monkeypatch.setattr(documents, "extract", _raise(exc))
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 60}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_TEXT_TOO_LARGE_REPLY)
@@ -738,7 +898,13 @@ def test_t_v190_err_01_row_6_embedding_error(tmp_path):
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": len(data)}
     embedder = FakeEmbedder(dim=16, script=[EmbeddingError("boom")])
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID, embedder=embedder,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=embedder,
     )
     _assert_failure_kept(tg, bot.DOC_EMBEDDING_ERROR_REPLY)
     conn.close()
@@ -754,7 +920,12 @@ def test_t_v190_err_01_row_7_sqlite_error(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(storage, "add_document", _raise(sqlite3.OperationalError("boom")))
     with caplog.at_level(logging.ERROR):
         bot._handle_document(
-            doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+            doc,
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            chat_id=USER_ID,
+            from_id=USER_ID,
             embedder=FakeEmbedder(dim=16),
         )
     _assert_failure_kept(tg, bot.DOC_STORAGE_ERROR_REPLY)
@@ -769,7 +940,12 @@ def test_t_v190_err_01_row_10a_download_timeout(tmp_path):
     tg.download_errors["documents/f1"] = bot.TelegramDownloadTimeout("download timed out")
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_DOWNLOAD_TIMEOUT_REPLY)
@@ -785,7 +961,13 @@ def test_t_v190_err_01_row_10b_embedding_timeout_before_row_6(tmp_path):
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": len(data)}
     embedder = FakeEmbedder(dim=16, script=[EmbeddingTimeoutError("boom")])
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID, embedder=embedder,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=embedder,
     )
     _assert_failure_kept(tg, bot.DOC_EMBEDDING_TIMEOUT_REPLY)  # not row 6's string
     conn.close()
@@ -806,8 +988,14 @@ def test_t_v190_err_01_row_10c_and_cmd_09_budget_counts_pre_index_time(tmp_path)
     clock = _seq_clock(0.0, 400.0)
     embedder = FakeEmbedder(dim=16)
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
-        embedder=embedder, monotonic=clock,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=embedder,
+        monotonic=clock,
     )
     _assert_failure_kept(tg, bot.DOC_BUDGET_EXCEEDED_REPLY)
     assert embedder.calls == []  # never reached the embed stage
@@ -825,7 +1013,12 @@ def test_t_v190_err_01_row_11_get_file_without_a_file_path(tmp_path):
     tg.get_file = lambda _file_id: {}
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_TELEGRAM_ERROR_REPLY)
@@ -839,7 +1032,12 @@ def test_t_v190_err_01_row_11_other_telegram_error(tmp_path):
     tg.download_errors["documents/f1"] = bot.TelegramError("telegram file download http 500")
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_failure_kept(tg, bot.DOC_TELEGRAM_ERROR_REPLY)
@@ -855,7 +1053,12 @@ def test_t_v190_err_01_row_12_confirmation_send_failure_document_still_stored(tm
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "notes.txt", "file_size": len(data)}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     assert storage.document_count(conn, user_id=USER_ID) == 1
@@ -868,14 +1071,26 @@ def test_t_v190_err_01_row_13_pre_check_limit_reached_plain_reply(tmp_path):
     cfg = make_cfg(tmp_path)
     for i in range(20):
         storage.add_document(
-            conn, user_id=USER_ID, filename=f"d{i}.txt", file_type="txt",
-            created_at=NOW, size_bytes=5, text_chars=5, page_count=None,
-            chunk_count=1, sha256="x" * 8,
+            conn,
+            user_id=USER_ID,
+            filename=f"d{i}.txt",
+            file_type="txt",
+            created_at=NOW,
+            size_bytes=5,
+            text_chars=5,
+            page_count=None,
+            chunk_count=1,
+            sha256="x" * 8,
         )
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "new.txt", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     _assert_prechecked_refused(tg, bot.DOC_LIMIT_REPLY)
@@ -898,7 +1113,12 @@ def test_t_v190_err_01_row_13_transactional_recheck_via_the_handler(tmp_path, mo
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "new.txt", "file_size": len(data)}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     assert tg.get_file_calls == ["f1"]  # the pre-check passed
@@ -912,7 +1132,13 @@ def test_t_v190_err_01_row_14_rag_not_configured(tmp_path):
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID, embedder=None,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=None,
     )
     _assert_prechecked_refused(tg, bot.DOC_RAG_NOT_CONFIGURED_REPLY)
     conn.close()
@@ -927,7 +1153,12 @@ def test_t_v190_err_01_row_15_catch_all(tmp_path, monkeypatch, caplog):
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 60}
     with caplog.at_level(logging.WARNING):
         bot._handle_document(
-            doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+            doc,
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            chat_id=USER_ID,
+            from_id=USER_ID,
             embedder=FakeEmbedder(dim=16),
         )
     _assert_failure_kept(tg, bot.DOC_HANDLER_FAILED_REPLY)
@@ -970,8 +1201,15 @@ def test_t_v190_cmd_08_exception_in_document_handler_lets_poll_loop_continue(
     llm = FakeLLM([LLMResponse("hi there", [], "stop")])
     with caplog.at_level(logging.WARNING):
         rc = bot.poll_loop(
-            conn=conn, tg=tg, cfg=cfg, llm=llm, skills={}, runner=RecordingRunner(),
-            bot_username=BOT_USERNAME, sleep=lambda _s: None, embedder=FakeEmbedder(dim=16),
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            llm=llm,
+            skills={},
+            runner=RecordingRunner(),
+            bot_username=BOT_USERNAME,
+            sleep=lambda _s: None,
+            embedder=FakeEmbedder(dim=16),
         )
     assert rc == 0
     assert tg.edited[-1][2] == bot.DOC_HANDLER_FAILED_REPLY
@@ -998,7 +1236,12 @@ def test_t_v190_err_02_no_traceback_text_reaches_the_user(tmp_path, monkeypatch)
     )
     doc = {"file_id": "f1", "file_name": "notes.txt", "file_size": 30}
     bot._handle_document(
-        doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+        doc,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
     all_text = [t for _c, _m, t in tg.edited] + [t for _c, t in tg.sent]
@@ -1017,7 +1260,12 @@ def test_t_v190_err_02_a_secret_sentinel_in_the_filename_never_reaches_the_user_
     doc = {"file_id": "f1", "file_name": raw_name, "file_size": 10}
     with caplog.at_level(logging.WARNING):
         bot._handle_document(
-            doc, conn=conn, tg=tg, cfg=cfg, chat_id=USER_ID, from_id=USER_ID,
+            doc,
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            chat_id=USER_ID,
+            from_id=USER_ID,
             embedder=FakeEmbedder(dim=16),
         )
     assert sentinel not in tg.sent[0][1]

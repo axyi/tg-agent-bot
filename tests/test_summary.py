@@ -105,8 +105,13 @@ def process(conn, cfg, text, llm, update_id=1):
     tg = RecordingTelegram()
     bot.process_update(
         update(text, update_id),
-        conn=conn, tg=tg, cfg=cfg, llm=llm, skills={},
-        runner=RecordingRunner(), bot_username=BOT_USERNAME,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        llm=llm,
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
     )
     return tg.sent
 
@@ -129,17 +134,18 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
     path = tmp_path / "legacy.db"
     legacy = sqlite3.connect(str(path), isolation_level=None)
     legacy.executescript(V0_SCHEMA)
-    legacy.execute(
-        "INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)"
-    )
+    legacy.execute("INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)")
     legacy.close()
 
     conn = storage.connect(path)
     storage.init_schema(conn)
     assert storage.schema_version(conn) == storage.SCHEMA_VERSION
-    assert conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
-    ).fetchone() is not None
+    assert (
+        conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
+        ).fetchone()
+        is not None
+    )
     # The migration is additive: existing rows survive.
     assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
 
@@ -159,9 +165,12 @@ def test_t_v1_sum_01_migration_from_version_one(tmp_path):
         storage.init_schema(ahead)
     assert "7" in str(raised.value)
     # A database from a future version is refused untouched, not half-migrated.
-    assert ahead.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
-    ).fetchone() is None
+    assert (
+        ahead.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'summaries'"
+        ).fetchone()
+        is None
+    )
     ahead.close()
 
 
@@ -181,7 +190,7 @@ def test_t_v1_sum_02_new_summarizes_before_resetting(conn, tmp_path):
     assert process(conn, cfg, "/new", llm) == [(USER_ID, "New conversation started.")]
 
     assert llm.max_tokens_calls == [512]
-    assert llm.calls[0][1] is None                    # no tools are exposed
+    assert llm.calls[0][1] is None  # no tools are exposed
     assert llm.calls[0][0][-1]["content"] == agent.SUMMARY_PROMPT
 
     stored = json.loads(storage.get_summary(conn, conv))
@@ -201,14 +210,24 @@ def test_t_v1_sum_02_new_without_history_does_not_call_the_model(conn, tmp_path)
 
 
 def test_t_v1_sum_02_extra_keys_are_dropped_and_types_coerced(conn, tmp_path):
-    llm = FakeLLM([LLMResponse(json.dumps({
-        "goal": "keep going",
-        "files": "not-an-array",
-        "decisions": ["a", 2],
-        "errors": [],
-        "next_action": None,
-        "surprise": "dropped",
-    }), [], "stop")])
+    llm = FakeLLM(
+        [
+            LLMResponse(
+                json.dumps(
+                    {
+                        "goal": "keep going",
+                        "files": "not-an-array",
+                        "decisions": ["a", 2],
+                        "errors": [],
+                        "next_action": None,
+                        "surprise": "dropped",
+                    }
+                ),
+                [],
+                "stop",
+            )
+        ]
+    )
     conv = seed(conn, ("user", "a"), ("assistant", "b"))
     result = json.loads(agent.summarize_conversation(conn, conv, llm, make_cfg(tmp_path)))
     assert set(result) == {"goal", "files", "decisions", "errors", "next_action"}
@@ -235,29 +254,32 @@ def test_t_v1_sum_03_fenced_json_is_repaired(conn, tmp_path):
     llm = scripted(fenced)
     result = agent.summarize_conversation(conn, conv, llm, make_cfg(tmp_path))
     assert json.loads(result)["goal"] == VALID_SUMMARY["goal"]
-    assert len(llm.calls) == 1                        # the fence strip needs no retry
+    assert len(llm.calls) == 1  # the fence strip needs no retry
 
 
 def test_t_v1_sum_04_summary_command(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     conv = seed(conn, ("user", "a"), ("assistant", "b"))
     sent = process(conn, cfg, "/summary", scripted(json.dumps(VALID_SUMMARY)))
-    assert sent == [(USER_ID, (
-        "Goal: Ship the docker sandbox\n"
-        "Files: tools.py; bot.py\n"
-        "Decisions: Use one pinned public image\n"
-        "Errors: docker exit 125 while the daemon was down\n"
-        "Next: Run the gates"
-    ))]
+    assert sent == [
+        (
+            USER_ID,
+            (
+                "Goal: Ship the docker sandbox\n"
+                "Files: tools.py; bot.py\n"
+                "Decisions: Use one pinned public image\n"
+                "Errors: docker exit 125 while the daemon was down\n"
+                "Next: Run the gates"
+            ),
+        )
+    ]
     assert storage.get_summary(conn, conv) is not None
     # The active conversation is untouched by /summary.
     assert storage.get_or_create_active_conversation(conn, USER_ID) == conv
 
     empty = dict(VALID_SUMMARY, files=[], decisions=[], errors=[], next_action="")
     sent = process(conn, cfg, "/summary", scripted(json.dumps(empty)), update_id=2)
-    assert sent[0][1].splitlines()[1:] == [
-        "Files: -", "Decisions: -", "Errors: -", "Next: "
-    ]
+    assert sent[0][1].splitlines()[1:] == ["Files: -", "Decisions: -", "Errors: -", "Next: "]
 
     failing = FakeLLM([LLMResponse("nope", [], "stop"), LLMResponse("nope", [], "stop")])
     assert process(conn, cfg, "/summary", failing, update_id=3) == [
@@ -279,7 +301,9 @@ def test_t_v1_sum_05_recent_goals_reach_the_system_prompt(conn):
         conv = storage.start_new_conversation(conn, USER_ID)
         conv_ids.append(conv)
         storage.add_summary(
-            conn, conv, USER_ID,
+            conn,
+            conv,
+            USER_ID,
             json.dumps(dict(VALID_SUMMARY, goal=f"goal {index} " + "x" * 300)),
         )
     # A summary whose JSON has no string goal is skipped, not rendered as "None".
@@ -312,8 +336,14 @@ def test_t_v1_sum_05_goal_block_is_dropped_when_the_budget_is_tiny(conn, tmp_pat
 
     tight = BudgetedLLM([LLMResponse("ok", [], "stop")])
     agent.run_agent(
-        conn=conn, conv_id=conv, llm=tight, skills={}, runner=RecordingRunner(),
-        now="2026-09-01T00:00:00Z", cfg=cfg, recent_goals=goals,
+        conn=conn,
+        conv_id=conv,
+        llm=tight,
+        skills={},
+        runner=RecordingRunner(),
+        now="2026-09-01T00:00:00Z",
+        cfg=cfg,
+        recent_goals=goals,
     )
     system = tight.calls[0][0][0]["content"]
     assert "Recent conversation goals" not in system
@@ -322,7 +352,13 @@ def test_t_v1_sum_05_goal_block_is_dropped_when_the_budget_is_tiny(conn, tmp_pat
     roomy = BudgetedLLM([LLMResponse("ok", [], "stop")])
     roomy.context_length = 42496
     agent.run_agent(
-        conn=conn, conv_id=conv, llm=roomy, skills={}, runner=RecordingRunner(),
-        now="2026-09-01T00:00:00Z", cfg=cfg, recent_goals=goals,
+        conn=conn,
+        conv_id=conv,
+        llm=roomy,
+        skills={},
+        runner=RecordingRunner(),
+        now="2026-09-01T00:00:00Z",
+        cfg=cfg,
+        recent_goals=goals,
     )
     assert "Recent conversation goals" in roomy.calls[0][0][0]["content"]

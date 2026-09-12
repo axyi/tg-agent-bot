@@ -56,11 +56,7 @@ def clean_filename(raw: str | None) -> str | None:
     `None`."""
     if not raw:
         return None
-    kept = [
-        ch
-        for ch in raw
-        if ch not in _PATH_SEPARATORS and ord(ch) >= 32 and ord(ch) != 0x7F
-    ]
+    kept = [ch for ch in raw if ch not in _PATH_SEPARATORS and ord(ch) >= 32 and ord(ch) != 0x7F]
     cleaned = "".join(kept).strip()[:CLEAN_FILENAME_MAX_CHARS]
     return cleaned or None
 
@@ -173,8 +169,7 @@ def _check_docx_archive_bounds(data: bytes) -> None:
         ratio = total_uncompressed / total_compressed
         if ratio > DOCX_MAX_COMPRESSION_RATIO:
             raise DocxArchiveTooLargeError(
-                f"compression ratio {ratio:.1f} exceeds the "
-                f"{DOCX_MAX_COMPRESSION_RATIO}x bound"
+                f"compression ratio {ratio:.1f} exceeds the {DOCX_MAX_COMPRESSION_RATIO}x bound"
             )
 
 
@@ -438,9 +433,7 @@ def _check_budget(
 ) -> None:
     elapsed = monotonic() - started_at
     if elapsed > budget_s:
-        raise IndexBudgetExceeded(
-            f"budget exceeded after {stage}: {elapsed:.1f}s > {budget_s}s"
-        )
+        raise IndexBudgetExceeded(f"budget exceeded after {stage}: {elapsed:.1f}s > {budget_s}s")
 
 
 def _document_chunks(extracted: Extracted) -> list[tuple[int | None, Chunk]]:
@@ -491,8 +484,7 @@ def index_document(
 
     if text_chars > MAX_EXTRACTED_TEXT_CHARS:
         raise ExtractedTextTooLargeError(
-            f"extracted text {text_chars} chars exceeds the "
-            f"{MAX_EXTRACTED_TEXT_CHARS}-char bound"
+            f"extracted text {text_chars} chars exceeds the {MAX_EXTRACTED_TEXT_CHARS}-char bound"
         )
     nonwhitespace_chars = sum(_nonwhitespace_len(page.text) for page in extracted.pages)
     if nonwhitespace_chars < _MIN_NONWHITESPACE_CHARS_FOR_ONE_CHUNK:

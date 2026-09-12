@@ -29,9 +29,15 @@ NOW = "2026-09-10T00:00:00Z"
 
 def _add_document(conn, user_id, filename, **overrides):
     fields = {
-        "user_id": user_id, "filename": filename, "file_type": "txt",
-        "created_at": NOW, "size_bytes": 5, "text_chars": 5,
-        "page_count": None, "chunk_count": 1, "sha256": "x" * 8,
+        "user_id": user_id,
+        "filename": filename,
+        "file_type": "txt",
+        "created_at": NOW,
+        "size_bytes": 5,
+        "text_chars": 5,
+        "page_count": None,
+        "chunk_count": 1,
+        "sha256": "x" * 8,
     }
     fields.update(overrides)
     return storage.add_document(conn, **fields)
@@ -61,9 +67,7 @@ def _connection_that_fails_on(path, trigger_prefix, exception=sqlite3.Operationa
                 raise exception("boom")
             return super().execute(sql, *args, **kwargs)
 
-    conn = sqlite3.connect(
-        str(path), isolation_level=None, timeout=5.0, factory=_BoomConnection
-    )
+    conn = sqlite3.connect(str(path), isolation_level=None, timeout=5.0, factory=_BoomConnection)
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
@@ -102,9 +106,15 @@ def test_t_v190_err_01_row_4_empty_document_raises_and_stores_nothing(tmp_path):
 
     with pytest.raises(documents.EmptyDocumentError):
         documents.index_document(
-            conn, user_id=1, filename="empty.txt", data=b"hi",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            conn,
+            user_id=1,
+            filename="empty.txt",
+            data=b"hi",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
 
     _assert_nothing_stored(conn)
@@ -130,17 +140,21 @@ def test_t_v190_err_01_row_4_pdf_zero_chunks_across_pages_raises_and_stores_noth
     # pypdf's own extract_text() is what index_document actually sees, and
     # is what must clear the summed floor while failing per-page.
     extracted = documents.extract(data, "pdf")
-    summed_nonwhitespace = sum(
-        documents._nonwhitespace_len(page.text) for page in extracted.pages
-    )
+    summed_nonwhitespace = sum(documents._nonwhitespace_len(page.text) for page in extracted.pages)
     assert summed_nonwhitespace >= 20  # clears DOC-04's extraction-time floor
     assert documents._document_chunks(extracted) == []  # yet every page chunks to nothing
 
     with pytest.raises(documents.EmptyDocumentError):
         documents.index_document(
-            conn, user_id=1, filename="thin.pdf", data=data,
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            conn,
+            user_id=1,
+            filename="thin.pdf",
+            data=data,
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
 
     _assert_nothing_stored(conn)
@@ -161,9 +175,15 @@ def test_t_v190_err_01_row_5b_text_too_large_raises_and_stores_nothing(tmp_path)
 
     with pytest.raises(documents.ExtractedTextTooLargeError) as exc_info:
         documents.index_document(
-            conn, user_id=1, filename="big.txt", data=data,
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            conn,
+            user_id=1,
+            filename="big.txt",
+            data=data,
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
 
     assert isinstance(exc_info.value, documents.DocumentTooLargeError)
@@ -179,9 +199,15 @@ def test_t_v190_err_01_row_5b_pdf_too_many_pages_propagates_and_stores_nothing(t
 
     with pytest.raises(documents.PdfTooManyPagesError) as exc_info:
         documents.index_document(
-            conn, user_id=1, filename="big.pdf", data=data,
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            conn,
+            user_id=1,
+            filename="big.pdf",
+            data=data,
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
 
     assert isinstance(exc_info.value, documents.DocumentTooLargeError)
@@ -201,9 +227,15 @@ def test_t_v190_err_01_row_6_embedding_error_propagates_and_stores_nothing(tmp_p
 
     with pytest.raises(EmbeddingError):
         documents.index_document(
-            conn, user_id=1, filename="a.txt", data=b"hello world, plenty of text here.",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            conn,
+            user_id=1,
+            filename="a.txt",
+            data=b"hello world, plenty of text here.",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
 
     _assert_nothing_stored(conn)
@@ -226,9 +258,15 @@ def test_t_v190_err_01_row_7_sqlite_error_rolls_back_and_stores_nothing(tmp_path
 
     with pytest.raises(sqlite3.Error):
         documents.index_document(
-            boom, user_id=1, filename="a.txt", data=b"hello world, plenty of text here.",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            boom,
+            user_id=1,
+            filename="a.txt",
+            data=b"hello world, plenty of text here.",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
     boom.close()
 
@@ -250,9 +288,16 @@ def test_t_v190_cmd_07_budget_after_extraction_raises_and_stores_nothing(tmp_pat
 
     with pytest.raises(documents.IndexBudgetExceeded):
         documents.index_document(
-            conn, user_id=1, filename="a.txt", data=b"hello world, plenty of text here.",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 400.0, budget_s=300.0,
+            conn,
+            user_id=1,
+            filename="a.txt",
+            data=b"hello world, plenty of text here.",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 400.0,
+            budget_s=300.0,
         )
 
     _assert_nothing_stored(conn)
@@ -268,9 +313,16 @@ def test_t_v190_cmd_07_budget_after_chunking_raises_and_stores_nothing(tmp_path)
 
     with pytest.raises(documents.IndexBudgetExceeded):
         documents.index_document(
-            conn, user_id=1, filename="a.txt", data=b"hello world, plenty of text here.",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=clock, budget_s=300.0,
+            conn,
+            user_id=1,
+            filename="a.txt",
+            data=b"hello world, plenty of text here.",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=clock,
+            budget_s=300.0,
         )
 
     _assert_nothing_stored(conn)
@@ -287,9 +339,16 @@ def test_t_v190_cmd_07_budget_after_embedding_batch_raises_and_stores_nothing(tm
 
     with pytest.raises(documents.IndexBudgetExceeded):
         documents.index_document(
-            conn, user_id=1, filename="a.txt", data=b"hello world, plenty of text here.",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=clock, budget_s=300.0,
+            conn,
+            user_id=1,
+            filename="a.txt",
+            data=b"hello world, plenty of text here.",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=clock,
+            budget_s=300.0,
         )
 
     assert len(embedder.calls) == 1  # the batch itself did run
@@ -308,9 +367,16 @@ def test_t_v190_cmd_07_budget_between_pdf_pages_raises_and_stores_nothing(tmp_pa
 
     with pytest.raises(documents.IndexBudgetExceeded):
         documents.index_document(
-            conn, user_id=1, filename="a.pdf", data=data,
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=clock, budget_s=300.0,
+            conn,
+            user_id=1,
+            filename="a.pdf",
+            data=data,
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=clock,
+            budget_s=300.0,
         )
 
     _assert_nothing_stored(conn)
@@ -340,9 +406,15 @@ def test_t_v190_err_01_row_13_transactional_recheck_raises_and_stores_nothing(tm
 
     with pytest.raises(documents.DocumentLimitExceededError):
         documents.index_document(
-            conn, user_id=1, filename="new.txt", data=b"hello world, plenty of text here.",
-            embedder=embedder, progress=lambda s: None, now=NOW,
-            started_at=0.0, monotonic=lambda: 0.0,
+            conn,
+            user_id=1,
+            filename="new.txt",
+            data=b"hello world, plenty of text here.",
+            embedder=embedder,
+            progress=lambda s: None,
+            now=NOW,
+            started_at=0.0,
+            monotonic=lambda: 0.0,
         )
 
     assert storage.document_count(conn, user_id=1) == 20  # unchanged, not 21
@@ -365,9 +437,15 @@ def test_t_v190_err_01_row_13_replace_at_20_is_not_the_limit(tmp_path):
     embedder = FakeEmbedder(dim=16)
 
     result = documents.index_document(
-        conn, user_id=1, filename="existing.txt", data=b"hello world, plenty of text here.",
-        embedder=embedder, progress=lambda s: None, now=NOW,
-        started_at=0.0, monotonic=lambda: 0.0,
+        conn,
+        user_id=1,
+        filename="existing.txt",
+        data=b"hello world, plenty of text here.",
+        embedder=embedder,
+        progress=lambda s: None,
+        now=NOW,
+        started_at=0.0,
+        monotonic=lambda: 0.0,
     )
 
     assert result.replaced is True

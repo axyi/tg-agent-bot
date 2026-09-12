@@ -18,8 +18,11 @@ WARNING = "stripped an invented source line"
 
 def passage(**overrides):
     fields = {
-        "chunk_id": 1, "filename": "policy.pdf", "page": 3,
-        "chunk_index": 0, "text": "passage text",
+        "chunk_id": 1,
+        "filename": "policy.pdf",
+        "page": 3,
+        "chunk_index": 0,
+        "text": "passage text",
     }
     fields.update(overrides)
     return rag.Passage(**fields)
@@ -27,14 +30,18 @@ def passage(**overrides):
 
 def result(passages=(), *, documents_present=True):
     return rag.SearchResult(
-        passages=list(passages), documents_present=documents_present,
-        rerank_attempted=False, rerank_succeeded=False, rerank_failure=None,
+        passages=list(passages),
+        documents_present=documents_present,
+        rerank_attempted=False,
+        rerank_succeeded=False,
+        rerank_failure=None,
     )
 
 
 # --------------------------------------------------------------------------
 # rag._render_sources -- the pure rendering grouping/order rules
 # --------------------------------------------------------------------------
+
 
 def test_render_sources_single_page():
     assert rag._render_sources([("a.pdf", 3)]) == "a.pdf (page 3)"
@@ -60,6 +67,7 @@ def test_render_sources_duplicate_pages_of_one_file_are_not_repeated():
 # --------------------------------------------------------------------------
 # T-V190-TOOL-06 -- passages were returned
 # --------------------------------------------------------------------------
+
 
 def test_t_v190_tool_06_a_canonical_line_survives_untouched():
     calls = [result([passage(filename="hr.pdf", page=4)])]
@@ -96,9 +104,7 @@ def test_t_v190_tool_06_an_invented_line_is_stripped_and_replaced(caplog):
 
 def test_t_v190_tool_06_multiple_invented_lines_log_exactly_one_warning(caplog):
     calls = [result([passage(filename="hr.pdf", page=4)])]
-    reply = (
-        "Line one.\nSource: a.pdf\nLine two.\nSources: b.pdf (page 9)\nLine three."
-    )
+    reply = "Line one.\nSource: a.pdf\nLine two.\nSources: b.pdf (page 9)\nLine three."
     with caplog.at_level(logging.WARNING):
         new_reply, changed = rag.attach_sources(reply, calls)
     assert changed is True
@@ -115,10 +121,7 @@ def test_t_v190_tool_06_a_prose_mention_does_not_satisfy_attribution():
 
 
 def test_t_v190_tool_06_collection_is_capped_at_five_pairs_first_seen():
-    passages = [
-        passage(filename=f"f{i}.pdf", page=i, chunk_id=i, chunk_index=i)
-        for i in range(7)
-    ]
+    passages = [passage(filename=f"f{i}.pdf", page=i, chunk_id=i, chunk_index=i) for i in range(7)]
     calls = [result(passages)]
     new_reply, _ = rag.attach_sources("answer", calls)
     rendered = new_reply.split("Sources: ", 1)[1]
@@ -139,6 +142,7 @@ def test_t_v190_tool_06_pairs_span_multiple_calls_in_call_order():
 # --------------------------------------------------------------------------
 # T-V190-TOOL-07 -- no passage was returned by any call
 # --------------------------------------------------------------------------
+
 
 def test_t_v190_tool_07_no_passages_strips_any_source_line(caplog):
     calls = [result([], documents_present=True)]
@@ -177,6 +181,7 @@ def test_t_v190_tool_07_zero_calls_is_untouched():
 # never by parsing, only by canonical-rendering equality.
 # --------------------------------------------------------------------------
 
+
 def test_t_v190_tool_08_the_exact_canonical_line_survives():
     calls = [result([passage(filename="a, b (page 9).pdf", page=9)])]
     reply = "Answer.\nSources: a, b (page 9).pdf (page 9)"
@@ -208,7 +213,5 @@ def test_t_v190_tool_08_reordered_entries_are_stripped_and_replaced():
     ]
     reply = "Answer.\nSources: z.pdf (page 1), a, b (page 9).pdf (page 9)"
     new_reply, changed = rag.attach_sources(reply, calls)
-    assert new_reply == (
-        "Answer.\n\nSources: a, b (page 9).pdf (page 9), z.pdf (page 1)"
-    )
+    assert new_reply == ("Answer.\n\nSources: a, b (page 9).pdf (page 9), z.pdf (page 1)")
     assert changed is True

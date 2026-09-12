@@ -15,11 +15,17 @@ never reads. Load-bearing markup: the parser
 line not starting with `|`, and every label must match
 `_GATE_MATRIX_LABEL_TO_NAME` (`:1685-1707`) byte-for-byte.
 
+v1.9.2 T1 (REQ-V15-NG-04): the single `ruff format --check` row split into
+`(staged)`/`(tree)`, the same split `ruff check` already has, once the
+whole-tree reformat closed the debt spec-v1.5 parked and `ruff-format-all`
+took over blocking on `pre-push`/`full` in `ruff-format`'s place there.
+
 | gate | pre-commit | pre-push | full |
 |---|:---:|:---:|:---:|
 | `ruff check` (staged) | yes | — | — |
 | `ruff check .` (tree) | — | yes | yes |
-| `ruff format --check` | yes | yes | yes |
+| `ruff format --check` (staged) | yes | — | — |
+| `ruff format --check` (tree) | — | yes | yes |
 | branch-name check | yes | yes | yes |
 | `gitleaks git --staged` | yes | — | — |
 | `gitleaks dir` (tree) | — | yes | yes |

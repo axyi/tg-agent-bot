@@ -31,6 +31,7 @@ FIFO_OPEN_BUDGET_S = 5.0
 # REQ-V13-CO-01 — the recovery chmod loop must not follow a symlink
 # --------------------------------------------------------------------------
 
+
 def test_t_v13_co_01_recovery_chmod_never_follows_a_symlink(tmp_path):
     """A `0o555` sandbox subdirectory whose child is a symlink pointing out of
     the sandbox: `rmtree`'s first pass cannot unlink the child, and the
@@ -63,6 +64,7 @@ def test_t_v13_co_01_recovery_chmod_never_follows_a_symlink(tmp_path):
 # REQ-V13-CO-02 — the `owner=owner_key()` binding of the orphan reap
 # --------------------------------------------------------------------------
 
+
 def test_t_v13_co_02_owner_key_binding_drives_the_reap(docker_stub, sandbox):  # noqa: F811
     """`run_command_docker` labels the container with *this* process's
     `owner_key()` (tools.py's `owner=owner_key()`), and the reap discriminates
@@ -70,7 +72,10 @@ def test_t_v13_co_02_owner_key_binding_drives_the_reap(docker_stub, sandbox):  #
     only the one whose key is not this live process's is removed."""
     docker_stub.set(exit=0, stdout="ok\n")
     tools.run_command_docker(
-        ["uname"], workdir=sandbox, image="python:3.13-slim", docker_ok=True,
+        ["uname"],
+        workdir=sandbox,
+        image="python:3.13-slim",
+        docker_ok=True,
     )
     run_argv = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["run"]][0]
     owner_labels = [a for a in run_argv if a.startswith("tgexec-owner=")]
@@ -90,6 +95,7 @@ def test_t_v13_co_02_owner_key_binding_drives_the_reap(docker_stub, sandbox):  #
 # REQ-V13-CO-03 — `resolve` is looked up at call time, not bound at `def` time
 # --------------------------------------------------------------------------
 
+
 def test_t_v13_co_03_resolve_is_bound_at_call_time(tmp_path, monkeypatch):
     """`_check_allowlist_resolution(cfg, resolve=None)` must reach
     `socket.getaddrinfo` through the module attribute: a stub installed long
@@ -105,7 +111,9 @@ def test_t_v13_co_03_resolve_is_bound_at_call_time(tmp_path, monkeypatch):
     box = tmp_path / "sandbox"
     box.mkdir()
     cfg = make_cfg(
-        tmp_path, exec_workdir=box, fetch_allowed_domains=frozenset({"wttr.in"}),
+        tmp_path,
+        exec_workdir=box,
+        fetch_allowed_domains=frozenset({"wttr.in"}),
     )
     assert bot._startup_docker_wiring(cfg, docker_ok=False) == (False, None)
     assert [entry[:2] for entry in seen] == [("wttr.in", 443)]
@@ -115,10 +123,12 @@ def test_t_v13_co_03_resolve_is_bound_at_call_time(tmp_path, monkeypatch):
 # REQ-V13-CO-04 — `resolve_host` catches `OSError` and nothing else
 # --------------------------------------------------------------------------
 
+
 def test_t_v13_co_04_resolve_host_catches_oserror_only(monkeypatch):
     def raising(exc):
         def _resolve(*args, **kwargs):
             raise exc
+
         return _resolve
 
     monkeypatch.setattr(socket, "getaddrinfo", raising(socket.gaierror("no such host")))
@@ -137,6 +147,7 @@ def test_t_v13_co_04_resolve_host_catches_oserror_only(monkeypatch):
 # --------------------------------------------------------------------------
 # REQ-V13-CO-05 — the three INF-01 clauses of `_ensure_empty_resolv`
 # --------------------------------------------------------------------------
+
 
 def _state_dir(tmp_path):
     state = tmp_path / "state"
@@ -198,10 +209,14 @@ def test_t_v13_co_05_c_a_fifo_neither_hangs_nor_is_accepted(tmp_path):
 # REQ-V13-CO-06 — `--only <unknown-id>` exits 1 instead of running nothing
 # --------------------------------------------------------------------------
 
+
 def _run_cli(*args):
     return subprocess.run(
         [sys.executable, str(mc.REPO_ROOT / "devtools" / "mutation_check.py"), *args],
-        cwd=mc.REPO_ROOT, capture_output=True, text=True, timeout=60,
+        cwd=mc.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
 

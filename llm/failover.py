@@ -19,8 +19,8 @@ from llm.base import (
     describe_client,
 )
 
-FAILOVER_THRESHOLD = 3        # consecutive failures before the other side is tried
-FAILOVER_COOLDOWN_S = 300.0   # how long a demoted provider stays out of the way
+FAILOVER_THRESHOLD = 3  # consecutive failures before the other side is tried
+FAILOVER_COOLDOWN_S = 300.0  # how long a demoted provider stays out of the way
 
 log = logging.getLogger("llm.failover")
 
@@ -69,7 +69,11 @@ class FailoverLLMClient:
         active = self.active_provider_name
         try:
             response = self._clients[active].complete(
-                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s,
+                messages,
+                tools,
+                max_tokens=max_tokens,
+                reasoning=reasoning,
+                timeout_s=timeout_s,
                 response_format=response_format,
             )
         except LLMError as exc:
@@ -80,7 +84,14 @@ class FailoverLLMClient:
                 and self._clock() >= self._cooldown_until[other]
             ):
                 return self._try_other(
-                    messages, tools, max_tokens, reasoning, timeout_s, active, other, exc,
+                    messages,
+                    tools,
+                    max_tokens,
+                    reasoning,
+                    timeout_s,
+                    active,
+                    other,
+                    exc,
                     response_format,
                 )
             raise
@@ -101,18 +112,25 @@ class FailoverLLMClient:
     ) -> LLMResponse:
         try:
             response = self._clients[other].complete(
-                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s,
+                messages,
+                tools,
+                max_tokens=max_tokens,
+                reasoning=reasoning,
+                timeout_s=timeout_s,
                 response_format=response_format,
             )
         except LLMError:
             self.failure_counts[other] += 1
-            raise                              # the last error reaches the caller
+            raise  # the last error reaches the caller
         self._cooldown_until[active] = self._clock() + FAILOVER_COOLDOWN_S
         self.active_provider_name = other
         self.failure_counts[other] = 0
         log.warning(
             "provider %s failed %d times (%s); serving from %s",
-            active, self.failure_counts[active], first_error.__class__.__name__, other,
+            active,
+            self.failure_counts[active],
+            first_error.__class__.__name__,
+            other,
         )
         return response
 

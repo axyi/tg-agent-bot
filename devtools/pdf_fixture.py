@@ -34,9 +34,7 @@ def _escape_pdf_text(line: str) -> str:
 def _page_content_stream(text: str) -> bytes:
     lines = text.split("\n")
     if len(lines) > MAX_LINES_PER_PAGE:
-        raise ValueError(
-            f"page has {len(lines)} lines, over the {MAX_LINES_PER_PAGE}-line bound"
-        )
+        raise ValueError(f"page has {len(lines)} lines, over the {MAX_LINES_PER_PAGE}-line bound")
     ops = [
         b"BT",
         f"/F1 {FONT_SIZE} Tf".encode("ascii"),

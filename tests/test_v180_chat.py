@@ -44,6 +44,7 @@ def _tg_client(handler, token="123456789:sentinel-chat-test-token"):
 # T-V180-CHAT-01 -- TelegramClient.delete_message
 # ---------------------------------------------------------------------------
 
+
 def test_t_v180_chat_01_delete_message_posts_delete_message_via_retry():
     seen = []
 
@@ -70,6 +71,7 @@ def test_t_v180_chat_01_delete_message_raises_telegram_error_on_fatal_result():
 # ---------------------------------------------------------------------------
 # T-V180-CHAT-02 / -03 -- `_StatusMessage.finish(*, ok: bool)`
 # ---------------------------------------------------------------------------
+
 
 class _StatusTg:
     """Records sends/edits/deletes; `delete_message` can be scripted to
@@ -156,11 +158,24 @@ def test_t_v180_chat_03_status_failed_under_max_chars():
 # T-V180-CHAT-04 -- `run_agent` is a one-line wrapper over `run_agent_outcome`
 # ---------------------------------------------------------------------------
 
+
 def test_t_v180_chat_04_run_agent_signature_and_return_type_unchanged():
     sig = inspect.signature(agent.run_agent)
     assert list(sig.parameters) == [
-        "conn", "conv_id", "llm", "skills", "runner", "now", "sleep", "cfg",
-        "fetcher", "audit", "recent_goals", "should_stop", "on_tool", "resolve_cost",
+        "conn",
+        "conv_id",
+        "llm",
+        "skills",
+        "runner",
+        "now",
+        "sleep",
+        "cfg",
+        "fetcher",
+        "audit",
+        "recent_goals",
+        "should_stop",
+        "on_tool",
+        "resolve_cost",
     ]
     assert sig.return_annotation is str
 
@@ -178,8 +193,13 @@ def test_t_v180_chat_04_run_agent_returns_exactly_the_outcomes_reply(conn, monke
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hi")
     reply = agent.run_agent(
-        conn=conn, conv_id=conv, llm=FakeLLM([_answer("hello there")]),
-        skills={}, runner=RecordingRunner(), now=NOW, sleep=lambda s: None,
+        conn=conn,
+        conv_id=conv,
+        llm=FakeLLM([_answer("hello there")]),
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda s: None,
     )
     assert len(captured) == 1
     assert isinstance(captured[0], agent.AgentOutcome)
@@ -190,13 +210,20 @@ def test_t_v180_chat_04_run_agent_returns_exactly_the_outcomes_reply(conn, monke
 # T-V180-CHAT-08 -- the outcome contract, per fallback return path
 # ---------------------------------------------------------------------------
 
+
 def _outcome(conn, script, *, should_stop=None):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hello")
     kwargs = {} if should_stop is None else {"should_stop": should_stop}
     return agent.run_agent_outcome(
-        conn=conn, conv_id=conv, llm=FakeLLM(script), skills={},
-        runner=RecordingRunner(), now=NOW, sleep=lambda s: None, **kwargs,
+        conn=conn,
+        conv_id=conv,
+        llm=FakeLLM(script),
+        skills={},
+        runner=RecordingRunner(),
+        now=NOW,
+        sleep=lambda s: None,
+        **kwargs,
     )
 
 
@@ -216,7 +243,8 @@ def test_t_v180_chat_08_llm_error(conn):
     outcome = _outcome(conn, [LLMError("llm http 400: bad", retryable=False)])
     assert outcome == agent.AgentOutcome(
         reply=agent.FALLBACK_LLM_ERROR.format(reason="llm http 400: bad"),
-        failed=True, kind="llm_error",
+        failed=True,
+        kind="llm_error",
     )
 
 
@@ -236,6 +264,7 @@ def test_t_v180_chat_08_no_answer(conn):
 # ---------------------------------------------------------------------------
 # T-V180-CHAT-09 -- negative: the reply send raises
 # ---------------------------------------------------------------------------
+
 
 class _ReplyFailsTg:
     """`STATUS_WORKING` sends succeed; every other send (the reply) raises."""
@@ -262,7 +291,10 @@ def test_t_v180_chat_09_reply_send_failure_keeps_status_failed_no_delete(conn, t
     cfg = make_cfg(tmp_path)
     tg = _ReplyFailsTg()
     process(
-        conn, cfg, update(text="hi", update_id=1), tg=tg,
+        conn,
+        cfg,
+        update(text="hi", update_id=1),
+        tg=tg,
         llm=FakeLLM([_tool_response(), _answer("final answer")]),
         runner=RecordingRunner(),
     )
@@ -285,8 +317,9 @@ class _RaisingLLM:
     def describe(self):
         return ("fake", "fake-model")
 
-    def complete(self, messages, tool_definitions, *, max_tokens=None, reasoning=None,
-                 timeout_s=None):
+    def complete(
+        self, messages, tool_definitions, *, max_tokens=None, reasoning=None, timeout_s=None
+    ):
         self.calls += 1
         if self.calls == 1:
             return self._first
@@ -300,8 +333,7 @@ def test_t_v180_chat_09_exception_escaping_run_agent_outcome_marks_failed_and_re
     tg = _ReplyFailsTg()
     llm = _RaisingLLM(_tool_response())
     with pytest.raises(RuntimeError, match="boom"):
-        process(conn, cfg, update(text="hi", update_id=2), tg=tg, llm=llm,
-                runner=RecordingRunner())
+        process(conn, cfg, update(text="hi", update_id=2), tg=tg, llm=llm, runner=RecordingRunner())
     assert tg.deleted == []
     assert tg.edits[-1] == (USER_ID, 1, bot.STATUS_FAILED)
 
@@ -309,6 +341,7 @@ def test_t_v180_chat_09_exception_escaping_run_agent_outcome_marks_failed_and_re
 # ---------------------------------------------------------------------------
 # T-V180-CHAT-10 -- the production path, both directions
 # ---------------------------------------------------------------------------
+
 
 class _ProductionTg:
     def __init__(self, *, delete_result=True):
@@ -336,7 +369,10 @@ def test_t_v180_chat_10_successful_outcome_deletes_status_no_failed_edit(conn, t
     cfg = make_cfg(tmp_path)
     tg = _ProductionTg()
     tg, llm, runner = process(
-        conn, cfg, update(text="hi", update_id=1), tg=tg,
+        conn,
+        cfg,
+        update(text="hi", update_id=1),
+        tg=tg,
         llm=FakeLLM([_tool_response(), _answer("final answer")]),
         runner=RecordingRunner(),
     )
@@ -349,7 +385,10 @@ def test_t_v180_chat_10_structurally_failed_outcome_marks_status_failed_no_delet
     cfg = make_cfg(tmp_path)
     tg = _ProductionTg()
     tg, llm, runner = process(
-        conn, cfg, update(text="hi", update_id=2), tg=tg,
+        conn,
+        cfg,
+        update(text="hi", update_id=2),
+        tg=tg,
         llm=FakeLLM([_tool_response(), LLMError("llm http 500", retryable=False)]),
         runner=RecordingRunner(),
     )
@@ -361,6 +400,7 @@ def test_t_v180_chat_10_structurally_failed_outcome_marks_status_failed_no_delet
 # ---------------------------------------------------------------------------
 # T-V180-CHAT-06 / -07 -- `_TypingIndicator` (REQ-V180-CHAT-05)
 # ---------------------------------------------------------------------------
+
 
 class _CallRecordingTg:
     """A `tg` stub exposing only `call`, matching what `_TypingIndicator`
@@ -414,7 +454,11 @@ def test_t_v180_chat_06_sends_immediately_then_one_per_tick_until_ceiling():
     tg = _CallRecordingTg()
     clock = _FakeClock([0.0, 1.0, 2.0, 20.0])  # deadline = 0.0 + ceiling_s(10.0)
     indicator = bot._TypingIndicator(
-        tg, 424242, ceiling_s=10.0, interval_s=0.0, monotonic=clock,
+        tg,
+        424242,
+        ceiling_s=10.0,
+        interval_s=0.0,
+        monotonic=clock,
     )
     indicator.start()
     indicator._thread.join(1.0)
@@ -441,7 +485,11 @@ def test_t_v180_chat_06_stop_event_rechecked_after_the_request_returns():
     tg = _CallRecordingTg(handler)
     clock = _FakeClock([0.0])  # ceiling far away: only the event should end the loop
     indicator = bot._TypingIndicator(
-        tg, 424242, ceiling_s=1000.0, interval_s=0.0, monotonic=clock,
+        tg,
+        424242,
+        ceiling_s=1000.0,
+        interval_s=0.0,
+        monotonic=clock,
         stop_event=stop_event,
     )
     indicator.start()
@@ -456,7 +504,11 @@ def test_t_v180_chat_06_stop_wakes_a_worker_parked_in_the_interval_wait():
     tg = _CallRecordingTg(lambda method, payload, kwargs: sent.set() or {})
     clock = _FakeClock([0.0])  # ceiling far away: only stop() should end the loop
     indicator = bot._TypingIndicator(
-        tg, 424242, ceiling_s=1000.0, interval_s=1000.0, monotonic=clock,
+        tg,
+        424242,
+        ceiling_s=1000.0,
+        interval_s=1000.0,
+        monotonic=clock,
     )
     indicator.start()
     assert sent.wait(1.0)  # bounded wait for the first (immediate) send
@@ -470,7 +522,11 @@ def test_t_v180_chat_07_raising_send_chat_action_disables_indicator_only(caplog)
     tg = _RaisingTg(RuntimeError("boom"))
     clock = _FakeClock([0.0])
     indicator = bot._TypingIndicator(
-        tg, 424242, ceiling_s=1000.0, interval_s=0.0, monotonic=clock,
+        tg,
+        424242,
+        ceiling_s=1000.0,
+        interval_s=0.0,
+        monotonic=clock,
     )
     with caplog.at_level(logging.WARNING):
         indicator.start()
@@ -500,7 +556,11 @@ def test_t_v180_chat_08_thread_start_raising_disables_indicator_without_raising(
     tg = _CallRecordingTg()
     clock = _FakeClock([0.0])
     indicator = bot._TypingIndicator(
-        tg, 424242, ceiling_s=1000.0, interval_s=0.0, monotonic=clock,
+        tg,
+        424242,
+        ceiling_s=1000.0,
+        interval_s=0.0,
+        monotonic=clock,
     )
     with caplog.at_level(logging.WARNING):
         indicator.start()  # Thread.start() raises RuntimeError; must not propagate

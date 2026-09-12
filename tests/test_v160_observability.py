@@ -865,9 +865,7 @@ def test_t_v160_trc_10_content_capture_on_redacts_and_bounds(conn, tmp_path):
     assert "status_message" not in attrs
 
 
-def test_t_v160_trc_10_content_capture_on_redacts_a_fresh_never_stored_secret(
-    conn, tmp_path
-):
+def test_t_v160_trc_10_content_capture_on_redacts_a_fresh_never_stored_secret(conn, tmp_path):
     """The gap the T13 report flagged: unlike the test above, this canary is
     never written through `storage.add_user_message`/`add_assistant_message`
     (both of which redact on the way in) before `set_content_attribute` sees
@@ -1361,9 +1359,7 @@ def test_t_v160_tq_03_closed_outcome_vocabulary(conn):
     row = health[0]
     assert (row.ok, row.error, row.budget, row.rejected, row.refused_repeat) == (1, 1, 1, 1, 1)
 
-    with tracing.start_span(
-        "execute_tool", tracing.KIND_INTERNAL, sink=tracing.NullSink()
-    ) as span:
+    with tracing.start_span("execute_tool", tracing.KIND_INTERNAL, sink=tracing.NullSink()) as span:
         with pytest.raises(ValueError):
             agent._record_tool_call(conn, conv, 1, call, "{}", "bogus", 0, None, span=span)
     assert len(tool_rows(conn)) == len(agent.TOOL_OUTCOMES)  # the bogus row never landed
@@ -1388,11 +1384,13 @@ def test_t_v160_tq_04_call_key_ignores_argument_key_order(conn):
 def test_t_v160_tq_04_third_identical_failure_is_refused_not_executed(conn, monkeypatch):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     call = tool_call(arguments='{"argv": ["true"]}')
-    responses = iter([
-        json.dumps({"error": "docker: no such host"}),
-        json.dumps({"error": "docker: TIMEOUT exceeded!!"}),
-        json.dumps({"exit_code": 0, "stdout": "ok"}),
-    ])
+    responses = iter(
+        [
+            json.dumps({"error": "docker: no such host"}),
+            json.dumps({"error": "docker: TIMEOUT exceeded!!"}),
+            json.dumps({"exit_code": 0, "stdout": "ok"}),
+        ]
+    )
     calls_made = []
 
     def fake_execute_tool(name, arguments, **kwargs):
@@ -1403,8 +1401,14 @@ def test_t_v160_tq_04_third_identical_failure_is_refused_not_executed(conn, monk
     repeat_failures: dict[tuple[str, str], int] = {}
     for _ in range(2):
         agent._execute_tool_calls(
-            [call], skills={}, runner=RecordingRunner(), tools_used=0,
-            conn=conn, conv_id=conv, turn_id=1, repeat_failures=repeat_failures,
+            [call],
+            skills={},
+            runner=RecordingRunner(),
+            tools_used=0,
+            conn=conn,
+            conv_id=conv,
+            turn_id=1,
+            repeat_failures=repeat_failures,
         )
     assert len(calls_made) == 2
     # Two distinct error classes, same call_key -- summed, not the max of either.
@@ -1412,12 +1416,18 @@ def test_t_v160_tq_04_third_identical_failure_is_refused_not_executed(conn, monk
     assert sum(repeat_failures.values()) == 2
 
     results, tools_used = agent._execute_tool_calls(
-        [call], skills={}, runner=RecordingRunner(), tools_used=0,
-        conn=conn, conv_id=conv, turn_id=1, repeat_failures=repeat_failures,
+        [call],
+        skills={},
+        runner=RecordingRunner(),
+        tools_used=0,
+        conn=conn,
+        conv_id=conv,
+        turn_id=1,
+        repeat_failures=repeat_failures,
     )
-    assert len(calls_made) == 2                      # the third call is never dispatched
+    assert len(calls_made) == 2  # the third call is never dispatched
     assert results == [(call.id, agent.REFUSED_REPEAT_RESULT)]
-    assert tools_used == 1                            # counts toward TOOL_EXECUTION_LIMIT
+    assert tools_used == 1  # counts toward TOOL_EXECUTION_LIMIT
 
     row = tool_rows(conn)[-1]
     assert row["outcome"] == "refused_repeat"
@@ -1432,8 +1442,14 @@ def test_t_v160_tq_04_third_identical_failure_is_refused_not_executed(conn, monk
 
     # A fresh user message (a fresh dict) starts the count again.
     agent._execute_tool_calls(
-        [call], skills={}, runner=RecordingRunner(), tools_used=0,
-        conn=conn, conv_id=conv, turn_id=1, repeat_failures={},
+        [call],
+        skills={},
+        runner=RecordingRunner(),
+        tools_used=0,
+        conn=conn,
+        conv_id=conv,
+        turn_id=1,
+        repeat_failures={},
     )
     assert len(calls_made) == 3
 

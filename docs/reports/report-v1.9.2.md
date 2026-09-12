@@ -83,10 +83,95 @@ this prompt's first pass -- see #8's own row for the (a)(b)(c) evidence;
 `f421621` was amended to carry the deletion so commit 1 holds all of
 §A's work.)
 
-### B. ruff format -- deferred to prompt 165 (REQ-V15-NG-04)
+### B -- reformat (prompt 165)
 
-Not touched by this commit; see prompt 165 and this report's "B --
-reformat" section, added by that prompt.
+`uv run --locked ruff format .` (project config, no extra flags) reformatted
+63 non-`docs/` `.py` files. It also touched 11 `docs/*.md` files (spec-v1.5's
+own reason: ruff reformats fenced code blocks in markdown); those were
+reverted (`git checkout --`), and `docs/**` is now excluded in
+`[tool.ruff.format]` so `ruff format --check .` honours that without
+runner-side filtering going forward -- this formalises spec-v1.5's own
+already-decided policy, not a new exception.
+
+**The operator's two rulings, both applied:**
+
+1. `devtools/bench_scenarios.py` -- **option (b)**: reverted to its
+   pre-reformat bytes, permanently excluded from `[tool.ruff.format]`
+   (`pyproject.toml`), commented and dated, citing REQ-V13-BEN-12
+   (`devtools/bench.py:335-340`'s `scenarios_sha256()` hashes the file's raw
+   bytes; that hash is pinned inside 15 committed
+   `docs/assets/bench/*.json` artefacts -- frozen measurement records,
+   never edited to match new bytes). Its mutation entry
+   (`v13-bench-turn-zero-based`, `devtools/mutation_check.py`, path
+   `devtools/bench_scenarios.py`) was left exactly as it was -- the file's
+   bytes never changed, so nothing to re-derive. `ruff check` still lints
+   the file; only the formatter skips it.
+2. `storage.py:243 _MIGRATION_2_TO_3` -- **deleted**, under §A.3, with
+   (a)(b)(c) evidence now in §A's table above (row 8). Commit 1
+   (originally `f421621`) was amended to `6c9a904` to carry this, so
+   commit 1 holds all 27 of §A's skylos decisions, not 26 of 27. The
+   skylos post-fix count moved from 1 to **0**; §C.5 above is updated to
+   match, and the "flip to blocking is one YAML line" note now applies
+   cleanly (not flipped -- left to the operator).
+
+**9 re-derived `find`/`replace` pairs** (mutation semantics unchanged, only
+byte layout re-matched against the reformatted source):
+
+| id | path | what changed under reformat |
+|---|---|---|
+| `cov-09-probe-user-flag` | `tools.py` | docker-argv list: one item per line instead of grouped pairs |
+| `v13-compact-keeps-head-only` | `tools.py` | a space added before a slice colon: `lines[len(head) :]` |
+| `v13-llm-call-not-recorded-on-error` | `agent.py` | `_record_llm_call(...)` call: one argument per line |
+| `v170-summary-retry-ignores-budget` | `agent.py` | `_ask_for_summary(...)` call: one argument per line |
+| `v13-bench-skipset-ignored` | `devtools/bench.py` | `LOCKED_META_FIELDS` tuple: one item per line |
+| `v13-bench-scenario-hash-ignored` | `devtools/bench.py` | same tuple, same reformat (shares its find string with the row above) |
+| `v170-config-hash-includes-treatment` | `devtools/bench.py` | `CONFIG_HASH_EXCLUDED` set literal: one item per line, one indent level deeper (now nested in `frozenset({...})`) |
+| `v160-readonly-connection-writable` | `storage.py` | the `sqlite3.connect(...)` call in `connect_readonly` merged onto one line (98 chars, under the 100-char limit) |
+| `v170-failover-drops-reasoning` | `llm/failover.py` | `self._clients[other].complete(...)` call: one argument per line |
+
+One incidental fix the reformat forced, not itself a re-derivation:
+`tests/test_v11_patch.py`'s `monkeypatch.setattr(agent, "summarize_conversation", lambda ...)`
+had a lambda signature ruff's formatter cannot wrap across lines (Python
+lambdas take no multi-line parameter list), leaving a 101-char `E501` after
+the reformat. Converted to a small named nested function with the same
+body and the same `monkeypatch.setattr` call; behaviour-preserving,
+verified green.
+
+**§B.4 -- `ruff format --check` now blocking whole-tree.** Added
+`ruff-format-all` (`config/quality_gates.yaml`): the generic
+`execute_command_gate` path, no `blocking_paths` key, `diff_scoped: false`,
+`argv: [uv, run, --locked, ruff, format, --check, "."]` -- the same shape
+`ruff-check-all` already uses next to diff-scoped `ruff-check`, confirmed
+against `devtools/checks.py:1174-1215`. No runner code change, so no new
+runner test. Wired into `pre-push`/`full` in place of the old diff-scoped
+`ruff-format`, which now stays only in `pre-commit` (a fast per-commit
+check on the staged diff; its `blocking_paths` partition still protects
+`devtools/checks.py`, `devtools/install_hooks.py`,
+`tests/test_v15_standards.py`). `docs/spec/spec-v1.9.0-delta-1.md`'s gate
+matrix table split its one `` `ruff format --check` `` row into
+`(staged)`/`(tree)`, the same split `` `ruff check` `` already has;
+`tests/test_v15_standards.py`'s `_GATE_MATRIX_LABEL_TO_NAME` gained the
+matching second entry (added, not replaced).
+
+**§B.5 -- both exit 0.** `ruff check .`: exit 0. `ruff format --check .`:
+exit 0, **92 files already formatted, 0 would reformat**.
+
+**Drift, both before and after this prompt's changes:** throwaway script,
+**108/108** find strings match exactly once.
+
+**The nine `--only` reruns**, sequential, nothing else touching the tree:
+all nine **killed** --
+`cov-09-probe-user-flag`, `v13-compact-keeps-head-only`,
+`v13-llm-call-not-recorded-on-error`, `v170-summary-retry-ignores-budget`,
+`v13-bench-skipset-ignored`, `v13-bench-scenario-hash-ignored`,
+`v170-config-hash-includes-treatment`, `v160-readonly-connection-writable`,
+`v170-failover-drops-reasoning`. Each restored the mutated file exactly
+(verified byte-for-byte by `mutation_check.py` itself); confirmed with a
+final drift-script run and `ruff check`/`ruff format --check` re-run
+afterward, both still clean. The full 108-entry `mutation_check.py` run
+(gate 6) is out of scope for this task (T3's own gate run).
+
+REQ-V15-NG-04 is closed.
 
 ### C. Beyond skylos
 

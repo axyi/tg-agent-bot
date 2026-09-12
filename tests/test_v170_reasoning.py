@@ -278,8 +278,16 @@ class _RecordingClient:
     def describe(self):
         return (self.name, self.name)
 
-    def complete(self, messages, tools, *, max_tokens=None, reasoning=REASONING_DEFAULT,
-                 timeout_s=None, response_format=None):
+    def complete(
+        self,
+        messages,
+        tools,
+        *,
+        max_tokens=None,
+        reasoning=REASONING_DEFAULT,
+        timeout_s=None,
+        response_format=None,
+    ):
         self.calls.append((messages, tools, max_tokens, reasoning, timeout_s))
         item = self.script.pop(0)
         if isinstance(item, LLMError):
@@ -327,9 +335,12 @@ def _capture_payload():
 
     def handler(request):
         captured["payload"] = json.loads(request.content)
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            },
+        )
 
     return captured, httpx.MockTransport(handler)
 
@@ -386,7 +397,8 @@ def test_t_v170_pol_05_openrouter_off_form_is_exact():
     captured, transport = _capture_payload()
     client = OpenRouterClient("key", "m", 5.0, httpx.Client(transport=transport))
     client.complete(
-        [{"role": "user", "content": "hi"}], None,
+        [{"role": "user", "content": "hi"}],
+        None,
         reasoning=ReasoningRequest("off", None, "summary"),
     )
     assert captured["payload"]["reasoning"] == {"enabled": False}
@@ -397,7 +409,8 @@ def test_t_v170_pol_05_openrouter_on_and_default_add_nothing(value):
     captured, transport = _capture_payload()
     client = OpenRouterClient("key", "m", 5.0, httpx.Client(transport=transport))
     client.complete(
-        [{"role": "user", "content": "hi"}], None,
+        [{"role": "user", "content": "hi"}],
+        None,
         reasoning=ReasoningRequest(value, None, "summary"),
     )
     assert "reasoning" not in captured["payload"]
@@ -482,20 +495,33 @@ def test_t_v170_pol_06_none_is_byte_identical_to_today():
 
 def test_t_v170_pol_06_merged_after_existing_keys():
     payload = build_payload(
-        "m", [{"role": "user", "content": "x"}], None,
+        "m",
+        [{"role": "user", "content": "x"}],
+        None,
         reasoning_fields={"chat_template_kwargs": {"enable_thinking": False}},
     )
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
     assert list(payload)[:5] == ["model", "messages", "temperature", "max_tokens", "stream"]
 
 
-@pytest.mark.parametrize("key", [
-    "model", "messages", "temperature", "max_tokens", "stream", "tools", "tool_choice",
-])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "model",
+        "messages",
+        "temperature",
+        "max_tokens",
+        "stream",
+        "tools",
+        "tool_choice",
+    ],
+)
 def test_t_v170_pol_06_collision_raises_naming_the_key(key):
     with pytest.raises(ValueError) as exc:
         build_payload(
-            "m", [{"role": "user", "content": "x"}], [{"type": "function"}],
+            "m",
+            [{"role": "user", "content": "x"}],
+            [{"type": "function"}],
             reasoning_fields={key: "poison"},
         )
     assert key in str(exc.value)
@@ -504,7 +530,9 @@ def test_t_v170_pol_06_collision_raises_naming_the_key(key):
 def test_n4_reasoning_fields_containing_messages_raises():
     with pytest.raises(ValueError) as exc:
         build_payload(
-            "m", [{"role": "user", "content": "x"}], None,
+            "m",
+            [{"role": "user", "content": "x"}],
+            None,
             reasoning_fields={"messages": "poison"},
         )
     assert "messages" in str(exc.value)
@@ -569,10 +597,12 @@ def _seed(path, schema: str):
 
 def _v3_schema() -> str:
     # v3: llm_calls/tool_calls exist, without trace_id/span_id.
-    return _V1_SCHEMA.replace(
-        "INSERT INTO schema_version (id, version) VALUES (1, 1);",
-        "INSERT INTO schema_version (id, version) VALUES (1, 3);",
-    ) + """
+    return (
+        _V1_SCHEMA.replace(
+            "INSERT INTO schema_version (id, version) VALUES (1, 1);",
+            "INSERT INTO schema_version (id, version) VALUES (1, 3);",
+        )
+        + """
 CREATE TABLE summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL UNIQUE,
     tg_user_id INTEGER NOT NULL, goal TEXT NOT NULL DEFAULT '',
@@ -598,13 +628,16 @@ CREATE TABLE tool_calls (
     duration_ms INTEGER NOT NULL, outcome TEXT NOT NULL
 );
 """
+    )
 
 
 def _v2_schema() -> str:
-    return _V1_SCHEMA.replace(
-        "INSERT INTO schema_version (id, version) VALUES (1, 1);",
-        "INSERT INTO schema_version (id, version) VALUES (1, 2);",
-    ) + """
+    return (
+        _V1_SCHEMA.replace(
+            "INSERT INTO schema_version (id, version) VALUES (1, 1);",
+            "INSERT INTO schema_version (id, version) VALUES (1, 2);",
+        )
+        + """
 CREATE TABLE summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER NOT NULL UNIQUE,
     tg_user_id INTEGER NOT NULL, goal TEXT NOT NULL DEFAULT '',
@@ -612,13 +645,17 @@ CREATE TABLE summaries (
     updated_at TEXT NOT NULL
 );
 """
+    )
 
 
-@pytest.mark.parametrize("schema_fn,start_version", [
-    (lambda: _V1_SCHEMA, 1),
-    (_v2_schema, 2),
-    (_v3_schema, 3),
-])
+@pytest.mark.parametrize(
+    "schema_fn,start_version",
+    [
+        (lambda: _V1_SCHEMA, 1),
+        (_v2_schema, 2),
+        (_v3_schema, 3),
+    ],
+)
 def test_t_v170_obs_01_chains_to_5(tmp_path, schema_fn, start_version):
     path = tmp_path / f"v{start_version}.db"
     _seed(path, schema_fn())
@@ -658,9 +695,7 @@ def test_t_v170_obs_01_migration_4_to_5_on_populated_db(tmp_path):
         )
     """)
     conn.execute("DROP TABLE llm_calls_v5")
-    conn.execute(
-        "INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)"
-    )
+    conn.execute("INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)")
     conn.execute(
         "INSERT INTO llm_calls (conv_id, turn_id, purpose, round, attempt, ts, provider, "
         "model, prompt_chars, prompt_chars_by_role, messages_n, tools_exposed, latency_ms) "
@@ -709,8 +744,15 @@ def test_t_v170_obs_02_llm_call_columns_equals_pragma_table_info(conn):
 def test_t_v170_obs_02_tracing_attribute_keys_has_the_new_key_and_still_rejects_unlisted():
     assert "tg_agent.reasoning.requested" in tracing.ATTRIBUTE_KEYS
     span = tracing.MutableSpan(
-        trace_id="t", span_id="s", parent_span_id=None, conv_id=None, turn_id=None,
-        name="x", kind=tracing.KIND_CLIENT, ts="2026-01-01T00:00:00Z", start_ns=0,
+        trace_id="t",
+        span_id="s",
+        parent_span_id=None,
+        conv_id=None,
+        turn_id=None,
+        name="x",
+        kind=tracing.KIND_CLIENT,
+        ts="2026-01-01T00:00:00Z",
+        start_ns=0,
         sink=tracing.NullSink(),
     )
     span.set_attribute("tg_agent.reasoning.requested", "off")  # does not raise
@@ -723,19 +765,22 @@ def test_t_v170_obs_02_tracing_attribute_keys_has_the_new_key_and_still_rejects_
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value,reasoning_tokens,reasoning_chars,expected", [
-    ("default", 7, 5, None),
-    ("default", None, 0, None),
-    ("off", None, 0, None),
-    ("on", None, 0, None),
-    ("off", 0, 0, 1),
-    ("off", None, 5, 0),
-    ("off", 1, 0, 0),
-    ("off", 0, 5, 0),
-    ("on", 0, 0, 0),
-    ("on", 7, 0, 1),
-    ("on", None, 5, 1),
-])
+@pytest.mark.parametrize(
+    "value,reasoning_tokens,reasoning_chars,expected",
+    [
+        ("default", 7, 5, None),
+        ("default", None, 0, None),
+        ("off", None, 0, None),
+        ("on", None, 0, None),
+        ("off", 0, 0, 1),
+        ("off", None, 5, 0),
+        ("off", 1, 0, 0),
+        ("off", 0, 5, 0),
+        ("on", 0, 0, 0),
+        ("on", 7, 0, 1),
+        ("on", None, 5, 1),
+    ],
+)
 def test_t_v170_obs_03_honored_truth_table(value, reasoning_tokens, reasoning_chars, expected):
     result = _reasoning_honored(value, reasoning_tokens, reasoning_chars)
     assert result is expected  # `is`, not `==`: a None regression must not read as falsy-0
@@ -771,23 +816,32 @@ def test_t_v170_obs_04_exactly_six_rows_all_requested_non_null(conn, tmp_path, m
     ]
     llm = FakeLLM(agent_script)
     run_agent(
-        conn=conn, conv_id=conv, llm=llm, skills={}, runner=RecordingRunner(),
-        now="2026-01-01T00:00:00Z", sleep=lambda _s: None,
+        conn=conn,
+        conv_id=conv,
+        llm=llm,
+        skills={},
+        runner=RecordingRunner(),
+        now="2026-01-01T00:00:00Z",
+        sleep=lambda _s: None,
     )
     assert len(_llm_rows(conn)) == 2
 
-    truncating_llm = FakeLLM([
-        LLMResponse("cut off", [], "length"),
-        LLMResponse(json.dumps(VALID_SUMMARY), [], "stop"),
-    ])
+    truncating_llm = FakeLLM(
+        [
+            LLMResponse("cut off", [], "length"),
+            LLMResponse(json.dumps(VALID_SUMMARY), [], "stop"),
+        ]
+    )
     result = summarize_conversation(conn, conv, truncating_llm, None)
     assert result is not None
     assert len(_llm_rows(conn)) == 4
 
-    repairing_llm = FakeLLM([
-        LLMResponse("not json at all", [], "stop"),
-        LLMResponse(json.dumps(VALID_SUMMARY), [], "stop"),
-    ])
+    repairing_llm = FakeLLM(
+        [
+            LLMResponse("not json at all", [], "stop"),
+            LLMResponse(json.dumps(VALID_SUMMARY), [], "stop"),
+        ]
+    )
     result = summarize_conversation(conn, conv, repairing_llm, None)
     assert result is not None
     rows = _llm_rows(conn)
@@ -802,18 +856,26 @@ def test_t_v170_obs_04_a_failover_inside_one_call_adds_no_extra_row(conn):
     storage.add_user_message(conn, conv, "hello")
 
     primary = _RecordingClient("lmstudio", [LLMError("down", retryable=True)] * 5)
-    secondary = _RecordingClient("openrouter", [
-        LLMResponse("", [_tool_call()], "tool_calls"),
-        LLMResponse("done", [], "stop"),
-    ])
+    secondary = _RecordingClient(
+        "openrouter",
+        [
+            LLMResponse("", [_tool_call()], "tool_calls"),
+            LLMResponse("done", [], "stop"),
+        ],
+    )
     failover = FailoverLLMClient(
         primary, secondary, primary_name="lmstudio", secondary_name="openrouter"
     )
     failover.failure_counts["lmstudio"] = 2  # one more trips FAILOVER_THRESHOLD
 
     run_agent(
-        conn=conn, conv_id=conv, llm=failover, skills={}, runner=RecordingRunner(),
-        now="2026-01-01T00:00:00Z", sleep=lambda _s: None,
+        conn=conn,
+        conv_id=conv,
+        llm=failover,
+        skills={},
+        runner=RecordingRunner(),
+        now="2026-01-01T00:00:00Z",
+        sleep=lambda _s: None,
     )
     rows = _llm_rows(conn)
     assert len(rows) == 2

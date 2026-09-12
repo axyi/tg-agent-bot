@@ -31,25 +31,71 @@ log = logging.getLogger("storage")
 # the structured log line and the tests all read it, so a row and its log line
 # can never drift apart (REQ-V13-OBS-06).
 LLM_CALL_COLUMNS = (
-    "id", "conv_id", "turn_id", "purpose", "round", "attempt", "ts", "provider", "model",
-    "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens",
-    "reasoning_chars", "prompt_chars", "prompt_chars_by_role", "messages_n", "tools_exposed",
-    "latency_ms", "finish_reason", "tool_calls_n", "error_kind", "cost_usd", "cost_basis",
-    "trace_id", "span_id",
+    "id",
+    "conv_id",
+    "turn_id",
+    "purpose",
+    "round",
+    "attempt",
+    "ts",
+    "provider",
+    "model",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "reasoning_chars",
+    "prompt_chars",
+    "prompt_chars_by_role",
+    "messages_n",
+    "tools_exposed",
+    "latency_ms",
+    "finish_reason",
+    "tool_calls_n",
+    "error_kind",
+    "cost_usd",
+    "cost_basis",
+    "trace_id",
+    "span_id",
     # v1.7.0 additions (REQ-V170-OBS-01), appended after span_id.
-    "reasoning_requested", "reasoning_honored",
+    "reasoning_requested",
+    "reasoning_honored",
 )
 TOOL_CALL_COLUMNS = (
-    "id", "conv_id", "turn_id", "tool_call_id", "tool", "ts", "input_chars",
-    "raw_output_chars", "output_chars", "output_tokens_est", "duration_ms", "outcome",
-    "trace_id", "span_id",
+    "id",
+    "conv_id",
+    "turn_id",
+    "tool_call_id",
+    "tool",
+    "ts",
+    "input_chars",
+    "raw_output_chars",
+    "output_chars",
+    "output_tokens_est",
+    "duration_ms",
+    "outcome",
+    "trace_id",
+    "span_id",
 )
 # REQ-V160-TRC-05: mirrors the `spans` table's own column list exactly, in the
 # same order as the DDL, so `T-V160-TRC-06` can assert it against
 # `PRAGMA table_info(spans)` directly.
 SPAN_COLUMNS = (
-    "id", "trace_id", "span_id", "parent_span_id", "conv_id", "turn_id", "name", "kind",
-    "ts", "start_ns", "duration_ms", "status", "status_message", "attributes_json",
+    "id",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "conv_id",
+    "turn_id",
+    "name",
+    "kind",
+    "ts",
+    "start_ns",
+    "duration_ms",
+    "status",
+    "status_message",
+    "attributes_json",
 )
 
 _SUMMARIES_DDL = """
@@ -179,7 +225,8 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks (document_id, chunk_index);
 """
 
-_SCHEMA = """
+_SCHEMA = (
+    """
 CREATE TABLE IF NOT EXISTS schema_version (
     id      INTEGER PRIMARY KEY CHECK (id = 1),
     version INTEGER NOT NULL
@@ -221,36 +268,52 @@ CREATE TABLE IF NOT EXISTS bot_state (
     value TEXT NOT NULL
 );
 
-""" + _SUMMARIES_DDL + _OBSERVABILITY_DDL + _SPANS_DDL
+"""
+    + _SUMMARIES_DDL
+    + _OBSERVABILITY_DDL
+    + _SPANS_DDL
+)
 
 # All three migrations are additive: a database keeps every row it had
 # (REQ-V1-MEM-01, REQ-V13-OBS-03). They chain, so a version-1 database reaches
 # 4 in one `init_schema` call.
-_MIGRATION_1_TO_2 = """
+_MIGRATION_1_TO_2 = (
+    """
 BEGIN IMMEDIATE;
-""" + _SUMMARIES_DDL + """
+"""
+    + _SUMMARIES_DDL
+    + """
 UPDATE schema_version SET version = 2 WHERE id = 1;
 COMMIT;
 """
+)
 
 # The real 2 -> 4 chain step: builds the (already v4-shaped) observability
 # tables and the spans table in one transaction, straight to version 4, with
 # no intermediate version = 3 commit.
-_MIGRATION_2_TO_4 = """
+_MIGRATION_2_TO_4 = (
+    """
 BEGIN IMMEDIATE;
-""" + _OBSERVABILITY_DDL + _SPANS_DDL + """
+"""
+    + _OBSERVABILITY_DDL
+    + _SPANS_DDL
+    + """
 UPDATE schema_version SET version = 4 WHERE id = 1;
 COMMIT;
 """
+)
 
 # REQ-V160-TRC-05: the `ALTER TABLE ... ADD COLUMN` statements exist only
 # here, never in `_OBSERVABILITY_DDL`'s fresh-database path, which already has
 # the columns from the start. This runs only against a genuine on-disk
 # version-3 database (built by pre-v1.6.0 code), which is exactly the shape
 # these ALTERs were written for.
-_MIGRATION_3_TO_4 = """
+_MIGRATION_3_TO_4 = (
+    """
 BEGIN IMMEDIATE;
-""" + _SPANS_DDL + """
+"""
+    + _SPANS_DDL
+    + """
 ALTER TABLE llm_calls ADD COLUMN trace_id TEXT;
 ALTER TABLE llm_calls ADD COLUMN span_id TEXT;
 ALTER TABLE tool_calls ADD COLUMN trace_id TEXT;
@@ -258,6 +321,7 @@ ALTER TABLE tool_calls ADD COLUMN span_id TEXT;
 UPDATE schema_version SET version = 4 WHERE id = 1;
 COMMIT;
 """
+)
 
 # REQ-V170-OBS-01: added and chained after `_MIGRATION_2_TO_4` /
 # `_MIGRATION_3_TO_4`, not folded into them or into `_OBSERVABILITY_DDL`.
@@ -397,9 +461,7 @@ def connect_readonly(db_path: Path) -> sqlite3.Connection:
     cannot set `journal_mode`. A missing database file raises
     `sqlite3.OperationalError` from the `mode=ro` URI itself rather than being
     silently created."""
-    conn = sqlite3.connect(
-        f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0
-    )
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0)
     conn.row_factory = sqlite3.Row
     # REQ-V190-STO-01: the read-only handle needs the module too, for the same
     # reason -- a schema naming `vec0` cannot even be parsed without it.
@@ -472,9 +534,12 @@ def _vec_chunks_ddl(dim: int) -> str:
 
 
 def _vec_chunks_exists(conn: sqlite3.Connection) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vec_chunks'"
-    ).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vec_chunks'"
+        ).fetchone()
+        is not None
+    )
 
 
 def _apply_embedding_pair(
@@ -622,9 +687,7 @@ def _add_tool_turn_body(
     turn_id = _next_turn_id(conn, conv_id)
     redacted_content = config.redact(content)
     payload = config.redact(json.dumps(tool_calls, ensure_ascii=False))
-    redacted_results = [
-        (tool_call_id, config.redact(result)) for tool_call_id, result in results
-    ]
+    redacted_results = [(tool_call_id, config.redact(result)) for tool_call_id, result in results]
     conn.execute(
         _INSERT_MESSAGE,
         (conv_id, turn_id, "assistant", redacted_content, payload, None, utc_now_iso()),
@@ -702,9 +765,7 @@ def load_context_messages(
     return [messages[position] for position in selected]
 
 
-def add_summary(
-    conn: sqlite3.Connection, conv_id: int, tg_user_id: int, summary_json: str
-) -> None:
+def add_summary(conn: sqlite3.Connection, conv_id: int, tg_user_id: int, summary_json: str) -> None:
     conn.execute(
         "INSERT INTO summaries (conv_id, tg_user_id, created_at, summary_json) "
         "VALUES (?, ?, ?, ?) "
@@ -823,8 +884,9 @@ def add_llm_call(
         "reasoning_honored": reasoning_honored,
     }
     row_id = _insert_row(conn, "llm_calls", row)
-    _log_row("llm_call", LLM_CALL_COLUMNS, row_id, row,
-             {"prompt_chars_by_role": prompt_chars_by_role})
+    _log_row(
+        "llm_call", LLM_CALL_COLUMNS, row_id, row, {"prompt_chars_by_role": prompt_chars_by_role}
+    )
     return row_id
 
 
@@ -940,8 +1002,15 @@ def add_document(
         " page_count, chunk_count, sha256) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            user_id, filename, file_type, created_at, size_bytes, text_chars,
-            page_count, chunk_count, sha256,
+            user_id,
+            filename,
+            file_type,
+            created_at,
+            size_bytes,
+            text_chars,
+            page_count,
+            chunk_count,
+            sha256,
         ),
     )
     return cursor.lastrowid
@@ -994,9 +1063,7 @@ def add_vectors(
         ).fetchall()
     }
     if owned != requested:
-        raise ValueError(
-            f"chunk ids not owned by user {user_id}: {sorted(requested - owned)}"
-        )
+        raise ValueError(f"chunk ids not owned by user {user_id}: {sorted(requested - owned)}")
     conn.executemany(
         "INSERT INTO vec_chunks (chunk_id, user_id, embedding) VALUES (?, ?, ?)",
         [(chunk_id, user_id, embedding) for chunk_id, embedding in rows],
@@ -1090,9 +1157,9 @@ def chunks_by_ids(
 
 
 def document_count(conn: sqlite3.Connection, *, user_id: int) -> int:
-    return conn.execute(
-        "SELECT COUNT(*) FROM documents WHERE user_id = ?", (user_id,)
-    ).fetchone()[0]
+    return conn.execute("SELECT COUNT(*) FROM documents WHERE user_id = ?", (user_id,)).fetchone()[
+        0
+    ]
 
 
 def document_count_all(conn: sqlite3.Connection) -> int:
@@ -1316,9 +1383,7 @@ def conversation_turn_traces(
     }
 
 
-def fetch_llm_calls(
-    conn: sqlite3.Connection, conv_id: int | None = None
-) -> list[sqlite3.Row]:
+def fetch_llm_calls(conn: sqlite3.Connection, conv_id: int | None = None) -> list[sqlite3.Row]:
     """Every recorded call, oldest first; one conversation when `conv_id` is given."""
     if conv_id is None:
         return conn.execute("SELECT * FROM llm_calls ORDER BY id").fetchall()
@@ -1327,9 +1392,7 @@ def fetch_llm_calls(
     ).fetchall()
 
 
-def fetch_tool_calls(
-    conn: sqlite3.Connection, conv_id: int | None = None
-) -> list[sqlite3.Row]:
+def fetch_tool_calls(conn: sqlite3.Connection, conv_id: int | None = None) -> list[sqlite3.Row]:
     if conv_id is None:
         return conn.execute("SELECT * FROM tool_calls ORDER BY id").fetchall()
     return conn.execute(
@@ -1346,9 +1409,7 @@ def _insert_row(conn: sqlite3.Connection, table: str, row: dict) -> int:
     return cursor.lastrowid
 
 
-def _log_row(
-    prefix: str, columns: tuple[str, ...], row_id: int, row: dict, expanded: dict
-) -> None:
+def _log_row(prefix: str, columns: tuple[str, ...], row_id: int, row: dict, expanded: dict) -> None:
     """REQ-V13-OBS-06: one INFO line per row, JSON, keyed by the table's own
     columns and nothing else — no content, no arguments, no URL. Building the
     line from the declared column tuple is what keeps the two in step: a column
@@ -1400,9 +1461,7 @@ def next_turn_id(conn: sqlite3.Connection, conv_id: int) -> int:
 
 def _add_single_row(conn: sqlite3.Connection, conv_id: int, role: str, content: str) -> int:
     turn_id = _next_turn_id(conn, conv_id)
-    conn.execute(
-        _INSERT_MESSAGE, (conv_id, turn_id, role, content, None, None, utc_now_iso())
-    )
+    conn.execute(_INSERT_MESSAGE, (conv_id, turn_id, role, content, None, None, utc_now_iso()))
     return turn_id
 
 

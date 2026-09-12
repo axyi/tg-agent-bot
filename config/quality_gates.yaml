@@ -6,10 +6,10 @@ scope:
 
 profiles:
   pre-commit: [ruff-check, ruff-format, gitleaks-staged, branch-name]
-  pre-push:   [ruff-check-all, ruff-format, branch-name, pytest, selftest,
+  pre-push:   [ruff-check-all, ruff-format-all, branch-name, pytest, selftest,
                gitleaks-tree, trivy, semgrep, skylos, mutation-v15, mutation-v160,
                mutation-v170, mutation-v180, mutation-v190, hooks-installed, doctor]
-  full:       [uv-sync, ruff-check-all, ruff-format, branch-name, pytest,
+  full:       [uv-sync, ruff-check-all, ruff-format-all, branch-name, pytest,
                selftest, selftest-live, rag-eval, mutation-all, gitleaks-tree,
                trivy, semgrep, skylos, hooks-installed, doctor, lint-docs]
 
@@ -51,6 +51,16 @@ gates:
     diff_scoped: false
     timeout_seconds: 30
 
+  # v1.9.2 T1 (REQ-V15-NG-04, closed): spec-v1.5's own note (spec-v1.5.md:
+  # 929-951) parked the whole-tree reformat as known debt, blocking only
+  # `blocking_paths` (this fast pre-commit check) while every other file
+  # stayed shadow. That debt is paid off in this release's own commit
+  # (mutation_check.py's re-derived find strings, gate 6 at 0 drifted, every
+  # `*.py` in the tree already formatted) -- `ruff-format-all` below is the
+  # whole-tree twin, the same shape as `ruff-check-all` next to
+  # `ruff-check`, wired into `pre-push`/`full` in its place. This gate stays
+  # only in `pre-commit`, for a fast per-commit check on the staged diff;
+  # `blocking_paths` still exists for that narrow, already-covered set.
   ruff-format:
     kind: command
     result_mode: exit_status
@@ -61,6 +71,19 @@ gates:
     diff_scoped: true
     blocking_paths: [devtools/checks.py, devtools/install_hooks.py,
                       tests/test_v15_standards.py]
+    timeout_seconds: 30
+
+  # devtools/bench_scenarios.py is excluded here too (pyproject.toml's
+  # [tool.ruff.format] exclude, REQ-V13-BEN-12) -- ruff format --check
+  # already honours that exclusion with no argv change needed.
+  ruff-format-all:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, ruff, format, --check, "."]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
     timeout_seconds: 30
 
   branch-name:

@@ -29,6 +29,7 @@ def capture(body_holder, payload=None, status=200):
     def handler(request):
         body_holder.append(request)
         return httpx.Response(status, json=payload if payload is not None else answer())
+
     return handler
 
 
@@ -55,7 +56,11 @@ def test_t_lm_02_tools_none_omits_keys():
     assert "tools" not in body
     assert "tool_choice" not in body
     assert build_payload("m", [], None).keys() == {
-        "model", "messages", "temperature", "max_tokens", "stream"
+        "model",
+        "messages",
+        "temperature",
+        "max_tokens",
+        "stream",
     }
 
 
@@ -63,10 +68,16 @@ def test_t_lm_03_tool_calls_parse():
     payload = answer(
         content=None,
         tool_calls=[
-            {"id": "call_a", "type": "function",
-             "function": {"name": "exec", "arguments": '{"argv": ["uname"]}'}},
-            {"id": "call_b", "type": "function",
-             "function": {"name": "load_skill", "arguments": {"name": "weather"}}},
+            {
+                "id": "call_a",
+                "type": "function",
+                "function": {"name": "exec", "arguments": '{"argv": ["uname"]}'},
+            },
+            {
+                "id": "call_b",
+                "type": "function",
+                "function": {"name": "load_skill", "arguments": {"name": "weather"}},
+            },
             {"function": {"name": "exec"}},
         ],
         finish_reason="tool_calls",
@@ -176,9 +187,7 @@ def test_t_lm_09_provider_switch(tmp_path):
         "ALLOWED_TG_IDS": "1",
     }
     with httpx.Client(transport=mock_llm_transport(lambda r: httpx.Response(200))) as http:
-        cfg = config.load_config(
-            env={**common, "LMSTUDIO_MODEL": "m"}, load_env_file=False
-        )
+        cfg = config.load_config(env={**common, "LMSTUDIO_MODEL": "m"}, load_env_file=False)
         assert isinstance(build_llm_client(cfg, client=http), LMStudioClient)
         cfg = config.load_config(
             env={
@@ -248,9 +257,7 @@ def test_t_v191_build_payload_refuses_a_protected_key_collision(monkeypatch):
     # rather than being a no-op that merely looks like one.
     import llm.base as base_module
 
-    monkeypatch.setattr(
-        base_module, "_PROTECTED_PAYLOAD_KEYS", frozenset({"response_format"})
-    )
+    monkeypatch.setattr(base_module, "_PROTECTED_PAYLOAD_KEYS", frozenset({"response_format"}))
     with pytest.raises(ValueError) as exc:
         base_module.build_payload("m", [], None, response_format=_RERANK_SCHEMA)
     assert "response_format" in str(exc.value)

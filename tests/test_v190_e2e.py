@@ -69,7 +69,8 @@ def document_update(*, file_id, file_name, file_size, update_id=1):
     return {
         "update_id": update_id,
         "message": {
-            "message_id": update_id, "date": 0,
+            "message_id": update_id,
+            "date": 0,
             "chat": {"id": USER_ID, "type": "private"},
             "from": {"id": USER_ID, "is_bot": False},
             "document": {"file_id": file_id, "file_name": file_name, "file_size": file_size},
@@ -81,7 +82,8 @@ def text_update(text, update_id):
     return {
         "update_id": update_id,
         "message": {
-            "message_id": update_id, "date": 0,
+            "message_id": update_id,
+            "date": 0,
             "chat": {"id": USER_ID, "type": "private"},
             "from": {"id": USER_ID, "is_bot": False},
             "text": text,
@@ -91,8 +93,15 @@ def text_update(text, update_id):
 
 def process(conn, cfg, upd, *, tg, llm, embedder):
     bot.process_update(
-        upd, conn=conn, tg=tg, cfg=cfg, llm=llm, skills={}, runner=RecordingRunner(),
-        bot_username=BOT_USERNAME, embedder=embedder,
+        upd,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        llm=llm,
+        skills={},
+        runner=RecordingRunner(),
+        bot_username=BOT_USERNAME,
+        embedder=embedder,
     )
 
 
@@ -109,24 +118,38 @@ def test_t_v190_e2e_01_upload_documents_ask_reply_carries_the_filename(tmp_path)
     data = b"Vacation policy: employees accrue twenty paid vacation days every year."
     tg.files["documents/f1"] = data
     process(
-        conn, cfg, document_update(file_id="f1", file_name="policy.txt", file_size=len(data)),
-        tg=tg, llm=FakeLLM([]), embedder=embedder,
+        conn,
+        cfg,
+        document_update(file_id="f1", file_name="policy.txt", file_size=len(data)),
+        tg=tg,
+        llm=FakeLLM([]),
+        embedder=embedder,
     )
     assert any(text.startswith("✅ policy.txt:") for _c, text in tg.sent)
 
     process(
-        conn, cfg, text_update("/documents", update_id=2),
-        tg=tg, llm=FakeLLM([]), embedder=embedder,
+        conn,
+        cfg,
+        text_update("/documents", update_id=2),
+        tg=tg,
+        llm=FakeLLM([]),
+        embedder=embedder,
     )
     assert "policy.txt" in tg.sent[-1][1]
 
-    llm = FakeLLM([
-        LLMResponse("", [search_call(0, "vacation days")], "tool_calls"),
-        LLMResponse("You get twenty vacation days per year.", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("", [search_call(0, "vacation days")], "tool_calls"),
+            LLMResponse("You get twenty vacation days per year.", [], "stop"),
+        ]
+    )
     process(
-        conn, cfg, text_update("How many vacation days do I get?", update_id=3),
-        tg=tg, llm=llm, embedder=embedder,
+        conn,
+        cfg,
+        text_update("How many vacation days do I get?", update_id=3),
+        tg=tg,
+        llm=llm,
+        embedder=embedder,
     )
 
     tool_message = llm.calls[1][0][-1]
@@ -153,18 +176,28 @@ def test_t_v190_e2e_02_pdf_three_pages_source_line_carries_the_page(tmp_path):
     data = write_pdf(pages)
     tg.files["documents/f1"] = data
     process(
-        conn, cfg, document_update(file_id="f1", file_name="handbook.pdf", file_size=len(data)),
-        tg=tg, llm=FakeLLM([]), embedder=embedder,
+        conn,
+        cfg,
+        document_update(file_id="f1", file_name="handbook.pdf", file_size=len(data)),
+        tg=tg,
+        llm=FakeLLM([]),
+        embedder=embedder,
     )
     assert any(text.startswith("✅ handbook.pdf:") for _c, text in tg.sent)
 
-    llm = FakeLLM([
-        LLMResponse("", [search_call(0, "refund window days")], "tool_calls"),
-        LLMResponse("The refund window is thirty days.", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("", [search_call(0, "refund window days")], "tool_calls"),
+            LLMResponse("The refund window is thirty days.", [], "stop"),
+        ]
+    )
     process(
-        conn, cfg, text_update("What is the refund window?", update_id=2),
-        tg=tg, llm=llm, embedder=embedder,
+        conn,
+        cfg,
+        text_update("What is the refund window?", update_id=2),
+        tg=tg,
+        llm=llm,
+        embedder=embedder,
     )
 
     tool_message = llm.calls[1][0][-1]
@@ -207,24 +240,38 @@ def test_t_v190_e2e_03_delete_then_the_same_question_carries_no_source_line(tmp_
     data = b"Vacation policy: employees accrue twenty paid vacation days every year."
     tg.files["documents/f1"] = data
     process(
-        conn, cfg, document_update(file_id="f1", file_name="policy.txt", file_size=len(data)),
-        tg=tg, llm=FakeLLM([]), embedder=embedder,
+        conn,
+        cfg,
+        document_update(file_id="f1", file_name="policy.txt", file_size=len(data)),
+        tg=tg,
+        llm=FakeLLM([]),
+        embedder=embedder,
     )
 
     process(
-        conn, cfg, text_update("/delete policy.txt", update_id=2),
-        tg=tg, llm=FakeLLM([]), embedder=embedder,
+        conn,
+        cfg,
+        text_update("/delete policy.txt", update_id=2),
+        tg=tg,
+        llm=FakeLLM([]),
+        embedder=embedder,
     )
     assert tg.sent[-1] == (USER_ID, "Deleted policy.txt.")
     assert storage.document_count(conn, user_id=USER_ID) == 0
 
-    llm = FakeLLM([
-        LLMResponse("", [search_call(0, "vacation days")], "tool_calls"),
-        LLMResponse("The documents do not cover that.", [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("", [search_call(0, "vacation days")], "tool_calls"),
+            LLMResponse("The documents do not cover that.", [], "stop"),
+        ]
+    )
     process(
-        conn, cfg, text_update("How many vacation days do I get?", update_id=3),
-        tg=tg, llm=llm, embedder=embedder,
+        conn,
+        cfg,
+        text_update("How many vacation days do I get?", update_id=3),
+        tg=tg,
+        llm=llm,
+        embedder=embedder,
     )
 
     tool_message = llm.calls[1][0][-1]

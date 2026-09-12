@@ -44,8 +44,7 @@ BASELINE_FLAGS = {
     "LLM_REASONING_POLICY": None,
     "LLM_REASONING_ON_PURPOSES": None,
 }
-CANDIDATE_FLAGS = {**BASELINE_FLAGS, "LLM_REASONING_POLICY": "off",
-                   "LLM_REASONING_ON_PURPOSES": ""}
+CANDIDATE_FLAGS = {**BASELINE_FLAGS, "LLM_REASONING_POLICY": "off", "LLM_REASONING_ON_PURPOSES": ""}
 PRICING = {
     "basis": "reference:some/model",
     "model": "some/model",
@@ -61,47 +60,104 @@ PRICING = {
 # deliberately tampered one is unambiguous
 # --------------------------------------------------------------------------
 
-def llm_row(row_id, *, conv_seq=1, purpose="agent", round_no=1, prompt=1000,
-            completion=100, cached=None, reasoning=None, reasoning_chars=0,
-            error_kind=None, cost=None, latency=500, tools_exposed=3, turn_id=1,
-            by_role=None):
+
+def llm_row(
+    row_id,
+    *,
+    conv_seq=1,
+    purpose="agent",
+    round_no=1,
+    prompt=1000,
+    completion=100,
+    cached=None,
+    reasoning=None,
+    reasoning_chars=0,
+    error_kind=None,
+    cost=None,
+    latency=500,
+    tools_exposed=3,
+    turn_id=1,
+    by_role=None,
+):
     total = None if prompt is None or completion is None else prompt + completion
     roles = by_role or {"system": 100, "tools": 50, "user": 10, "assistant": 0, "tool": 0}
     return {
-        "id": row_id, "conv_seq": conv_seq, "turn_id": turn_id, "purpose": purpose,
-        "round": round_no, "attempt": 1, "ts": "2026-01-01T00:00:00Z",
-        "provider": "lmstudio", "model": "m",
-        "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total,
-        "cached_tokens": cached, "reasoning_tokens": reasoning,
-        "reasoning_chars": reasoning_chars, "prompt_chars": (prompt or 0) * 3,
+        "id": row_id,
+        "conv_seq": conv_seq,
+        "turn_id": turn_id,
+        "purpose": purpose,
+        "round": round_no,
+        "attempt": 1,
+        "ts": "2026-01-01T00:00:00Z",
+        "provider": "lmstudio",
+        "model": "m",
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "cached_tokens": cached,
+        "reasoning_tokens": reasoning,
+        "reasoning_chars": reasoning_chars,
+        "prompt_chars": (prompt or 0) * 3,
         "prompt_chars_by_role": json.dumps(roles, sort_keys=True),
-        "messages_n": 2, "tools_exposed": tools_exposed, "latency_ms": latency,
-        "finish_reason": "stop", "tool_calls_n": 0, "error_kind": error_kind,
-        "cost_usd": cost, "cost_basis": None if cost is None else "reference:some/model",
+        "messages_n": 2,
+        "tools_exposed": tools_exposed,
+        "latency_ms": latency,
+        "finish_reason": "stop",
+        "tool_calls_n": 0,
+        "error_kind": error_kind,
+        "cost_usd": cost,
+        "cost_basis": None if cost is None else "reference:some/model",
     }
 
 
 def tool_row(row_id, *, conv_seq=1, tool="exec", output_tokens_est=200, turn_id=1):
     return {
-        "id": row_id, "conv_seq": conv_seq, "turn_id": turn_id,
-        "tool_call_id": f"call_{row_id}", "tool": tool, "ts": "2026-01-01T00:00:00Z",
-        "input_chars": 20, "raw_output_chars": 600, "output_chars": 600,
-        "output_tokens_est": output_tokens_est, "duration_ms": 30, "outcome": "ok",
+        "id": row_id,
+        "conv_seq": conv_seq,
+        "turn_id": turn_id,
+        "tool_call_id": f"call_{row_id}",
+        "tool": tool,
+        "ts": "2026-01-01T00:00:00Z",
+        "input_chars": 20,
+        "raw_output_chars": 600,
+        "output_chars": 600,
+        "output_tokens_est": output_tokens_est,
+        "duration_ms": 30,
+        "outcome": "ok",
     }
 
 
-def fake_run(scenario_id, repeat=1, *, llm_rows=None, tool_rows=None, success=True,
-             failure=None, answers=("ok",), wall_ms=1000, checks=None):
+def fake_run(
+    scenario_id,
+    repeat=1,
+    *,
+    llm_rows=None,
+    tool_rows=None,
+    success=True,
+    failure=None,
+    answers=("ok",),
+    wall_ms=1000,
+    checks=None,
+):
     llm_rows = [llm_row(1)] if llm_rows is None else list(llm_rows)
     tool_rows = [] if tool_rows is None else list(tool_rows)
     if checks is None:
-        checks = [{"kind": "answer_regex", "ok": success,
-                   "detail": "ok" if success else "pattern not found"}]
+        checks = [
+            {
+                "kind": "answer_regex",
+                "ok": success,
+                "detail": "ok" if success else "pattern not found",
+            }
+        ]
     return {
-        "scenario": scenario_id, "repeat": repeat, "success": success,
+        "scenario": scenario_id,
+        "repeat": repeat,
+        "success": success,
         "failure": None if success else (failure or "checks"),
-        "checks": checks, "answers": list(answers),
-        "llm_calls": llm_rows, "tool_calls": tool_rows,
+        "checks": checks,
+        "answers": list(answers),
+        "llm_calls": llm_rows,
+        "tool_calls": tool_rows,
         "totals": bench.totals_from_rows(llm_rows, tool_rows, wall_ms),
     }
 
@@ -109,19 +165,31 @@ def fake_run(scenario_id, repeat=1, *, llm_rows=None, tool_rows=None, success=Tr
 def fake_doc(runs=None, *, repeats=1, skipped=(), flags=None, **meta):
     skipped = list(skipped)
     if runs is None:
-        runs = [fake_run(scenario.id, repeat)
-                for scenario in SCENARIOS if scenario.id not in skipped
-                for repeat in range(1, repeats + 1)]
+        runs = [
+            fake_run(scenario.id, repeat)
+            for scenario in SCENARIOS
+            if scenario.id not in skipped
+            for repeat in range(1, repeats + 1)
+        ]
     document = {
         "bench_schema": bench.BENCH_SCHEMA,
         "meta": {
-            "tag": "t", "started_at": "2026-01-01T00:00:00Z",
-            "finished_at": "2026-01-01T01:00:00Z", "git_commit": "0" * 40,
-            "provider": "lmstudio", "model": "m", "context_length": 42496,
-            "repeats": repeats, "timeout_s": 600.0, "prefix_tokens": 900,
+            "tag": "t",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T01:00:00Z",
+            "git_commit": "0" * 40,
+            "provider": "lmstudio",
+            "model": "m",
+            "context_length": 42496,
+            "repeats": repeats,
+            "timeout_s": 600.0,
+            "prefix_tokens": 900,
             "scenarios_sha256": bench.scenarios_sha256(),
-            "pricing": dict(PRICING), "skipped_scenarios": skipped, "only": None,
-            "env_flags": dict(flags or BASELINE_FLAGS), "config_sha256": "c" * 64,
+            "pricing": dict(PRICING),
+            "skipped_scenarios": skipped,
+            "only": None,
+            "env_flags": dict(flags or BASELINE_FLAGS),
+            "config_sha256": "c" * 64,
             "constants": bench.constants(),
         },
         "runs": runs,
@@ -152,12 +220,10 @@ def make_config(tmp_path, **overrides):
 class ScriptedLLM:
     """Answers every request the same way unless a script is given."""
 
-    def __init__(self, script=None, answer="ответ 396 три 332 30 50 Orion KV cache",
-                 usage=None):
+    def __init__(self, script=None, answer="ответ 396 три 332 30 50 Orion KV cache", usage=None):
         self.script = list(script) if script is not None else None
         self.answer = answer
-        self.usage = usage if usage is not None else Usage(prompt_tokens=100,
-                                                           completion_tokens=10)
+        self.usage = usage if usage is not None else Usage(prompt_tokens=100, completion_tokens=10)
         self.calls = 0
 
     def describe(self):
@@ -190,12 +256,13 @@ class BlockingLLM:
         if self.calls <= self.before:
             calls = [ToolCall("raw", "exec", json.dumps({"argv": ["echo", "hi"]}))]
             return LLMResponse(
-                "", calls if self.tool_call else [], "tool_calls",
+                "",
+                calls if self.tool_call else [],
+                "tool_calls",
                 usage=Usage(prompt_tokens=10, completion_tokens=1),
             )
         self.event.wait(30)
-        return LLMResponse("late", [], "stop", usage=Usage(prompt_tokens=1,
-                                                           completion_tokens=1))
+        return LLMResponse("late", [], "stop", usage=Usage(prompt_tokens=1, completion_tokens=1))
 
 
 @pytest.fixture
@@ -243,12 +310,14 @@ def _fake_clock():
     def clock():
         state["now"] += 0.5
         return state["now"]
+
     return clock
 
 
 # --------------------------------------------------------------------------
 # the scenario catalog (REQ-V13-BEN-08, REQ-V13-BEN-09)
 # --------------------------------------------------------------------------
+
 
 def test_catalog_is_the_eighteen_frozen_scenarios():
     assert len(SCENARIOS) == 18
@@ -271,11 +340,11 @@ def test_no_regex_carries_the_markdown_escape():
 
 def test_out_of_range_turn_is_rejected_at_load_time():
     with pytest.raises(ValueError):
-        Scenario(id="X", title="x", turns=["a", "/new", "b"],
-                 checks=[answer_regex("a", turn=3)])
+        Scenario(id="X", title="x", turns=["a", "/new", "b"], checks=[answer_regex("a", turn=3)])
     # Two non-command turns, so turn=2 is in range and turn=-1 is the last one.
-    scenario = Scenario(id="X", title="x", turns=["a", "/new", "b"],
-                        checks=[answer_regex("a", turn=2)])
+    scenario = Scenario(
+        id="X", title="x", turns=["a", "/new", "b"], checks=[answer_regex("a", turn=2)]
+    )
     assert scenario.turn_index(2) == 1
     assert scenario.turn_index(-1) == 1
 
@@ -287,21 +356,27 @@ def test_unknown_check_kind_is_rejected():
 
 def test_an_answer_check_without_a_turn_is_rejected():
     with pytest.raises(ValueError):
-        Scenario(id="X", title="x", turns=["a"],
-                 checks=[Check(kind=bench_scenarios.ANSWER_REGEX, pattern="a")])
+        Scenario(
+            id="X",
+            title="x",
+            turns=["a"],
+            checks=[Check(kind=bench_scenarios.ANSWER_REGEX, pattern="a")],
+        )
 
 
 # --------------------------------------------------------------------------
 # check evaluation (section 7.3)
 # --------------------------------------------------------------------------
 
+
 def _scenario(checks, turns=("вопрос",)):
     return Scenario(id="T01", title="t", turns=list(turns), checks=list(checks))
 
 
 def test_each_check_kind_against_crafted_answers():
-    obs = bench.Observation(answers=["ответ 396"], tool_rows=[tool_row(1)],
-                            exit_codes=[0, 2], summary_goals=["a goal"])
+    obs = bench.Observation(
+        answers=["ответ 396"], tool_rows=[tool_row(1)], exit_codes=[0, 2], summary_goals=["a goal"]
+    )
     kinds = [
         (bench_scenarios.answer_regex(r"\b396\b"), True),
         (bench_scenarios.answer_regex("отсутствует"), False),
@@ -331,9 +406,9 @@ def test_json_keys_reads_the_first_object_and_reports_a_bounded_reason():
     assert result["ok"] is False
     assert result["detail"] == "1 of 2 keys matched"
 
-    result = bench.evaluate_checks(
-        _scenario([check]), bench.Observation(answers=["нет объекта"])
-    )[0]
+    result = bench.evaluate_checks(_scenario([check]), bench.Observation(answers=["нет объекта"]))[
+        0
+    ]
     assert result["detail"] == "no json object in the answer"
 
 
@@ -364,28 +439,32 @@ def test_json_keys_parses_a_nested_object_and_braces_inside_strings():
 
 
 def test_turn_addressing_counts_only_non_command_turns():
-    scenario = Scenario(id="T", title="t", turns=["a", "/new", "b", "c"],
-                        checks=[answer_regex("first", turn=1),
-                                answer_regex("second", turn=2),
-                                answer_regex("third", turn=3)])
+    scenario = Scenario(
+        id="T",
+        title="t",
+        turns=["a", "/new", "b", "c"],
+        checks=[
+            answer_regex("first", turn=1),
+            answer_regex("second", turn=2),
+            answer_regex("third", turn=3),
+        ],
+    )
     obs = bench.Observation(answers=["first", "second", "third"])
     assert [check["ok"] for check in bench.evaluate_checks(scenario, obs)] == [True] * 3
 
 
 def test_answer_max_chars_detail_is_never_an_excerpt():
     obs = bench.Observation(answers=["x" * 1800])
-    result = bench.evaluate_checks(
-        _scenario([bench_scenarios.answer_max_chars(1500)]), obs
-    )[0]
+    result = bench.evaluate_checks(_scenario([bench_scenarios.answer_max_chars(1500)]), obs)[0]
     assert result["detail"] == "1800 > 1500 chars"
     assert "xxx" not in result["detail"]
 
 
 def test_exit_code_check_fails_loudly_when_the_audit_log_is_unreadable():
     obs = bench.Observation(answers=["a"], audit_read=False)
-    result = bench.evaluate_checks(
-        _scenario([bench_scenarios.exit_code_seen(nonzero=True)]), obs
-    )[0]
+    result = bench.evaluate_checks(_scenario([bench_scenarios.exit_code_seen(nonzero=True)]), obs)[
+        0
+    ]
     assert result == {"kind": "exit_code_seen", "ok": False, "detail": "audit log unreadable"}
 
 
@@ -393,14 +472,20 @@ def test_exit_code_check_fails_loudly_when_the_audit_log_is_unreadable():
 # run_bench with fakes (REQ-V13-BEN-07)
 # --------------------------------------------------------------------------
 
+
 def test_run_bench_writes_a_document_check_accepts(tmp_path):
     result = bench.run_bench(SCENARIOS, **run_kwargs(tmp_path))
     document = bench.redact_document(result.document(), [TG_ID])
-    document["meta"].update({
-        "tag": "t", "started_at": "2026-01-01T00:00:00Z",
-        "finished_at": "2026-01-01T00:10:00Z", "git_commit": "0" * 40,
-        "prefix_tokens": 900, "pricing": None,
-    })
+    document["meta"].update(
+        {
+            "tag": "t",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:10:00Z",
+            "git_commit": "0" * 40,
+            "prefix_tokens": 900,
+            "pricing": None,
+        }
+    )
     code, reason = bench.check_document(document)
     assert (code, reason) == (0, "valid"), reason
     assert result.meta["skipped_scenarios"] == ["S08", "S17"]
@@ -433,11 +518,14 @@ def test_factories_are_called_once_per_run_with_that_runs_config(tmp_path):
         return RecordingRunner()
 
     scenarios = [scenario for scenario in SCENARIOS if scenario.id in ("S01", "S02")]
-    bench.run_bench(scenarios, **run_kwargs(
-        tmp_path, repeats=2, fetcher_factory=fetcher_factory, runner_factory=runner_factory
-    ))
+    bench.run_bench(
+        scenarios,
+        **run_kwargs(
+            tmp_path, repeats=2, fetcher_factory=fetcher_factory, runner_factory=runner_factory
+        ),
+    )
     assert len(seen["fetch"]) == 4 == len(seen["runner"])
-    assert len(set(seen["fetch"])) == 4          # a fresh sandbox per run
+    assert len(set(seen["fetch"])) == 4  # a fresh sandbox per run
     assert seen["fetch"] == seen["runner"]
     for workdir in seen["fetch"]:
         assert workdir.name == "sandbox"
@@ -447,6 +535,7 @@ def test_factories_are_called_once_per_run_with_that_runs_config(tmp_path):
 def test_the_harness_never_constructs_a_telegram_client(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("TelegramClient must never be constructed by the harness")
+
     monkeypatch.setattr(bench.bot.TelegramClient, "__init__", forbidden)
     result = bench.run_bench(
         [scenario for scenario in SCENARIOS if scenario.id == "S01"], **run_kwargs(tmp_path)
@@ -510,16 +599,17 @@ def test_a_failed_invocation_is_recorded_and_counted(tmp_path):
 # aborts: timeout, SIGINT, cost cap (REQ-V13-BEN-05, REQ-V13-BEN-02)
 # --------------------------------------------------------------------------
 
+
 def test_a_timed_out_run_aborts_the_benchmark(tmp_path, blocking_llm):
     scenarios = [scenario for scenario in SCENARIOS if scenario.id in ("S01", "S02")]
-    result = bench.run_bench(scenarios, **run_kwargs(
-        tmp_path, timeout_s=0.2, llm_factory=lambda cfg: blocking_llm
-    ))
+    result = bench.run_bench(
+        scenarios, **run_kwargs(tmp_path, timeout_s=0.2, llm_factory=lambda cfg: blocking_llm)
+    )
     assert result.meta["aborted"] == "timeout:S01-1"
     assert len(result.runs) == 1
     assert result.runs[0]["failure"] == "timeout"
     assert result.runs[0]["success"] is False
-    assert (tmp_path / ".bench" / "t" / "S01-1").exists()   # kept for inspection
+    assert (tmp_path / ".bench" / "t" / "S01-1").exists()  # kept for inspection
 
 
 def test_the_timeout_snapshot_holds_only_committed_rows(tmp_path):
@@ -565,10 +655,15 @@ def test_the_cost_cap_aborts_after_the_run_that_crossed_it(tmp_path):
     usage = Usage(prompt_tokens=100, completion_tokens=10, provider_cost_usd=0.02)
     resolver = bench.pricing.make_resolver(make_config(tmp_path), {})
     scenarios = [scenario for scenario in SCENARIOS if scenario.id in ("S01", "S02")]
-    result = bench.run_bench(scenarios, **run_kwargs(
-        tmp_path, max_cost_usd=0.01, resolve_cost=resolver,
-        llm_factory=lambda cfg: ScriptedLLM(usage=usage),
-    ))
+    result = bench.run_bench(
+        scenarios,
+        **run_kwargs(
+            tmp_path,
+            max_cost_usd=0.01,
+            resolve_cost=resolver,
+            llm_factory=lambda cfg: ScriptedLLM(usage=usage),
+        ),
+    )
     assert result.meta["aborted"] == "cost_cap"
     assert len(result.runs) == 1
     assert result.runs[0]["totals"]["cost_usd"] == pytest.approx(0.02)
@@ -603,8 +698,7 @@ def test_openrouter_refuses_to_run_without_a_cost_cap(tmp_path, monkeypatch, cap
     assert not (tmp_path / "assets").exists()
 
 
-def test_openrouter_from_the_env_refuses_to_run_without_a_cost_cap(
-        tmp_path, monkeypatch, capsys):
+def test_openrouter_from_the_env_refuses_to_run_without_a_cost_cap(tmp_path, monkeypatch, capsys):
     """REQ-V13-BEN-02 caps the provider that spends, not the CLI flag: without
     `--provider` the harness pins nothing and `.env` decides."""
     _cli_env(monkeypatch, tmp_path, provider_env="openrouter")
@@ -620,14 +714,21 @@ def test_an_openrouter_run_with_a_cap_is_not_refused(tmp_path, monkeypatch, caps
     _cli_env(monkeypatch, tmp_path, provider_env="openrouter")
     monkeypatch.setattr(bench, "_resolve_pricing", lambda cfg, client: (None, None))
     monkeypatch.setattr(bench, "_prefix_tokens", lambda client, skills: 900)
-    monkeypatch.setattr(bench.llm_module, "build_llm_client",
-                        lambda cfg_, client=None, override=None: ScriptedLLM())
+    monkeypatch.setattr(
+        bench.llm_module, "build_llm_client", lambda cfg_, client=None, override=None: ScriptedLLM()
+    )
     runs = [fake_run("S01", 1)]
-    monkeypatch.setattr(bench, "run_bench", lambda *args, **kwargs: bench.BenchResult(
-        meta=dict(fake_doc()["meta"]), runs=runs, summary=bench.summarize(runs, [], 1)))
+    monkeypatch.setattr(
+        bench,
+        "run_bench",
+        lambda *args, **kwargs: bench.BenchResult(
+            meta=dict(fake_doc()["meta"]), runs=runs, summary=bench.summarize(runs, [], 1)
+        ),
+    )
 
-    code = bench.main(["run", "--tag", "capped", "--only", "S01", "--repeats", "1",
-                       "--max-cost-usd", "0.01"])
+    code = bench.main(
+        ["run", "--tag", "capped", "--only", "S01", "--repeats", "1", "--max-cost-usd", "0.01"]
+    )
     assert "--max-cost-usd" not in capsys.readouterr().err
     assert code == 0
     assert (tmp_path / "assets" / "capped.json").exists()
@@ -644,6 +745,7 @@ def test_a_pinned_lmstudio_provider_overrides_an_openrouter_env(tmp_path, monkey
 # --------------------------------------------------------------------------
 # meta (REQ-V13-BEN-03, REQ-V13-BEN-10)
 # --------------------------------------------------------------------------
+
 
 def test_env_flags_are_exactly_the_nine_keys_with_null_for_absent_fields(tmp_path):
     flags = bench.env_flags(make_config(tmp_path))
@@ -691,9 +793,7 @@ def test_the_pinned_treatment_tracks_the_config_defaults():
     """`STAGE_C_DEFAULTS` spells the treatment out in its own literals, so a
     drift in `config` would leave the harness measuring one window while the
     bot serves another — and the final gate would not notice."""
-    assert bench.STAGE_C_DEFAULTS["EXEC_OUTPUT_DEFAULT_CHARS"] == (
-        config.DEFAULT_EXEC_OUTPUT_CHARS
-    )
+    assert bench.STAGE_C_DEFAULTS["EXEC_OUTPUT_DEFAULT_CHARS"] == (config.DEFAULT_EXEC_OUTPUT_CHARS)
     assert bench.STAGE_C_DEFAULTS["FETCH_INLINE_DEFAULT_CHARS"] == (
         config.DEFAULT_FETCH_INLINE_CHARS
     )
@@ -735,53 +835,130 @@ def _arithmetic_runs():
     reported `cached_tokens` of zero, no price at all, and an even number of
     repeats per scenario."""
     rows_a = [
-        llm_row(1, purpose="agent", round_no=1, prompt=1000, completion=100,
-                cached=0, latency=500, tools_exposed=3, by_role=_ARITH_ROLES_START),
-        llm_row(2, purpose="agent", round_no=2, prompt=1400, completion=100,
-                cached=0, latency=600, tools_exposed=3, error_kind="timeout",
-                by_role=_ARITH_ROLES_GROWN),
-        llm_row(3, purpose="agent", round_no=2, prompt=1400, completion=200,
-                cached=0, latency=700, tools_exposed=3, by_role=_ARITH_ROLES_GROWN),
-        llm_row(4, purpose="summary", round_no=1, prompt=300, completion=50,
-                cached=0, latency=100, tools_exposed=0, by_role=_ARITH_ROLES_START),
+        llm_row(
+            1,
+            purpose="agent",
+            round_no=1,
+            prompt=1000,
+            completion=100,
+            cached=0,
+            latency=500,
+            tools_exposed=3,
+            by_role=_ARITH_ROLES_START,
+        ),
+        llm_row(
+            2,
+            purpose="agent",
+            round_no=2,
+            prompt=1400,
+            completion=100,
+            cached=0,
+            latency=600,
+            tools_exposed=3,
+            error_kind="timeout",
+            by_role=_ARITH_ROLES_GROWN,
+        ),
+        llm_row(
+            3,
+            purpose="agent",
+            round_no=2,
+            prompt=1400,
+            completion=200,
+            cached=0,
+            latency=700,
+            tools_exposed=3,
+            by_role=_ARITH_ROLES_GROWN,
+        ),
+        llm_row(
+            4,
+            purpose="summary",
+            round_no=1,
+            prompt=300,
+            completion=50,
+            cached=0,
+            latency=100,
+            tools_exposed=0,
+            by_role=_ARITH_ROLES_START,
+        ),
     ]
-    tools_a = [tool_row(1, tool="exec", output_tokens_est=300),
-               tool_row(2, tool="fetch", output_tokens_est=200)]
+    tools_a = [
+        tool_row(1, tool="exec", output_tokens_est=300),
+        tool_row(2, tool="fetch", output_tokens_est=200),
+    ]
     rows_b = [
-        llm_row(1, purpose="agent", round_no=1, prompt=1400, completion=300,
-                cached=0, latency=400, tools_exposed=3, by_role=_ARITH_ROLES_START),
+        llm_row(
+            1,
+            purpose="agent",
+            round_no=1,
+            prompt=1400,
+            completion=300,
+            cached=0,
+            latency=400,
+            tools_exposed=3,
+            by_role=_ARITH_ROLES_START,
+        ),
     ]
     # prompts 1000 → 1400 → 1400 → 300: new = 1000 + 400 + 0 + 0 = 1400,
     # re-sent = 4100 − 1400 = 2700.
     totals_a = {
-        "calls": 4, "failed_calls": 1, "prompt_tokens": 4100, "completion_tokens": 450,
-        "cached_tokens": 0, "reasoning_tokens": 0, "tool_calls": 2,
-        "tool_output_tokens_est": 500, "latency_ms": 1900, "cost_usd": None,
-        "resent_tokens": 2700, "new_tokens": 1400, "wall_ms": 1000,
+        "calls": 4,
+        "failed_calls": 1,
+        "prompt_tokens": 4100,
+        "completion_tokens": 450,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+        "tool_calls": 2,
+        "tool_output_tokens_est": 500,
+        "latency_ms": 1900,
+        "cost_usd": None,
+        "resent_tokens": 2700,
+        "new_tokens": 1400,
+        "wall_ms": 1000,
     }
     totals_b = {
-        "calls": 1, "failed_calls": 0, "prompt_tokens": 1400, "completion_tokens": 300,
-        "cached_tokens": 0, "reasoning_tokens": 0, "tool_calls": 0,
-        "tool_output_tokens_est": 0, "latency_ms": 400, "cost_usd": None,
-        "resent_tokens": 0, "new_tokens": 1400, "wall_ms": 2000,
+        "calls": 1,
+        "failed_calls": 0,
+        "prompt_tokens": 1400,
+        "completion_tokens": 300,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+        "tool_calls": 0,
+        "tool_output_tokens_est": 0,
+        "latency_ms": 400,
+        "cost_usd": None,
+        "resent_tokens": 0,
+        "new_tokens": 1400,
+        "wall_ms": 2000,
     }
-    run_a = {"scenario": "S01", "repeat": 1, "success": True, "failure": None,
-             "checks": [{"kind": "answer_regex", "ok": True, "detail": "ok"}],
-             "answers": ["ok"], "llm_calls": rows_a, "tool_calls": tools_a,
-             "totals": totals_a}
-    run_b = {"scenario": "S01", "repeat": 2, "success": False, "failure": "checks",
-             "checks": [{"kind": "answer_regex", "ok": False, "detail": "pattern not found"}],
-             "answers": ["no"], "llm_calls": rows_b, "tool_calls": [],
-             "totals": totals_b}
+    run_a = {
+        "scenario": "S01",
+        "repeat": 1,
+        "success": True,
+        "failure": None,
+        "checks": [{"kind": "answer_regex", "ok": True, "detail": "ok"}],
+        "answers": ["ok"],
+        "llm_calls": rows_a,
+        "tool_calls": tools_a,
+        "totals": totals_a,
+    }
+    run_b = {
+        "scenario": "S01",
+        "repeat": 2,
+        "success": False,
+        "failure": "checks",
+        "checks": [{"kind": "answer_regex", "ok": False, "detail": "pattern not found"}],
+        "answers": ["no"],
+        "llm_calls": rows_b,
+        "tool_calls": [],
+        "totals": totals_b,
+    }
     return run_a, run_b
 
 
 def test_totals_from_rows_matches_hand_computed_arithmetic():
     run_a, run_b = _arithmetic_runs()
-    assert bench.totals_from_rows(
-        run_a["llm_calls"], run_a["tool_calls"], 1000) == run_a["totals"]
-    assert bench.totals_from_rows(
-        run_b["llm_calls"], run_b["tool_calls"], 2000) == run_b["totals"]
+    assert bench.totals_from_rows(run_a["llm_calls"], run_a["tool_calls"], 1000) == run_a["totals"]
+    assert bench.totals_from_rows(run_b["llm_calls"], run_b["tool_calls"], 2000) == run_b["totals"]
 
 
 def test_summarize_matches_hand_computed_arithmetic():
@@ -801,20 +978,35 @@ def test_summarize_matches_hand_computed_arithmetic():
                 "of": 2,
                 # An even count averages the two runs — never picks one of them.
                 "median": {
-                    "calls": 2.5, "failed_calls": 0.5, "prompt_tokens": 2750.0,
-                    "completion_tokens": 375.0, "cached_tokens": 0.0,
-                    "reasoning_tokens": 0.0, "tool_calls": 1.0,
-                    "tool_output_tokens_est": 250.0, "latency_ms": 1150.0,
-                    "cost_usd": None, "resent_tokens": 1350.0, "new_tokens": 1400.0,
+                    "calls": 2.5,
+                    "failed_calls": 0.5,
+                    "prompt_tokens": 2750.0,
+                    "completion_tokens": 375.0,
+                    "cached_tokens": 0.0,
+                    "reasoning_tokens": 0.0,
+                    "tool_calls": 1.0,
+                    "tool_output_tokens_est": 250.0,
+                    "latency_ms": 1150.0,
+                    "cost_usd": None,
+                    "resent_tokens": 1350.0,
+                    "new_tokens": 1400.0,
                     "wall_ms": 1500.0,
                 },
             },
         },
         "totals": {
-            "calls": 5, "failed_calls": 1, "prompt_tokens": 5500,
-            "completion_tokens": 750, "cached_tokens": 0, "reasoning_tokens": 0,
-            "tool_calls": 2, "tool_output_tokens_est": 500, "latency_ms": 2300,
-            "cost_usd": None, "resent_tokens": 2700, "new_tokens": 2800,
+            "calls": 5,
+            "failed_calls": 1,
+            "prompt_tokens": 5500,
+            "completion_tokens": 750,
+            "cached_tokens": 0,
+            "reasoning_tokens": 0,
+            "tool_calls": 2,
+            "tool_output_tokens_est": 500,
+            "latency_ms": 2300,
+            "cost_usd": None,
+            "resent_tokens": 2700,
+            "new_tokens": 2800,
             "wall_ms": 3000,
         },
         "avg_per_task": {
@@ -829,15 +1021,21 @@ def test_summarize_matches_hand_computed_arithmetic():
         "tokens_per_success": 6250.0,
         # `cached_tokens` was *reported* as zero, so the rate is 0.0, not null.
         "cache_hit_rate": 0.0,
-        "top_tools": [{"name": "exec", "calls": 1, "output_tokens_est": 300},
-                      {"name": "fetch", "calls": 1, "output_tokens_est": 200}],
+        "top_tools": [
+            {"name": "exec", "calls": 1, "output_tokens_est": 300},
+            {"name": "fetch", "calls": 1, "output_tokens_est": 200},
+        ],
         # Three rows tie at 1400; the strict `>` keeps the first of them.
-        "top_turn": {"scenario": "S01", "repeat": 1, "turn": 1, "round": 2,
-                     "prompt_tokens": 1400},
+        "top_turn": {"scenario": "S01", "repeat": 1, "turn": 1, "round": 2, "prompt_tokens": 1400},
         # Run B has one agent call and grew by nothing — it stays in the
         # denominator, so the mean is half of run A's growth.
-        "context_growth": {"system": 0.0, "tools": 0.0, "user": 0.0,
-                           "assistant": 20.0, "tool": 100.0},
+        "context_growth": {
+            "system": 0.0,
+            "tools": 0.0,
+            "user": 0.0,
+            "assistant": 20.0,
+            "tool": 100.0,
+        },
     }
 
 
@@ -849,13 +1047,21 @@ def test_summarize_of_an_empty_run_set_matches_hand_computed_arithmetic():
         "success_rate": 0.0,
         "per_scenario": {},
         "totals": {
-            "calls": 0, "failed_calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
-            "cached_tokens": 0, "reasoning_tokens": 0, "tool_calls": 0,
-            "tool_output_tokens_est": 0, "latency_ms": 0, "cost_usd": None,
-            "resent_tokens": 0, "new_tokens": 0, "wall_ms": 0,
+            "calls": 0,
+            "failed_calls": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+            "reasoning_tokens": 0,
+            "tool_calls": 0,
+            "tool_output_tokens_est": 0,
+            "latency_ms": 0,
+            "cost_usd": None,
+            "resent_tokens": 0,
+            "new_tokens": 0,
+            "wall_ms": 0,
         },
-        "avg_per_task": {"tokens": 0.0, "rounds": 0.0, "tool_calls": 0.0,
-                         "latency_ms": 0.0},
+        "avg_per_task": {"tokens": 0.0, "rounds": 0.0, "tool_calls": 0.0, "latency_ms": 0.0},
         "cost_per_success": None,
         "tokens_per_success": None,
         "resent_share": 0.0,
@@ -863,8 +1069,7 @@ def test_summarize_of_an_empty_run_set_matches_hand_computed_arithmetic():
         "cache_hit_rate": None,
         "top_tools": [],
         "top_turn": None,
-        "context_growth": {"system": 0.0, "tools": 0.0, "user": 0.0,
-                           "assistant": 0.0, "tool": 0.0},
+        "context_growth": {"system": 0.0, "tools": 0.0, "user": 0.0, "assistant": 0.0, "tool": 0.0},
     }
 
 
@@ -915,14 +1120,16 @@ def test_check_rejects_invalid_token_counts():
     document = fake_doc()
     document["runs"][0]["llm_calls"][0]["prompt_tokens"] = -5
     document["runs"][0]["totals"] = bench.totals_from_rows(
-        document["runs"][0]["llm_calls"], [], 1000)
+        document["runs"][0]["llm_calls"], [], 1000
+    )
     document["summary"] = bench.summarize(document["runs"], [], 1)
     assert bench.check_document(document)[0] == 3
 
     document = fake_doc()
     document["runs"][0]["llm_calls"][0]["cached_tokens"] = 5000
     document["runs"][0]["totals"] = bench.totals_from_rows(
-        document["runs"][0]["llm_calls"], [], 1000)
+        document["runs"][0]["llm_calls"], [], 1000
+    )
     document["summary"] = bench.summarize(document["runs"], [], 1)
     code, reason = bench.check_document(document)
     assert code == 3
@@ -978,8 +1185,7 @@ def test_check_rejects_a_skip_of_a_non_network_scenario():
     assert "not a network scenario" in reason
 
 
-def test_a_narrowed_run_passes_check_and_renders_every_heading(tmp_path, monkeypatch,
-                                                               capsys):
+def test_a_narrowed_run_passes_check_and_renders_every_heading(tmp_path, monkeypatch, capsys):
     """REQ-V13-AUD-03 and REQ-V13-RSN-02 report on files produced by `--only`,
     so a narrowed run must validate against its own selection."""
     _stub_cli(monkeypatch, tmp_path)
@@ -994,8 +1200,16 @@ def test_a_narrowed_run_passes_check_and_renders_every_heading(tmp_path, monkeyp
     out = tmp_path / "smoke.md"
     assert bench.main(["report", "--baseline", str(path), "--out", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
-    for heading in ("## Meta", "## Per scenario", "## Totals\n", "## Totals by purpose",
-                    "## Audit", "## Reasoning", "## Latency", "## Failures"):
+    for heading in (
+        "## Meta",
+        "## Per scenario",
+        "## Totals\n",
+        "## Totals by purpose",
+        "## Audit",
+        "## Reasoning",
+        "## Latency",
+        "## Failures",
+    ):
         assert heading in text, heading
     capsys.readouterr()
 
@@ -1048,9 +1262,14 @@ def test_check_rejects_a_stale_scenarios_hash():
 
 
 def test_check_validates_the_pricing_snapshot():
-    manual = {"basis": "manual", "model": None, "input_usd_per_mtok": 1.0,
-              "output_usd_per_mtok": 2.0, "cached_input_usd_per_mtok": None,
-              "fetched_at": None}
+    manual = {
+        "basis": "manual",
+        "model": None,
+        "input_usd_per_mtok": 1.0,
+        "output_usd_per_mtok": 2.0,
+        "cached_input_usd_per_mtok": None,
+        "fetched_at": None,
+    }
     assert bench.check_document(fake_doc(pricing=manual)) == (0, "valid")
     assert bench.check_document(fake_doc(pricing=None)) == (0, "valid")
 
@@ -1061,8 +1280,12 @@ def test_check_validates_the_pricing_snapshot():
 
 
 def test_conv_seq_resets_the_resent_arithmetic_at_a_new_conversation():
-    rows = [llm_row(1, conv_seq=1, prompt=100), llm_row(2, conv_seq=1, prompt=300),
-            llm_row(3, conv_seq=2, prompt=120), llm_row(4, conv_seq=2, prompt=400)]
+    rows = [
+        llm_row(1, conv_seq=1, prompt=100),
+        llm_row(2, conv_seq=1, prompt=300),
+        llm_row(3, conv_seq=2, prompt=120),
+        llm_row(4, conv_seq=2, prompt=400),
+    ]
     totals = bench.totals_from_rows(rows, [], 1000)
     # per group: (100 new) + (200 new, 100 re-sent); (120 new) + (280 new, 120 re-sent)
     assert totals["resent_tokens"] == 220
@@ -1107,6 +1330,7 @@ def test_check_rejects_a_row_with_an_unknown_column():
 # `report` and `--gate` (REQ-V13-BEN-14, section 13.3)
 # --------------------------------------------------------------------------
 
+
 def _force_full_gate_scenarios(candidate: dict) -> None:
     """erratum: spec-v1.7.0 T7, REQ-V170-BEN-06 item 3 -- the new executable
     3/3 rule over GATE_REQUIRED_FULL_SCENARIOS is not what most `_pair()`
@@ -1124,16 +1348,21 @@ def _force_full_gate_scenarios(candidate: dict) -> None:
             candidate["summary"]["per_scenario"][scenario_id]["of"] = 3
 
 
-def _pair(*, candidate_prompt=600, candidate_completion=60, repeats=1,
-          candidate_extra_rows=(), candidate_success=True):
+def _pair(
+    *,
+    candidate_prompt=600,
+    candidate_completion=60,
+    repeats=1,
+    candidate_extra_rows=(),
+    candidate_success=True,
+):
     baseline = fake_doc(repeats=repeats)
     runs = []
     for scenario in SCENARIOS:
         for repeat in range(1, repeats + 1):
             rows = [llm_row(1, prompt=candidate_prompt, completion=candidate_completion)]
             rows += [copy.deepcopy(row) for row in candidate_extra_rows]
-            runs.append(fake_run(scenario.id, repeat, llm_rows=rows,
-                                 success=candidate_success))
+            runs.append(fake_run(scenario.id, repeat, llm_rows=rows, success=candidate_success))
     candidate = fake_doc(runs, repeats=repeats, flags=CANDIDATE_FLAGS, tag="optimized")
     if candidate_success:
         _force_full_gate_scenarios(candidate)
@@ -1143,8 +1372,17 @@ def _pair(*, candidate_prompt=600, candidate_completion=60, repeats=1,
 def test_report_renders_every_required_heading():
     baseline, candidate = _pair()
     text = bench.render_report(baseline, candidate)
-    for heading in ("## Meta", "## Per scenario", "## Totals\n", "## Totals by purpose",
-                    "## Audit", "## Reasoning", "## Latency", "## Failures", "## Verdict"):
+    for heading in (
+        "## Meta",
+        "## Per scenario",
+        "## Totals\n",
+        "## Totals by purpose",
+        "## Audit",
+        "## Reasoning",
+        "## Latency",
+        "## Failures",
+        "## Verdict",
+    ):
         assert heading in text, heading
     assert "env_flags.HISTORY_TOOL_STUB" in text
     assert "pricing.basis" in text
@@ -1157,9 +1395,11 @@ def test_report_of_a_single_file_has_no_verdict():
 
 
 def test_report_totals_by_purpose_and_latency_are_recomputed():
-    rows = [llm_row(1, purpose="agent", prompt=100, completion=10, latency=200),
-            llm_row(2, purpose="agent", prompt=300, completion=20, latency=400),
-            llm_row(3, purpose="summary", prompt=50, completion=5, latency=600)]
+    rows = [
+        llm_row(1, purpose="agent", prompt=100, completion=10, latency=200),
+        llm_row(2, purpose="agent", prompt=300, completion=20, latency=400),
+        llm_row(3, purpose="summary", prompt=50, completion=5, latency=600),
+    ]
     document = fake_doc()
     document["runs"][0]["llm_calls"] = rows
     document["runs"][0]["totals"] = bench.totals_from_rows(rows, [], 1000)
@@ -1172,8 +1412,9 @@ def test_report_totals_by_purpose_and_latency_are_recomputed():
 
 def test_prefix_share_has_one_shared_implementation():
     """REQ-V13-OBS-08: the report and the dashboard read the same function."""
-    document = fake_doc(runs=[fake_run("S01", 1, llm_rows=[llm_row(1, prompt=1000)])],
-                        prefix_tokens=250)
+    document = fake_doc(
+        runs=[fake_run("S01", 1, llm_rows=[llm_row(1, prompt=1000)])], prefix_tokens=250
+    )
     assert metrics.prefix_share(document) == 0.25
     assert metrics.prefix_share(fake_doc(prefix_tokens=None)) is None
     assert not hasattr(bench, "_prefix_share")
@@ -1191,23 +1432,31 @@ def test_report_reasoning_block_splits_by_tools_exposed():
     ]
     document = fake_doc(runs=[fake_run("S01", 1, llm_rows=rows)])
     text = bench.render_report(document)
-    assert ("- reasoning observed: yes, max reasoning_tokens: 42, "
-            "max reasoning_chars: 130, \u03a3 reasoning_tokens: 42, "
-            "reasoning share: 0.1400") in text
-    assert ("- tool-exposed calls: calls: 2, reasoning observed: yes, "
-            "max reasoning_tokens: 42, max reasoning_chars: 130, "
-            "\u03a3 reasoning_tokens: 42, reasoning share: 0.2100") in text
+    assert (
+        "- reasoning observed: yes, max reasoning_tokens: 42, "
+        "max reasoning_chars: 130, \u03a3 reasoning_tokens: 42, "
+        "reasoning share: 0.1400"
+    ) in text
+    assert (
+        "- tool-exposed calls: calls: 2, reasoning observed: yes, "
+        "max reasoning_tokens: 42, max reasoning_chars: 130, "
+        "\u03a3 reasoning_tokens: 42, reasoning share: 0.2100"
+    ) in text
     # A provider that honestly reports zero renders 0.0000, never `n/a`.
-    assert ("- tools-withheld calls: calls: 1, reasoning observed: no, "
-            "max reasoning_tokens: 0, max reasoning_chars: 0, "
-            "\u03a3 reasoning_tokens: 0, reasoning share: 0.0000") in text
+    assert (
+        "- tools-withheld calls: calls: 1, reasoning observed: no, "
+        "max reasoning_tokens: 0, max reasoning_chars: 0, "
+        "\u03a3 reasoning_tokens: 0, reasoning share: 0.0000"
+    ) in text
 
 
 def test_report_reasoning_share_is_chars_only_when_no_row_reports_tokens():
     """Section 7.8: `n/a (chars only: N)` is the branch for *no* row carrying
     `reasoning_tokens` at all — not for rows carrying a zero."""
-    rows = [llm_row(1, reasoning=None, reasoning_chars=70),
-            llm_row(2, reasoning=None, reasoning_chars=30)]
+    rows = [
+        llm_row(1, reasoning=None, reasoning_chars=70),
+        llm_row(2, reasoning=None, reasoning_chars=30),
+    ]
     text = bench.render_report(fake_doc(runs=[fake_run("S01", 1, llm_rows=rows)]))
     assert "reasoning share: n/a (chars only: 100)" in text
 
@@ -1218,9 +1467,11 @@ def test_report_reasoning_share_is_chars_only_when_no_row_reports_tokens():
 
 
 def test_report_reasoning_counts_only_the_error_free_calls_of_a_group():
-    rows = [llm_row(1, reasoning=5, tools_exposed=3),
-            llm_row(2, reasoning=5, tools_exposed=3, error_kind="timeout"),
-            llm_row(3, reasoning=5, tools_exposed=0, error_kind="http_5xx")]
+    rows = [
+        llm_row(1, reasoning=5, tools_exposed=3),
+        llm_row(2, reasoning=5, tools_exposed=3, error_kind="timeout"),
+        llm_row(3, reasoning=5, tools_exposed=0, error_kind="http_5xx"),
+    ]
     text = bench.render_report(fake_doc(runs=[fake_run("S01", 1, llm_rows=rows)]))
     assert "- tool-exposed calls: calls: 1, " in text
     assert "- tools-withheld calls: calls: 0, " in text
@@ -1230,7 +1481,10 @@ def test_report_failures_section_truncates_and_says_none():
     assert "none" in bench._failures_section(fake_doc(), None)
     document = fake_doc()
     document["runs"][3] = fake_run(
-        document["runs"][3]["scenario"], 1, success=False, failure="checks",
+        document["runs"][3]["scenario"],
+        1,
+        success=False,
+        failure="checks",
         answers=["y" * 400],
         checks=[{"kind": "answer_regex", "ok": False, "detail": "pattern not found"}],
     )
@@ -1242,11 +1496,18 @@ def test_report_failures_section_truncates_and_says_none():
     assert "y" * 301 not in section
 
 
-@pytest.mark.parametrize("field_name,value", [
-    ("provider", "openrouter"), ("model", "other"), ("context_length", 8192),
-    ("repeats", 2), ("timeout_s", 300.0), ("scenarios_sha256", "f" * 64),
-    ("config_sha256", "d" * 64),
-])
+@pytest.mark.parametrize(
+    "field_name,value",
+    [
+        ("provider", "openrouter"),
+        ("model", "other"),
+        ("context_length", 8192),
+        ("repeats", 2),
+        ("timeout_s", 300.0),
+        ("scenarios_sha256", "f" * 64),
+        ("config_sha256", "d" * 64),
+    ],
+)
 def test_gate_refuses_two_files_whose_locked_meta_differs(field_name, value):
     baseline, candidate = _pair()
     candidate["meta"][field_name] = value
@@ -1267,16 +1528,19 @@ def test_gate_refuses_a_changed_request_default(tmp_path):
     assert "constants" in bench.comparability(baseline, candidate)
 
 
-@pytest.mark.parametrize("side,key,value,needle", [
-    ("baseline", "LLM_FAILOVER", "auto", "LLM_FAILOVER"),
-    ("candidate", "LLM_FAILOVER", "auto", "LLM_FAILOVER"),
-    ("baseline", "LLM_SUMMARY_MODEL", "openrouter:x", "LLM_SUMMARY_MODEL"),
-    ("baseline", "LLM_MAX_TOKENS", 1024, "LLM_MAX_TOKENS"),
-    ("baseline", "HISTORY_TOOL_STUB", "off", "HISTORY_TOOL_STUB"),
-    ("candidate", "HISTORY_TOOL_STUB", "off", "HISTORY_TOOL_STUB"),
-    ("candidate", "EXEC_OUTPUT_DEFAULT_CHARS", 1000, "EXEC_OUTPUT_DEFAULT_CHARS"),
-    ("candidate", "LLM_REASONING", "off", "LLM_REASONING"),
-])
+@pytest.mark.parametrize(
+    "side,key,value,needle",
+    [
+        ("baseline", "LLM_FAILOVER", "auto", "LLM_FAILOVER"),
+        ("candidate", "LLM_FAILOVER", "auto", "LLM_FAILOVER"),
+        ("baseline", "LLM_SUMMARY_MODEL", "openrouter:x", "LLM_SUMMARY_MODEL"),
+        ("baseline", "LLM_MAX_TOKENS", 1024, "LLM_MAX_TOKENS"),
+        ("baseline", "HISTORY_TOOL_STUB", "off", "HISTORY_TOOL_STUB"),
+        ("candidate", "HISTORY_TOOL_STUB", "off", "HISTORY_TOOL_STUB"),
+        ("candidate", "EXEC_OUTPUT_DEFAULT_CHARS", 1000, "EXEC_OUTPUT_DEFAULT_CHARS"),
+        ("candidate", "LLM_REASONING", "off", "LLM_REASONING"),
+    ],
+)
 def test_gate_enforces_the_ben_03_treatment_rule(side, key, value, needle):
     baseline, candidate = _pair()
     document = baseline if side == "baseline" else candidate
@@ -1285,12 +1549,15 @@ def test_gate_enforces_the_ben_03_treatment_rule(side, key, value, needle):
     assert reason is not None and needle in reason
 
 
-@pytest.mark.parametrize("base_value,cand_value", [
-    (None, ""),          # the shape the four-commit contract actually produces
-    ("", ""),
-    (None, None),
-    ("", None),
-])
+@pytest.mark.parametrize(
+    "base_value,cand_value",
+    [
+        (None, ""),  # the shape the four-commit contract actually produces
+        ("", ""),
+        (None, None),
+        ("", None),
+    ],
+)
 def test_gate_accepts_every_empty_summary_model_shape(base_value, cand_value):
     """Appendix E.6: `LLM_SUMMARY_MODEL` is a stage-C key (PRE-04, `[C3, TC5]`),
     so the C1 baseline carries `null` by REQ-V13-BEN-10 — the shape
@@ -1315,10 +1582,16 @@ def test_gate_refuses_a_routed_summary_model_on_either_side(side, tmp_path, caps
     reason = bench.comparability(baseline, candidate)
     assert reason is not None and "LLM_SUMMARY_MODEL" in reason and side in reason
 
-    code = bench.main(["report",
-                       "--baseline", str(_write(tmp_path, "baseline.json", baseline)),
-                       "--candidate", str(_write(tmp_path, "optimized.json", candidate)),
-                       "--gate"])
+    code = bench.main(
+        [
+            "report",
+            "--baseline",
+            str(_write(tmp_path, "baseline.json", baseline)),
+            "--candidate",
+            str(_write(tmp_path, "optimized.json", candidate)),
+            "--gate",
+        ]
+    )
     assert code == 2
     assert "LLM_SUMMARY_MODEL" in capsys.readouterr().err
 
@@ -1341,10 +1614,12 @@ def test_ben_05_both_allowed_reasoning_policy_pairs_are_comparable():
     assert off_candidate["meta"]["env_flags"]["LLM_REASONING_POLICY"] == "off"
     assert bench.comparability(baseline, off_candidate) is None
 
-    by_purpose_flags = {**CANDIDATE_FLAGS, "LLM_REASONING_POLICY": "by-purpose",
-                        "LLM_REASONING_ON_PURPOSES": "tool-round"}
-    by_purpose_candidate = fake_doc(off_candidate["runs"], flags=by_purpose_flags,
-                                    tag="optimized")
+    by_purpose_flags = {
+        **CANDIDATE_FLAGS,
+        "LLM_REASONING_POLICY": "by-purpose",
+        "LLM_REASONING_ON_PURPOSES": "tool-round",
+    }
+    by_purpose_candidate = fake_doc(off_candidate["runs"], flags=by_purpose_flags, tag="optimized")
     assert bench.comparability(baseline, by_purpose_candidate) is None
 
 
@@ -1360,18 +1635,24 @@ def test_ben_05_an_unrelated_env_flags_difference_still_blocks_the_gate():
 def test_the_gate_prices_both_sides_with_the_baseline_snapshot():
     baseline, candidate = _pair(candidate_prompt=1000, candidate_completion=100)
     # Identical tokens: no saving, whatever the candidate's own price list says.
-    candidate["meta"]["pricing"] = {**PRICING, "input_usd_per_mtok": 0.01,
-                                    "output_usd_per_mtok": 0.01}
+    candidate["meta"]["pricing"] = {
+        **PRICING,
+        "input_usd_per_mtok": 0.01,
+        "output_usd_per_mtok": 0.01,
+    }
     decision = bench.verdict(baseline, candidate)
     assert decision.passed is False
     assert "cost gate" in decision.reason
 
 
 def test_the_conservative_cost_gate_charges_failed_invocations():
-    failed = [llm_row(2, prompt=None, completion=None, error_kind="transport"),
-              llm_row(3, prompt=None, completion=None, error_kind="transport")]
-    baseline, candidate = _pair(candidate_prompt=600, candidate_completion=50,
-                                candidate_extra_rows=failed)
+    failed = [
+        llm_row(2, prompt=None, completion=None, error_kind="transport"),
+        llm_row(3, prompt=None, completion=None, error_kind="transport"),
+    ]
+    baseline, candidate = _pair(
+        candidate_prompt=600, candidate_completion=50, candidate_extra_rows=failed
+    )
     decision = bench.verdict(baseline, candidate)
     assert decision.passed is False
     text = "\n".join(decision.lines)
@@ -1393,8 +1674,9 @@ def test_the_quality_gate_allows_no_lost_run():
     baseline, candidate = _pair(repeats=2, candidate_prompt=100, candidate_completion=10)
     assert bench.verdict(baseline, candidate).passed is True
     lost = candidate["runs"][0]
-    candidate["runs"][0] = fake_run(lost["scenario"], lost["repeat"],
-                                    llm_rows=lost["llm_calls"], success=False)
+    candidate["runs"][0] = fake_run(
+        lost["scenario"], lost["repeat"], llm_rows=lost["llm_calls"], success=False
+    )
     candidate["summary"] = bench.summarize(candidate["runs"], [], 2)
     # bench.summarize() derives per_scenario fresh from candidate["runs"], which
     # wipes _pair()'s GATE_REQUIRED_FULL_SCENARIOS patch (real repeats=2 here, so
@@ -1412,13 +1694,15 @@ def test_a_compensated_aggregate_cannot_hide_a_broken_scenario():
     for index, run in enumerate(baseline["runs"]):
         if run["scenario"] == "S02" and run["repeat"] in (2, 3):
             baseline["runs"][index] = fake_run(
-                "S02", run["repeat"], llm_rows=run["llm_calls"], success=False)
+                "S02", run["repeat"], llm_rows=run["llm_calls"], success=False
+            )
     baseline["summary"] = bench.summarize(baseline["runs"], [], 3)
     # candidate: S02 recovers to 3/3 but S03 collapses to 1/3 — same total.
     for index, run in enumerate(candidate["runs"]):
         if run["scenario"] == "S03" and run["repeat"] in (2, 3):
             candidate["runs"][index] = fake_run(
-                "S03", run["repeat"], llm_rows=run["llm_calls"], success=False)
+                "S03", run["repeat"], llm_rows=run["llm_calls"], success=False
+            )
     candidate["summary"] = bench.summarize(candidate["runs"], [], 3)
     assert candidate["summary"]["successes"] == baseline["summary"]["successes"]
     decision = bench.verdict(baseline, candidate)
@@ -1428,9 +1712,10 @@ def test_a_compensated_aggregate_cannot_hide_a_broken_scenario():
 
 def test_no_successful_runs_is_a_fail_not_a_division_by_zero():
     baseline, candidate = _pair()
-    candidate["runs"] = [fake_run(run["scenario"], run["repeat"],
-                                  llm_rows=run["llm_calls"], success=False)
-                         for run in candidate["runs"]]
+    candidate["runs"] = [
+        fake_run(run["scenario"], run["repeat"], llm_rows=run["llm_calls"], success=False)
+        for run in candidate["runs"]
+    ]
     candidate["summary"] = bench.summarize(candidate["runs"], [], 1)
     decision = bench.verdict(baseline, candidate)
     assert decision.passed is False
@@ -1449,6 +1734,7 @@ def test_without_a_price_snapshot_the_metric_is_tokens():
 # --------------------------------------------------------------------------
 # the CLI (REQ-V13-BEN-01, REQ-V13-BEN-13)
 # --------------------------------------------------------------------------
+
 
 def _write(tmp_path, name, document):
     path = tmp_path / name
@@ -1475,20 +1761,38 @@ def test_cli_report_gate_exit_codes(tmp_path):
     base_path = _write(tmp_path, "baseline.json", baseline)
     cand_path = _write(tmp_path, "optimized.json", candidate)
     out = tmp_path / "report.md"
-    code = bench.main(["report", "--baseline", str(base_path), "--candidate",
-                       str(cand_path), "--gate", "--out", str(out)])
+    code = bench.main(
+        [
+            "report",
+            "--baseline",
+            str(base_path),
+            "--candidate",
+            str(cand_path),
+            "--gate",
+            "--out",
+            str(out),
+        ]
+    )
     assert code == 0
     assert "## Verdict" in out.read_text(encoding="utf-8")
 
     candidate["meta"]["model"] = "another"
     cand_path = _write(tmp_path, "other.json", candidate)
-    assert bench.main(["report", "--baseline", str(base_path), "--candidate",
-                       str(cand_path), "--gate"]) == 2
+    assert (
+        bench.main(
+            ["report", "--baseline", str(base_path), "--candidate", str(cand_path), "--gate"]
+        )
+        == 2
+    )
 
     _, failing = _pair(candidate_prompt=1000, candidate_completion=100)
     fail_path = _write(tmp_path, "failing.json", failing)
-    assert bench.main(["report", "--baseline", str(base_path), "--candidate",
-                       str(fail_path), "--gate"]) == 1
+    assert (
+        bench.main(
+            ["report", "--baseline", str(base_path), "--candidate", str(fail_path), "--gate"]
+        )
+        == 1
+    )
 
 
 def test_cli_report_propagates_a_validation_failure(tmp_path):
@@ -1504,12 +1808,16 @@ def _stub_cli(monkeypatch, tmp_path, *, llm=None, preflight=False):
     monkeypatch.setattr(bench, "_base_config", lambda tag, provider: cfg)
     monkeypatch.setattr(bench, "_resolve_pricing", lambda cfg_, client: (None, None))
     monkeypatch.setattr(bench, "_prefix_tokens", lambda client, skills: 900)
-    monkeypatch.setattr(bench, "_network_preflight", lambda client: (lambda: preflight))
+    monkeypatch.setattr(bench, "_network_preflight", lambda client: lambda: preflight)
     monkeypatch.setattr(bench, "_real_runner_factory", lambda run_cfg: RecordingRunner())
-    monkeypatch.setattr(bench, "_real_fetcher_factory",
-                        lambda client: (lambda run_cfg: FakeFetcher()))
-    monkeypatch.setattr(bench.llm_module, "build_llm_client",
-                        lambda cfg_, client=None, override=None: llm or ScriptedLLM())
+    monkeypatch.setattr(
+        bench, "_real_fetcher_factory", lambda client: lambda run_cfg: FakeFetcher()
+    )
+    monkeypatch.setattr(
+        bench.llm_module,
+        "build_llm_client",
+        lambda cfg_, client=None, override=None: llm or ScriptedLLM(),
+    )
     return cfg
 
 
@@ -1537,13 +1845,16 @@ def test_cli_run_exits_four_on_an_abort(tmp_path, monkeypatch, capsys):
     flushed = []
     monkeypatch.setattr(bench.sys.stdout, "flush", lambda: flushed.append("out"))
     monkeypatch.setattr(bench.sys.stderr, "flush", lambda: flushed.append("err"))
-    monkeypatch.setattr(bench.os, "_exit",
-                        lambda code: recorded.update(code=code, flushed=list(flushed)))
-    monkeypatch.setattr(bench.bot, "_reap_orphaned_containers",
-                        lambda: recorded.setdefault("reaped", True))
+    monkeypatch.setattr(
+        bench.os, "_exit", lambda code: recorded.update(code=code, flushed=list(flushed))
+    )
+    monkeypatch.setattr(
+        bench.bot, "_reap_orphaned_containers", lambda: recorded.setdefault("reaped", True)
+    )
     aborted = bench.BenchResult(
         meta={**fake_doc()["meta"], "aborted": "timeout:S01-1"},
-        runs=[fake_run("S01", 1)], summary=bench.summarize([fake_run("S01", 1)], [], 1),
+        runs=[fake_run("S01", 1)],
+        summary=bench.summarize([fake_run("S01", 1)], [], 1),
     )
     monkeypatch.setattr(bench, "run_bench", lambda *args, **kwargs: aborted)
     bench.main(["run", "--tag", "aborted"])
@@ -1555,8 +1866,9 @@ def test_cli_run_exits_four_on_an_abort(tmp_path, monkeypatch, capsys):
 def test_cli_run_reports_usage_missing(tmp_path, monkeypatch, capsys):
     _stub_cli(monkeypatch, tmp_path)
     llm = ScriptedLLM(script=[LLMResponse("плоский ответ", [], "stop", usage=None)])
-    monkeypatch.setattr(bench.llm_module, "build_llm_client",
-                        lambda cfg_, client=None, override=None: llm)
+    monkeypatch.setattr(
+        bench.llm_module, "build_llm_client", lambda cfg_, client=None, override=None: llm
+    )
     code = bench.main(["run", "--tag", "missing", "--only", "S01", "--repeats", "1"])
     capsys.readouterr()
     assert code == 3
@@ -1575,16 +1887,23 @@ def test_cli_module_runs_as_a_script():
     import sys as system
 
     result = subprocess.run(
-        [system.executable, str(bench.REPO_ROOT / "devtools" / "bench.py"), "check",
-         str(bench.REPO_ROOT / "devtools" / "bench.py")],
-        capture_output=True, cwd=str(bench.REPO_ROOT), timeout=120,
+        [
+            system.executable,
+            str(bench.REPO_ROOT / "devtools" / "bench.py"),
+            "check",
+            str(bench.REPO_ROOT / "devtools" / "bench.py"),
+        ],
+        capture_output=True,
+        cwd=str(bench.REPO_ROOT),
+        timeout=120,
     )
-    assert result.returncode == 1          # not valid json — but the module imported
+    assert result.returncode == 1  # not valid json — but the module imported
 
 
 # --------------------------------------------------------------------------
 # row copying (REQ-V13-BEN-03, section 7.4)
 # --------------------------------------------------------------------------
+
 
 def test_rows_are_copied_without_conv_id_and_numbered_by_first_appearance(tmp_path):
     db_path = tmp_path / "rows.db"
@@ -1592,22 +1911,55 @@ def test_rows_are_copied_without_conv_id_and_numbered_by_first_appearance(tmp_pa
     storage.init_schema(conn)
     first = storage.get_or_create_active_conversation(conn, TG_ID)
     storage.add_llm_call(
-        conn, conv_id=first, turn_id=1, purpose="agent", round_no=1, attempt=1,
-        ts="t", provider="p", model="m", prompt_chars=10,
-        prompt_chars_by_role={"system": 10}, messages_n=1, tools_exposed=1,
-        latency_ms=5, prompt_tokens=10, completion_tokens=2,
+        conn,
+        conv_id=first,
+        turn_id=1,
+        purpose="agent",
+        round_no=1,
+        attempt=1,
+        ts="t",
+        provider="p",
+        model="m",
+        prompt_chars=10,
+        prompt_chars_by_role={"system": 10},
+        messages_n=1,
+        tools_exposed=1,
+        latency_ms=5,
+        prompt_tokens=10,
+        completion_tokens=2,
     )
     second = storage.start_new_conversation(conn, TG_ID)
     storage.add_llm_call(
-        conn, conv_id=second, turn_id=1, purpose="agent", round_no=1, attempt=1,
-        ts="t", provider="p", model="m", prompt_chars=10,
-        prompt_chars_by_role={"system": 10}, messages_n=1, tools_exposed=1,
-        latency_ms=5, prompt_tokens=20, completion_tokens=2,
+        conn,
+        conv_id=second,
+        turn_id=1,
+        purpose="agent",
+        round_no=1,
+        attempt=1,
+        ts="t",
+        provider="p",
+        model="m",
+        prompt_chars=10,
+        prompt_chars_by_role={"system": 10},
+        messages_n=1,
+        tools_exposed=1,
+        latency_ms=5,
+        prompt_tokens=20,
+        completion_tokens=2,
     )
     storage.add_tool_call(
-        conn, conv_id=second, turn_id=1, tool_call_id="c1", tool="exec", ts="t",
-        input_chars=1, raw_output_chars=2, output_chars=2, output_tokens_est=3,
-        duration_ms=4, outcome="ok",
+        conn,
+        conv_id=second,
+        turn_id=1,
+        tool_call_id="c1",
+        tool="exec",
+        ts="t",
+        input_chars=1,
+        raw_output_chars=2,
+        output_chars=2,
+        output_tokens_est=3,
+        duration_ms=4,
+        outcome="ok",
     )
     conn.close()
 
@@ -1627,8 +1979,10 @@ def test_reading_a_missing_database_degrades_to_no_rows(tmp_path):
 def test_exit_codes_are_read_from_the_run_audit_log(tmp_path):
     path = tmp_path / "audit.jsonl"
     path.write_text(
-        json.dumps({"tool": "exec", "outcome": "ok", "exit_code": 0}) + "\n"
-        + json.dumps({"tool": "exec", "outcome": "ok", "exit_code": 1}) + "\n"
+        json.dumps({"tool": "exec", "outcome": "ok", "exit_code": 0})
+        + "\n"
+        + json.dumps({"tool": "exec", "outcome": "ok", "exit_code": 1})
+        + "\n"
         + "not json\n",
         encoding="utf-8",
     )
@@ -1642,9 +1996,22 @@ def test_a_read_only_connection_sees_committed_rows_of_a_live_writer(tmp_path):
     storage.init_schema(conn)
     conv = storage.get_or_create_active_conversation(conn, TG_ID)
     storage.add_llm_call(
-        conn, conv_id=conv, turn_id=1, purpose="agent", round_no=1, attempt=1, ts="t",
-        provider="p", model="m", prompt_chars=1, prompt_chars_by_role={}, messages_n=1,
-        tools_exposed=1, latency_ms=1, prompt_tokens=1, completion_tokens=1,
+        conn,
+        conv_id=conv,
+        turn_id=1,
+        purpose="agent",
+        round_no=1,
+        attempt=1,
+        ts="t",
+        provider="p",
+        model="m",
+        prompt_chars=1,
+        prompt_chars_by_role={},
+        messages_n=1,
+        tools_exposed=1,
+        latency_ms=1,
+        prompt_tokens=1,
+        completion_tokens=1,
     )
     try:
         # The writer is still open, exactly as an abandoned worker would be.

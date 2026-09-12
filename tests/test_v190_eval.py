@@ -85,8 +85,16 @@ class _DynamicRerankLLM:
     def describe(self):
         return ("fake", "fake-rerank-model")
 
-    def complete(self, messages, tool_definitions, *, max_tokens=None,
-                 reasoning=None, timeout_s=None, response_format=None):
+    def complete(
+        self,
+        messages,
+        tool_definitions,
+        *,
+        max_tokens=None,
+        reasoning=None,
+        timeout_s=None,
+        response_format=None,
+    ):
         self.calls.append((list(messages), tool_definitions))
         if tool_definitions is None:
             self._rerank_calls += 1
@@ -94,7 +102,9 @@ class _DynamicRerankLLM:
                 return LLMResponse(content="not valid json", tool_calls=[], finish_reason="stop")
             n = len(re.findall(r"^\[\d+\]", messages[-1]["content"], re.MULTILINE))
             return LLMResponse(
-                content=json.dumps(list(range(1, n + 1))), tool_calls=[], finish_reason="stop",
+                content=json.dumps(list(range(1, n + 1))),
+                tool_calls=[],
+                finish_reason="stop",
             )
         if not self._agent_script:
             raise AssertionError("agent script exhausted")
@@ -118,34 +128,38 @@ _SYNTH_ONBOARDING = (
 _SYNTH_EXPENSES = (
     "Elephant sanctuary recorded twelve rescued individuals during the annual census update.\n"
 )
-_SYNTH_SECURITY = (
-    "Lion pride tracked nine members within the reserve boundary this month.\n"
-)
+_SYNTH_SECURITY = "Lion pride tracked nine members within the reserve boundary this month.\n"
 
 _SYNTH_QUESTIONS = [
     {
         "question": "How many wombat specimens are in the colony?",
-        "expected_source": "vacation_policy.md", "expected_page": None,
+        "expected_source": "vacation_policy.md",
+        "expected_page": None,
         "expected_evidence": "forty specimens",
     },
     {
         "question": "How many giraffes are in the herd?",
-        "expected_source": "onboarding.txt", "expected_page": None,
+        "expected_source": "onboarding.txt",
+        "expected_page": None,
         "expected_evidence": "seventeen animals",
     },
     {
         "question": "How many elephants were rescued?",
-        "expected_source": "expenses.docx", "expected_page": None,
+        "expected_source": "expenses.docx",
+        "expected_page": None,
         "expected_evidence": "twelve rescued individuals",
     },
     {
         "question": "How many lions are in the pride?",
-        "expected_source": "security_guidelines.pdf", "expected_page": 1,
+        "expected_source": "security_guidelines.pdf",
+        "expected_page": 1,
         "expected_evidence": "nine members",
     },
     {
         "question": "How many tigers are in the reserve?",
-        "expected_source": None, "expected_page": None, "expected_evidence": None,
+        "expected_source": None,
+        "expected_page": None,
+        "expected_evidence": None,
     },
 ]
 
@@ -168,11 +182,13 @@ def _write_synth_questions(tmp_path, questions=None, *, name="questions.json"):
 
 def _smoke_script(turn2_query):
     return [
-        LLMResponse("", [ToolCall("c0", "search_documents", json.dumps({"query": "wombat"}))],
-                     "tool_calls"),
+        LLMResponse(
+            "", [ToolCall("c0", "search_documents", json.dumps({"query": "wombat"}))], "tool_calls"
+        ),
         LLMResponse("There are forty wombats.", [], "stop"),
         LLMResponse(
-            "", [ToolCall("c1", "search_documents", json.dumps({"query": turn2_query}))],
+            "",
+            [ToolCall("c1", "search_documents", json.dumps({"query": turn2_query}))],
             "tool_calls",
         ),
         LLMResponse("In weeks: about six.", [], "stop"),
@@ -188,7 +204,7 @@ def _parse_table(lines):
     themselves come from real, unmocked retrieval."""
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("| question |"))
     rows = []
-    for line in lines[header_idx + 2:]:
+    for line in lines[header_idx + 2 :]:
         if not line.startswith("|"):
             break
         cells = [cell.strip() for cell in line.strip("|").split("|")]
@@ -249,8 +265,10 @@ def test_t_v190_eval_01_corpus_files_exist_and_are_disjoint_by_filename():
 def test_t_v190_eval_04_every_evidence_occurs_in_its_extracted_source_text():
     documents_to_index = rag_eval.load_corpus_documents(rag_eval.CORPUS_DIR)
     file_type = {
-        "vacation_policy.md": "md", "onboarding.txt": "txt",
-        "expenses.docx": "docx", "security_guidelines.pdf": "pdf",
+        "vacation_policy.md": "md",
+        "onboarding.txt": "txt",
+        "expenses.docx": "docx",
+        "security_guidelines.pdf": "pdf",
     }
     extracted_text = {
         filename: "\n".join(p.text for p in documents.extract(data, file_type[filename]).pages)
@@ -281,8 +299,13 @@ def test_t_v190_eval_02_run_offline_exits_zero_with_correct_metrics(tmp_path):
 
     lines: list[str] = []
     code = rag_eval.run(
-        conn=conn, cfg=cfg, embedder=embedder, llm=llm,
-        corpus_dir=corpus_dir, questions_path=questions_path, print_fn=lines.append,
+        conn=conn,
+        cfg=cfg,
+        embedder=embedder,
+        llm=llm,
+        corpus_dir=corpus_dir,
+        questions_path=questions_path,
+        print_fn=lines.append,
     )
 
     assert code == 0
@@ -294,9 +317,7 @@ def test_t_v190_eval_02_run_offline_exits_zero_with_correct_metrics(tmp_path):
     assert n == 4  # the four answerable synthetic questions
 
     summary = {
-        mode: next(
-            line for line in lines if line.strip().startswith(f"{mode}: recall@5=")
-        )
+        mode: next(line for line in lines if line.strip().startswith(f"{mode}: recall@5="))
         for mode in rag_eval.MODES
     }
     for mode in rag_eval.MODES:
@@ -311,9 +332,7 @@ def test_t_v190_eval_02_run_offline_exits_zero_with_correct_metrics(tmp_path):
         assert "page_hit_rate=1.000" in summary[mode]
 
     assert any("passages returned" in line for line in lines if "How many tigers" in line)
-    assert any(
-        line.strip().startswith("conversation-aware smoke: pass") for line in lines
-    )
+    assert any(line.strip().startswith("conversation-aware smoke: pass") for line in lines)
 
 
 def test_t_v190_eval_02_run_offline_below_floor_exits_one(tmp_path):
@@ -328,8 +347,13 @@ def test_t_v190_eval_02_run_offline_below_floor_exits_one(tmp_path):
 
     lines: list[str] = []
     code = rag_eval.run(
-        conn=conn, cfg=cfg, embedder=embedder, llm=llm,
-        corpus_dir=corpus_dir, questions_path=questions_path, print_fn=lines.append,
+        conn=conn,
+        cfg=cfg,
+        embedder=embedder,
+        llm=llm,
+        corpus_dir=corpus_dir,
+        questions_path=questions_path,
+        print_fn=lines.append,
     )
 
     assert code == 1
@@ -346,8 +370,13 @@ def test_t_v190_eval_02_run_offline_rerank_not_both_true_exits_two(tmp_path):
 
     lines: list[str] = []
     code = rag_eval.run(
-        conn=conn, cfg=cfg, embedder=embedder, llm=llm,
-        corpus_dir=corpus_dir, questions_path=questions_path, print_fn=lines.append,
+        conn=conn,
+        cfg=cfg,
+        embedder=embedder,
+        llm=llm,
+        corpus_dir=corpus_dir,
+        questions_path=questions_path,
+        print_fn=lines.append,
     )
 
     assert code == 2
@@ -364,6 +393,7 @@ def test_t_v190_eval_02_run_offline_index_failure_exits_two(tmp_path, monkeypatc
     class _BrokenEmbedder:
         def embed(self, texts, *, conv_id=None):
             from llm.embeddings import EmbeddingError
+
             raise EmbeddingError("the box is unreachable")
 
         def describe(self):
@@ -371,8 +401,13 @@ def test_t_v190_eval_02_run_offline_index_failure_exits_two(tmp_path, monkeypatc
 
     lines: list[str] = []
     code = rag_eval.run(
-        conn=conn, cfg=cfg, embedder=_BrokenEmbedder(), llm=llm,
-        corpus_dir=corpus_dir, questions_path=questions_path, print_fn=lines.append,
+        conn=conn,
+        cfg=cfg,
+        embedder=_BrokenEmbedder(),
+        llm=llm,
+        corpus_dir=corpus_dir,
+        questions_path=questions_path,
+        print_fn=lines.append,
     )
     assert code == 2
     assert any("FAIL indexing the corpus" in line for line in lines)
@@ -434,9 +469,10 @@ def test_t_v190_eval_03_first_hit_requires_filename_and_evidence():
 
 def test_t_v190_eval_03_first_hit_miss():
     items = [{"filename": "a.txt", "page": None, "text": "irrelevant"}]
-    assert rag_eval.first_hit(
-        items, expected_source="a.txt", expected_evidence="not present"
-    ) == (None, None)
+    assert rag_eval.first_hit(items, expected_source="a.txt", expected_evidence="not present") == (
+        None,
+        None,
+    )
 
 
 def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
@@ -451,8 +487,11 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     cfg = _cfg(tmp_path)
     llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks"))
     ok, detail = rag_eval.conversation_smoke(
-        conn, question="How many wombat specimens are in the colony?",
-        embedder=embedder, llm=llm, cfg=cfg,
+        conn,
+        question="How many wombat specimens are in the colony?",
+        embedder=embedder,
+        llm=llm,
+        cfg=cfg,
     )
     assert ok is True
     assert "wombat colony in weeks" in detail
@@ -461,8 +500,11 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     rag_eval.index_corpus(conn2, embedder=embedder, documents_to_index=documents_to_index)
     llm2 = _DynamicRerankLLM(_smoke_script("giraffe herd size"))
     ok2, detail2 = rag_eval.conversation_smoke(
-        conn2, question="How many wombat specimens are in the colony?",
-        embedder=embedder, llm=llm2, cfg=cfg,
+        conn2,
+        question="How many wombat specimens are in the colony?",
+        embedder=embedder,
+        llm=llm2,
+        cfg=cfg,
     )
     assert ok2 is False
     assert "no search_documents call sharing a token" in detail2
@@ -473,8 +515,11 @@ def test_t_v190_eval_03_freeze_reports_every_corpus_file_and_questions(tmp_path)
     questions_path = _write_synth_questions(tmp_path)
     hashes = rag_eval.freeze(corpus_dir, questions_path)
     assert set(hashes) == {
-        "vacation_policy.md", "onboarding.txt", "expenses.docx.md",
-        "security_guidelines.pdf.txt", "questions.json",
+        "vacation_policy.md",
+        "onboarding.txt",
+        "expenses.docx.md",
+        "security_guidelines.pdf.txt",
+        "questions.json",
     }
     assert all(len(digest) == 64 for digest in hashes.values())
     # Same content, same hash -- and a byte-for-byte re-read never touches

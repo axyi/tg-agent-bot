@@ -1689,7 +1689,8 @@ def test_v15_rpt_01_lint_accepts_matching_cell_count(tmp_path: Path):
 _GATE_MATRIX_LABEL_TO_NAME = {
     "`ruff check` (staged)": "ruff-check",
     "`ruff check .` (tree)": "ruff-check-all",
-    "`ruff format --check`": "ruff-format",
+    "`ruff format --check` (staged)": "ruff-format",
+    "`ruff format --check` (tree)": "ruff-format-all",
     "branch-name check": "branch-name",
     # "commit-msg checks" is not a `profiles:` gate -- own hook / via `replay`.
     "`gitleaks git --staged`": "gitleaks-staged",

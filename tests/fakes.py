@@ -93,8 +93,10 @@ class RecordingRunner:
 
     def forbid_real_processes(self, monkeypatch):
         """Fail the test if anything reaches `subprocess.Popen` while this runner stands in."""
+
         def _forbidden(*args, **kwargs):
             raise AssertionError(f"unexpected subprocess start: {args!r}")
+
         monkeypatch.setattr(subprocess, "Popen", _forbidden)
 
 

@@ -70,8 +70,14 @@ RAG_RERANK_MODES = ("on", "off")
 FORBIDDEN_SCOPES = (  # skylos: ignore -- REQ-V12-SSR-02 requires this constant to
     # exist as written to document address_scope's return vocabulary; see
     # docs/reports/report-v1.2.md's "not a defect" ruling.
-    "loopback", "private", "link-local", "multicast",
-    "reserved", "unspecified", "non-global", "unparsable",
+    "loopback",
+    "private",
+    "link-local",
+    "multicast",
+    "reserved",
+    "unspecified",
+    "non-global",
+    "unparsable",
 )
 
 _DIGITS_RE = re.compile(r"^[0-9]+$")
@@ -95,7 +101,7 @@ class ConfigError(Exception):
 class Config:
     telegram_bot_token: str
     allowed_tg_ids: frozenset[int]
-    llm_provider: str          # "lmstudio" | "openrouter"
+    llm_provider: str  # "lmstudio" | "openrouter"
     lmstudio_base_url: str
     lmstudio_model: str
     openrouter_api_key: str
@@ -110,9 +116,7 @@ class Config:
     openrouter_context_length: int = 131072
     llm_failover: str = "auto"
     exec_docker_image: str = DEFAULT_DOCKER_IMAGE
-    audit_log_path: Path = field(
-        default_factory=lambda: PROJECT_ROOT / "exec_audit.jsonl"
-    )
+    audit_log_path: Path = field(default_factory=lambda: PROJECT_ROOT / "exec_audit.jsonl")
     rate_limit_capacity: int = 10
     rate_limit_refill_s: float = 6.0
     telegram_bot_name: str = ""
@@ -278,13 +282,13 @@ def load_config(
     openrouter_api_key = _value(source, "OPENROUTER_API_KEY")
     openrouter_model = _value(source, "OPENROUTER_MODEL")
 
-    failover = (_value(source, "LLM_FAILOVER").lower() or "auto")
+    failover = _value(source, "LLM_FAILOVER").lower() or "auto"
     if failover not in FAILOVER_MODES:
         raise ConfigError(
             f"LLM_FAILOVER must be one of {', '.join(FAILOVER_MODES)}, got: {failover}"
         )
 
-    history_tool_stub = (_value(source, "HISTORY_TOOL_STUB").lower() or "on")
+    history_tool_stub = _value(source, "HISTORY_TOOL_STUB").lower() or "on"
     if history_tool_stub not in HISTORY_TOOL_STUB_MODES:
         raise ConfigError(
             f"HISTORY_TOOL_STUB must be one of {', '.join(HISTORY_TOOL_STUB_MODES)}, "
@@ -344,8 +348,7 @@ def load_config(
         )
         if not configured:
             raise ConfigError(
-                f"LLM_RERANK_MODEL routes the rerank to {routed_provider}, "
-                f"which is not configured"
+                f"LLM_RERANK_MODEL routes the rerank to {routed_provider}, which is not configured"
             )
         rerank_model = f"{routed_provider}:{routed_name}"
 
@@ -368,9 +371,7 @@ def load_config(
     llm_reasoning_policy = _parse_choice(
         source, "LLM_REASONING_POLICY", llm_reasoning_policy_default, REASONING_POLICIES
     )
-    llm_reasoning_on_purposes = _parse_purposes(
-        source, "LLM_REASONING_ON_PURPOSES", "tool-round"
-    )
+    llm_reasoning_on_purposes = _parse_purposes(source, "LLM_REASONING_ON_PURPOSES", "tool-round")
 
     # v1.9.0 additions (REQ-V190-RET-02): the embeddings client and retrieval
     # config, read after LLM_REASONING_ON_PURPOSES.
@@ -391,9 +392,7 @@ def load_config(
 
     embedding_model = _value(source, "EMBEDDING_MODEL")
     embedding_dim_raw = _value(source, "EMBEDDING_DIM")
-    embedding_dim = (
-        _parse_int(source, "EMBEDDING_DIM", 0, 1, 4096) if embedding_dim_raw else None
-    )
+    embedding_dim = _parse_int(source, "EMBEDDING_DIM", 0, 1, 4096) if embedding_dim_raw else None
     if bool(embedding_model) != (embedding_dim is not None):
         raise ConfigError("EMBEDDING_MODEL and EMBEDDING_DIM must be set together")
 
@@ -429,19 +428,26 @@ def load_config(
         telegram_bot_name=_value(source, "TELEGRAM_BOT_NAME"),
         fetch_allowed_domains=_parse_domains(_value(source, "FETCH_ALLOWED_DOMAINS")),
         exec_sandbox_max_bytes=_parse_int(
-            source, "EXEC_SANDBOX_MAX_BYTES", DEFAULT_EXEC_SANDBOX_MAX_BYTES,
-            MIN_EXEC_SANDBOX_MAX_BYTES, MAX_EXEC_SANDBOX_MAX_BYTES,
+            source,
+            "EXEC_SANDBOX_MAX_BYTES",
+            DEFAULT_EXEC_SANDBOX_MAX_BYTES,
+            MIN_EXEC_SANDBOX_MAX_BYTES,
+            MAX_EXEC_SANDBOX_MAX_BYTES,
         ),
-        exec_sandbox_clean_on_start=_parse_bool(
-            source, "EXEC_SANDBOX_CLEAN_ON_START", True
-        ),
+        exec_sandbox_clean_on_start=_parse_bool(source, "EXEC_SANDBOX_CLEAN_ON_START", True),
         exec_output_default_chars=_parse_int(
-            source, "EXEC_OUTPUT_DEFAULT_CHARS", DEFAULT_EXEC_OUTPUT_CHARS,
-            MIN_EXEC_OUTPUT_CHARS, MAX_EXEC_OUTPUT_CHARS,
+            source,
+            "EXEC_OUTPUT_DEFAULT_CHARS",
+            DEFAULT_EXEC_OUTPUT_CHARS,
+            MIN_EXEC_OUTPUT_CHARS,
+            MAX_EXEC_OUTPUT_CHARS,
         ),
         fetch_inline_default_chars=_parse_int(
-            source, "FETCH_INLINE_DEFAULT_CHARS", DEFAULT_FETCH_INLINE_CHARS,
-            MIN_FETCH_INLINE_CHARS, MAX_FETCH_INLINE_CHARS,
+            source,
+            "FETCH_INLINE_DEFAULT_CHARS",
+            DEFAULT_FETCH_INLINE_CHARS,
+            MIN_FETCH_INLINE_CHARS,
+            MAX_FETCH_INLINE_CHARS,
         ),
         history_tool_stub=history_tool_stub,
         llm_price_ref_model=_value(source, "LLM_PRICE_REF_MODEL"),
@@ -531,8 +537,7 @@ def _check_summary_floor_budget(llm_timeout_s: float, llm_summary_max_tokens: in
     is given, or the truncation retry could never be attempted in production --
     refuse that configuration at startup rather than discover it live."""
     summary_floor = (
-        LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * llm_summary_max_tokens
-        + _SUMMARY_BUDGET_FLOOR_S
+        LATENCY_INTERCEPT_S + LATENCY_PER_TOKEN_S * llm_summary_max_tokens + _SUMMARY_BUDGET_FLOOR_S
     )
     if llm_timeout_s < summary_floor:
         raise ConfigError(
@@ -589,9 +594,7 @@ def _prepare_workdir(value: str) -> Path:
         workdir.mkdir(parents=True, exist_ok=True)
         workdir.chmod(0o700)
     except OSError as exc:
-        raise ConfigError(
-            f"EXEC_WORKDIR could not be created: {exc.__class__.__name__}"
-        ) from None
+        raise ConfigError(f"EXEC_WORKDIR could not be created: {exc.__class__.__name__}") from None
     if not workdir.is_dir():
         raise ConfigError("EXEC_WORKDIR is not a directory")
     return workdir
@@ -629,8 +632,7 @@ def _check_sandbox_placement(exec_workdir: Path, db_path: Path, audit_log_path: 
         )
     if _same(exec_workdir, PROJECT_ROOT):
         raise ConfigError(
-            "EXEC_WORKDIR must not be the project root: the exec container mounts it "
-            "read-write"
+            "EXEC_WORKDIR must not be the project root: the exec container mounts it read-write"
         )
     for name, target in (
         ("DB_PATH", db_path),

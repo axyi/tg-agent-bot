@@ -70,9 +70,15 @@ def _add_tool(conn, conv_id, **overrides):
 
 def _add_document(conn, user_id, filename, **overrides):
     fields = {
-        "user_id": user_id, "filename": filename, "file_type": "txt",
-        "created_at": NOW, "size_bytes": 5, "text_chars": 5,
-        "page_count": None, "chunk_count": 1, "sha256": "x" * 8,
+        "user_id": user_id,
+        "filename": filename,
+        "file_type": "txt",
+        "created_at": NOW,
+        "size_bytes": 5,
+        "text_chars": 5,
+        "page_count": None,
+        "chunk_count": 1,
+        "sha256": "x" * 8,
     }
     fields.update(overrides)
     return storage.add_document(conn, **fields)
@@ -104,9 +110,12 @@ def _seed_v5_database(path) -> sqlite3.Connection:
     conn.executescript(storage._SCHEMA)
     conn.executescript(storage._MIGRATION_4_TO_5)
     assert storage.schema_version(conn) == 5
-    assert conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'documents'"
-    ).fetchone() is None
+    assert (
+        conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'documents'"
+        ).fetchone()
+        is None
+    )
     return conn
 
 
@@ -122,9 +131,7 @@ def _reopen_with_failure(path, trigger_prefix, exception=RuntimeError):
                 raise exception("boom")
             return super().execute(sql, *args, **kwargs)
 
-    conn = sqlite3.connect(
-        str(path), isolation_level=None, timeout=5.0, factory=_BoomConnection
-    )
+    conn = sqlite3.connect(str(path), isolation_level=None, timeout=5.0, factory=_BoomConnection)
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
@@ -189,9 +196,20 @@ def test_t_v190_sto_02_migration_preserves_all_four_tables(tmp_path):
     _add_call(conn, conv_id)
     _add_tool(conn, conv_id)
     storage.add_span(
-        conn, trace_id="t1", span_id="s1", parent_span_id=None, conv_id=conv_id,
-        turn_id=1, name="n", kind="INTERNAL", ts=NOW, start_ns=1, duration_ms=1,
-        status="ok", status_message=None, attributes_json="{}",
+        conn,
+        trace_id="t1",
+        span_id="s1",
+        parent_span_id=None,
+        conv_id=conv_id,
+        turn_id=1,
+        name="n",
+        kind="INTERNAL",
+        ts=NOW,
+        start_ns=1,
+        duration_ms=1,
+        status="ok",
+        status_message=None,
+        attributes_json="{}",
     )
 
     before = {
@@ -204,13 +222,19 @@ def test_t_v190_sto_02_migration_preserves_all_four_tables(tmp_path):
     assert storage.schema_version(conn) == 6
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_llm_calls_conv'"
-    ).fetchone() is not None
+    assert (
+        conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_llm_calls_conv'"
+        ).fetchone()
+        is not None
+    )
     for table in ("documents", "chunks"):
-        assert conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
-        ).fetchone() is not None, table
+        assert (
+            conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            is not None
+        ), table
 
     for table, rows in before.items():
         after = [dict(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY id")]
@@ -253,13 +277,19 @@ def test_t_v190_sto_09_a_failure_mid_migration_rolls_back(tmp_path):
     assert storage.schema_version(boom) == 5
     after = [dict(row) for row in boom.execute("SELECT * FROM llm_calls ORDER BY id")]
     assert after == before
-    assert boom.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'llm_calls_v6'"
-    ).fetchone() is None
+    assert (
+        boom.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'llm_calls_v6'"
+        ).fetchone()
+        is None
+    )
     for table in ("documents", "chunks"):
-        assert boom.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
-        ).fetchone() is None, table
+        assert (
+            boom.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            is None
+        ), table
     assert boom.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert boom.execute("PRAGMA foreign_key_check").fetchall() == []
     boom.close()
@@ -300,12 +330,16 @@ def test_t_v190_sto_03_delete_document_removes_vectors_chunks_and_row(tmp_path):
     assert storage.delete_document(conn, user_id=1, document_id=doc_id) is True
 
     assert storage.document_id_for(conn, user_id=1, filename="a.txt") is None
-    assert conn.execute(
-        "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)
-    ).fetchone()[0] == 0
-    assert conn.execute(
-        "SELECT COUNT(*) FROM vec_chunks WHERE chunk_id = ?", (chunk_id,)
-    ).fetchone()[0] == 0
+    assert (
+        conn.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)).fetchone()[0]
+        == 0
+    )
+    assert (
+        conn.execute("SELECT COUNT(*) FROM vec_chunks WHERE chunk_id = ?", (chunk_id,)).fetchone()[
+            0
+        ]
+        == 0
+    )
     vector = sqlite_vec.serialize_float32([0.1] * 16)
     assert storage.knn_chunk_ids(conn, user_id=1, vector=vector, k=5) == []
     assert storage.user_chunks(conn, user_id=1) == []
@@ -336,12 +370,16 @@ def test_t_v190_sto_03_a_failing_vector_delete_rolls_back(tmp_path):
 
     check = storage.connect(path)
     assert storage.document_id_for(check, user_id=1, filename="a.txt") == doc_id
-    assert check.execute(
-        "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)
-    ).fetchone()[0] == 1
-    assert check.execute(
-        "SELECT COUNT(*) FROM vec_chunks WHERE chunk_id = ?", (chunk_id,)
-    ).fetchone()[0] == 1
+    assert (
+        check.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)).fetchone()[0]
+        == 1
+    )
+    assert (
+        check.execute("SELECT COUNT(*) FROM vec_chunks WHERE chunk_id = ?", (chunk_id,)).fetchone()[
+            0
+        ]
+        == 1
+    )
     check.close()
 
 
@@ -456,9 +494,7 @@ def test_t_v190_sto_08_orphan_vec_chunks_recovered_when_empty(tmp_path):
     storage.add_vectors(conn, user_id=1, rows=[(chunk_id, good32)])
 
     doc2 = _add_document(conn, 1, "b.txt")
-    [chunk2] = storage.add_chunks(
-        conn, user_id=1, document_id=doc2, chunks=[(0, "y", None, 0, 1)]
-    )
+    [chunk2] = storage.add_chunks(conn, user_id=1, document_id=doc2, chunks=[(0, "y", None, 0, 1)])
     bad16 = sqlite_vec.serialize_float32([0.1] * 16)
     with pytest.raises(sqlite3.Error):
         storage.add_vectors(conn, user_id=1, rows=[(chunk2, bad16)])
@@ -497,11 +533,16 @@ def test_t_v190_sto_05_add_chunks_returns_ids_in_chunk_order(tmp_path):
     storage.init_schema(conn)
     doc_id = _add_document(conn, 1, "a.txt", chunk_count=3)
 
-    ids = storage.add_chunks(conn, user_id=1, document_id=doc_id, chunks=[
-        (0, "aaa", None, 0, 3),
-        (1, "bbb", None, 3, 6),
-        (2, "ccc", None, 6, 9),
-    ])
+    ids = storage.add_chunks(
+        conn,
+        user_id=1,
+        document_id=doc_id,
+        chunks=[
+            (0, "aaa", None, 0, 3),
+            (1, "bbb", None, 3, 6),
+            (2, "ccc", None, 6, 9),
+        ],
+    )
 
     assert len(ids) == 3
     rows = conn.execute(
@@ -534,9 +575,14 @@ def test_t_v190_sto_05_add_chunks_raises_for_an_unowned_document(tmp_path):
 
 def _index(conn, embedder, **overrides):
     fields = {
-        "user_id": 1, "filename": "a.txt", "data": b"hello world. " * 5,
-        "embedder": embedder, "progress": lambda s: None, "now": NOW,
-        "started_at": 0.0, "monotonic": lambda: 0.0,
+        "user_id": 1,
+        "filename": "a.txt",
+        "data": b"hello world. " * 5,
+        "embedder": embedder,
+        "progress": lambda s: None,
+        "now": NOW,
+        "started_at": 0.0,
+        "monotonic": lambda: 0.0,
     }
     fields.update(overrides)
     return documents.index_document(conn, **fields)
@@ -571,9 +617,10 @@ def test_t_v190_sto_05_index_document_txt_stores_and_reports_progress(tmp_path):
     assert row["size_bytes"] == len(data)
     assert row["sha256"] == hashlib.sha256(data).hexdigest()
     assert row["created_at"] == NOW
-    assert conn.execute(
-        "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)
-    ).fetchone()[0] == result.chunk_count
+    assert (
+        conn.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)).fetchone()[0]
+        == result.chunk_count
+    )
     vector = sqlite_vec.serialize_float32([0.0] * 16)
     hits = storage.knn_chunk_ids(conn, user_id=1, vector=vector, k=5)
     assert len(hits) == result.chunk_count
@@ -585,10 +632,13 @@ def test_t_v190_sto_05_index_document_pdf_reports_pages_and_attributes_them(tmp_
     conn = storage.connect(tmp_path / "a.db")
     storage.init_schema(conn, embedding_dim=16, embedding_model="m")
     embedder = FakeEmbedder(dim=16)
-    data = write_pdf([
-        "Page one has plenty of readable text on it.", "",
-        "Page three also has plenty of readable text on it.",
-    ])
+    data = write_pdf(
+        [
+            "Page one has plenty of readable text on it.",
+            "",
+            "Page three also has plenty of readable text on it.",
+        ]
+    )
     calls: list[str] = []
 
     result = _index(conn, embedder, filename="a.pdf", data=data, progress=calls.append)
@@ -645,9 +695,10 @@ def test_t_v190_sto_05_index_document_replace_on_reupload(tmp_path):
     assert second.replaced is True
     assert second_id != first_id  # AUTOINCREMENT: no row identity carried over
     assert storage.document_count(conn, user_id=1) == 1
-    assert conn.execute(
-        "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (first_id,)
-    ).fetchone()[0] == 0
+    assert (
+        conn.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (first_id,)).fetchone()[0]
+        == 0
+    )
     vector = sqlite_vec.serialize_float32([0.0] * 16)
     hits = storage.knn_chunk_ids(conn, user_id=1, vector=vector, k=100)
     assert len(hits) == second.chunk_count  # no leftover vectors from the replaced doc

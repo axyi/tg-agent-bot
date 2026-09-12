@@ -132,18 +132,31 @@ MUTATIONS = [
     {
         "id": "cov-09-probe-user-flag",
         "path": "tools.py",
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which broke `tools.py`'s docker-argv list onto one
+        # item per line. Same mutation semantics: drop the "--user"/uid:gid
+        # pair, keep the rest identical.
         "find": (
-            '                "--user", f"{os.getuid()}:{os.getgid()}",\n'
+            '                "--user",\n'
+            '                f"{os.getuid()}:{os.getgid()}",\n'
             '                "--read-only",\n'
-            '                "--cap-drop", "ALL",\n'
-            '                "--security-opt", "no-new-privileges",\n'
-            '                image, "timeout", "--version",'
+            '                "--cap-drop",\n'
+            '                "ALL",\n'
+            '                "--security-opt",\n'
+            '                "no-new-privileges",\n'
+            "                image,\n"
+            '                "timeout",\n'
+            '                "--version",\n'
         ),
         "replace": (
             '                "--read-only",\n'
-            '                "--cap-drop", "ALL",\n'
-            '                "--security-opt", "no-new-privileges",\n'
-            '                image, "timeout", "--version",'
+            '                "--cap-drop",\n'
+            '                "ALL",\n'
+            '                "--security-opt",\n'
+            '                "no-new-privileges",\n'
+            "                image,\n"
+            '                "timeout",\n'
+            '                "--version",\n'
         ),
         "why": "TST-02 #9: the timeout probe must run as the bot's own uid:gid, not root",
     },
@@ -369,12 +382,23 @@ MUTATIONS = [
         # its round's real turn_id instead of None, so this find string is
         # updated to match; same id, same underlying property (every LLM
         # invocation, failed or not, gets its own row).
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived again after the whole-tree
+        # ruff format pass, which put one argument per line.
         "find": (
             "            _record_llm_call(\n"
-            "                conn, conv_id, llm, resolve_cost, span=span,\n"
-            '                purpose="agent", round_no=round_no, attempt=attempts, ts=ts,\n'
-            "                latency_ms=_elapsed_ms(started), turn_id=turn_id,\n"
-            "                messages=request_messages, tools=request_tools,\n"
+            "                conn,\n"
+            "                conv_id,\n"
+            "                llm,\n"
+            "                resolve_cost,\n"
+            "                span=span,\n"
+            '                purpose="agent",\n'
+            "                round_no=round_no,\n"
+            "                attempt=attempts,\n"
+            "                ts=ts,\n"
+            "                latency_ms=_elapsed_ms(started),\n"
+            "                turn_id=turn_id,\n"
+            "                messages=request_messages,\n"
+            "                tools=request_tools,\n"
             "                response=response,\n"
             "                error_kind=None if failure is None else "
             'getattr(failure, "kind", "http"),\n'
@@ -384,7 +408,7 @@ MUTATIONS = [
         ),
         "replace": "",
         "why": "REQ-V13-OBS-04 / REQ-V160-TRC-08: every LLM invocation, "
-               "failed or not, is an invocation and gets its own row and chat span",
+        "failed or not, is an invocation and gets its own row and chat span",
     },
     {
         "id": "v13-resent-formula",
@@ -419,15 +443,29 @@ MUTATIONS = [
     {
         "id": "v13-bench-skipset-ignored",
         "path": "devtools/bench.py",
-        "find": '    "scenarios_sha256", "skipped_scenarios", "constants", "config_sha256",\n',
-        "replace": '    "scenarios_sha256", "constants", "config_sha256",\n',
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which put one tuple item per line.
+        "find": (
+            '    "scenarios_sha256",\n'
+            '    "skipped_scenarios",\n'
+            '    "constants",\n'
+            '    "config_sha256",\n'
+        ),
+        "replace": ('    "scenarios_sha256",\n    "constants",\n    "config_sha256",\n'),
         "why": "REQ-V13-BEN-12: two files with different skip sets may not be compared",
     },
     {
         "id": "v13-bench-scenario-hash-ignored",
         "path": "devtools/bench.py",
-        "find": '    "scenarios_sha256", "skipped_scenarios", "constants", "config_sha256",\n',
-        "replace": '    "skipped_scenarios", "constants", "config_sha256",\n',
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which put one tuple item per line.
+        "find": (
+            '    "scenarios_sha256",\n'
+            '    "skipped_scenarios",\n'
+            '    "constants",\n'
+            '    "config_sha256",\n'
+        ),
+        "replace": ('    "skipped_scenarios",\n    "constants",\n    "config_sha256",\n'),
         "why": "REQ-V13-BEN-12: a differing scenarios_sha256 makes two files incomparable",
     },
     {
@@ -542,7 +580,9 @@ MUTATIONS = [
     {
         "id": "v13-compact-keeps-head-only",
         "path": "tools.py",
-        "find": "    tail = _suffix_within(lines[len(head):], tail_budget)\n",
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which added a space before the slice colon.
+        "find": "    tail = _suffix_within(lines[len(head) :], tail_budget)\n",
         "replace": "    tail = []\n",
         "why": "REQ-V13-TOO-01: compaction keeps a tail window, not the head alone",
     },
@@ -869,10 +909,12 @@ MUTATIONS = [
         # load between `row_factory` and the `PRAGMA query_only` line; both
         # find/replace variants carry it unchanged, since this mutation is
         # about `mode=ro` and the PRAGMA, not the extension load.
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which merged the `sqlite3.connect(...)` call onto one
+        # line (98 chars, under the 100-char limit).
         "find": (
-            "    conn = sqlite3.connect(\n"
-            '        f"file:{db_path}?mode=ro", uri=True, isolation_level=None, timeout=5.0\n'
-            "    )\n"
+            '    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, '
+            "isolation_level=None, timeout=5.0)\n"
             "    conn.row_factory = sqlite3.Row\n"
             "    # REQ-V190-STO-01: the read-only handle needs the module too, for the same\n"
             "    # reason -- a schema naming `vec0` cannot even be parsed without it.\n"
@@ -883,9 +925,8 @@ MUTATIONS = [
             "    return conn\n"
         ),
         "replace": (
-            "    conn = sqlite3.connect(\n"
-            '        f"file:{db_path}?mode=rw", uri=True, isolation_level=None, timeout=5.0\n'
-            "    )\n"
+            '    conn = sqlite3.connect(f"file:{db_path}?mode=rw", uri=True, '
+            "isolation_level=None, timeout=5.0)\n"
             "    conn.row_factory = sqlite3.Row\n"
             "    # REQ-V190-STO-01: the read-only handle needs the module too, for the same\n"
             "    # reason -- a schema naming `vec0` cannot even be parsed without it.\n"
@@ -931,16 +972,24 @@ MUTATIONS = [
         # both call sites (the primary path and `_try_other`'s fallback);
         # `self._clients[other].complete(` disambiguates to the fallback
         # one -- the path T-V170-POL-04's failover-triggering test drives.
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which put one argument per line.
         "find": (
             "            response = self._clients[other].complete(\n"
-            "                messages, tools, max_tokens=max_tokens, reasoning=reasoning, "
-            "timeout_s=timeout_s,\n"
+            "                messages,\n"
+            "                tools,\n"
+            "                max_tokens=max_tokens,\n"
+            "                reasoning=reasoning,\n"
+            "                timeout_s=timeout_s,\n"
             "                response_format=response_format,\n"
             "            )\n"
         ),
         "replace": (
             "            response = self._clients[other].complete(\n"
-            "                messages, tools, max_tokens=max_tokens, timeout_s=timeout_s,\n"
+            "                messages,\n"
+            "                tools,\n"
+            "                max_tokens=max_tokens,\n"
+            "                timeout_s=timeout_s,\n"
             "                response_format=response_format,\n"
             "            )\n"
         ),
@@ -951,13 +1000,25 @@ MUTATIONS = [
     {
         "id": "v170-summary-retry-ignores-budget",
         "path": "agent.py",
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which put one argument per line.
         "find": (
-            "                llm, messages, record, attempt=2, max_tokens=retry_max_tokens,\n"
-            "                reasoning=rescue_reasoning, timeout_s=timeout_s,\n"
+            "                llm,\n"
+            "                messages,\n"
+            "                record,\n"
+            "                attempt=2,\n"
+            "                max_tokens=retry_max_tokens,\n"
+            "                reasoning=rescue_reasoning,\n"
+            "                timeout_s=timeout_s,\n"
         ),
         "replace": (
-            "                llm, messages, record, attempt=2, max_tokens=retry_max_tokens,\n"
-            "                reasoning=rescue_reasoning, timeout_s=None,\n"
+            "                llm,\n"
+            "                messages,\n"
+            "                record,\n"
+            "                attempt=2,\n"
+            "                max_tokens=retry_max_tokens,\n"
+            "                reasoning=rescue_reasoning,\n"
+            "                timeout_s=None,\n"
         ),
         "why": "REQ-V170-SUM-03: the truncation retry must derive its HTTP "
         "timeout from the remaining budget, never re-send the original, "
@@ -994,8 +1055,7 @@ MUTATIONS = [
         "id": "v170-honored-treats-null-as-positive",
         "path": "agent.py",
         "find": (
-            "    if reasoning_tokens is None and reasoning_chars == 0:\n"
-            "        return None\n"
+            "    if reasoning_tokens is None and reasoning_chars == 0:\n        return None\n"
         ),
         "replace": "",
         "why": "REQ-V170-OBS-01 rule 2: absent evidence (no reasoning-token "
@@ -1014,8 +1074,11 @@ MUTATIONS = [
     {
         "id": "v170-config-hash-includes-treatment",
         "path": "devtools/bench.py",
-        "find": '    "llm_reasoning_policy", "llm_reasoning_on_purposes",\n',
-        "replace": '    "llm_reasoning_on_purposes",\n',
+        # v1.9.2 T1 (REQ-V15-NG-04): re-derived after the whole-tree ruff
+        # format pass, which put one set item per line (and nested the
+        # frozenset literal one indent level deeper).
+        "find": '        "llm_reasoning_policy",\n        "llm_reasoning_on_purposes",\n',
+        "replace": '        "llm_reasoning_on_purposes",\n',
         "why": "REQ-V170-BEN-03: the reasoning policy is the treatment under "
         "test, not part of the locked instrument -- hashing it would make "
         "config_sha256 unstable across a policy-only candidate pair",
@@ -1100,8 +1163,7 @@ MUTATIONS = [
             "        (vector, k, user_id),"
         ),
         "replace": (
-            '        "WHERE embedding MATCH ? AND k = ? ORDER BY distance",\n'
-            "        (vector, k),"
+            '        "WHERE embedding MATCH ? AND k = ? ORDER BY distance",\n        (vector, k),'
         ),
         "why": "REQ-V190-SEC-01: knn_chunk_ids must scope the vec0 KNN to "
         "the calling user -- without the user_id predicate (and its bound "
@@ -1129,8 +1191,7 @@ MUTATIONS = [
         "id": "v190-delete-user-predicate-dropped",
         "path": "storage.py",
         "find": (
-            '"SELECT id FROM documents WHERE user_id = ? AND filename = ?", '
-            "(user_id, filename)"
+            '"SELECT id FROM documents WHERE user_id = ? AND filename = ?", (user_id, filename)'
         ),
         "replace": '"SELECT id FROM documents WHERE filename = ?", (filename,)',
         "why": "REQ-V190-SEC-03: document_id_for must scope to the calling "

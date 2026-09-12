@@ -31,10 +31,36 @@ HISTOGRAM_CAP = 20
 # against the recommended explicit bucket boundaries in
 # open-telemetry/semantic-conventions-genai.
 DURATION_BOUNDARIES = (
-    0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+    0.01,
+    0.02,
+    0.04,
+    0.08,
+    0.16,
+    0.32,
+    0.64,
+    1.28,
+    2.56,
+    5.12,
+    10.24,
+    20.48,
+    40.96,
+    81.92,
 )
 TOKEN_BOUNDARIES = (
-    1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864,
+    1,
+    4,
+    16,
+    64,
+    256,
+    1024,
+    4096,
+    16384,
+    65536,
+    262144,
+    1048576,
+    4194304,
+    16777216,
+    67108864,
 )
 
 
@@ -102,9 +128,7 @@ def context_growth(calls: Sequence) -> dict[str, float]:
         return {role: 0.0 for role in PROMPT_ROLE_KEYS}
     first = _by_role(agent_calls[0])
     last = _by_role(agent_calls[-1])
-    return {
-        role: float(last.get(role, 0) - first.get(role, 0)) for role in PROMPT_ROLE_KEYS
-    }
+    return {role: float(last.get(role, 0) - first.get(role, 0)) for role in PROMPT_ROLE_KEYS}
 
 
 def _by_role(call) -> dict:
@@ -139,19 +163,14 @@ def top_tools(
         totals[row["tool"]] = totals.get(row["tool"], 0) + row["output_tokens_est"]
     grand = sum(totals.values())
     ranked = sorted(totals.items(), key=lambda item: (-item[1], item[0]))
-    return [
-        (tool, tokens, tokens / grand if grand else 0.0) for tool, tokens in ranked[:limit]
-    ]
+    return [(tool, tokens, tokens / grand if grand else 0.0) for tool, tokens in ranked[:limit]]
 
 
-def turn_timeline(
-    conn: sqlite3.Connection, conv_id: int, turn_id: int | None = None
-) -> list[dict]:
+def turn_timeline(conn: sqlite3.Connection, conv_id: int, turn_id: int | None = None) -> list[dict]:
     """The rounds of one exchange: the agent calls from the one that produced
     `turn_id` up to (not including) the next round-1 call, each with the tool
     calls of its own turn. `turn_id` defaults to the most recent exchange."""
-    calls = [row for row in storage.fetch_llm_calls(conn, conv_id)
-             if row["purpose"] == "agent"]
+    calls = [row for row in storage.fetch_llm_calls(conn, conv_id) if row["purpose"] == "agent"]
     if turn_id is None:
         turn_id = _last_exchange_turn(calls)
     start = next((index for index, row in enumerate(calls) if row["turn_id"] == turn_id), None)
@@ -165,14 +184,16 @@ def turn_timeline(
     timeline = []
     for offset, row in enumerate(calls[start:]):
         if offset and row["round"] == 1:
-            break                     # the next user message starts here
-        timeline.append({
-            "round": row["round"],
-            "prompt_tokens": row["prompt_tokens"],
-            "completion_tokens": row["completion_tokens"],
-            "tools": tools_by_turn.get(row["turn_id"], []),
-            "final": row["tool_calls_n"] == 0,
-        })
+            break  # the next user message starts here
+        timeline.append(
+            {
+                "round": row["round"],
+                "prompt_tokens": row["prompt_tokens"],
+                "completion_tokens": row["completion_tokens"],
+                "tools": tools_by_turn.get(row["turn_id"], []),
+                "final": row["tool_calls_n"] == 0,
+            }
+        )
     return timeline
 
 
@@ -340,9 +361,7 @@ def _scenario_by_chat_span(conn: sqlite3.Connection) -> dict[str, str | None]:
     return result
 
 
-def usage_by(
-    conn: sqlite3.Connection, *, group: str, since: date | None = None
-) -> list[UsageRow]:
+def usage_by(conn: sqlite3.Connection, *, group: str, since: date | None = None) -> list[UsageRow]:
     if group not in ("model", "day", "purpose", "scenario"):
         raise ValueError(f"unknown usage_by group: {group!r}")
     rows = _fetch_llm_rows(conn, since)
@@ -401,7 +420,12 @@ def _build_usage_row(provider, model, purpose, scenario, day, key: str, rows: li
     ]
     reasoning_denominator = sum(c for _, c in reasoning_pairs)
     return UsageRow(
-        provider=provider, model=model, purpose=purpose, scenario=scenario, day=day, key=key,
+        provider=provider,
+        model=model,
+        purpose=purpose,
+        scenario=scenario,
+        day=day,
+        key=key,
         calls=len(rows),
         errors=sum(1 for row in rows if row["error_kind"] is not None),
         input_tokens=sum(row["prompt_tokens"] or 0 for row in rows),
@@ -411,15 +435,22 @@ def _build_usage_row(provider, model, purpose, scenario, day, key: str, rows: li
         cost_usd=sum(row["cost_usd"] for row in priced) if priced else 0.0,
         cost_basis=", ".join(sorted(bases)) if bases else None,
         cache_hit_share=(sum(c for c, _ in cache_pairs) / cache_denominator)
-        if cache_denominator else None,
+        if cache_denominator
+        else None,
         reasoning_share=(sum(r for r, _ in reasoning_pairs) / reasoning_denominator)
-        if reasoning_denominator else None,
+        if reasoning_denominator
+        else None,
     )
 
 
 def _fold_usage_rows(rows: list[UsageRow]) -> UsageRow:
     return UsageRow(
-        provider=None, model=None, purpose=None, scenario=None, day=None, key="(other)",
+        provider=None,
+        model=None,
+        purpose=None,
+        scenario=None,
+        day=None,
+        key="(other)",
         calls=sum(r.calls for r in rows),
         errors=sum(r.errors for r in rows),
         input_tokens=sum(r.input_tokens for r in rows),
@@ -427,7 +458,9 @@ def _fold_usage_rows(rows: list[UsageRow]) -> UsageRow:
         cached_tokens=sum(r.cached_tokens for r in rows),
         reasoning_tokens=sum(r.reasoning_tokens for r in rows),
         cost_usd=sum(r.cost_usd for r in rows),
-        cost_basis=None, cache_hit_share=None, reasoning_share=None,
+        cost_basis=None,
+        cache_hit_share=None,
+        reasoning_share=None,
     )
 
 
@@ -466,9 +499,15 @@ def _build_histogram(name, unit, attributes, boundaries, values: list[float]) ->
     for value in values:
         counts[bisect.bisect_left(boundaries, value)] += 1
     return Histogram(
-        name=name, unit=unit, attributes=attributes, boundaries=tuple(boundaries),
-        counts=tuple(counts), total=len(values), sum=sum(values),
-        p50=_percentile(values, 50), p95=_percentile(values, 95),
+        name=name,
+        unit=unit,
+        attributes=attributes,
+        boundaries=tuple(boundaries),
+        counts=tuple(counts),
+        total=len(values),
+        sum=sum(values),
+        p50=_percentile(values, 50),
+        p95=_percentile(values, 95),
     )
 
 
@@ -487,9 +526,7 @@ def _histograms_with_boundaries(
         # REQ-V160-MET-04: the folded histogram's attributes are exactly this
         # one pair, regardless of the grouping dimensions used elsewhere.
         histograms.append(
-            _build_histogram(
-                name, unit, (("gen_ai.request.model", "(other)"),), boundaries, other
-            )
+            _build_histogram(name, unit, (("gen_ai.request.model", "(other)"),), boundaries, other)
         )
     return histograms
 
@@ -585,8 +622,13 @@ def tool_health(conn: sqlite3.Connection, *, since: date | None = None) -> list[
 # report (T-V160-MET-09 asserts `MAX_TOOL_CALLS_ACCEPTED` never appears).
 _LIMIT_HIT_NAMES = frozenset(
     {
-        "ROUND_LIMIT", "TOOL_ROUND_LIMIT", "HTTP_ATTEMPT_LIMIT", "TOOL_EXECUTION_LIMIT",
-        "MAX_TOOL_CALLS_PER_RESPONSE", "MALFORMED_RETRY_LIMIT", "EMPTY_REPAIR_LIMIT",
+        "ROUND_LIMIT",
+        "TOOL_ROUND_LIMIT",
+        "HTTP_ATTEMPT_LIMIT",
+        "TOOL_EXECUTION_LIMIT",
+        "MAX_TOOL_CALLS_PER_RESPONSE",
+        "MALFORMED_RETRY_LIMIT",
+        "EMPTY_REPAIR_LIMIT",
     }
 )
 

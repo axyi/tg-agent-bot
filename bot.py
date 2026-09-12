@@ -48,17 +48,17 @@ DEFAULT_READ_TIMEOUT_S = 20.0
 MESSAGE_LIMIT = 4096
 MAX_BACKOFF_S = 30.0
 
-SEND_ATTEMPT_LIMIT = 3            # total attempts per send/edit call
+SEND_ATTEMPT_LIMIT = 3  # total attempts per send/edit call
 SEND_TRANSPORT_SLEEP_S = 2.0
-MAX_MESSAGE_CHARS = 4000          # the accepted length of one user message
+MAX_MESSAGE_CHARS = 4000  # the accepted length of one user message
 STATUS_MAX_CHARS = 64
 LIVE_READ_TIMEOUT_S = 30.0
 PROVIDER_OVERRIDE_KEY = "provider_override"
-PRICING_STATE_KEY = "pricing_json"    # REQ-V13-PRC-02: the persisted price snapshot
-STATS_MAX_CHARS = 3500            # REQ-V13-OBS-07
-REAP_TIMEOUT_S = 15.0             # REQ-V11-ORP-02
+PRICING_STATE_KEY = "pricing_json"  # REQ-V13-PRC-02: the persisted price snapshot
+STATS_MAX_CHARS = 3500  # REQ-V13-OBS-07
+REAP_TIMEOUT_S = 15.0  # REQ-V11-ORP-02
 
-TYPING_INTERVAL_S = 4.0           # REQ-V180-CHAT-05
+TYPING_INTERVAL_S = 4.0  # REQ-V180-CHAT-05
 TYPING_JOIN_TIMEOUT_S = 3.0
 TYPING_REQUEST_TIMEOUT_S = 2.0
 
@@ -176,9 +176,7 @@ class TelegramClient:
 
         status = response.status_code
         if status in (401, 404):
-            raise TelegramError(
-                redact(f"telegram {method} rejected the bot token"), fatal=True
-            )
+            raise TelegramError(redact(f"telegram {method} rejected the bot token"), fatal=True)
         if status == 429:
             raise TelegramError(
                 redact(f"telegram {method} rate limited"), retry_after=_retry_after(response)
@@ -621,7 +619,8 @@ def _check_allowlist_resolution(cfg: Config, resolve: Callable[..., list] | None
             log.warning(
                 "could not resolve allowlisted domain %s: %s; the request-time "
                 "guard remains in force",
-                entry, exc.__class__.__name__,
+                entry,
+                exc.__class__.__name__,
             )
             continue
         for result in results:
@@ -645,9 +644,18 @@ def _reap_orphaned_containers() -> None:
     never prevents startup."""
     try:
         listed = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"label={tools.CONTAINER_LABEL}",
-             "--format", _REAP_PS_FORMAT],
-            timeout=REAP_TIMEOUT_S, capture_output=True, env=tools._probe_env(),
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"label={tools.CONTAINER_LABEL}",
+                "--format",
+                _REAP_PS_FORMAT,
+            ],
+            timeout=REAP_TIMEOUT_S,
+            capture_output=True,
+            env=tools._probe_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("orphan container reap failed: %s", redact(str(exc)))
@@ -655,9 +663,7 @@ def _reap_orphaned_containers() -> None:
     if listed.returncode != 0:
         log.warning("orphan container reap failed: docker ps exited %d", listed.returncode)
         return
-    lines = [
-        line for line in listed.stdout.decode("utf-8", errors="replace").split("\n") if line
-    ]
+    lines = [line for line in listed.stdout.decode("utf-8", errors="replace").split("\n") if line]
     to_remove = []
     skipped = 0
     for line in lines:
@@ -673,7 +679,9 @@ def _reap_orphaned_containers() -> None:
     try:
         removed = subprocess.run(
             ["docker", "rm", "-f", *to_remove],
-            timeout=REAP_TIMEOUT_S, capture_output=True, env=tools._probe_env(),
+            timeout=REAP_TIMEOUT_S,
+            capture_output=True,
+            env=tools._probe_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("orphan container reap failed: %s", redact(str(exc)))
@@ -717,7 +725,7 @@ def _ensure_empty_resolv(db_path: Path) -> Path:
                 f'refusing to use "{path}" as the empty resolv file: '
                 "it is not a plain file owned by this process"
             )
-        os.fchmod(fd, 0o644)          # exact perms regardless of umask
+        os.fchmod(fd, 0o644)  # exact perms regardless of umask
     finally:
         os.close(fd)
     return path
@@ -731,8 +739,7 @@ def _refuse_shared_parent(parent: Path) -> None:
     st = os.stat(parent)
     if (st.st_mode & 0o002) and not (st.st_mode & stat.S_ISVTX):
         raise ConfigError(
-            f'"{parent}" is world-writable and not sticky; move DB_PATH out of '
-            "a shared directory"
+            f'"{parent}" is world-writable and not sticky; move DB_PATH out of a shared directory'
         )
 
 
@@ -850,7 +857,12 @@ def process_update(
             _send(tg, chat_id, [RATE_LIMIT_REPLY])
             return
         _handle_document(
-            document, conn=conn, tg=tg, cfg=cfg, chat_id=chat_id, from_id=from_id,
+            document,
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            chat_id=chat_id,
+            from_id=from_id,
             embedder=embedder,
         )
         return
@@ -880,10 +892,23 @@ def process_update(
             _handle_new(conn, tg, cfg, llm, chat_id, from_id, resolve_cost, summary_llm)
             return
         if name == "/status":
-            _send(tg, chat_id, split_message(_render_status(
-                conn, cfg, llm, skills, docker_version, docker_ok,
-                load_provider_override(conn), from_id, dashboard_status,
-            )))
+            _send(
+                tg,
+                chat_id,
+                split_message(
+                    _render_status(
+                        conn,
+                        cfg,
+                        llm,
+                        skills,
+                        docker_version,
+                        docker_ok,
+                        load_provider_override(conn),
+                        from_id,
+                        dashboard_status,
+                    )
+                ),
+            )
             return
         if name == "/stats":
             _send(tg, chat_id, split_message(_render_stats(conn, from_id)))
@@ -894,8 +919,13 @@ def process_update(
         if name == "/model":
             parts = stripped.split()
             _handle_model(
-                conn, tg, cfg, llm, chat_id,
-                parts[1] if len(parts) > 1 else "", set_provider,
+                conn,
+                tg,
+                cfg,
+                llm,
+                chat_id,
+                parts[1] if len(parts) > 1 else "",
+                set_provider,
             )
             return
         if name == "/reload_skills":
@@ -905,7 +935,7 @@ def process_update(
             _handle_documents(conn, tg, chat_id, from_id)
             return
         if name == "/delete":
-            argument = stripped[len(token):].strip()
+            argument = stripped[len(token) :].strip()
             _handle_delete(conn, tg, chat_id, from_id, argument)
             return
 
@@ -918,8 +948,13 @@ def process_update(
     # no embedder configured the tool stays "not available" (TOOL-02).
     searcher = (
         rag.Searcher(
-            conn, user_id=from_id, embedder=embedder, llm=rerank_llm or llm, cfg=cfg,
-            conv_id=conv_id, resolve_cost=resolve_cost,
+            conn,
+            user_id=from_id,
+            embedder=embedder,
+            llm=rerank_llm or llm,
+            cfg=cfg,
+            conv_id=conv_id,
+            resolve_cost=resolve_cost,
         )
         if embedder is not None
         else None
@@ -969,8 +1004,14 @@ def _write_audit(path: Path, tg_user_id: int, conv_id: int, record: dict) -> Non
 
 
 def _handle_new(
-    conn, tg, cfg: Config, llm, chat_id: int, from_id: int,
-    resolve_cost: CostResolver | None = None, summary_llm=None,
+    conn,
+    tg,
+    cfg: Config,
+    llm,
+    chat_id: int,
+    from_id: int,
+    resolve_cost: CostResolver | None = None,
+    summary_llm=None,
 ) -> None:
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     if len(storage.load_context_messages(conn, conv_id, agent.CONTEXT_WINDOW_MESSAGES)) >= 2:
@@ -978,20 +1019,31 @@ def _handle_new(
             summary = agent.summarize_conversation(
                 # REQ-V13-RTE-01: the summary purpose, and only it, may run on
                 # the routed client; `summary_llm` is None unless it is configured.
-                conn, conv_id, summary_llm or llm, cfg, resolve_cost=resolve_cost,
-                retry_max_tokens=cfg.llm_summary_max_tokens, budget_s=cfg.llm_timeout_s,
+                conn,
+                conv_id,
+                summary_llm or llm,
+                cfg,
+                resolve_cost=resolve_cost,
+                retry_max_tokens=cfg.llm_summary_max_tokens,
+                budget_s=cfg.llm_timeout_s,
             )
             if summary is not None:
                 storage.add_summary(conn, conv_id, from_id, summary)
-        except Exception as exc:      # summarization never blocks /new
+        except Exception as exc:  # summarization never blocks /new
             log.warning("summarizing the outgoing conversation failed: %s", redact(str(exc)))
     storage.start_new_conversation(conn, from_id)
     _send(tg, chat_id, [NEW_CONVERSATION_REPLY])
 
 
 def _handle_summary(
-    conn, tg, cfg: Config, llm, chat_id: int, from_id: int,
-    resolve_cost: CostResolver | None = None, summary_llm=None,
+    conn,
+    tg,
+    cfg: Config,
+    llm,
+    chat_id: int,
+    from_id: int,
+    resolve_cost: CostResolver | None = None,
+    summary_llm=None,
 ) -> None:
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     if len(storage.load_context_messages(conn, conv_id, agent.CONTEXT_WINDOW_MESSAGES)) < 2:
@@ -999,8 +1051,13 @@ def _handle_summary(
         return
     try:
         summary = agent.summarize_conversation(
-            conn, conv_id, summary_llm or llm, cfg, resolve_cost=resolve_cost,
-            retry_max_tokens=cfg.llm_summary_max_tokens, budget_s=cfg.llm_timeout_s,
+            conn,
+            conv_id,
+            summary_llm or llm,
+            cfg,
+            resolve_cost=resolve_cost,
+            retry_max_tokens=cfg.llm_summary_max_tokens,
+            budget_s=cfg.llm_timeout_s,
         )
     except Exception as exc:
         log.warning("summarizing on request failed: %s", redact(str(exc)))
@@ -1065,23 +1122,25 @@ def _render_stats(conn, from_id: int) -> str:
     conv_id = storage.active_conversation_id(conn, from_id)
     here = metrics.conversation_stats(conn, conv_id)
     everywhere = metrics.global_stats(conn)
-    return _fit([
-        "Stats (this conversation | all time)",
-        f"LLM calls: {here.calls} | {everywhere.calls} "
-        f"(errors {here.errors} | {everywhere.errors})",
-        f"Tokens in: {_pair(here.tokens_in, everywhere.tokens_in)} "
-        f"(cached: {_pair(here.cached_tokens, everywhere.cached_tokens)}, "
-        f"reasoning: {_pair(here.reasoning_tokens, everywhere.reasoning_tokens)})",
-        f"Tokens out: {_pair(here.tokens_out, everywhere.tokens_out)}",
-        f"Est. cost: {_render_cost(here.cost_usd)} | {_render_cost(everywhere.cost_usd)} "
-        f"(basis: {_pair(here.cost_basis, everywhere.cost_basis)})",
-        f"Avg prompt/call: {_pair(here.avg_prompt, everywhere.avg_prompt)}; "
-        f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}",
-        f"Top tools by output tokens (all time): {_render_top_tools(conn)}",
-        f"Last turn: {_render_last_turn(conn, conv_id)}",
-        _render_errors_line(conn),
-        _render_summaries_line(conn),
-    ])
+    return _fit(
+        [
+            "Stats (this conversation | all time)",
+            f"LLM calls: {here.calls} | {everywhere.calls} "
+            f"(errors {here.errors} | {everywhere.errors})",
+            f"Tokens in: {_pair(here.tokens_in, everywhere.tokens_in)} "
+            f"(cached: {_pair(here.cached_tokens, everywhere.cached_tokens)}, "
+            f"reasoning: {_pair(here.reasoning_tokens, everywhere.reasoning_tokens)})",
+            f"Tokens out: {_pair(here.tokens_out, everywhere.tokens_out)}",
+            f"Est. cost: {_render_cost(here.cost_usd)} | {_render_cost(everywhere.cost_usd)} "
+            f"(basis: {_pair(here.cost_basis, everywhere.cost_basis)})",
+            f"Avg prompt/call: {_pair(here.avg_prompt, everywhere.avg_prompt)}; "
+            f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}",
+            f"Top tools by output tokens (all time): {_render_top_tools(conn)}",
+            f"Last turn: {_render_last_turn(conn, conv_id)}",
+            _render_errors_line(conn),
+            _render_summaries_line(conn),
+        ]
+    )
 
 
 def _render_counts(counts: dict[str, int]) -> str:
@@ -1140,9 +1199,7 @@ def _render_top_tools(conn) -> str:
     ranked = metrics.top_tools(conn)
     if not ranked:
         return "none"
-    return ", ".join(
-        f"{tool} {tokens} ({round(share * 100)}%)" for tool, tokens, share in ranked
-    )
+    return ", ".join(f"{tool} {tokens} ({round(share * 100)}%)" for tool, tokens, share in ranked)
 
 
 def _render_last_turn(conn, conv_id: int | None) -> str:
@@ -1151,8 +1208,10 @@ def _render_last_turn(conn, conv_id: int | None) -> str:
         return "none"
     parts = []
     for entry in timeline:
-        part = (f"r{entry['round']} in {_cell(entry['prompt_tokens'], str)} "
-                f"out {_cell(entry['completion_tokens'], str)}")
+        part = (
+            f"r{entry['round']} in {_cell(entry['prompt_tokens'], str)} "
+            f"out {_cell(entry['completion_tokens'], str)}"
+        )
         if entry["tools"]:
             part += " → " + ", ".join(f"{tool} {ms} ms" for tool, ms in entry["tools"])
         elif entry["final"]:
@@ -1170,15 +1229,17 @@ def _render_failures(llm) -> str:
     return f"lmstudio={counts.get('lmstudio', 0)}, openrouter={counts.get('openrouter', 0)}"
 
 
-def _handle_model(
-    conn, tg, cfg: Config, llm, chat_id: int, argument: str, set_provider
-) -> None:
+def _handle_model(conn, tg, cfg: Config, llm, chat_id: int, argument: str, set_provider) -> None:
     override = load_provider_override(conn)
     if not argument:
-        _send(tg, chat_id, [
-            f"Provider: {_active_provider(cfg, llm, override)} "
-            f"(override: {override or 'none'}, failures: {_render_failures(llm)})"
-        ])
+        _send(
+            tg,
+            chat_id,
+            [
+                f"Provider: {_active_provider(cfg, llm, override)} "
+                f"(override: {override or 'none'}, failures: {_render_failures(llm)})"
+            ],
+        )
         return
     choice = argument.casefold()
     if choice == "auto":
@@ -1308,9 +1369,15 @@ def _handle_document(
             raise TelegramError(redact("telegram getFile returned no file_path"))
         data = tg.download_file(file_path, max_bytes=DOCUMENT_MAX_BYTES)
         result = documents.index_document(
-            conn, user_id=from_id, filename=filename, data=data, embedder=embedder,
-            progress=status.update, now=storage.utc_now_iso(),
-            started_at=started_at, monotonic=monotonic,
+            conn,
+            user_id=from_id,
+            filename=filename,
+            data=data,
+            embedder=embedder,
+            progress=status.update,
+            now=storage.utc_now_iso(),
+            started_at=started_at,
+            monotonic=monotonic,
         )
     except documents.DocumentLimitExceededError:
         log.warning("document refused: limit")
@@ -1622,8 +1689,7 @@ def run_selftest() -> int:
 
 def _selftest_failure(conn, tg, cfg: Config, root: Path) -> str | None:
     rows = conn.execute(
-        "SELECT turn_id, role, content, tool_calls_json, tool_call_id "
-        "FROM messages ORDER BY id"
+        "SELECT turn_id, role, content, tool_calls_json, tool_call_id FROM messages ORDER BY id"
     ).fetchall()
 
     users = [row for row in rows if row["role"] == "user"]
@@ -1653,9 +1719,7 @@ def _selftest_failure(conn, tg, cfg: Config, root: Path) -> str | None:
     if tool_turns[0]["turn_id"] != tool_rows[0]["turn_id"]:
         return "the assistant row and the tool row are not in one turn group"
 
-    answers = [
-        row for row in rows if row["role"] == "assistant" and row["tool_calls_json"] is None
-    ]
+    answers = [row for row in rows if row["role"] == "assistant" and row["tool_calls_json"] is None]
     if len(answers) != 1 or answers[0]["content"] != "selftest ok":
         return "the final assistant message was not stored exactly once"
 
@@ -1774,9 +1838,7 @@ def _live_lmstudio(cfg: Config, client: httpx.Client) -> int:
     try:
         response = client.get(f"{cfg.lmstudio_base_url}/models", timeout=LIVE_READ_TIMEOUT_S)
         if response.status_code != 200:
-            return _live_fail(
-                "lmstudio", f"http {response.status_code}: {response.text[:200]}"
-            )
+            return _live_fail("lmstudio", f"http {response.status_code}: {response.text[:200]}")
         body = response.json()
     except Exception as exc:
         return _live_fail("lmstudio", exc)
@@ -1809,13 +1871,9 @@ def _live_embeddings(cfg: Config, client: httpx.Client) -> int:
         print("live: FAIL embeddings (EMBEDDING_MODEL and EMBEDDING_DIM are not set)")
         return 1
     try:
-        response = client.get(
-            f"{cfg.embedding_base_url}/models", timeout=LIVE_READ_TIMEOUT_S
-        )
+        response = client.get(f"{cfg.embedding_base_url}/models", timeout=LIVE_READ_TIMEOUT_S)
         if response.status_code != 200:
-            return _live_fail(
-                "embeddings", f"http {response.status_code}: {response.text[:200]}"
-            )
+            return _live_fail("embeddings", f"http {response.status_code}: {response.text[:200]}")
         body = response.json()
     except Exception as exc:
         return _live_fail("embeddings", exc)
@@ -1823,8 +1881,11 @@ def _live_embeddings(cfg: Config, client: httpx.Client) -> int:
     if cfg.embedding_model not in models:
         return _live_fail("embeddings", f"model {cfg.embedding_model} is not loaded")
     embedder = EmbeddingsClient(
-        cfg.embedding_base_url, cfg.embedding_model, cfg.embedding_dim,
-        LIVE_READ_TIMEOUT_S, client,
+        cfg.embedding_base_url,
+        cfg.embedding_model,
+        cfg.embedding_dim,
+        LIVE_READ_TIMEOUT_S,
+        client,
     )
     try:
         vectors = embedder.embed(["selftest"])
@@ -1951,18 +2012,14 @@ def main(argv: list[str] | None = None) -> int:
     # routing is configured. Unset it stays None so the summary keeps running on
     # whichever client `/model` has selected, exactly as before.
     summary_llm = (
-        build_llm_client(cfg, client=client, purpose="summary")
-        if cfg.llm_summary_model
-        else None
+        build_llm_client(cfg, client=client, purpose="summary") if cfg.llm_summary_model else None
     )
 
     # v1.9.1 T1: a third client, same shape as summary_llm above, only when
     # LLM_RERANK_MODEL is configured. Unset it stays None so Searcher keeps
     # reranking on whichever client `/model` has selected, exactly as before.
     rerank_llm = (
-        build_llm_client(cfg, client=client, purpose="rerank")
-        if cfg.llm_rerank_model
-        else None
+        build_llm_client(cfg, client=client, purpose="rerank") if cfg.llm_rerank_model else None
     )
 
     # REQ-V13-PRC-02: once, at startup, and never per message.
@@ -1973,8 +2030,11 @@ def main(argv: list[str] | None = None) -> int:
     # and the document upload flow "not available" (TOOL-02, ERR-01 row 14).
     embedder = (
         EmbeddingsClient(
-            cfg.embedding_base_url, cfg.embedding_model, cfg.embedding_dim,
-            cfg.embedding_timeout_s, client,
+            cfg.embedding_base_url,
+            cfg.embedding_model,
+            cfg.embedding_dim,
+            cfg.embedding_timeout_s,
+            client,
         )
         if cfg.rag_enabled
         else None
@@ -2005,9 +2065,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             dashboard_status = "off (bind failed)"
         else:
-            dashboard_thread = threading.Thread(
-                target=dashboard_srv.serve_forever, daemon=True
-            )
+            dashboard_thread = threading.Thread(target=dashboard_srv.serve_forever, daemon=True)
             dashboard_thread.start()
             dashboard_status = f"http://127.0.0.1:{cfg.dashboard_port}/"
             log.info("dashboard: serving at %s", dashboard_status)

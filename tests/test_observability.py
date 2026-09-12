@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS summaries (
 # helpers
 # --------------------------------------------------------------------------
 
+
 def body(message, usage=None, finish_reason="stop"):
     payload = {"choices": [{"message": message, "finish_reason": finish_reason}]}
     if usage is not None:
@@ -116,8 +117,13 @@ class NamedLLM:
         self.timeout_s_calls = []
 
     def complete(
-        self, messages, tools, *, max_tokens=None,
-        reasoning: ReasoningRequest = REASONING_DEFAULT, timeout_s=None,
+        self,
+        messages,
+        tools,
+        *,
+        max_tokens=None,
+        reasoning: ReasoningRequest = REASONING_DEFAULT,
+        timeout_s=None,
         response_format=None,
     ):
         self.calls.append((list(messages), tools))
@@ -211,9 +217,15 @@ def process(conn, cfg, upd, **kwargs):
     tg = kwargs.pop("tg", None) or RecordingTelegram()
     llm = kwargs.pop("llm", None) or FakeLLM([])
     bot.process_update(
-        upd, conn=conn, tg=tg, cfg=cfg, llm=llm, skills=kwargs.pop("skills", {}),
+        upd,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        llm=llm,
+        skills=kwargs.pop("skills", {}),
         runner=kwargs.pop("runner", None) or RecordingRunner(),
-        bot_username=BOT_USERNAME, **kwargs,
+        bot_username=BOT_USERNAME,
+        **kwargs,
     )
     return tg
 
@@ -233,8 +245,7 @@ CALL_DEFAULTS = {
     "reasoning_tokens": None,
     "reasoning_chars": 0,
     "prompt_chars": 300,
-    "prompt_chars_by_role": {"system": 100, "tools": 50, "user": 150,
-                             "assistant": 0, "tool": 0},
+    "prompt_chars_by_role": {"system": 100, "tools": 50, "user": 150, "assistant": 0, "tool": 0},
     "messages_n": 2,
     "tools_exposed": 3,
     "latency_ms": 5,
@@ -263,9 +274,17 @@ def registered_secrets():
 
 def add_tool(conn, conv_id, **overrides):
     fields = {
-        "conv_id": conv_id, "turn_id": 1, "tool_call_id": "call_1_0", "tool": "exec",
-        "ts": NOW, "input_chars": 20, "raw_output_chars": 100, "output_chars": 100,
-        "output_tokens_est": 33, "duration_ms": 7, "outcome": "ok",
+        "conv_id": conv_id,
+        "turn_id": 1,
+        "tool_call_id": "call_1_0",
+        "tool": "exec",
+        "ts": NOW,
+        "input_chars": 20,
+        "raw_output_chars": 100,
+        "output_chars": 100,
+        "output_tokens_est": 33,
+        "duration_ms": 7,
+        "outcome": "ok",
     }
     fields.update(overrides)
     return storage.add_tool_call(conn, **fields)
@@ -275,18 +294,21 @@ def add_tool(conn, conv_id, **overrides):
 # 6.1 REQ-V13-OBS-01 — usage on the response
 # --------------------------------------------------------------------------
 
+
 def test_obs01_usage_full():
-    response = parse_response(body(
-        {"content": "hi"},
-        {
-            "prompt_tokens": 900,
-            "completion_tokens": 40,
-            "total_tokens": 940,
-            "prompt_tokens_details": {"cached_tokens": 128},
-            "completion_tokens_details": {"reasoning_tokens": 12},
-            "cost": 0.00042,
-        },
-    ))
+    response = parse_response(
+        body(
+            {"content": "hi"},
+            {
+                "prompt_tokens": 900,
+                "completion_tokens": 40,
+                "total_tokens": 940,
+                "prompt_tokens_details": {"cached_tokens": 128},
+                "completion_tokens_details": {"reasoning_tokens": 12},
+                "cost": 0.00042,
+            },
+        )
+    )
     assert response.usage == Usage(900, 40, 940, 128, 12, 0.00042)
 
 
@@ -358,6 +380,7 @@ def test_tool_choice_appears_only_with_tools():
 # 6.1 REQ-V13-OBS-02 — reasoning never reaches the user
 # --------------------------------------------------------------------------
 
+
 def test_obs02_think_block_is_stripped_from_content():
     response = parse_response(body({"content": "<think>plan</think>Answer"}))
     assert response.content == "Answer"
@@ -412,11 +435,14 @@ def test_obs02_non_string_reasoning_field_is_ignored():
 # 6.1 REQ-V13-OBS-04 — describe() on all three clients
 # --------------------------------------------------------------------------
 
+
 def test_describe_on_the_two_adapters():
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
     with httpx.Client(transport=transport) as client:
         assert LMStudioClient("http://local/v1", "small", 1.0, client).describe() == (
-            "lmstudio", "small")
+            "lmstudio",
+            "small",
+        )
         assert OpenRouterClient("key", "big", 1.0, client).describe() == ("openrouter", "big")
 
 
@@ -429,7 +455,8 @@ def test_describe_on_failover_reports_the_client_that_served_the_call():
     assert failover.describe() == ("lmstudio", "small")
     failover.failure_counts["lmstudio"] = FAILOVER_THRESHOLD - 1
     assert failover.complete([{"role": "user", "content": "x"}], None).content == (
-        "from the fallback")
+        "from the fallback"
+    )
     assert failover.describe() == ("openrouter", "big")
 
 
@@ -437,24 +464,28 @@ def test_describe_on_failover_reports_the_client_that_served_the_call():
 # 6.1 REQ-V13-OBS-03 — schema v3
 # --------------------------------------------------------------------------
 
+
 def test_obs03_fresh_database_is_v3(conn):
     assert storage.SCHEMA_VERSION == 6
     assert storage.schema_version(conn) == 6
     for table in ("llm_calls", "tool_calls", "spans"):
-        assert conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
-        ).fetchone() is not None
+        assert (
+            conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            is not None
+        )
 
 
 def test_obs03_migration_from_v2_is_additive_and_idempotent(tmp_path):
     path = tmp_path / "v2.db"
     legacy = sqlite3.connect(str(path), isolation_level=None)
     legacy.executescript(V2_SCHEMA)
-    legacy.execute(
-        "INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)")
+    legacy.execute("INSERT INTO conversations (tg_user_id, created_at, active) VALUES (7, 'x', 1)")
     legacy.execute(
         "INSERT INTO messages (conv_id, turn_id, role, content, created_at) "
-        "VALUES (1, 1, 'user', 'hi', 'x')")
+        "VALUES (1, 1, 'user', 'hi', 'x')"
+    )
     legacy.close()
 
     conn = storage.connect(path)
@@ -509,10 +540,10 @@ def test_obs03_writers_round_trip(conn):
 # 6.1 REQ-V13-OBS-04 — one row per llm.complete invocation
 # --------------------------------------------------------------------------
 
+
 def test_obs04_a_successful_tool_round_is_recorded(conn):
     script = [
-        LLMResponse("", [tool_call()], "tool_calls",
-                    Usage(900, 40, 940, None, None, None)),
+        LLMResponse("", [tool_call()], "tool_calls", Usage(900, 40, 940, None, None, None)),
         LLMResponse("done", [], "stop"),
     ]
     _, _, conv = run(conn, script)
@@ -526,7 +557,12 @@ def test_obs04_a_successful_tool_round_is_recorded(conn):
     assert first["finish_reason"] == "tool_calls" and first["tool_calls_n"] == 1
     assert first["error_kind"] is None
     assert set(json.loads(first["prompt_chars_by_role"])) == {
-        "system", "tools", "user", "assistant", "tool"}
+        "system",
+        "tools",
+        "user",
+        "assistant",
+        "tool",
+    }
     assert first["prompt_chars"] == sum(json.loads(first["prompt_chars_by_role"]).values())
     # v1.9.0 T6 (REQ-V190-TOOL-01, operator-ratified EC-03 extension):
     # tool_specs() gained a fourth entry (search_documents), unconditionally
@@ -544,9 +580,14 @@ def test_obs04_the_row_points_at_the_turn_it_produced(conn):
     _, _, conv = run(conn, script)
     rows = llm_rows(conn)
     turns = [r["turn_id"] for r in rows]
-    stored = [r["turn_id"] for r in conn.execute(
-        "SELECT DISTINCT turn_id FROM messages WHERE conv_id = ? AND role != 'user' "
-        "ORDER BY turn_id", (conv,))]
+    stored = [
+        r["turn_id"]
+        for r in conn.execute(
+            "SELECT DISTINCT turn_id FROM messages WHERE conv_id = ? AND role != 'user' "
+            "ORDER BY turn_id",
+            (conv,),
+        )
+    ]
     assert turns == stored
 
 
@@ -593,11 +634,16 @@ def test_obs04_summary_calls_are_recorded_with_round_zero(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_user_message(conn, conv, "hello")
     storage.add_assistant_message(conn, conv, "hi")
-    llm = FakeLLM([
-        LLMResponse("not json", [], "stop"),
-        LLMResponse('{"goal": "g", "files": [], "decisions": [], '
-                    '"errors": [], "next_action": ""}', [], "stop"),
-    ])
+    llm = FakeLLM(
+        [
+            LLMResponse("not json", [], "stop"),
+            LLMResponse(
+                '{"goal": "g", "files": [], "decisions": [], "errors": [], "next_action": ""}',
+                [],
+                "stop",
+            ),
+        ]
+    )
     assert agent.summarize_conversation(conn, conv, llm, None) is not None
     rows = llm_rows(conn)
     assert len(rows) == 2
@@ -615,8 +661,11 @@ def test_obs04_a_stub_resolver_lands_in_the_row(conn):
         seen.append((provider, model, usage))
         return (0.125, "reference:anthropic/claude")
 
-    run(conn, [LLMResponse("done", [], "stop", Usage(10, 2, 12, None, None, None))],
-        resolve_cost=resolver)
+    run(
+        conn,
+        [LLMResponse("done", [], "stop", Usage(10, 2, 12, None, None, None))],
+        resolve_cost=resolver,
+    )
     row = llm_rows(conn)[0]
     assert row["cost_usd"] == 0.125
     assert row["cost_basis"] == "reference:anthropic/claude"
@@ -637,15 +686,17 @@ def test_obs04_the_resolver_sees_the_post_invocation_describe_values(conn):
         primary, secondary, primary_name="lmstudio", secondary_name="openrouter"
     )
     failover.failure_counts["lmstudio"] = FAILOVER_THRESHOLD - 1
-    run(conn, [], llm=failover,
-        resolve_cost=lambda p, m, u: (seen.append((p, m)), (None, None))[1])
+    run(conn, [], llm=failover, resolve_cost=lambda p, m, u: (seen.append((p, m)), (None, None))[1])
     assert seen == [("openrouter", "big")]
 
 
 def test_obs04_the_resolver_runs_for_a_failed_invocation_too(conn):
     seen = []
-    run(conn, [LLMError("llm http 500", retryable=False)],
-        resolve_cost=lambda p, m, u: (seen.append(u), (None, None))[1])
+    run(
+        conn,
+        [LLMError("llm http 500", retryable=False)],
+        resolve_cost=lambda p, m, u: (seen.append(u), (None, None))[1],
+    )
     assert seen == [None]
 
 
@@ -663,6 +714,7 @@ def test_obs04_a_client_without_describe_still_records_provider_and_model(conn):
 # 6.1 REQ-V13-OBS-05 — one row per tool call, whatever its outcome
 # --------------------------------------------------------------------------
 
+
 def test_obs05_an_executed_tool_call_is_recorded(conn):
     script = [LLMResponse("", [tool_call()], "tool_calls"), LLMResponse("done", [], "stop")]
     _, _, conv = run(conn, script)
@@ -677,13 +729,14 @@ def test_obs05_an_executed_tool_call_is_recorded(conn):
     # uncompacted `recorded\n`), while `output_tokens_est` stays on the
     # envelope the model is actually sent — the basis the O1 metric
     # `tool_output_tokens_est` was benchmarked on.
-    envelope = conn.execute(
-        "SELECT content FROM messages WHERE role = 'tool'").fetchone()[0]
+    envelope = conn.execute("SELECT content FROM messages WHERE role = 'tool'").fetchone()[0]
     assert row["output_chars"] == row["raw_output_chars"] == len("recorded\n")
     assert row["output_tokens_est"] == agent.estimate_tokens(envelope)
     assert row["duration_ms"] >= 0
-    assert row["turn_id"] == conn.execute(
-        "SELECT turn_id FROM messages WHERE role = 'tool'").fetchone()[0]
+    assert (
+        row["turn_id"]
+        == conn.execute("SELECT turn_id FROM messages WHERE role = 'tool'").fetchone()[0]
+    )
 
 
 def test_obs05_excess_calls_are_recorded_as_rejected(conn):
@@ -699,7 +752,8 @@ def test_obs05_a_budget_refusal_is_recorded(conn):
     # boundary, so the last round runs out of budget half-way through.
     def full_round():
         return LLMResponse(
-            "", [tool_call(i) for i in range(agent.MAX_TOOL_CALLS_PER_RESPONSE)], "tool_calls")
+            "", [tool_call(i) for i in range(agent.MAX_TOOL_CALLS_PER_RESPONSE)], "tool_calls"
+        )
 
     script = [LLMResponse("", [tool_call()], "tool_calls")]
     script += [full_round() for _ in range(4)]
@@ -726,12 +780,13 @@ def test_obs05_an_error_envelope_is_recorded_as_error(conn):
 # 6.1 REQ-V13-OBS-06 / 6.2 REQ-V13-OBS-09 — structured log lines, no content
 # --------------------------------------------------------------------------
 
+
 def parse_log(caplog, prefix):
     payloads = []
     for record in caplog.records:
         message = record.getMessage()
         if message.startswith(prefix + " "):
-            payloads.append(json.loads(message[len(prefix) + 1:]))
+            payloads.append(json.loads(message[len(prefix) + 1 :]))
     return payloads
 
 
@@ -772,8 +827,11 @@ def test_obs06_log_lines_carry_no_message_text(conn, caplog):
 def test_obs09_the_tables_store_no_message_content(conn, registered_secrets):
     config.register_secret("SYNTHETIC-CANARY-OBS")
     script = [
-        LLMResponse("", [ToolCall("c1", "exec", json.dumps(
-            {"argv": ["echo", "SYNTHETIC-CANARY-OBS"]}))], "tool_calls"),
+        LLMResponse(
+            "",
+            [ToolCall("c1", "exec", json.dumps({"argv": ["echo", "SYNTHETIC-CANARY-OBS"]}))],
+            "tool_calls",
+        ),
         LLMResponse("done", [], "stop"),
     ]
     run(conn, script, user="please echo SYNTHETIC-CANARY-OBS")
@@ -787,14 +845,33 @@ def test_obs09_the_tables_store_no_message_content(conn, registered_secrets):
 # 6.1 REQ-V13-OBS-07 — /stats and the /status token line
 # --------------------------------------------------------------------------
 
+
 def seed_conversation(conn, *, basis=(None, None), user_id=USER_ID):
     conv = storage.get_or_create_active_conversation(conn, user_id)
-    add_call(conn, conv, turn_id=2, round_no=1, prompt_tokens=2980, completion_tokens=88,
-             total_tokens=3068, tool_calls_n=1, finish_reason="tool_calls",
-             cost_usd=None if basis[0] is None else 0.01, cost_basis=basis[0])
-    add_call(conn, conv, turn_id=3, round_no=2, prompt_tokens=3512, completion_tokens=210,
-             total_tokens=3722, cost_usd=None if basis[1] is None else 0.0123,
-             cost_basis=basis[1])
+    add_call(
+        conn,
+        conv,
+        turn_id=2,
+        round_no=1,
+        prompt_tokens=2980,
+        completion_tokens=88,
+        total_tokens=3068,
+        tool_calls_n=1,
+        finish_reason="tool_calls",
+        cost_usd=None if basis[0] is None else 0.01,
+        cost_basis=basis[0],
+    )
+    add_call(
+        conn,
+        conv,
+        turn_id=3,
+        round_no=2,
+        prompt_tokens=3512,
+        completion_tokens=210,
+        total_tokens=3722,
+        cost_usd=None if basis[1] is None else 0.0123,
+        cost_basis=basis[1],
+    )
     add_tool(conn, conv, turn_id=2, tool="exec", duration_ms=412, output_tokens_est=1812)
     return conv
 
@@ -849,8 +926,9 @@ def test_obs07_stats_on_an_empty_database(conn, tmp_path):
 def test_obs07_stats_separates_this_conversation_from_all_time(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     other = storage.get_or_create_active_conversation(conn, 999)
-    add_call(conn, other, prompt_tokens=1000, completion_tokens=100, total_tokens=1100,
-             error_kind="http")
+    add_call(
+        conn, other, prompt_tokens=1000, completion_tokens=100, total_tokens=1100, error_kind="http"
+    )
     seed_conversation(conn)
     text = stats_text(conn, cfg)
     assert "LLM calls: 2 | 3 (errors 0 | 1)" in text
@@ -891,6 +969,7 @@ def test_obs07_stats_stays_under_the_cap(conn, tmp_path):
 # 6.1 REQ-V13-OBS-08 — metrics.py
 # --------------------------------------------------------------------------
 
+
 def test_obs08_resent_tokens_on_a_hand_computed_sequence():
     calls = [{"prompt_tokens": 100}, {"prompt_tokens": 250}, {"prompt_tokens": 200}]
     resent, new = metrics.resent_tokens(calls)
@@ -912,15 +991,44 @@ def test_obs08_resent_tokens_skips_rows_without_usage():
 
 def test_obs08_context_growth_is_the_per_role_char_delta():
     calls = [
-        {"purpose": "agent", "prompt_chars_by_role":
-            {"system": 100, "tools": 2000, "user": 40, "assistant": 0, "tool": 0}},
-        {"purpose": "summary", "prompt_chars_by_role":
-            {"system": 9999, "tools": 0, "user": 0, "assistant": 0, "tool": 0}},
-        {"purpose": "agent", "prompt_chars_by_role":
-            {"system": 100, "tools": 2000, "user": 40, "assistant": 250, "tool": 900}},
+        {
+            "purpose": "agent",
+            "prompt_chars_by_role": {
+                "system": 100,
+                "tools": 2000,
+                "user": 40,
+                "assistant": 0,
+                "tool": 0,
+            },
+        },
+        {
+            "purpose": "summary",
+            "prompt_chars_by_role": {
+                "system": 9999,
+                "tools": 0,
+                "user": 0,
+                "assistant": 0,
+                "tool": 0,
+            },
+        },
+        {
+            "purpose": "agent",
+            "prompt_chars_by_role": {
+                "system": 100,
+                "tools": 2000,
+                "user": 40,
+                "assistant": 250,
+                "tool": 900,
+            },
+        },
     ]
     assert metrics.context_growth(calls) == {
-        "system": 0, "tools": 0, "user": 0, "assistant": 250, "tool": 900}
+        "system": 0,
+        "tools": 0,
+        "user": 0,
+        "assistant": 250,
+        "tool": 900,
+    }
 
 
 def test_obs08_context_growth_needs_two_agent_calls():
@@ -928,19 +1036,35 @@ def test_obs08_context_growth_needs_two_agent_calls():
     single = [{"purpose": "agent", "prompt_chars_by_role": {"system": 100}}]
     assert metrics.context_growth(single) == zeros
     assert metrics.context_growth([]) == zeros
-    assert metrics.context_growth(
-        [{"purpose": "summary", "prompt_chars_by_role": {}}] * 3) == zeros
+    assert metrics.context_growth([{"purpose": "summary", "prompt_chars_by_role": {}}] * 3) == zeros
 
 
 def test_obs08_context_growth_reads_the_stored_json_column(conn):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
-    add_call(conn, conv, prompt_chars_by_role={
-        "system": 100, "tools": 50, "user": 150, "assistant": 0, "tool": 0})
-    add_call(conn, conv, purpose="summary", round_no=0, turn_id=None,
-             prompt_chars_by_role={"system": 5000, "tools": 0, "user": 0,
-                                   "assistant": 0, "tool": 0})
-    add_call(conn, conv, prompt_chars_by_role={
-        "system": 100, "tools": 50, "user": 150, "assistant": 300, "tool": 700})
+    add_call(
+        conn,
+        conv,
+        prompt_chars_by_role={"system": 100, "tools": 50, "user": 150, "assistant": 0, "tool": 0},
+    )
+    add_call(
+        conn,
+        conv,
+        purpose="summary",
+        round_no=0,
+        turn_id=None,
+        prompt_chars_by_role={"system": 5000, "tools": 0, "user": 0, "assistant": 0, "tool": 0},
+    )
+    add_call(
+        conn,
+        conv,
+        prompt_chars_by_role={
+            "system": 100,
+            "tools": 50,
+            "user": 150,
+            "assistant": 300,
+            "tool": 700,
+        },
+    )
     growth = metrics.context_growth(storage.fetch_llm_calls(conn, conv))
     assert growth == {"system": 0, "tools": 0, "user": 0, "assistant": 300, "tool": 700}
 

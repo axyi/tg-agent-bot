@@ -42,6 +42,7 @@ USAGE = Usage(prompt_tokens=1000, completion_tokens=200, total_tokens=1200)
 # Helpers
 # --------------------------------------------------------------------------
 
+
 def model_entry(model_id, **overrides):
     prices = {
         "prompt": PROMPT_PER_TOKEN,
@@ -143,6 +144,7 @@ def base_env(**overrides):
 # REQ-V13-PRC-01 — the `/models` payload
 # --------------------------------------------------------------------------
 
+
 def test_prc01_fetch_converts_per_token_strings_to_per_million():
     seen = []
     client = models_client(
@@ -168,13 +170,16 @@ def test_prc01_absent_cache_price_stays_none():
     assert prices[BIG].cached_input_usd_per_mtok is None
 
 
-@pytest.mark.parametrize("entry", [
-    {"prompt": None},                     # the field is absent
-    {"completion": None},
-    {"prompt": "free"},                   # a string that is not a number
-    {"completion": "-0.000015"},          # a negative rate
-    {"prompt": ["0.000003"]},             # the wrong JSON type
-])
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"prompt": None},  # the field is absent
+        {"completion": None},
+        {"prompt": "free"},  # a string that is not a number
+        {"completion": "-0.000015"},  # a negative rate
+        {"prompt": ["0.000003"]},  # the wrong JSON type
+    ],
+)
 def test_prc01_unusable_entries_are_skipped(entry):
     client = models_client({"data": [model_entry(BIG, **entry), model_entry(REF)]})
     prices = pricing.fetch_openrouter_prices(client, [BIG, REF], now=NOW)
@@ -197,12 +202,15 @@ def test_prc01_no_model_ids_makes_no_request():
     assert seen == []
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"payload": {"data": [], "error": "nope"}, "status": 500},
-    {"payload": "not json at all"},
-    {"payload": {"data": "not a list"}},
-    {"payload": {"data": []}, "raises": httpx.ConnectError("refused")},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"payload": {"data": [], "error": "nope"}, "status": 500},
+        {"payload": "not json at all"},
+        {"payload": {"data": "not a list"}},
+        {"payload": {"data": []}, "raises": httpx.ConnectError("refused")},
+    ],
+)
 def test_prc01_fetch_failures_raise_pricing_error(kwargs):
     client = models_client(**kwargs)
     with pytest.raises(pricing.PricingError):
@@ -212,6 +220,7 @@ def test_prc01_fetch_failures_raise_pricing_error(kwargs):
 # --------------------------------------------------------------------------
 # REQ-V13-PRC-01 — the cost formula
 # --------------------------------------------------------------------------
+
 
 def test_prc01_cost_uses_the_cache_price_for_cached_tokens():
     usage = Usage(prompt_tokens=1000, completion_tokens=200, cached_tokens=400)
@@ -236,16 +245,17 @@ def test_prc01_cost_counts_the_completion_tokens():
 
 
 def test_prc01_cost_treats_a_missing_cached_count_as_zero():
-    assert pricing.cost_usd(USAGE, price()) == pytest.approx(
-        (1000 * 3.0 + 200 * 15.0) / 1_000_000
-    )
+    assert pricing.cost_usd(USAGE, price()) == pytest.approx((1000 * 3.0 + 200 * 15.0) / 1_000_000)
 
 
-@pytest.mark.parametrize("usage", [
-    None,
-    Usage(prompt_tokens=None, completion_tokens=200),
-    Usage(prompt_tokens=1000, completion_tokens=None),
-])
+@pytest.mark.parametrize(
+    "usage",
+    [
+        None,
+        Usage(prompt_tokens=None, completion_tokens=200),
+        Usage(prompt_tokens=1000, completion_tokens=None),
+    ],
+)
 def test_prc01_cost_is_none_when_usage_is_incomplete(usage):
     """A failed call or a partial usage object stores NULL, never 0.0."""
     assert pricing.cost_usd(usage, price()) is None
@@ -270,6 +280,7 @@ def test_prc01_zero_tokens_cost_zero_not_none():
 # reordered the steps would answer differently.
 # --------------------------------------------------------------------------
 
+
 def full_resolver(tmp_path, **cfg_overrides):
     fields = {
         "openrouter_model": BIG,
@@ -279,9 +290,7 @@ def full_resolver(tmp_path, **cfg_overrides):
     }
     fields.update(cfg_overrides)
     cfg = make_cfg(tmp_path, **fields)
-    return pricing.make_resolver(
-        cfg, snapshot(), snapshot_basis=None, stale=stale_state()
-    )
+    return pricing.make_resolver(cfg, snapshot(), snapshot_basis=None, stale=stale_state())
 
 
 def test_prc02_step1_provider_cost_wins(tmp_path):
@@ -363,12 +372,15 @@ def test_prc02_step4_stale_reference_keeps_the_model_in_the_label(tmp_path):
     assert cost == pytest.approx((1000 * 1.0 + 200 * 5.0) / 1_000_000)
 
 
-@pytest.mark.parametrize("stale", [
-    None,
-    {},
-    {"prices": "not an object"},
-    {"prices": {BIG: {"input_usd_per_mtok": "free", "output_usd_per_mtok": 5.0}}},
-])
+@pytest.mark.parametrize(
+    "stale",
+    [
+        None,
+        {},
+        {"prices": "not an object"},
+        {"prices": {BIG: {"input_usd_per_mtok": "free", "output_usd_per_mtok": 5.0}}},
+    ],
+)
 def test_prc02_step5_no_basis_at_all(tmp_path, stale):
     cfg = make_cfg(tmp_path, openrouter_model=BIG)
     resolve = pricing.make_resolver(cfg, None, snapshot_basis=None, stale=stale)
@@ -384,9 +396,7 @@ def test_prc02_a_priced_call_without_usage_stores_neither_cost_nor_basis(tmp_pat
 
 def test_prc02_snapshot_basis_overrides_the_derived_label(tmp_path):
     cfg = make_cfg(tmp_path, openrouter_model=BIG, llm_price_ref_model=REF)
-    resolve = pricing.make_resolver(
-        cfg, snapshot(), snapshot_basis=f"reference:{REF}", stale=None
-    )
+    resolve = pricing.make_resolver(cfg, snapshot(), snapshot_basis=f"reference:{REF}", stale=None)
     assert resolve("openrouter", BIG, USAGE)[1] == f"reference:{REF}"
     assert resolve("lmstudio", "small", USAGE)[1] == f"reference:{REF}"
 
@@ -421,9 +431,9 @@ def test_prc02_snapshot_to_state_round_trips(tmp_path):
     assert state["prices"][REF]["cached_input_usd_per_mtok"] is None
     # Whatever the persist wrote, the resolver must read back as a stale price.
     cfg = make_cfg(tmp_path, openrouter_model=BIG)
-    resolve = pricing.make_resolver(cfg, None, snapshot_basis=None, stale=json.loads(
-        json.dumps(state)
-    ))
+    resolve = pricing.make_resolver(
+        cfg, None, snapshot_basis=None, stale=json.loads(json.dumps(state))
+    )
     cost, basis = resolve("openrouter", BIG, USAGE)
     assert basis == "openrouter-list-stale"
     assert cost == pytest.approx((1000 * 3.0 + 200 * 15.0) / 1_000_000)
@@ -432,6 +442,7 @@ def test_prc02_snapshot_to_state_round_trips(tmp_path):
 # --------------------------------------------------------------------------
 # REQ-V13-PRC-02 — the single `bot.py` wiring
 # --------------------------------------------------------------------------
+
 
 def test_prc02_startup_fetch_persists_the_snapshot(conn, tmp_path):
     cfg = make_cfg(tmp_path, openrouter_model=BIG, llm_price_ref_model=REF)
@@ -489,14 +500,21 @@ def test_prc02_the_resolver_reaches_run_agent(conn, tmp_path, monkeypatch):
         {
             "update_id": 1,
             "message": {
-                "message_id": 1, "date": 0,
+                "message_id": 1,
+                "date": 0,
                 "chat": {"id": USER_ID, "type": "private"},
                 "from": {"id": USER_ID, "is_bot": False},
                 "text": "hello",
             },
         },
-        conn=conn, tg=RecordingTelegram(), cfg=make_cfg(tmp_path), llm=object(),
-        skills={}, runner=None, bot_username="ThisBot", resolve_cost=sentinel,
+        conn=conn,
+        tg=RecordingTelegram(),
+        cfg=make_cfg(tmp_path),
+        llm=object(),
+        skills={},
+        runner=None,
+        bot_username="ThisBot",
+        resolve_cost=sentinel,
     )
     assert seen["resolve_cost"] is sentinel
 
@@ -518,14 +536,21 @@ def test_prc02_the_resolver_reaches_the_summarizer(conn, tmp_path, monkeypatch, 
         {
             "update_id": 1,
             "message": {
-                "message_id": 1, "date": 0,
+                "message_id": 1,
+                "date": 0,
                 "chat": {"id": USER_ID, "type": "private"},
                 "from": {"id": USER_ID, "is_bot": False},
                 "text": command,
             },
         },
-        conn=conn, tg=RecordingTelegram(), cfg=make_cfg(tmp_path), llm=object(),
-        skills={}, runner=None, bot_username="ThisBot", resolve_cost=sentinel,
+        conn=conn,
+        tg=RecordingTelegram(),
+        cfg=make_cfg(tmp_path),
+        llm=object(),
+        skills={},
+        runner=None,
+        bot_username="ThisBot",
+        resolve_cost=sentinel,
     )
     assert seen["resolve_cost"] is sentinel
 
@@ -547,8 +572,14 @@ def test_prc02_poll_loop_hands_the_resolver_down(conn, tmp_path, monkeypatch):
             return self.batches.pop()
 
     bot.poll_loop(
-        conn=conn, tg=OneBatch(), cfg=make_cfg(tmp_path), llm=object(), skills={},
-        runner=None, bot_username="ThisBot", sleep=lambda _s: None,
+        conn=conn,
+        tg=OneBatch(),
+        cfg=make_cfg(tmp_path),
+        llm=object(),
+        skills={},
+        runner=None,
+        bot_username="ThisBot",
+        sleep=lambda _s: None,
         resolve_cost=sentinel,
     )
     assert seen["resolve_cost"] is sentinel
@@ -558,29 +589,46 @@ def test_prc02_poll_loop_hands_the_resolver_down(conn, tmp_path, monkeypatch):
 # REQ-V13-PRC-03 — every basis form survives storage and `/stats`
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("basis", [
-    "provider",
-    "openrouter-list",
-    "openrouter-list-stale",
-    f"reference:{REF}",
-    f"reference-stale:{REF}",
-    "manual",
-])
+
+@pytest.mark.parametrize(
+    "basis",
+    [
+        "provider",
+        "openrouter-list",
+        "openrouter-list-stale",
+        f"reference:{REF}",
+        f"reference-stale:{REF}",
+        "manual",
+    ],
+)
 def test_prc03_every_basis_form_is_stored_and_rendered(conn, basis):
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     storage.add_llm_call(
-        conn, conv_id=conv, turn_id=1, purpose="agent", round_no=1, attempt=1, ts=NOW,
-        provider="openrouter", model=BIG, prompt_chars=100,
+        conn,
+        conv_id=conv,
+        turn_id=1,
+        purpose="agent",
+        round_no=1,
+        attempt=1,
+        ts=NOW,
+        provider="openrouter",
+        model=BIG,
+        prompt_chars=100,
         prompt_chars_by_role={"system": 100, "tools": 0, "user": 0, "assistant": 0, "tool": 0},
-        messages_n=2, tools_exposed=0, latency_ms=5, prompt_tokens=1000,
-        completion_tokens=200, total_tokens=1200, cost_usd=0.0123, cost_basis=basis,
+        messages_n=2,
+        tools_exposed=0,
+        latency_ms=5,
+        prompt_tokens=1000,
+        completion_tokens=200,
+        total_tokens=1200,
+        cost_usd=0.0123,
+        cost_basis=basis,
     )
     stored = conn.execute("SELECT cost_basis FROM llm_calls").fetchone()["cost_basis"]
     assert stored == basis
     # Reference prices are estimates and `/stats` says so, in the OBS-07 layout.
     line = [
-        row for row in bot._render_stats(conn, USER_ID).splitlines()
-        if row.startswith("Est. cost:")
+        row for row in bot._render_stats(conn, USER_ID).splitlines() if row.startswith("Est. cost:")
     ][0]
     assert line == f"Est. cost: $0.0123 | $0.0123 (basis: {basis} | {basis})"
 
@@ -588,6 +636,7 @@ def test_prc03_every_basis_form_is_stored_and_rendered(conn, basis):
 # --------------------------------------------------------------------------
 # REQ-V13-PRE-04 — the three pricing variables
 # --------------------------------------------------------------------------
+
 
 def test_pre04_pricing_variables_default_to_empty():
     cfg = config.load_config(env=base_env(), load_env_file=False)
@@ -622,10 +671,13 @@ def test_pre04_a_free_manual_price_is_accepted():
     assert cfg.llm_price_output_usd_per_mtok == 0.0
 
 
-@pytest.mark.parametrize("env,expected", [
-    ({"LLM_PRICE_INPUT_USD_PER_MTOK": "3"}, "LLM_PRICE_OUTPUT_USD_PER_MTOK"),
-    ({"LLM_PRICE_OUTPUT_USD_PER_MTOK": "15"}, "LLM_PRICE_INPUT_USD_PER_MTOK"),
-])
+@pytest.mark.parametrize(
+    "env,expected",
+    [
+        ({"LLM_PRICE_INPUT_USD_PER_MTOK": "3"}, "LLM_PRICE_OUTPUT_USD_PER_MTOK"),
+        ({"LLM_PRICE_OUTPUT_USD_PER_MTOK": "15"}, "LLM_PRICE_INPUT_USD_PER_MTOK"),
+    ],
+)
 def test_pre04_manual_prices_are_both_or_neither(env, expected):
     with pytest.raises(config.ConfigError) as exc:
         config.load_config(env=base_env(**env), load_env_file=False)

@@ -46,7 +46,7 @@ def cache_system_prompt(messages: list[dict]) -> list[dict]:
         if not isinstance(content, str) or not content:
             return messages
         block = {"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}
-        return [*messages[:index], {**message, "content": [block]}, *messages[index + 1:]]
+        return [*messages[:index], {**message, "content": [block]}, *messages[index + 1 :]]
     return messages
 
 

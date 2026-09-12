@@ -30,9 +30,7 @@ from devtools import bench
 from tests.test_config import base_env
 
 _REAL_PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_REAL_BASELINE_PATH = (
-    _REAL_PROJECT_ROOT / "docs" / "assets" / "bench" / "baseline-v1.6.0.json"
-)
+_REAL_BASELINE_PATH = _REAL_PROJECT_ROOT / "docs" / "assets" / "bench" / "baseline-v1.6.0.json"
 _ACC03_ALLOWED_SELECTION_FILES = frozenset(
     {"config.py", "pyproject.toml", ".env.example", "README.md", "AGENTS.md"}
 )
@@ -43,8 +41,9 @@ def _load_real_baseline() -> dict:
         return json.load(f)
 
 
-def _candidate_from_real_baseline(baseline: dict, *, scale: float = 1.0,
-                                   fix_failures: bool = True, tag: str = "cand-test") -> dict:
+def _candidate_from_real_baseline(
+    baseline: dict, *, scale: float = 1.0, fix_failures: bool = True, tag: str = "cand-test"
+) -> dict:
     """A copy of the real, committed baseline: `meta.reasoning` and the two
     new `llm_calls` fields added (T-V170-BEN-01's "candidate-shaped
     document"); costs/tokens optionally scaled and failing repeats optionally
@@ -54,7 +53,8 @@ def _candidate_from_real_baseline(baseline: dict, *, scale: float = 1.0,
     candidate["meta"]["tag"] = tag
     candidate["meta"]["git_commit"] = "b" * 40
     candidate["meta"]["reasoning"] = {
-        "policy": "by-purpose", "on_purposes": ["tool-round"],
+        "policy": "by-purpose",
+        "on_purposes": ["tool-round"],
         "mechanism": {"tool-round": None, "final": None, "summary": "c:assistant-prefill"},
         "provider_form": "lmstudio",
     }
@@ -107,10 +107,14 @@ def test_t_v170_ben_01_meta_reasoning_shape_and_additive_optionality():
     assert (code, reason) == (0, "valid")
 
     for policy in ("model-default", "off", "by-purpose"):
-        cfg_stub = type("Cfg", (), {
-            "llm_reasoning_policy": policy,
-            "llm_reasoning_on_purposes": frozenset({"final", "tool-round"}),
-        })()
+        cfg_stub = type(
+            "Cfg",
+            (),
+            {
+                "llm_reasoning_policy": policy,
+                "llm_reasoning_on_purposes": frozenset({"final", "tool-round"}),
+            },
+        )()
         meta = bench.reasoning_meta(cfg_stub, "lmstudio")
         assert meta["policy"] == policy  # present on every run, model-default included
         assert meta["on_purposes"] == ["final", "tool-round"]  # sorted
@@ -175,10 +179,18 @@ def test_t_v170_ben_04_and_ben_06_gate_verdicts_against_the_real_baseline(tmp_pa
     def _report(candidate: dict) -> int:
         cand_path = tmp_path / "candidate.json"
         cand_path.write_text(json.dumps(candidate), encoding="utf-8")
-        return bench.main([
-            "report", "--baseline", str(base_path), "--candidate", str(cand_path),
-            "--gate", "--out", str(tmp_path / "report.md"),
-        ])
+        return bench.main(
+            [
+                "report",
+                "--baseline",
+                str(base_path),
+                "--candidate",
+                str(cand_path),
+                "--gate",
+                "--out",
+                str(tmp_path / "report.md"),
+            ]
+        )
 
     both_pass = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=True)
     assert _report(both_pass) == 0
@@ -188,7 +200,9 @@ def test_t_v170_ben_04_and_ben_06_gate_verdicts_against_the_real_baseline(tmp_pa
 
     s18_stays_2_of_3 = _candidate_from_real_baseline(real_baseline, scale=0.5, fix_failures=False)
     assert s18_stays_2_of_3["summary"]["per_scenario"]["S18"] == {
-        **s18_stays_2_of_3["summary"]["per_scenario"]["S18"], "success": 2, "of": 3,
+        **s18_stays_2_of_3["summary"]["per_scenario"]["S18"],
+        "success": 2,
+        "of": 3,
     }
     v = bench.verdict(real_baseline, s18_stays_2_of_3)
     assert v.passed is False
@@ -204,7 +218,8 @@ def test_t_v170_ben_04_and_ben_06_gate_verdicts_against_the_real_baseline(tmp_pa
         run["success"] = False
         run["failure"] = "checks"
     two_repeat_loss["summary"] = bench.summarize(
-        two_repeat_loss["runs"], two_repeat_loss["meta"]["skipped_scenarios"],
+        two_repeat_loss["runs"],
+        two_repeat_loss["meta"]["skipped_scenarios"],
         two_repeat_loss["meta"]["repeats"],
     )
     assert _report(two_repeat_loss) == 1
@@ -228,6 +243,7 @@ def test_n6_aborted_candidate_refused_before_per_scenario():
 def test_t_v170_ben_05_gate_required_full_scenarios_shape():
     assert bench.GATE_REQUIRED_FULL_SCENARIOS == ("S13", "S14", "S15", "S16", "S17", "S18")
     from llm.base import REQUEST_DEFAULTS
+
     assert "GATE_REQUIRED_FULL_SCENARIOS" not in bench.constants()
     assert "GATE_REQUIRED_FULL_SCENARIOS" not in REQUEST_DEFAULTS
     real_baseline = _load_real_baseline()
@@ -239,17 +255,33 @@ def test_t_v170_ben_05_gate_required_full_scenarios_shape():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("tag", [
-    "baseline-v1.6.0", "cand-v170-off", "a", "a" * 64,
-])
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "baseline-v1.6.0",
+        "cand-v170-off",
+        "a",
+        "a" * 64,
+    ],
+)
 def test_t_v170_car_01_tag_accepts(tag):
     assert bench._TAG_RE.match(tag) is not None
     assert tag not in (".", "..")
 
 
-@pytest.mark.parametrize("tag", [
-    "..", ".", "a/b", "../x", "a\\b", "", "a" * 65, "a b",
-])
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "..",
+        ".",
+        "a/b",
+        "../x",
+        "a\\b",
+        "",
+        "a" * 65,
+        "a b",
+    ],
+)
 def test_t_v170_car_01_tag_rejects(tag):
     assert tag in (".", "..") or bench._TAG_RE.match(tag) is None
 
@@ -395,7 +427,10 @@ def test_t_v170_acc_03_version_half():
     immune to every future release's own version bump."""
     result = subprocess.run(
         ["git", "show", "v1.7.0:pyproject.toml"],
-        cwd=_REAL_PROJECT_ROOT, capture_output=True, text=True, check=True,
+        cwd=_REAL_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     version = tomllib.loads(result.stdout)["project"]["version"]
     cand_docs = _acc03_cand_v170_documents()
@@ -409,9 +444,7 @@ def _acc03_run_git_readonly(args: list[str], root: Path) -> subprocess.Completed
     `subprocess.run` precedent; no `GIT_*` scrubbing needed, unlike
     `tests/test_v15_standards.py`'s fixtures, which *write* into a throwaway
     repo and must guard against a leaked `GIT_DIR`."""
-    return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=False
-    )
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
 
 
 _ACC03_T12_PROMPT_RE = re.compile(r"docs/prompts/\d+-v170-t12-[\w.-]*\.md")
@@ -525,8 +558,12 @@ def test_t_v170_acc_03_selection_commit_locator_and_hunks_synthetic(tmp_path):
         (repo / name).write_text(content, encoding="utf-8")
     _git(["add", "-A"], repo)
     _git(
-        ["commit", "-q", "-m",
-         "feat: selection\n\n(prompt: docs/prompts/999-v170-t12-selection.md)"],
+        [
+            "commit",
+            "-q",
+            "-m",
+            "feat: selection\n\n(prompt: docs/prompts/999-v170-t12-selection.md)",
+        ],
         repo,
     )
 

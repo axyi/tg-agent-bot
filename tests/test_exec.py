@@ -9,9 +9,7 @@ import tools
 
 
 def run(tmp_path, code, timeout_s=tools.EXEC_TIMEOUT_S):
-    return tools._run_process(
-        [sys.executable, "-c", code], workdir=tmp_path, timeout_s=timeout_s
-    )
+    return tools._run_process([sys.executable, "-c", code], workdir=tmp_path, timeout_s=timeout_s)
 
 
 def exec_tool(payload, runner=None):
@@ -149,4 +147,3 @@ def test_t_ex_13_cap_boundary(tmp_path, size):
     result = run(tmp_path, f"import sys; sys.stdout.buffer.write(b'x' * {size})")
     assert result["truncated"] is (size > 4096)
     assert len(result["stdout"]) == min(size, 4096)
-

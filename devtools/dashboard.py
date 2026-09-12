@@ -77,6 +77,7 @@ MEDIAN_KEY_TOKENS = "tokens"
 # `tool_breakdown`)
 # --------------------------------------------------------------------------
 
+
 def load_document(path: Path) -> dict:
     """The benchmark file, or `ValueError` with a one-line reason."""
     try:
@@ -209,6 +210,7 @@ def tool_breakdown(runs: Sequence[dict]) -> list[dict]:
 # functions (REQ-V160-DSH-01's import direction). No HTML is built here.
 # --------------------------------------------------------------------------
 
+
 def _timeline_blocks(document: dict) -> list[dict]:
     """One dict per scenario -- the median run, its rank label, timeline rows
     and context growth -- everything `dashboard_render._timeline` needs to
@@ -219,16 +221,18 @@ def _timeline_blocks(document: dict) -> list[dict]:
         runs = grouped[scenario]
         key = median_key(runs)
         run = median_run(runs)
-        if run is None:                       # unreachable: a group is never empty
+        if run is None:  # unreachable: a group is never empty
             continue
-        blocks.append({
-            "scenario": scenario,
-            "run": run,
-            "runs_count": len(runs),
-            "ranked": "cost" if key == MEDIAN_KEY_COST else "prompt + completion tokens",
-            "rows": timeline_rows(run),
-            "growth": metrics.context_growth(run["llm_calls"]),
-        })
+        blocks.append(
+            {
+                "scenario": scenario,
+                "run": run,
+                "runs_count": len(runs),
+                "ranked": "cost" if key == MEDIAN_KEY_COST else "prompt + completion tokens",
+                "rows": timeline_rows(run),
+                "growth": metrics.context_growth(run["llm_calls"]),
+            }
+        )
     return blocks
 
 
@@ -251,22 +255,26 @@ def usage_rows_from_document(document: dict) -> list["metrics.UsageRow"]:
     totals = summary["totals"]
     tag = document["meta"].get("tag") or "(bench)"
     pricing = document["meta"].get("pricing") or {}
-    return [metrics.UsageRow(
-        provider=document["meta"].get("provider"),
-        model=document["meta"].get("model"),
-        purpose=None, scenario=None, day=None,
-        key=str(tag)[:128],
-        calls=totals["calls"],
-        errors=totals["failed_calls"],
-        input_tokens=totals["prompt_tokens"] or 0,
-        output_tokens=totals["completion_tokens"] or 0,
-        cached_tokens=totals["cached_tokens"] or 0,
-        reasoning_tokens=totals["reasoning_tokens"] or 0,
-        cost_usd=totals["cost_usd"] or 0.0,
-        cost_basis=pricing.get("basis"),
-        cache_hit_share=summary.get("cache_hit_rate"),
-        reasoning_share=None,
-    )]
+    return [
+        metrics.UsageRow(
+            provider=document["meta"].get("provider"),
+            model=document["meta"].get("model"),
+            purpose=None,
+            scenario=None,
+            day=None,
+            key=str(tag)[:128],
+            calls=totals["calls"],
+            errors=totals["failed_calls"],
+            input_tokens=totals["prompt_tokens"] or 0,
+            output_tokens=totals["completion_tokens"] or 0,
+            cached_tokens=totals["cached_tokens"] or 0,
+            reasoning_tokens=totals["reasoning_tokens"] or 0,
+            cost_usd=totals["cost_usd"] or 0.0,
+            cost_basis=pricing.get("basis"),
+            cache_hit_share=summary.get("cache_hit_rate"),
+            reasoning_share=None,
+        )
+    ]
 
 
 def usage_band(document: dict) -> str:
@@ -285,14 +293,16 @@ def usage_band(document: dict) -> str:
 # CLI
 # --------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dashboard.py",
         description="Render a static HTML dashboard from a benchmark JSON document.",
     )
     parser.add_argument("bench", help="the benchmark document (bench_schema 1 or 2)")
-    parser.add_argument("--compare", default=None,
-                        help="a second document; adds the #compare section")
+    parser.add_argument(
+        "--compare", default=None, help="a second document; adds the #compare section"
+    )
     parser.add_argument("--out", required=True, help="the HTML file to write")
     return parser
 
@@ -318,5 +328,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_OK
 
 
-if __name__ == "__main__":       # pragma: no cover - exercised through the CLI test
+if __name__ == "__main__":  # pragma: no cover - exercised through the CLI test
     raise SystemExit(main())

@@ -24,7 +24,10 @@ from devtools import checks
 def test_t_v190_ver_01_v190_was_tagged():
     result = subprocess.run(
         ["git", "show", "v1.9.0:pyproject.toml"],
-        cwd=checks.REPO_ROOT, capture_output=True, text=True, check=True,
+        cwd=checks.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     version = tomllib.loads(result.stdout)["project"]["version"]
     assert version == "1.9.0"

@@ -213,9 +213,7 @@ def test_t_ag_12_empty_content_triggers_one_repair_round(conn):
     assert reply == agent.FALLBACK_EMPTY
     assert len(llm.calls) == 2
     assert llm.calls[0][0][-1]["content"] != agent.EMPTY_REPAIR_INSTRUCTION
-    assert llm.calls[1][0][-1] == {
-        "role": "system", "content": agent.EMPTY_REPAIR_INSTRUCTION
-    }
+    assert llm.calls[1][0][-1] == {"role": "system", "content": agent.EMPTY_REPAIR_INSTRUCTION}
     assert rows(conn, conv)[-1]["content"] == agent.FALLBACK_EMPTY
     # The repair instruction is a request-time nudge, never a stored message.
     stored = conn.execute("SELECT content FROM messages").fetchall()
@@ -264,15 +262,22 @@ def test_t_ag_14_weather_skill_url_reaches_the_fetcher(conn, monkeypatch):
     # old envelope made `tools._fetch_size` return None, so the size columns
     # silently fell back to the envelope length and this end-to-end leg stopped
     # covering TOO-07 at all.
-    fetcher = FakeFetcher({"url": url, "status": 200, "content_type": "text/plain",
-                           "chars_total": 128, "returned_chars": 16,
-                           "truncated": True, "saved_to": "fetch/" + "0" * 16 + ".txt",
-                           "save_error": None, "text": "Koln: sunny +21C"})
+    fetcher = FakeFetcher(
+        {
+            "url": url,
+            "status": 200,
+            "content_type": "text/plain",
+            "chars_total": 128,
+            "returned_chars": 16,
+            "truncated": True,
+            "saved_to": "fetch/" + "0" * 16 + ".txt",
+            "save_error": None,
+            "text": "Koln: sunny +21C",
+        }
+    )
     runner = RecordingRunner()
     runner.forbid_real_processes(monkeypatch)
-    reply, llm, runner, _, conv = run(
-        conn, script, skills=skills, runner=runner, fetcher=fetcher
-    )
+    reply, llm, runner, _, conv = run(conn, script, skills=skills, runner=runner, fetcher=fetcher)
     assert reply == "Koln: sunny"
     # No process was started (forbid_real_processes) and no request left the process
     # (the `no_network` conftest fixture); only the injected fetcher saw the URL.
@@ -283,9 +288,7 @@ def test_t_ag_14_weather_skill_url_reaches_the_fetcher(conn, monkeypatch):
     assert json.loads(tool_rows[1]["content"])["text"].startswith("Koln: sunny")
     # REQ-V13-TOO-03: the fetch row is measured on `chars_total` against the
     # inline excerpt — the assertion that goes red if the envelope shape rots.
-    row = conn.execute(
-        "SELECT * FROM tool_calls WHERE tool = 'fetch' ORDER BY id"
-    ).fetchone()
+    row = conn.execute("SELECT * FROM tool_calls WHERE tool = 'fetch' ORDER BY id").fetchone()
     assert (row["raw_output_chars"], row["output_chars"]) == (128, 16)
 
 
