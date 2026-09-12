@@ -61,7 +61,10 @@ def _index(conn, embedder, user_id, filename, texts):
     vectors = embedder.embed(texts)
     storage.add_vectors(
         conn, user_id=user_id,
-        rows=[(cid, sqlite_vec.serialize_float32(v)) for cid, v in zip(chunk_ids, vectors)],
+        rows=[
+            (cid, sqlite_vec.serialize_float32(v))
+            for cid, v in zip(chunk_ids, vectors, strict=True)
+        ],
     )
     return doc_id, chunk_ids
 

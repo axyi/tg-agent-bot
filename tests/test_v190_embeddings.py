@@ -289,7 +289,7 @@ def test_fake_embedder_is_deterministic_and_shares_structure():
     assert v1 == v2
 
     def cosine(a, b):
-        return sum(x * y for x, y in zip(a, b))
+        return sum(x * y for x, y in zip(a, b, strict=True))
 
     assert cosine(v1, v2) == pytest.approx(1.0)
     assert cosine(v1, v3) < cosine(v1, v2)

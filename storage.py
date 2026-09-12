@@ -233,20 +233,6 @@ UPDATE schema_version SET version = 2 WHERE id = 1;
 COMMIT;
 """
 
-# Retained but no longer reached by `init_schema`'s chain: `_OBSERVABILITY_DDL`
-# is now the v4 shape (it already carries `trace_id`/`span_id`), so a database
-# chaining through version 2 must not stop and commit `version = 3` over
-# already-v4-shaped tables -- that would be a version row lying about the
-# table shape it just wrote. `_MIGRATION_2_TO_4` below is the real chain step;
-# this constant stays only because deleting it is an unlisted edit the
-# amendment table doesn't call for.
-_MIGRATION_2_TO_3 = """
-BEGIN IMMEDIATE;
-""" + _OBSERVABILITY_DDL + """
-UPDATE schema_version SET version = 3 WHERE id = 1;
-COMMIT;
-"""
-
 # The real 2 -> 4 chain step: builds the (already v4-shaped) observability
 # tables and the spans table in one transaction, straight to version 4, with
 # no intermediate version = 3 commit.

@@ -126,7 +126,7 @@ class SpanSink(Protocol):
 class NullSink:
     """Drops every span. The default wherever no sink is supplied."""
 
-    def write(self, span: Span) -> None:
+    def write(self, span: Span) -> None:  # skylos: ignore -- SpanSink Protocol signature
         return None
 
 
@@ -257,7 +257,7 @@ class MutableSpan:
         else:
             try:
                 self._sink.write(span)
-            except Exception as exc:  # noqa: BLE001 -- best-effort sink, never masks the body
+            except Exception as exc:  # best-effort sink, never masks the body
                 _record_dropped_span(exc)
         return span
 

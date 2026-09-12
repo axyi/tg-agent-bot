@@ -325,9 +325,9 @@ def test_t_v11_orp_01_wrap_timeout_prefix_and_label():
     assert without_wrap[-1] == "uname"
     assert "timeout" not in without_wrap
 
-    pairs = list(zip(with_wrap, with_wrap[1:]))
+    pairs = list(zip(with_wrap, with_wrap[1:], strict=False))
     assert ("--label", tools.CONTAINER_LABEL) in pairs
-    pairs2 = list(zip(without_wrap, without_wrap[1:]))
+    pairs2 = list(zip(without_wrap, without_wrap[1:], strict=False))
     assert ("--label", tools.CONTAINER_LABEL) in pairs2
 
 
@@ -396,7 +396,7 @@ def test_t_v11_orp_03_image_has_timeout_argv_and_hardening(docker_stub):  # noqa
     run_calls = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["run"]]
     assert len(run_calls) == 1
     argv = run_calls[0]
-    pairs = list(zip(argv, argv[1:]))
+    pairs = list(zip(argv, argv[1:], strict=False))
     assert ("--pull", "never") in pairs
     assert ("--network", "none") in pairs
     assert "--read-only" in argv
@@ -758,7 +758,9 @@ def test_t_v11_inf_01_mount_flag_ordering_and_omission():
         uid=1000, gid=1000, container_name="tgexec-x", empty_resolv=resolv,
     )
     mounts = [
-        value for flag, value in zip(with_resolv, with_resolv[1:]) if flag == "--mount"
+        value
+        for flag, value in zip(with_resolv, with_resolv[1:], strict=False)
+        if flag == "--mount"
     ]
     assert mounts == [
         "type=bind,source=/srv/sandbox,target=/work",
@@ -770,7 +772,9 @@ def test_t_v11_inf_01_mount_flag_ordering_and_omission():
         uid=1000, gid=1000, container_name="tgexec-x",
     )
     mounts2 = [
-        value for flag, value in zip(without_resolv, without_resolv[1:]) if flag == "--mount"
+        value
+        for flag, value in zip(without_resolv, without_resolv[1:], strict=False)
+        if flag == "--mount"
     ]
     assert mounts2 == ["type=bind,source=/srv/sandbox,target=/work"]
 

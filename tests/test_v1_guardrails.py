@@ -909,7 +909,7 @@ def test_history_budget_shrinks_the_window(conn):
         context_length = 2560
 
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
-    for i in range(30):
+    for _i in range(30):
         storage.add_user_message(conn, conv, "padding " * 40)
     storage.add_user_message(conn, conv, "the newest question")
 

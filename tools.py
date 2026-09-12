@@ -993,7 +993,7 @@ class _TextExtractor(HTMLParser):
                 self.parts.append("\n")
             return
 
-    def handle_starttag(self, tag: str, attrs) -> None:
+    def handle_starttag(self, tag: str, attrs) -> None:  # skylos: ignore -- HTMLParser override
         if tag in HTML_DROP_TAGS:
             self._dropped += 1
             return
@@ -1004,7 +1004,7 @@ class _TextExtractor(HTMLParser):
         elif tag in HTML_BLOCK_TAGS:
             self._break()
 
-    def handle_startendtag(self, tag: str, attrs) -> None:
+    def handle_startendtag(self, tag: str, attrs) -> None:  # skylos: ignore -- HTMLParser override
         # `<br/>` is one newline, not the start-plus-end pair the base class
         # would synthesize, and `<svg/>` has no subtree to drop.
         if not self._dropped and tag not in HTML_DROP_TAGS and tag in HTML_BLOCK_TAGS:

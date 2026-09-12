@@ -108,7 +108,9 @@ def bm25_search(rows, query: str, k: int = 20) -> list[int]:
     corpus = [tokenize(row["text"]) for row in rows]
     bm25 = rank_bm25.BM25Okapi(corpus)
     scores = bm25.get_scores(tokenize(query))
-    scored = [(row["id"], score) for row, score in zip(rows, scores) if score > 0]
+    scored = [
+        (row["id"], score) for row, score in zip(rows, scores, strict=True) if score > 0
+    ]
     scored.sort(key=lambda pair: (-pair[1], pair[0]))
     return [chunk_id for chunk_id, _score in scored[:k]]
 
@@ -408,13 +410,13 @@ class Searcher:
                     rerank_succeeded = True
                 else:
                     reason = "rerank returned no usable order"
-            except Exception as exc:  # noqa: BLE001 -- the fallback boundary
+            except Exception as exc:  # the fallback boundary
                 reason = _failure_reason(exc)
             if not rerank_succeeded:
                 rerank_failure = reason
                 try:
                     log.warning("rerank fell back to rrf order: %s", rerank_failure)
-                except Exception:  # noqa: BLE001 -- a failing logger must not escape
+                except Exception:  # a failing logger must not escape
                     pass
 
         # Step 5: slice to the first cfg.rag_top_k.
@@ -521,7 +523,7 @@ def _strip_source_lines(reply: str, *, keep: set[str]) -> tuple[str, bool]:
     if removed_any:
         try:
             log.warning(_STRIPPED_SOURCE_WARNING)
-        except Exception:  # noqa: BLE001 -- a failing logger must not escape
+        except Exception:  # a failing logger must not escape
             pass
     return "\n".join(kept_lines), kept_valid
 

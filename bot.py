@@ -1491,7 +1491,7 @@ def poll_loop(
     return 0
 
 
-def _handle_signal(signum, frame) -> None:
+def _handle_signal(signum, frame) -> None:  # skylos: ignore -- signal.signal callback signature
     global _shutdown
     _shutdown = True
 
@@ -1521,12 +1521,12 @@ class _SelftestLLM:
 
     def complete(
         self,
-        messages,
-        tool_definitions,
+        messages,  # skylos: ignore -- LLMClient Protocol signature (llm/base.py)
+        tool_definitions,  # skylos: ignore -- LLMClient Protocol signature
         *,
-        max_tokens=None,
-        reasoning: ReasoningRequest = REASONING_DEFAULT,
-        timeout_s=None,
+        max_tokens=None,  # skylos: ignore -- LLMClient Protocol signature
+        reasoning: ReasoningRequest = REASONING_DEFAULT,  # skylos: ignore -- LLMClient signature
+        timeout_s=None,  # skylos: ignore -- LLMClient Protocol signature
     ) -> LLMResponse:
         response = self._script[min(self.calls, len(self._script) - 1)]
         self.calls += 1
@@ -1997,7 +1997,7 @@ def main(argv: list[str] | None = None) -> int:
             dashboard_srv = dashboard_server.build_server(
                 db_path=cfg.db_path, port=cfg.dashboard_port
             )
-        except Exception as exc:  # noqa: BLE001 -- REQ-V160-SRV-07's broad startup guard
+        except Exception as exc:  # REQ-V160-SRV-07's broad startup guard
             log.error(
                 "dashboard: failed to start on port %d: %s",
                 cfg.dashboard_port,

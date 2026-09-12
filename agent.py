@@ -62,7 +62,6 @@ SUMMARY_MAX_TOKENS = 512
 # rule instead. Duplicated in config.py as `_SUMMARY_BUDGET_FLOOR_S` (that
 # module cannot import this one -- see its own comment).
 SUMMARY_BUDGET_FLOOR_S = 30.0
-SUMMARY_KEYS = ("goal", "files", "decisions", "errors", "next_action")
 
 # REQ-V160-TQ-03: the closed vocabulary `_record_tool_call` writes to
 # tool_calls.outcome. "ok"/"error" come from `_tool_outcome`, "budget" from
@@ -139,7 +138,7 @@ log = logging.getLogger("agent")
 
 def build_system_prompt(
     skills: dict[str, Skill],
-    now: str | None = None,
+    now: str | None = None,  # skylos: ignore -- kept for positional callers (docstring below)
     recent_goals: list[str] | None = None,
 ) -> str:
     """The cacheable prefix. Its only inputs are the skill catalog and the recent

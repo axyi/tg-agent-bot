@@ -300,7 +300,9 @@ class _RecordingSearcher:
         return self._inner.search(query)
 
 
-def _refusing_runner(argv: list[str]) -> dict:  # pragma: no cover -- never invoked
+def _refusing_runner(  # pragma: no cover -- never invoked
+    argv: list[str],  # skylos: ignore -- CommandRunner signature
+) -> dict:
     return {"error": "exec is not available in devtools/rag_eval.py"}
 
 
@@ -562,7 +564,7 @@ def main() -> int:
                 if cfg.llm_rerank_model
                 else None
             )
-        except Exception as exc:  # noqa: BLE001 -- construction failure is exit 2
+        except Exception as exc:  # construction failure is exit 2
             print(f"gate-7: FAIL constructing the chat model -- {config.redact(str(exc))}")
             return 2
         embedder = EmbeddingsClient(

@@ -1371,7 +1371,11 @@ def test_v15_gate_06_replay_ruff_invocation_uses_repo_root_cwd_and_relative_path
 def test_n6_pre_push_refused_when_pytest_fails(git_worktree: Path):
     wt = git_worktree
     (wt / "tests" / "test_v15_tmp_failing.py").write_text(
-        "def test_deliberately_failing():\n    assert False\n"
+        # v1.9.2 T1: not `assert False` -- this project's own ruff `select`
+        # now includes B (flake8-bugbear), and B011 flags exactly that
+        # construct; a violation here would fail this fixture's own
+        # pre-commit `ruff-check` step before pytest ever runs.
+        "def test_deliberately_failing():\n    assert 1 == 2\n"
     )
     _git(["add", "-A"], wt)
     _git(

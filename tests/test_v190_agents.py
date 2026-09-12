@@ -158,7 +158,7 @@ def test_t_v190_ec_01_readme_documents_rag_subsections_in_order():
     positions = [section.index(heading) for heading in _DOCUMENTS_RAG_SUBSECTIONS]
     assert positions == sorted(positions), (
         "Documents (RAG) subsections out of order: "
-        f"{list(zip(_DOCUMENTS_RAG_SUBSECTIONS, positions))}"
+        f"{list(zip(_DOCUMENTS_RAG_SUBSECTIONS, positions, strict=True))}"
     )
 
 

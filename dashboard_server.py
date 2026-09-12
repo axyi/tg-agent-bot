@@ -40,7 +40,6 @@ MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_REQUEST_LINE_BYTES = 8 * 1024
 MAX_HEADERS = 64
 
-_TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _SINCE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _SECURITY_HEADERS = (
@@ -50,19 +49,6 @@ _SECURITY_HEADERS = (
     ("Cache-Control", "no-store"),
 )
 
-_STATIC_ROUTES = frozenset(
-    {
-        "/",
-        "/traces",
-        "/tools",
-        "/api/health",
-        "/api/usage",
-        "/api/traces",
-        "/api/tools",
-        "/conversations",
-        "/api/conversations",
-    }
-)
 _TRACE_PAGE_RE = re.compile(r"^/traces/([0-9a-f]{32})$")
 _TRACE_API_RE = re.compile(r"^/api/traces/([0-9a-f]{32})$")
 _CONV_PAGE_RE = re.compile(r"^/conversations/([0-9]{1,10})$")
@@ -122,17 +108,6 @@ def _not_found(*, is_api: bool) -> None:
     )
     raise _FixedResponse(
         404, body, "application/json; charset=utf-8" if is_api else "text/html; charset=utf-8"
-    )
-
-
-def _service_unavailable(*, is_api: bool) -> None:
-    body = (
-        json.dumps({"error": "service unavailable"}, ensure_ascii=False).encode("utf-8")
-        if is_api
-        else dashboard_render.error_page("service unavailable").encode("utf-8")
-    )
-    raise _FixedResponse(
-        503, body, "application/json; charset=utf-8" if is_api else "text/html; charset=utf-8"
     )
 
 
@@ -267,20 +242,6 @@ def _usage_row_json(row: metrics.UsageRow) -> dict[str, Any]:
     if row.day is not None:
         payload["day"] = row.day
     return payload
-
-
-def _histogram_json(hist: metrics.Histogram) -> dict[str, Any]:
-    return {
-        "name": hist.name,
-        "unit": hist.unit,
-        "attributes": dict(hist.attributes),
-        "boundaries": list(hist.boundaries),
-        "counts": list(hist.counts),
-        "total": hist.total,
-        "sum": hist.sum,
-        "p50": hist.p50,
-        "p95": hist.p95,
-    }
 
 
 def _span_json(span: dashboard_render.ServedSpan) -> dict[str, Any]:
@@ -482,7 +443,7 @@ def _rendered_page_messages(
 class DashboardHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def version_string(self) -> str:  # noqa: D102 -- overriding stdlib hook
+    def version_string(self) -> str:  # overriding stdlib hook
         return "tg-agent-bot"
 
     # ------------------------------------------------------------------
@@ -531,11 +492,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         self._handle(send_body=False)
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 -- stdlib signature
+    def log_message(self, format: str, *args: Any) -> None:  # skylos: ignore -- stdlib signature
         route = getattr(self, "_matched_route", "?")
         log.debug("%s %s", self.command, route)
 
-    def log_error(self, format: str, *args: Any) -> None:  # noqa: A002 -- stdlib signature
+    def log_error(self, format: str, *args: Any) -> None:  # skylos: ignore -- stdlib signature
         pass  # never let the stdlib's own error logger print a raw path/value
 
     # ------------------------------------------------------------------
@@ -570,7 +531,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 else "text/html; charset=utf-8"
             )
             self._respond(503, body, ctype, send_body=send_body)
-        except Exception:  # noqa: BLE001 -- the fixed, content-free 500 REQ-V160-SRV-07 wants
+        except Exception:  # the fixed, content-free 500 REQ-V160-SRV-07 wants
             log.error("dashboard: unhandled error on %s", config.redact(self._matched_route))
             is_api = self._matched_route.startswith("/api/")
             body = (
@@ -764,12 +725,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
         self._respond(200, html.encode("utf-8"), "text/html; charset=utf-8", send_body=send_body)
 
-    _CONVERSATIONS_NAV = [
+    _CONVERSATIONS_NAV = (
         ("usage", "/"),
         ("traces", "/traces"),
         ("tools", "/tools"),
         ("conversations", "/conversations"),
-    ]
+    )
 
     def _page_conversations(self, query: str, *, send_body: bool) -> None:
         params = _parse_query(query, frozenset({"limit"}), is_api=False)

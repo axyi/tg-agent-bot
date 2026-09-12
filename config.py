@@ -67,8 +67,12 @@ RAG_RERANK_MODES = ("on", "off")
 
 # v1.2 addition (REQ-V12-SSR-02): scopes `address_scope` can name, and the
 # backstop the six is_* flags alone would miss (finding W-6).
-FORBIDDEN_SCOPES = ("loopback", "private", "link-local", "multicast",
-                    "reserved", "unspecified", "non-global", "unparsable")
+FORBIDDEN_SCOPES = (  # skylos: ignore -- REQ-V12-SSR-02 requires this constant to
+    # exist as written to document address_scope's return vocabulary; see
+    # docs/reports/report-v1.2.md's "not a defect" ruling.
+    "loopback", "private", "link-local", "multicast",
+    "reserved", "unspecified", "non-global", "unparsable",
+)
 
 _DIGITS_RE = re.compile(r"^[0-9]+$")
 _TG_ID_RE = re.compile(r"^[1-9][0-9]*$")
@@ -699,7 +703,7 @@ def _parse_manual_prices(
     raw_input, raw_output = (_value(source, key) for key in keys)
     if not raw_input and not raw_output:
         return None, None
-    for key, raw in zip(keys, (raw_input, raw_output)):
+    for key, raw in zip(keys, (raw_input, raw_output), strict=True):
         if not raw:
             raise ConfigError(f"{key} is required when {_other(keys, key)} is set")
     return _parse_price(keys[0], raw_input), _parse_price(keys[1], raw_output)

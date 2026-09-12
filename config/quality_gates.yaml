@@ -188,10 +188,16 @@ gates:
     severity: [CRITICAL, HIGH]
     timeout_seconds: 240
 
+  # v1.9.2 T1: --exclude .semgrep excludes the rule pack's own vendored
+  # ruleset from the scan target -- without it, semgrep scans
+  # .semgrep/p-security-audit.yaml as if it were project source and finds
+  # its own example vulnerable snippets (2 x INFO, below --severity ERROR,
+  # so never blocking, but noise on an unfiltered run).
   semgrep:
     kind: command
     result_mode: findings
-    argv: [semgrep, scan, --config, "{config}", --severity, ERROR, --error,
+    argv: [semgrep, scan, --config, "{config}", --exclude, ".semgrep",
+           --severity, ERROR, --error,
            --metrics=off, --disable-version-check, --json, --output,
            "{artefact}", "{target}"]
     placeholders: { config: .semgrep/, target: "." }

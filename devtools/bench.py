@@ -174,7 +174,6 @@ TOTALS_KEYS = (
     "cost_usd", "resent_tokens", "new_tokens", "wall_ms",
 )
 AVG_KEYS = ("tokens", "rounds", "tool_calls", "latency_ms")
-PRICING_BASES_WITH_MODEL = ("openrouter-list", "openrouter-list-stale")
 
 LLM_ROW_KEYS = frozenset(storage.LLM_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"}
 TOOL_ROW_KEYS = frozenset(storage.TOOL_CALL_COLUMNS) - {"conv_id"} | {"conv_seq"}
@@ -941,7 +940,7 @@ def _run_turns(
                 # `bot._send` splits one reply into Telegram-sized parts; the
                 # split loses nothing, so the parts concatenate back exactly.
                 answers.append("".join(part for _chat, part in recorder.sent[before:]))
-    except BaseException as exc:                   # noqa: BLE001 - reported, never raised
+    except BaseException as exc:  # reported, never raised
         outcome["error"] = f"{exc.__class__.__name__}: {config.redact(str(exc))}"[:200]
     finally:
         if conn is not None:

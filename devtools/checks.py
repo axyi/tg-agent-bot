@@ -1507,7 +1507,12 @@ def _run_lint_docs(name: str, gate: dict[str, Any], repo_root: Path) -> GateResu
 
 
 def execute_builtin_gate(
-    name: str, gate: dict[str, Any], *, config: dict[str, Any], repo_root: Path, profile: str
+    name: str,
+    gate: dict[str, Any],
+    *,
+    config: dict[str, Any],
+    repo_root: Path,
+    profile: str,  # skylos: ignore -- uniform signature shared with execute_command_gate
 ) -> GateResult:
     handler = gate["handler"]
     if handler == "branch_name":
@@ -1610,7 +1615,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 1 if result.blocked else 0
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:  # skylos: ignore -- args.func(args) dispatch
     config = load_gate_config()
     result = execute_builtin_gate(
         "doctor", config["gates"]["doctor"], config=config, repo_root=REPO_ROOT, profile="doctor"
@@ -1630,7 +1635,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def cmd_lint_docs(args: argparse.Namespace) -> int:
+def cmd_lint_docs(args: argparse.Namespace) -> int:  # skylos: ignore -- args.func(args) dispatch
     config = load_gate_config()
     result = execute_builtin_gate(
         "lint-docs",
