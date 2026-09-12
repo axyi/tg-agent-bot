@@ -1,7 +1,8 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T11 complete, run in progress. Gate 7 red — known limitation,
-disposition deferred to T13 (see T8 section).**
+**Status: T12 complete, run in progress. `<implementation-tip>` = `5f9c58f`.
+Gate 7 red — known limitation, ship/accept disposition deferred to T13
+(see T8 section).**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -11,17 +12,24 @@ disposition deferred to T13 (see T8 section).**
 - **Handoff:** `docs/handoff-v1.9.0.md`
 - **Executor:** claude-sonnet-5 (Claude Code)
 - **`<base>`** (HEAD before this run's first commit): `d6c13124d8108d6ca23900b91ef30d27d95fc6fc`
-- **`<implementation-tip>`**: not yet reached (T12's commit)
-- **Final test count (RPT-02 item 2):** T0 floor **1220** (`AGENTS.md:146`'s
-  stated figure — no drift); final count not yet reached.
-- **Task-brief files written (RPT-02 item 4):** none yet (T0 is *artefacts
-  only*, no brief needed per its own §15.1 row).
+- **`<implementation-tip>`**: `5f9c58f3ad49bf3b609df90329db4c7a83296a1f` (T12's commit — the last
+  source/test/config commit; this evidence-only commit and its own sha
+  are, per REQ-V190-REV-02, never self-referenced inside this file).
+- **Final test count (RPT-02 item 2):** T0 floor **1220** → final
+  **1560** (`pytest --collect-only -q` at T12, exceeds the floor by 340 —
+  see each task's own section above for its exact per-task increment).
+- **Task-brief files written (RPT-02 item 4):** `docs/spec/task-briefs/v190-T1.md`
+  through `v190-T12.md` (T0 and T13 are *artefacts only*, no brief needed
+  per their own §15.1 row).
 - **Benchmark rule (RPT-02 item 6, REQ-V190-EC-06): fires.** This release
   changes both `tool_specs()` (a fourth tool, REQ-V190-TOOL-01) and
   `SYSTEM_PROMPT` (one rule line, REQ-V190-TOOL-04), so
   `meta.prompt_tools_sha256` changes. T0's baseline run: tag
   `v190-baseline`, `docs/assets/bench/v190-baseline.json`. T11's candidate
-  run and `docs/reports/bench-v190.md` not yet reached.
+  run: tag `v190-candidate`, `docs/assets/bench/v190-candidate.json`;
+  hand-assembled comparison at `docs/reports/bench-v190.md` (neither run
+  completed cleanly on this deployment's model — see T11's section for
+  the full disposition; the delta is reported, not gated).
 - **`--no-verify` attestation (RPT-02 item 12):** No commit or push in this
   run used `--no-verify` or any other hook bypass. Evidence:
   `checks.py replay --range <base>..<implementation-tip>` at T13.
