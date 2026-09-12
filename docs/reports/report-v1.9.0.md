@@ -1,6 +1,6 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T10 complete, run in progress. Gate 7 red — known limitation,
+**Status: T11 complete, run in progress. Gate 7 red — known limitation,
 disposition deferred to T13 (see T8 section).**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
