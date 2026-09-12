@@ -1,8 +1,16 @@
 # Implementation report — spec-v1.9.0
 
-**Status: T12 complete, run in progress. `<implementation-tip>` = `5f9c58f`.
-Gate 7 red — known limitation, ship/accept disposition deferred to T13
-(see T8 section).**
+**Status: T13 complete, run closed. `<implementation-tip>` = `5f9c58f`
+(T12's commit). Seven gates re-run clean except gate 7 (the disclosed,
+diagnosed known limitation — recall@5=1.000 throughout, the reranker's
+completion contract only); `checks.py run --profile full` 15/16 PASS
+(rag-eval the sole expected FAIL); `checks.py replay
+--range d6c1312..5f9c58f` 36/36 clean; Appendix B 16/16 PASS, driven by
+the automated suite. The operator explicitly accepted the release under
+gate 7's standing FAIL (see "Operator decision" below, mirroring this
+project's own v1.7.0 precedent). This evidence-only commit lands on
+`docs/reports/*` alone; `lint-docs` and `gitleaks-tree` are re-run against
+it below, and, both green, the annotated tag `v1.9.0` is created on it.**
 
 - **Spec:** `docs/spec/spec-v1.9.0.md`
 - **Spec `sha256` at T0:** `619198899cb99bafe7f0fd0aed6b41a71fbf7df36849cec27803ec637d4ce52e`
@@ -32,7 +40,8 @@ Gate 7 red — known limitation, ship/accept disposition deferred to T13
   the full disposition; the delta is reported, not gated).
 - **`--no-verify` attestation (RPT-02 item 12):** No commit or push in this
   run used `--no-verify` or any other hook bypass. Evidence:
-  `checks.py replay --range <base>..<implementation-tip>` at T13.
+  `checks.py replay --range d6c1312..5f9c58f` — **36/36 commits
+  `[PASS] … clean`** (T13).
 
 ## Operator inputs
 
@@ -198,6 +207,56 @@ both matching EC-06's own prediction exactly. Two scenarios (S05, S09)
 show large negative deltas that are model-instability noise (retry/resend
 variance on this box), not real regressions or savings — disclosed as
 such, not reported as a finding.
+
+## T13 — final acceptance (REQ-V190-REV-02)
+
+Against `<implementation-tip>` = `5f9c58f` (T12's commit):
+
+- **Seven gates, verbatim, re-run**: `uv sync --locked` 0; `ruff check .`
+  0; `pytest` 0 (1560 collected, exceeds the T0 floor); `bot.py
+  --selftest` 0; `bot.py --selftest-live` 0 (all seven live checks OK);
+  `mutation_check.py` 0 (**105/105 killed, 0 survived/errored/drifted**);
+  `rag_eval.py` exit 2 — the disclosed known limitation, unchanged: `hybrid`
+  recall@5=1.000/MRR=1.000/page-hit-rate=1.000, `hybrid+rerank`
+  recall@5=1.000/MRR=0.950, two answerable items' rerank failed to
+  complete this run (a different pair again — further confirmation of
+  genuine stochastic variance, not a fixed failure mode), retrieval
+  quality unaffected.
+- **`checks.py run --profile full --since <base>`**: 15/16 PASS, `rag-eval`
+  the sole (expected) FAIL, matching T11's own full-profile result
+  exactly.
+- **`checks.py replay --range <base>..<implementation-tip>`**: **36/36
+  commits `[PASS] … clean`** — no `--no-verify` or other hook bypass
+  anywhere in this run's history, confirming RPT-02 item 12's attestation
+  directly rather than by assertion alone.
+- **Appendix B (`docs/spec/spec-v1.9.0-delta-1.md`)**: all 16 scenarios
+  (E1–E16) run offline against fakes and a `tmp_path` database, no live
+  call needed. Each is covered by the automated suite already exercised
+  throughout T1–T11 (E1/E15 → `T-V190-CMD`/`E2E` tests; E2/E3/E4 →
+  `T-V190-DOC-02/-03`, storage's index_document half; E5 → `T-V190-STO-04`;
+  E6 → `T-V190-RET-01`; E7 → `T-V190-CMD-03`; E8/E9 → `T-V190-RET-04…07`;
+  E10 → `T-V190-TOOL-02`; E11/E12 → `T-V190-TOOL-05/-06`; E13/E14 →
+  `T-V190-CMD-05/-06`; E16 → `T-V190-SEC-01`) — a targeted subset spanning
+  every one of these requirement ids was re-run explicitly for this
+  acceptance pass and is green. **16/16 PASS**, driven by the already-green
+  automated suite (the same style this project's own v1.8.0 report
+  recorded Appendix B verification in).
+
+## Operator decision — accepting the release under gate 7's standing FAIL
+
+Per REQ-V190-REV-02, gate 7 red at T13 would ordinarily withhold the
+`v1.9.0` tag. The operator reviewed T13's full acceptance evidence — 15/16
+gates PASS, `mutation-all` 105/105, 36/36 commits clean under `checks.py
+replay`, Appendix B 16/16, and gate 7's own diagnosis (recall@5=1.000 on
+every retrieval mode across every one of this run's live attempts;
+the failure is confined to the LLM reranker bonus's completion contract,
+root-caused to genuine run-to-run stochastic reasoning-length variance in
+the deployed thinking chat model, `qwen/qwen3.8-27b`, not this release's
+code) — and **explicitly accepted the release under gate 7's standing
+FAIL**, authorising the evidence-only commit and the `v1.9.0` tag to
+proceed regardless. This mirrors this project's own v1.7.0 precedent
+(shipped under a standing cost-gate FAIL after explicit operator
+acceptance, recorded the same way in `docs/reports/report-v1.7.0.md`).
 
 ## Formal waiver — AGENTS.md's spec-drift rule, for three already-disclosed deviations
 
@@ -808,13 +867,20 @@ file says over either document's assertion.
 
 ## Formal lift of REQ-NG-05 / REQ-V1-NG-05 (RPT-02 item 11, EC-13)
 
-Not yet reached — recorded at T10 alongside the README `## Documents (RAG)`
-section it also lands in.
+**Partially lifted, formally, by this release** (T10, `README.md`'s
+`## Documents (RAG)` section): user-uploaded documents, their embeddings
+and a vector index (STO-02's `documents`/`chunks`/`vec_chunks` schema,
+`llm/embeddings.py`, `rag.py`) are now in scope. "Vector or semantic
+memory" of the conversation itself, automatic model routing and semantic
+caching (NG-08) stay explicitly out of scope — this release adds no
+memory of past turns beyond the existing `CONTEXT_WINDOW_MESSAGES` window,
+routes to no alternate model, and caches nothing across requests.
 
 ## `--no-verify` attestation (RPT-02 item 12)
 
-No commit or push in this run has used `--no-verify` or any other hook
-bypass, through T0 (T0 has made no commit yet — this is the first).
+No commit or push in this run used `--no-verify` or any other hook
+bypass. Evidence: `checks.py replay --range d6c1312..5f9c58f` (T13) shows
+**36/36 commits `[PASS] … clean`**.
 
 ## Ledger row (paste into `economics.md`)
 
@@ -832,3 +898,20 @@ alongside gate 7's final ship/accept disposition:
 ```
 | [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.0 | 2026-09-12 | ≈204.4 KB (spec 174,186 B + delta 30,222 B) | 18 so far (141–158; 141 — spec authoring, 142 — go-run kickoff, 158 — this row, T12's version bump; T13's own prompt not yet counted) | no — gate 7 (`rag-eval`) drew 2 of the 4-cycle repair budget at T8 (`_RERANK_MAX_TOKENS` 128→1024→2048, then `_RERANK_TIMEOUT_S` 20.0→120.0, each its own fix-and-rerun) without reaching green, diagnosed as genuine run-to-run stochastic reasoning-length variance in the deployed thinking model (`qwen/qwen3.8-27b`), not a code defect — retrieval itself measured recall@5=1.000 on every mode across all 6 live runs; final ship/accept disposition deferred to T13, which also confirms this cycle count. Every other blocker across T0–T12 was a disclosed pre-existing-test/spec-list gap (an EC-03-class amendment) fixed before any gate ran red, or a clean-context review finding — never a red-gate-then-repair cycle drawn against the codebase itself | Disclosed, not hidden: erratum 1 (T1, REQ-V190-EC-03's amendment list missed three more `SCHEMA_VERSION`-literal tests, operator-ratified) alongside a real `add_vectors` 2-tuple-vs-3-column bug found and fixed pre-commit; erratum 2 (T2, RET-08's live wiring broke two more `test_v1_guardrails.py` tests, operator-ratified); a disclosed spec defect (T3, `T-V190-SEC-04` assigned to two different requirements by Appendix A, left unedited per operator decision) plus a test-strengthening erratum; erratum 3 (T4, a silently unsearchable zero-chunk PDF document, `EmptyDocumentError` guard added, operator-ratified); erratum 4 (T6, `tools_exposed` literal bump 3→4, operator-ratified; one infra 403 retry, no partial commit); a real bug found and fixed pre-commit (T7, `getFile`'s missing `file_path` misreported as DOCX corruption); gate 7's reranker completion contract (T8, see "First run"); erratum 5 (T10, a third self-precedented `report_path`-repoint break); T11's clean-context review — 1 🟡 fixed (the envelope worst-case-header comment's arithmetic), 1 🟡 formally waived (the already-disclosed `rag.py` timeout/token deviations) — plus one process-hygiene incident (a duplicate background invocation and a stray foreground probe, both caught via `git status`/`git diff` and cleanly reverted before affecting the authoritative run); T12's own required edit exposed two more pre-existing tests outside EC-03's list, both stopped-and-reported rather than self-resolved, both operator-ratified: `tests/test_v190_agents.py`'s count-bearing-lines check (renamed to `test_t_v190_rpt_05_agents_md_count_lines_landed_at_t12`, its own T10-era comment already anticipated this exact change) and `tests/test_v180_version.py` (REQ-V190-EC-03 forbids deletion; repointed from the live tree to the frozen `v1.8.0` git-tag blob — `git show v1.8.0:pyproject.toml`, the same convention `test_t_v170_acc_03_version_half` already established at v1.8.0's own T9 — establishing that every future version-pin test gets this same treatment at its own retirement, never deletion) | subagents' own harness-reported aggregates, see `docs/reports/report-v1.9.0.md` for the per-task breakdown; the interactive orchestrator session's own token count is not self-measurable by this harness | $0 marginal — Claude Code subscription-metered session, not per-token billed; live LM Studio inference (T0's `v190-baseline` bench, T8's gate-7 reranker attempts) is reference-priced only, no real money spent; no OpenRouter inference beyond gate 5/selftest-live's zero-token reachability checks | claude-sonnet-5 | Claude Code |
 ```
+
+## Tag and final gate results (RPT-02 item 13)
+
+**Tag: `v1.9.0`**, annotated, created on this evidence-only commit after
+`lint-docs` and `gitleaks-tree` both re-ran green against it (recorded
+below, outside this file per REV-02 — the tag and its target sha are
+never self-referenced inside the tagged commit's own content).
+
+Final gate results for the tree this report describes (`<implementation-tip>`
+`5f9c58f`, T13's re-run): `uv-sync` 0, `ruff-check-all` 0, `ruff-format`
+0 (legacy pre-existing drift, non-blocking), `pytest` 0 (1560 collected),
+`selftest` 0, `selftest-live` 0, `mutation-all` 0 (**105/105 killed**),
+`rag-eval` **exit 2** (accepted under the operator's decision above),
+`gitleaks-tree` 0, `trivy` 0, `semgrep` 0, `skylos` 0 (non-blocking, 15
+in-scope findings, all pre-existing/intentional), `hooks-installed` 0,
+`doctor` 0, `lint-docs` 0. `checks.py replay --range d6c1312..5f9c58f`:
+36/36 clean. Appendix B: 16/16 PASS.
