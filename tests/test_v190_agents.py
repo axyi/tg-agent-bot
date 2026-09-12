@@ -123,13 +123,15 @@ def test_t_v190_ec_01_agents_md_layout_bullets_present():
         assert entry in text, f"missing layout bullet: {entry!r}"
 
 
-def test_t_v190_ec_01_agents_md_count_bearing_lines_untouched():
+def test_t_v190_rpt_05_agents_md_count_lines_landed_at_t12():
     # RPT-05: AGENTS.md:146's test count and :155's mutation count are
-    # written once, in T12 -- T10 must not touch them. Both still carry
-    # their pre-T10 figures (1220 tests, 98 mutation entries).
+    # written once, in T12. T10 left them at their pre-T10 figures (1220
+    # tests, 98 mutation entries) -- this test's own comment, from T10,
+    # named T12 as the release point for both; T12 has now landed the
+    # real post-run figures (1560 tests, 105 mutation entries).
     text = _read_agents_md()
-    assert "1220" in text
-    assert "98 entries" in text
+    assert "1560" in text
+    assert "105 entries" in text
 
 
 def test_t_v190_ec_01_readme_documents_rag_heading_present():

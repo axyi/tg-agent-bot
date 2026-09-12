@@ -824,7 +824,8 @@ exactly as they are:
 | v1.4 | — | no release: RSN-06 STOP, verdict FAIL |
 | v1.5 | 1.5.0 | |
 | v1.5.1 | 1.5.1 | |
-| v1.6.0 | 1.6.0 | this release |
+| v1.6.0 | 1.6.0 | |
+| v1.9.0 | 1.9.0 | RAG over user documents; this release |
 
 ## Token economy
 

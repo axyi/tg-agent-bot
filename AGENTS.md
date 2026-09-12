@@ -157,8 +157,8 @@ uv run --locked python devtools/mutation_check.py
 uv run --locked python devtools/rag_eval.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1220
-tests as of spec-v1.8.0 T10). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1560
+tests as of spec-v1.9.0 T12). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its
@@ -166,12 +166,13 @@ Telegram message. **Gate 5 must be fully green at every commit, including its
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 98 entries as of spec-v1.8.0 T6 (up
-from 92 at spec-v1.7.0's close; T6 added six `v180-*` entries covering
-the chat-status signal, the typing-indicator ceiling, and transcript
-redaction/truncation/budget; see
-`docs/reports/report-v1.8.0.md`); `--select <prefix>` runs a named subset
-(mutually exclusive with `--only`), e.g. `--select v180-`. Gate 7
+the test suite once per mutation) — 105 entries as of spec-v1.9.0 T9 (up
+from 98 at spec-v1.8.0's close; T9 added seven `v190-*` entries covering
+RAG per-user isolation (the vector KNN and BM25 queries, `list_documents`/
+`document_id_for`'s owner predicates), the delete path's `vec_chunks`
+cleanup, the upload size precheck, and the sources-fallback rendering; see
+`docs/reports/report-v1.9.0.md`); `--select <prefix>` runs a named subset
+(mutually exclusive with `--only`), e.g. `--select v190-`. Gate 7
 (`devtools/rag_eval.py`, spec-v1.9.0 T8) is the retrieval evaluation: it
 needs the live environment like gate 5, spends real inference on the
 reranker and an advisory conversation smoke, and exits 0 only when
