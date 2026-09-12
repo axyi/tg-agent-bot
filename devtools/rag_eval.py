@@ -368,6 +368,7 @@ def run(
     resolve_cost=None,
     run_agent_outcome: Callable = agent.run_agent_outcome,
     print_fn: Callable[[str], None] = print,
+    rerank_llm=None,
 ) -> int:
     # RET-06/-07 must actually run: force the override regardless of the
     # deployment's own .env, and prove it in the script's own output.
@@ -393,7 +394,7 @@ def run(
     ranks: dict[str, list[tuple[int | None, int | None]]] = {mode: [] for mode in MODES}
     rerank_flags: list[tuple[dict, rag.SearchResult]] = []
     hybrid_rerank_searcher = rag.Searcher(
-        conn, user_id=EVAL_USER_ID, embedder=embedder, llm=llm, cfg=cfg,
+        conn, user_id=EVAL_USER_ID, embedder=embedder, llm=rerank_llm or llm, cfg=cfg,
         conv_id=storage.get_or_create_active_conversation(conn, EVAL_USER_ID),
         resolve_cost=resolve_cost,
     )
@@ -553,6 +554,14 @@ def main() -> int:
     try:
         try:
             llm = build_llm_client(cfg, client=client)
+            # v1.9.1 T1: mirrors bot.py's own startup wiring -- a bare client
+            # on LLM_RERANK_MODEL's provider when configured, so the gate
+            # measures the same reranker a live deployment would use.
+            rerank_llm = (
+                build_llm_client(cfg, client=client, purpose="rerank")
+                if cfg.llm_rerank_model
+                else None
+            )
         except Exception as exc:  # noqa: BLE001 -- construction failure is exit 2
             print(f"gate-7: FAIL constructing the chat model -- {config.redact(str(exc))}")
             return 2
@@ -567,7 +576,7 @@ def main() -> int:
                 storage.init_schema(
                     conn, embedding_dim=cfg.embedding_dim, embedding_model=cfg.embedding_model,
                 )
-                return run(conn=conn, cfg=cfg, embedder=embedder, llm=llm)
+                return run(conn=conn, cfg=cfg, embedder=embedder, llm=llm, rerank_llm=rerank_llm)
             finally:
                 conn.close()
     finally:

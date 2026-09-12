@@ -281,3 +281,20 @@ def test_max_tokens_is_forwarded_to_the_active_side():
     client = wrapper(primary, StubClient("openrouter"))
     client.complete([], None, max_tokens=512)
     assert primary.max_tokens_calls == [512]
+
+
+def test_t_v191_response_format_is_forwarded_to_the_active_side():
+    class Recorder(StubClient):
+        def __init__(self, name):
+            super().__init__(name)
+            self.response_format_calls = []
+
+        def complete(self, messages, tools, *, response_format=None, **kwargs):
+            self.response_format_calls.append(response_format)
+            return super().complete(messages, tools, **kwargs)
+
+    schema = {"type": "json_schema", "json_schema": {"name": "rerank"}}
+    primary = Recorder("lmstudio")
+    client = wrapper(primary, StubClient("openrouter"))
+    client.complete([], None, response_format=schema)
+    assert primary.response_format_calls == [schema]

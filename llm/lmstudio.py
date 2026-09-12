@@ -43,6 +43,7 @@ class LMStudioClient:
         max_tokens: int | None = None,
         reasoning: ReasoningRequest = REASONING_DEFAULT,
         timeout_s: float | None = None,
+        response_format: dict | None = None,
     ) -> LLMResponse:
         # REQ-V170-POL-05: `request.mechanism` alone, never `request.tag` --
         # the per-purpose lookup already happened in `resolve_reasoning`.
@@ -70,6 +71,7 @@ class LMStudioClient:
                 tools,
                 max_tokens=self.max_tokens if max_tokens is None else max_tokens,
                 reasoning_fields=reasoning_fields,
+                response_format=response_format,
             ),
             timeout_s=self.timeout_s if timeout_s is None else timeout_s,
         )

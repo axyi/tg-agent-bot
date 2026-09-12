@@ -86,7 +86,7 @@ class _DynamicRerankLLM:
         return ("fake", "fake-rerank-model")
 
     def complete(self, messages, tool_definitions, *, max_tokens=None,
-                 reasoning=None, timeout_s=None):
+                 reasoning=None, timeout_s=None, response_format=None):
         self.calls.append((list(messages), tool_definitions))
         if tool_definitions is None:
             self._rerank_calls += 1

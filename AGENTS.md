@@ -177,7 +177,12 @@ cleanup, the upload size precheck, and the sources-fallback rendering; see
 needs the live environment like gate 5, spends real inference on the
 reranker and an advisory conversation smoke, and exits 0 only when
 `hybrid` recall@5 >= 0.8 and every answerable item's rerank flags are
-both `True` — see `evals/rag/` and REQ-V190-EVAL-01..04.
+both `True` — see `evals/rag/` and REQ-V190-EVAL-01..04. v1.9.1 T1 fixed
+the rerank contract (a `response_format` JSON schema, budgets sized to a
+measured, non-thinking routed model via `LLM_RERANK_MODEL`) that made this
+gate structurally unable to finish under v1.9.0 — gate 7 is expected green
+at every commit from v1.9.1 on, the same standing requirement as every
+other gate, not a disclosed exception (see `docs/reports/report-v1.9.1.md`).
 
 Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY` (`model-default` | `off` | `by-purpose`, default `by-purpose`) and
 `LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,

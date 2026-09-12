@@ -48,6 +48,9 @@ class FakeLLM:
         # reason as `max_tokens_calls` above.
         self.reasoning_calls = []
         self.timeout_s_calls = []
+        # v1.9.1 T1: recorded in its own parallel list, same reason as the
+        # three above.
+        self.response_format_calls = []
 
     def describe(self):
         """REQ-V13-OBS-04: `provider`/`model` are NOT NULL columns."""
@@ -61,12 +64,14 @@ class FakeLLM:
         max_tokens=None,
         reasoning: ReasoningRequest = REASONING_DEFAULT,
         timeout_s=None,
+        response_format=None,
     ):
         # The agent reuses one `messages` list, so snapshot it before it grows.
         self.calls.append((list(messages), tool_definitions))
         self.max_tokens_calls.append(max_tokens)
         self.reasoning_calls.append(reasoning)
         self.timeout_s_calls.append(timeout_s)
+        self.response_format_calls.append(response_format)
         if not self.script:
             raise AssertionError("FakeLLM script exhausted")
         item = self.script.pop(0)

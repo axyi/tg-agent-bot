@@ -934,12 +934,14 @@ MUTATIONS = [
         "find": (
             "            response = self._clients[other].complete(\n"
             "                messages, tools, max_tokens=max_tokens, reasoning=reasoning, "
-            "timeout_s=timeout_s\n"
+            "timeout_s=timeout_s,\n"
+            "                response_format=response_format,\n"
             "            )\n"
         ),
         "replace": (
             "            response = self._clients[other].complete(\n"
-            "                messages, tools, max_tokens=max_tokens, timeout_s=timeout_s\n"
+            "                messages, tools, max_tokens=max_tokens, timeout_s=timeout_s,\n"
+            "                response_format=response_format,\n"
             "            )\n"
         ),
         "why": "REQ-V170-POL-04: the failover fallback must forward the "
@@ -1170,6 +1172,39 @@ MUTATIONS = [
         "Sources: block when no valid source line survives stripping -- "
         "without the fallback the reply is returned unchanged and the "
         "model's citation is silently dropped",
+    },
+    # -- v1.9.1 T1 (docs/spec/task-briefs/v191-T1.md): the two regressions
+    # that would silently restore the v1.9.0 rerank bug (an unenforceable
+    # contract, a rerank client no operator override could reach). --------
+    {
+        "id": "v191-rerank-response-format-dropped",
+        "path": "rag.py",
+        "find": (
+            "                timeout_s=_RERANK_TIMEOUT_S,\n"
+            "                response_format=_rerank_response_format(len(candidates)),\n"
+            "            )"
+        ),
+        "replace": "                timeout_s=_RERANK_TIMEOUT_S,\n            )",
+        "why": "v1.9.1 T1: the rerank call must ask for the JSON schema -- "
+        "without response_format the model is free to reply in whatever "
+        "shape it likes again, the exact contract gap that made gate 7 "
+        "structurally unable to pass under v1.9.0's budgets",
+    },
+    {
+        "id": "v191-rerank-model-ignored",
+        "path": "llm/__init__.py",
+        "find": (
+            '    if purpose == "rerank":\n'
+            '        routed = parse_routed_model(cfg.llm_rerank_model, "LLM_RERANK_MODEL")\n'
+            "        if routed is not None:\n"
+            "            provider, model = routed\n"
+            "            return _client_for(cfg, provider, client, model=model)\n"
+        ),
+        "replace": "",
+        "why": "v1.9.1 T1: build_llm_client(purpose='rerank') must honour "
+        "LLM_RERANK_MODEL -- dropping the branch silently falls through to "
+        "the main client, so an operator's routed fast model is never "
+        "actually used for reranking",
     },
 ]
 

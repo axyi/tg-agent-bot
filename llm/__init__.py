@@ -2,7 +2,7 @@
 
 import httpx
 
-from config import Config, ConfigError, parse_summary_model
+from config import Config, ConfigError, parse_routed_model, parse_summary_model
 from llm.base import LLMClient, LLMError, LLMResponse, ToolCall
 from llm.failover import FailoverLLMClient
 from llm.lmstudio import LMStudioClient
@@ -42,9 +42,15 @@ def build_llm_client(
     summary purpose falls through to the main client below, so a caller that
     wants one client per purpose must not build the summary one blindly: with
     no routing that would be a second, needlessly independent main client.
+    `purpose="rerank"` (v1.9.1 T1) mirrors this exactly, on `LLM_RERANK_MODEL`.
     """
     if purpose == "summary":
         routed = parse_summary_model(cfg.llm_summary_model)
+        if routed is not None:
+            provider, model = routed
+            return _client_for(cfg, provider, client, model=model)
+    if purpose == "rerank":
+        routed = parse_routed_model(cfg.llm_rerank_model, "LLM_RERANK_MODEL")
         if routed is not None:
             provider, model = routed
             return _client_for(cfg, provider, client, model=model)

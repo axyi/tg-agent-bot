@@ -148,6 +148,17 @@ gates:
   # spec-v1.9.0 T8 (REQ-V190-EVAL-04): gate 7, the retrieval evaluation --
   # the live environment, same shape as selftest-live, but slower (real
   # embeddings + rerank calls per question) hence the wider timeout.
+  #
+  # v1.9.0's 600s here predated any real measurement: the rerank stage alone
+  # could need ~1970s under the unfixed contract (ten answerable items x the
+  # production model's 196.9s measured median), which is why gate 7 was
+  # structurally unable to finish, not merely flaky. v1.9.1 T1
+  # (docs/reports/report-v1.9.1.md) fixed the contract (a response_format
+  # JSON schema, LLM_RERANK_MODEL routed to a fast non-thinking model) and
+  # re-measured one real green run: `time uv run --locked python
+  # devtools/rag_eval.py`, this tree, 2026-09-12: real=4m47.388s (~287.4s)
+  # -> 2x ~574.8s, rounded up to 580s, following the same rule the
+  # mutation-* gates below already use.
   rag-eval:
     kind: command
     result_mode: exit_status
@@ -156,7 +167,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 600
+    timeout_seconds: 580
 
   # Confirmed against trivy fs --help at 0.74.0 (T4): --scanners, --severity,
   # --exit-code, --ignore-unfixed, --format json, --output all unchanged.

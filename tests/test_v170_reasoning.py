@@ -279,7 +279,7 @@ class _RecordingClient:
         return (self.name, self.name)
 
     def complete(self, messages, tools, *, max_tokens=None, reasoning=REASONING_DEFAULT,
-                 timeout_s=None):
+                 timeout_s=None, response_format=None):
         self.calls.append((messages, tools, max_tokens, reasoning, timeout_s))
         item = self.script.pop(0)
         if isinstance(item, LLMError):

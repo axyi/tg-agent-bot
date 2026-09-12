@@ -63,12 +63,14 @@ class FailoverLLMClient:
         max_tokens: int | None = None,
         reasoning: ReasoningRequest = REASONING_DEFAULT,
         timeout_s: float | None = None,
+        response_format: dict | None = None,
     ) -> LLMResponse:
         self._restore_primary_after_cooldown()
         active = self.active_provider_name
         try:
             response = self._clients[active].complete(
-                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s
+                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s,
+                response_format=response_format,
             )
         except LLMError as exc:
             self.failure_counts[active] += 1
@@ -78,7 +80,8 @@ class FailoverLLMClient:
                 and self._clock() >= self._cooldown_until[other]
             ):
                 return self._try_other(
-                    messages, tools, max_tokens, reasoning, timeout_s, active, other, exc
+                    messages, tools, max_tokens, reasoning, timeout_s, active, other, exc,
+                    response_format,
                 )
             raise
         self.failure_counts[active] = 0
@@ -94,10 +97,12 @@ class FailoverLLMClient:
         active: str,
         other: str,
         first_error: LLMError,
+        response_format: dict | None = None,
     ) -> LLMResponse:
         try:
             response = self._clients[other].complete(
-                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s
+                messages, tools, max_tokens=max_tokens, reasoning=reasoning, timeout_s=timeout_s,
+                response_format=response_format,
             )
         except LLMError:
             self.failure_counts[other] += 1

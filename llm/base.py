@@ -181,6 +181,7 @@ class LLMClient(Protocol):
         max_tokens: int | None = None,
         reasoning: ReasoningRequest = REASONING_DEFAULT,
         timeout_s: float | None = None,
+        response_format: dict | None = None,
     ) -> LLMResponse: ...
 
     def describe(self) -> tuple[str, str]:
@@ -232,6 +233,7 @@ def build_payload(
     *,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     reasoning_fields: dict | None = None,
+    response_format: dict | None = None,
 ) -> dict:
     payload = {
         "model": model,
@@ -251,6 +253,18 @@ def build_payload(
             key = sorted(collision)[0]
             raise ValueError(f"reasoning_fields collides with a protected key: {key}")
         payload.update(reasoning_fields)
+    if response_format is not None:
+        # v1.9.1 T1 (rerank JSON-schema contract): the same collision guard as
+        # reasoning_fields above, applied to the one key a response_format
+        # request ever adds -- a caller cannot use it to overwrite a
+        # protected key either, even though "response_format" itself is not
+        # one today.
+        fields = {"response_format": response_format}
+        collision = _PROTECTED_PAYLOAD_KEYS & fields.keys()
+        if collision:
+            key = sorted(collision)[0]
+            raise ValueError(f"response_format collides with a protected key: {key}")
+        payload.update(fields)
     return payload
 
 

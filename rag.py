@@ -37,28 +37,26 @@ _RERANK_SYSTEM = (
     "of passage numbers, most relevant first, nothing else."
 )
 _RERANK_CANDIDATE_CHARS = 600
-# Operator-ratified deviation from spec-v1.9.0 T5/RET-06's literal 128
-# (docs/prompts/153-v190-t8-rag-eval.md): a thinking-variant chat model can
-# spend its whole budget on chain-of-thought before ever emitting the JSON
-# answer, because `resolve_reasoning("off", ...)` degrades to "default"
-# rather than truly suppressing reasoning (the erratum T5's own test module
-# docstring already discloses). 1024 was tried first and was still
-# sometimes truncated for the two heaviest-reasoning questions; 2048 is the
-# second and, per the orchestrator's own explicit cap, last token-budget
-# attempt for this call only -- nothing else about RET-06 changes.
-_RERANK_MAX_TOKENS = 2048
-# Operator-ratified deviation from spec-v1.9.0 T5/RET-06's literal 20.0
-# (docs/prompts/154-v190-t8-rerank-timeout-fix.md): the true bottleneck the
-# `_RERANK_MAX_TOKENS` bump above did not fix -- a direct reproduction
-# showed the same thinking-variant model's valid answer arriving at 89.5s,
-# well past the old 20s budget, not a token-truncation problem. 120.0 gives
-# headroom for that observed latency, for this one call only. Trade-off:
-# when this operator's chat model reasons heavily, a real user's
-# `search_documents` turn with reranking on can now take up to 120s (was
-# 20s) before falling back to the plain RRF order -- still bounded, never
-# unbounded, and still never fatal (Searcher.search's own fallback is
-# unchanged).
-_RERANK_TIMEOUT_S = 120.0
+# v1.9.1 T1 (docs/reports/report-v1.9.1.md): v1.9.0's 2048 assumed another
+# model's chain-of-thought had to be absorbed inside this budget. Measured
+# instead, across every routed model and a JSON-schema request (below), the
+# passing completion length tops out at 53 tokens; 128 keeps over 2x
+# headroom on that measurement. A thinking model pointed at rerank will now
+# truncate before ever emitting `{"order": [...]}` and `_parse_rerank_reply`
+# returns `None` -- Searcher.search's existing fallback to the plain RRF
+# order still applies, so this is a safe, gate-visible degradation (gate 7
+# fails loudly), never a silent one.
+_RERANK_MAX_TOKENS = 128
+# v1.9.1 T1 (docs/reports/report-v1.9.1.md): v1.9.0's 120.0 was sized for the
+# production model's own measured latency (196.9s median) -- itself already
+# past `rag-eval`'s old 600s gate budget once multiplied across ten
+# answerable items, which is why gate 7 was never merely flaky but
+# structurally unable to finish. Measured against the model this call is now
+# routed to (LLM_RERANK_MODEL) instead, the median reply lands at 0.83s;
+# 30.0 gives headroom for a provider hiccup and still fails fast. A model
+# that reasons through this budget anyway degrades exactly as above: a safe
+# fallback to RRF order, caught by gate 7, not a silent one.
+_RERANK_TIMEOUT_S = 30.0
 
 _HYBRID_CANDIDATES = 10  # RRF is cut to this many candidates for the reranker
 
@@ -134,6 +132,35 @@ def _rerank_messages(question: str, candidates: list[Passage]) -> list[dict]:
         {"role": "system", "content": _RERANK_SYSTEM},
         {"role": "user", "content": "\n".join(lines)},
     ]
+
+
+def _rerank_response_format(n: int) -> dict:
+    """The JSON-schema `response_format` for the rerank call (v1.9.1 T1):
+    `n` is the candidate count actually sent to this call, never
+    `_HYBRID_CANDIDATES` -- a smaller final batch must produce a tighter
+    `maximum`/`maxItems`, not the constant's ceiling. `_parse_rerank_reply`
+    needs no change to read `{"order": [...]}`: its `re.search(r"\\[.*?\\]",
+    ...)` already lifts the array out of the wrapping object."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "rerank",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "order": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 1, "maximum": n},
+                        "minItems": 1,
+                        "maxItems": n,
+                    }
+                },
+                "required": ["order"],
+                "additionalProperties": False,
+            },
+        },
+    }
 
 
 def _parse_rerank_reply(content: str, n: int) -> list[int] | None:
@@ -212,6 +239,7 @@ def rerank(
                 max_tokens=_RERANK_MAX_TOKENS,
                 reasoning=reasoning,
                 timeout_s=_RERANK_TIMEOUT_S,
+                response_format=_rerank_response_format(len(candidates)),
             )
         except LLMError as exc:
             span.set_error(exc)

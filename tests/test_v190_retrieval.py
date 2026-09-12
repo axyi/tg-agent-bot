@@ -247,19 +247,19 @@ def test_t_v190_ret_06_rerank_reorders_truncates_candidates_and_records_the_call
     )
 
     assert [p.chunk_id for p in result] == [3, 1, 2]
-    # 2048, not RET-06's literal 128: operator-ratified deviation
-    # (docs/prompts/153-v190-t8-rag-eval.md) for a thinking-variant chat
-    # model that can spend the whole budget on undisabled reasoning before
-    # ever emitting the JSON answer -- rag.py:_RERANK_MAX_TOKENS.
-    assert llm.max_tokens_calls == [2048]
-    # 120.0, not RET-06's literal 20.0: operator-ratified deviation
-    # (docs/prompts/154-v190-t8-rerank-timeout-fix.md) -- the real
-    # bottleneck a direct reproduction found (a valid answer arriving at
-    # 89.5s), not the token budget above -- rag.py:_RERANK_TIMEOUT_S.
-    assert llm.timeout_s_calls == [120.0]
+    # v1.9.1 T1 (docs/reports/report-v1.9.1.md): 128, not v1.9.0's 2048 --
+    # measured across every routed model with the JSON schema below, the
+    # passing completion length never exceeds 53 tokens.
+    assert llm.max_tokens_calls == [128]
+    # v1.9.1 T1: 30.0, not v1.9.0's 120.0 -- measured median 0.83s on the
+    # routed model; 30.0 absorbs a provider hiccup and still fails fast.
+    assert llm.timeout_s_calls == [30.0]
     # See module docstring: resolve_reasoning("off", frozenset(), "final")
     # degrades to "default", not "off" -- disclosed erratum.
     assert llm.reasoning_calls[0].value == "default"
+    # v1.9.1 T1: the rerank call carries a JSON schema whose maximum/maxItems
+    # equal the candidate count actually sent (3), not _HYBRID_CANDIDATES.
+    assert llm.response_format_calls == [rag._rerank_response_format(3)]
 
     messages, tools = llm.calls[0]
     assert tools is None

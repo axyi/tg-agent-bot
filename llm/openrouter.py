@@ -79,6 +79,7 @@ class OpenRouterClient:
         max_tokens: int | None = None,
         reasoning: ReasoningRequest = REASONING_DEFAULT,
         timeout_s: float | None = None,
+        response_format: dict | None = None,
     ) -> LLMResponse:
         if self.model.startswith(ANTHROPIC_PREFIX):
             messages = cache_system_prompt(messages)
@@ -87,6 +88,7 @@ class OpenRouterClient:
             messages,
             tools,
             max_tokens=self.max_tokens if max_tokens is None else max_tokens,
+            response_format=response_format,
         )
         payload["usage"] = dict(USAGE_ACCOUNTING)
         # REQ-V170-POL-05: `request.value` alone, never `request.mechanism`

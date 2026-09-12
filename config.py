@@ -132,6 +132,12 @@ class Config:
     # the summary purpose, normalised by `parse_summary_model`. Empty is the
     # default — the summary then runs on the main client, as it always has.
     llm_summary_model: str = ""
+    # v1.9.1 T1 addition: exactly `llm_summary_model`'s shape, for the RAG
+    # rerank purpose -- the local box has no non-thinking chat model
+    # (docs/reports/report-v1.9.1.md), so rerank is routed to a fast,
+    # schema-capable model instead. Empty is the default -- the rerank then
+    # runs on the main client, as it always has.
+    llm_rerank_model: str = ""
     # v1.6.0 addition (REQ-V160-TRC-09): gates the four opt-in content
     # attributes on spans. Off by default -- content never leaves the
     # process unless an operator turns this on explicitly.
@@ -210,12 +216,15 @@ def strip_secret_fragment(text: str) -> str:
     return text[:-best_len] if best_len else text
 
 
-def parse_summary_model(raw: str) -> tuple[str, str] | None:
-    """Split `LLM_SUMMARY_MODEL` into `(provider, model)`; `None` when unset.
+def parse_routed_model(raw: str, env_var: str) -> tuple[str, str] | None:
+    """Split a `"<provider>:<model>"` routing variable into `(provider,
+    model)`; `None` when unset. `env_var` is the variable's name, used only
+    in the error text, so `LLM_SUMMARY_MODEL` and `LLM_RERANK_MODEL`
+    (REQ-V13-RTE-01, v1.9.1 T1) share one parser instead of two copies.
 
-    Shared by `load_config` and `llm.build_llm_client` so the routed value is
-    read in exactly one way (REQ-V13-RTE-01). Whether the named provider is
-    *configured* is a separate question, answered once, in `load_config`.
+    Shared by `load_config` and `llm.build_llm_client` so a routed value is
+    read in exactly one way. Whether the named provider is *configured* is a
+    separate question, answered once, in `load_config`.
     """
     value = raw.strip()
     if not value:
@@ -224,12 +233,19 @@ def parse_summary_model(raw: str) -> tuple[str, str] | None:
     provider, model = provider.strip().lower(), model.strip()
     if provider not in PROVIDERS:
         raise ConfigError(
-            f"LLM_SUMMARY_MODEL must be '<provider>:<model>' with the provider one of "
+            f"{env_var} must be '<provider>:<model>' with the provider one of "
             f"{', '.join(PROVIDERS)}, got: {value}"
         )
     if not model:
-        raise ConfigError(f"LLM_SUMMARY_MODEL names no model after '{provider}:', got: {value}")
+        raise ConfigError(f"{env_var} names no model after '{provider}:', got: {value}")
     return provider, model
+
+
+def parse_summary_model(raw: str) -> tuple[str, str] | None:
+    """`parse_routed_model` for `LLM_SUMMARY_MODEL` -- kept as its own name
+    (and its error text byte-identical) because it predates the general
+    parser and existing call sites/tests name it directly."""
+    return parse_routed_model(raw, "LLM_SUMMARY_MODEL")
 
 
 def load_config(
@@ -310,6 +326,24 @@ def load_config(
                 f"which is not configured"
             )
         summary_model = f"{routed_provider}:{routed_name}"
+
+    # v1.9.1 T1 (REQ-V13-RTE-01's shape, reused verbatim): the rerank purpose
+    # routes the same way the summary purpose does, one env var later.
+    rerank_model = ""
+    routed_rerank = parse_routed_model(_value(source, "LLM_RERANK_MODEL"), "LLM_RERANK_MODEL")
+    if routed_rerank is not None:
+        routed_provider, routed_name = routed_rerank
+        configured = (
+            bool(lmstudio_base_url and lmstudio_model)
+            if routed_provider == "lmstudio"
+            else bool(openrouter_api_key and openrouter_model)
+        )
+        if not configured:
+            raise ConfigError(
+                f"LLM_RERANK_MODEL routes the rerank to {routed_provider}, "
+                f"which is not configured"
+            )
+        rerank_model = f"{routed_provider}:{routed_name}"
 
     manual_input_price, manual_output_price = _parse_manual_prices(source)
 
@@ -410,6 +444,7 @@ def load_config(
         llm_price_input_usd_per_mtok=manual_input_price,
         llm_price_output_usd_per_mtok=manual_output_price,
         llm_summary_model=summary_model,
+        llm_rerank_model=rerank_model,
         obs_capture_content=_parse_bool(source, "OBS_CAPTURE_CONTENT", False),
         dashboard_enabled=_parse_bool(source, "DASHBOARD_ENABLED", True),
         dashboard_port=_parse_int(source, "DASHBOARD_PORT", 8765, 1024, 65535),

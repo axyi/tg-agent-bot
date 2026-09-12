@@ -306,3 +306,122 @@ def test_rte_01_main_builds_no_second_client_when_the_variable_is_unset(tmp_path
     assert bot.main([]) == 0
     assert built == ["agent"]
     assert captured["summary_llm"] is None
+
+
+# --------------------------------------------------------------------------
+# v1.9.1 T1 -- LLM_RERANK_MODEL, exactly LLM_SUMMARY_MODEL's shape
+# (config.py)
+# --------------------------------------------------------------------------
+
+
+def test_t_v191_rerank_default_is_no_routing():
+    cfg = load_config(env=base_env(), load_env_file=False)
+    assert cfg.llm_rerank_model == ""
+    assert config.parse_routed_model("", "LLM_RERANK_MODEL") is None
+
+
+def test_t_v191_rerank_a_configured_provider_and_model_are_accepted():
+    cfg = load_config(
+        env=base_env(LLM_RERANK_MODEL=" OpenRouter:fast/model "), load_env_file=False
+    )
+    assert cfg.llm_rerank_model == "openrouter:fast/model"
+    assert config.parse_routed_model(cfg.llm_rerank_model, "LLM_RERANK_MODEL") == (
+        "openrouter", "fast/model",
+    )
+
+
+@pytest.mark.parametrize("value", ["anthropic:some/model", "cheap/model", ":cheap/model"])
+def test_t_v191_rerank_an_unknown_provider_is_refused(value):
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(LLM_RERANK_MODEL=value), load_env_file=False)
+    assert "LLM_RERANK_MODEL" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["openrouter:", "lmstudio:   "])
+def test_t_v191_rerank_an_empty_model_is_refused(value):
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(LLM_RERANK_MODEL=value), load_env_file=False)
+    assert "LLM_RERANK_MODEL" in str(exc.value)
+
+
+def test_t_v191_rerank_an_unconfigured_openrouter_is_refused():
+    env = base_env(
+        OPENROUTER_API_KEY=None, OPENROUTER_MODEL=None,
+        LLM_RERANK_MODEL="openrouter:fast/model",
+    )
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=env, load_env_file=False)
+    assert "LLM_RERANK_MODEL" in str(exc.value)
+    assert "openrouter" in str(exc.value)
+
+
+def test_t_v191_rerank_an_unconfigured_lmstudio_is_refused():
+    env = base_env(
+        LLM_PROVIDER="openrouter", LMSTUDIO_MODEL=None,
+        LLM_RERANK_MODEL="lmstudio:small",
+    )
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=env, load_env_file=False)
+    assert "LLM_RERANK_MODEL" in str(exc.value)
+    assert "lmstudio" in str(exc.value)
+
+
+# --------------------------------------------------------------------------
+# v1.9.1 T1 -- the rerank purpose (llm/__init__.py)
+# --------------------------------------------------------------------------
+
+
+def test_t_v191_rerank_purpose_gets_the_routed_client_and_no_failover(tmp_path):
+    cfg = make_cfg(tmp_path, llm_rerank_model="openrouter:fast/model")
+    with httpx.Client() as http:
+        main = build_llm_client(cfg, client=http)
+        routed = build_llm_client(cfg, client=http, purpose="rerank")
+        assert isinstance(main, FailoverLLMClient)
+        assert isinstance(routed, OpenRouterClient)
+        assert routed.describe() == ("openrouter", "fast/model")
+        assert routed._client is http
+
+
+def test_t_v191_rerank_purpose_can_route_to_lmstudio(tmp_path):
+    cfg = make_cfg(tmp_path, llm_rerank_model="lmstudio:small-local")
+    with httpx.Client() as http:
+        routed = build_llm_client(cfg, client=http, purpose="rerank")
+    assert isinstance(routed, LMStudioClient)
+    assert routed.describe() == ("lmstudio", "small-local")
+
+
+def test_t_v191_an_unset_variable_leaves_the_rerank_purpose_on_the_main_client(tmp_path):
+    cfg = make_cfg(tmp_path)
+    with httpx.Client() as http:
+        main = build_llm_client(cfg, client=http)
+        rerank = build_llm_client(cfg, client=http, purpose="rerank")
+    assert isinstance(main, FailoverLLMClient)
+    assert isinstance(rerank, FailoverLLMClient)
+
+
+# --------------------------------------------------------------------------
+# v1.9.1 T1 -- startup wiring (bot.main)
+# --------------------------------------------------------------------------
+
+
+def test_t_v191_main_builds_a_third_client_for_the_rerank_purpose(tmp_path, monkeypatch):
+    cfg = make_cfg(
+        tmp_path, db_path=tmp_path / "main.db", llm_rerank_model="openrouter:fast/model"
+    )
+    captured, built = {}, []
+    _stub_startup(monkeypatch, cfg, captured, built)
+
+    assert bot.main([]) == 0
+    assert built == ["agent", "rerank"]
+    assert captured["rerank_llm"] == "client-rerank"
+    assert captured["llm"] == "client-agent"
+
+
+def test_t_v191_main_builds_no_rerank_client_when_the_variable_is_unset(tmp_path, monkeypatch):
+    cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db")
+    captured, built = {}, []
+    _stub_startup(monkeypatch, cfg, captured, built)
+
+    assert bot.main([]) == 0
+    assert built == ["agent"]
+    assert captured["rerank_llm"] is None

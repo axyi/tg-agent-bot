@@ -809,6 +809,7 @@ def process_update(
     summary_llm=None,
     dashboard_status: str = "off (--no-dashboard)",
     embedder=None,
+    rerank_llm=None,
 ) -> None:
     if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
         log.warning("update without a usable update_id ignored")
@@ -917,7 +918,7 @@ def process_update(
     # no embedder configured the tool stays "not available" (TOOL-02).
     searcher = (
         rag.Searcher(
-            conn, user_id=from_id, embedder=embedder, llm=llm, cfg=cfg,
+            conn, user_id=from_id, embedder=embedder, llm=rerank_llm or llm, cfg=cfg,
             conv_id=conv_id, resolve_cost=resolve_cost,
         )
         if embedder is not None
@@ -1437,6 +1438,7 @@ def poll_loop(
     summary_llm=None,
     dashboard_status: str = "off (--no-dashboard)",
     embedder=None,
+    rerank_llm=None,
 ) -> int:
     raw = storage.get_state(conn, "last_update_id")
     offset = int(raw) + 1 if raw is not None else None
@@ -1479,6 +1481,7 @@ def poll_loop(
                     summary_llm=summary_llm,
                     dashboard_status=dashboard_status,
                     embedder=embedder,
+                    rerank_llm=rerank_llm,
                 )
                 if isinstance(update, dict) and isinstance(update.get("update_id"), int):
                     offset = update["update_id"] + 1
@@ -1953,6 +1956,15 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
 
+    # v1.9.1 T1: a third client, same shape as summary_llm above, only when
+    # LLM_RERANK_MODEL is configured. Unset it stays None so Searcher keeps
+    # reranking on whichever client `/model` has selected, exactly as before.
+    rerank_llm = (
+        build_llm_client(cfg, client=client, purpose="rerank")
+        if cfg.llm_rerank_model
+        else None
+    )
+
     # REQ-V13-PRC-02: once, at startup, and never per message.
     resolve_cost = build_cost_resolver(conn, cfg, client)
 
@@ -2044,6 +2056,7 @@ def main(argv: list[str] | None = None) -> int:
             summary_llm=summary_llm,
             dashboard_status=dashboard_status,
             embedder=embedder,
+            rerank_llm=rerank_llm,
         )
     finally:
         if dashboard_srv is not None:

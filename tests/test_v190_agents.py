@@ -177,15 +177,20 @@ def test_t_v190_ec_01_readme_documents_rag_retrieval_funnel():
         assert count in section
 
 
-def test_t_v190_ec_01_readme_gate_7_recorded_red():
-    # Honesty in two places: the eval-numbers subsection and the ## Tests
-    # gate block itself -- neither may claim gate 7 passes.
-    rag_section = _documents_rag_section(_read_readme())
-    assert "currently red" in rag_section.lower()
+def test_t_v191_readme_gate_7_recorded_green():
+    # v1.9.1 T1 fixed the rerank contract (response_format + LLM_RERANK_MODEL)
+    # that made gate 7 structurally unable to finish under v1.9.0; this
+    # supersedes test_t_v190_ec_01_readme_gate_7_recorded_red's "currently
+    # red" claim, which is now false and must not survive in either spot --
+    # the eval-numbers subsection and the ## Tests gate block itself.
+    rag_section = _normalize(_documents_rag_section(_read_readme())).lower()
+    assert "gate 7 (`devtools/rag_eval.py`) passes" in rag_section
+    assert "currently red" not in rag_section
 
     text = _read_readme()
-    tests_section = text[text.index("## Tests") :]
-    assert "currently red" in tests_section.lower()
+    tests_section = _normalize(text[text.index("## Tests") :]).lower()
+    assert "gate 7 passes as of v1.9.1" in tests_section
+    assert "currently red" not in tests_section
 
 
 def test_t_v190_ec_01_readme_eval_numbers_table_present():

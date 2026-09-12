@@ -118,6 +118,7 @@ class NamedLLM:
     def complete(
         self, messages, tools, *, max_tokens=None,
         reasoning: ReasoningRequest = REASONING_DEFAULT, timeout_s=None,
+        response_format=None,
     ):
         self.calls.append((list(messages), tools))
         self.reasoning_calls.append(reasoning)

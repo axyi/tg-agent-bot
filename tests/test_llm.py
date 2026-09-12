@@ -203,3 +203,70 @@ def test_base_url_trailing_slash_is_stripped():
         load_env_file=False,
     )
     assert cfg.lmstudio_base_url == "http://localhost:1234/v1"
+
+
+# ----------------------------------------------------------------------------
+# v1.9.1 T1 -- response_format passthrough (build_payload, both providers)
+# ----------------------------------------------------------------------------
+
+_RERANK_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "rerank",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "order": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1, "maximum": 3},
+                    "minItems": 1,
+                    "maxItems": 3,
+                }
+            },
+            "required": ["order"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def test_t_v191_build_payload_carries_response_format_when_given():
+    payload = build_payload("m", [], None, response_format=_RERANK_SCHEMA)
+    assert payload["response_format"] == _RERANK_SCHEMA
+
+
+def test_t_v191_build_payload_omits_response_format_when_not_given():
+    payload = build_payload("m", [], None)
+    assert "response_format" not in payload
+
+
+def test_t_v191_build_payload_refuses_a_protected_key_collision(monkeypatch):
+    # "response_format" itself is never one of the seven protected keys
+    # today; this proves the guard is actually wired to the same
+    # _PROTECTED_PAYLOAD_KEYS set reasoning_fields is checked against,
+    # rather than being a no-op that merely looks like one.
+    import llm.base as base_module
+
+    monkeypatch.setattr(
+        base_module, "_PROTECTED_PAYLOAD_KEYS", frozenset({"response_format"})
+    )
+    with pytest.raises(ValueError) as exc:
+        base_module.build_payload("m", [], None, response_format=_RERANK_SCHEMA)
+    assert "response_format" in str(exc.value)
+
+
+def test_t_v191_lmstudio_request_carries_response_format():
+    seen = []
+    llm = LMStudioClient(BASE_URL, "m", 5.0, client_for(capture(seen)))
+    llm.complete([{"role": "user", "content": "hi"}], None, response_format=_RERANK_SCHEMA)
+    body = json.loads(seen[0].read())
+    assert body["response_format"] == _RERANK_SCHEMA
+
+
+def test_t_v191_openrouter_request_carries_response_format():
+    seen = []
+    llm = OpenRouterClient(SENTINEL_KEY, "vendor/model", 5.0, client_for(capture(seen)))
+    llm.complete([{"role": "user", "content": "hi"}], None, response_format=_RERANK_SCHEMA)
+    body = json.loads(seen[0].read())
+    assert body["response_format"] == _RERANK_SCHEMA

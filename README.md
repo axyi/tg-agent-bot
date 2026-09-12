@@ -441,6 +441,14 @@ is sized so five passage bodies of at most `RAG_PASSAGE_CHARS` (1000)
 characters each fit inside the 12,000-character tool envelope with room
 left for headers and for the model's own reasoning about them.
 
+The rerank call asks the model for a JSON array via a `response_format`
+JSON schema (`{"order": [...]}`, v1.9.1), and can be routed to a second
+model with `LLM_RERANK_MODEL=<provider>:<model>` (unset keeps rerank on the
+main client, no failover applies to the routed client) — recommended
+because the local box carries no non-thinking chat model: every chat model
+there spends its whole completion budget on reasoning before ever emitting
+the rerank answer (`docs/reports/report-v1.9.1.md`).
+
 ### Storage
 
 Two tables (`documents`, `chunks`) hold the durable record; a `sqlite-vec`
@@ -513,15 +521,16 @@ the full pipeline with reranking forced on):
 Retrieval itself is solid on every mode: recall@5 and page hit-rate are
 1.000 throughout. Reranking did not help against plain hybrid RRF ordering
 on this corpus — it left recall@5 and page hit-rate unchanged and moved
-MRR down slightly, 1.000 -> 0.950. **Gate 7 (`devtools/rag_eval.py`) is
-currently red for this deployment.** This is not a retrieval-quality
-failure: the deployed chat model (`qwen/qwen3.8-27b`, a thinking variant)
-has genuine run-to-run stochastic reasoning-length variance that
-intermittently exceeds even a generously raised rerank timeout (120 s, up
-from RET-06's literal 20 s), so the reranker's own completion contract —
-not the ranking it produces when it does complete — is what the gate
-catches. See `docs/reports/report-v1.9.0.md`'s T8 section for the full
-diagnosis and the three ratified attempts made to reach exit 0.
+MRR down slightly, 1.000 -> 0.950. **Gate 7 (`devtools/rag_eval.py`)
+passes** as of v1.9.1: the rerank call now requests a JSON-schema
+`response_format` and can be routed to a fast, non-thinking model via
+`LLM_RERANK_MODEL`, bringing `_RERANK_MAX_TOKENS`/`_RERANK_TIMEOUT_S` down
+to measured reality (128 tokens, 30 s) instead of a budget sized to absorb
+another model's chain-of-thought. Under v1.9.0 the reranker's own
+completion contract — not the ranking it produces when it completes — is
+what made the gate structurally unable to finish; see
+`docs/reports/report-v1.9.0.md`'s T8 section for that original diagnosis
+and `docs/reports/report-v1.9.1.md` for the measured before/after.
 
 ## Add a skill
 
@@ -970,12 +979,14 @@ uv run --locked python devtools/rag_eval.py
 Gates 1–4 and 6 are offline and unconditional; gates 5 and 7 need the live
 environment (gate 7 is spec-v1.9.0 T8's retrieval evaluation — it also
 spends real inference tokens on the reranker and an advisory
-conversation-aware smoke test; see `evals/rag/`). **Gate 7 is currently red
-for this deployment**: retrieval quality is solid (recall@5 = 1.000, page
-hit-rate = 1.000 on every mode — see [Documents (RAG)](#documents-rag)),
-but the deployed thinking chat model's stochastic reasoning-length variance
-intermittently exceeds even a generously raised rerank timeout, so the
-reranker's completion contract — not retrieval itself — is what fails.
+conversation-aware smoke test; see `evals/rag/`). **Gate 7 passes as of
+v1.9.1** (`docs/reports/report-v1.9.1.md`): retrieval quality is solid
+(recall@5 = 1.000, page hit-rate = 1.000 on every mode — see
+[Documents (RAG)](#documents-rag)), and the rerank call now requests a
+JSON schema and is routed to a fast, non-thinking model
+(`LLM_RERANK_MODEL`), so the reranker's completion contract — the thing
+v1.9.0 could not reliably satisfy — is enforceable and fast rather than
+sized to absorb a thinking model's chain-of-thought.
 The suite is provably offline: any
 real outbound HTTP request fails the test, the LLM and the Telegram client are
 replaced by fakes, the command runner is injected, and even the `docker` binary
