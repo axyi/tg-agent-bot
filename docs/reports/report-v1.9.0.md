@@ -27,8 +27,14 @@ it below, and, both green, the annotated tag `v1.9.0` is created on it.**
   **1560** (`pytest --collect-only -q` at T12, exceeds the floor by 340 —
   see each task's own section above for its exact per-task increment).
 - **Task-brief files written (RPT-02 item 4):** `docs/spec/task-briefs/v190-T1.md`
-  through `v190-T12.md` (T0 and T13 are *artefacts only*, no brief needed
-  per their own §15.1 row).
+  through `v190-T10.md`, plus `v190-T12.md` — eleven files (T0 and T13 are
+  *artefacts only*, no brief needed per their own §15.1 row). **T11 has no
+  brief file and never had one:** its delegation was the `code-reviewer`
+  clean-context review, which is driven by the diff and the project's own
+  reviewer agent definition rather than by a task-brief. Corrected by
+  prompt 159 — this line previously read "through `v190-T12.md`", a range
+  that silently claimed a `v190-T11.md` that `git log --all` shows was
+  never written.
 - **Benchmark rule (RPT-02 item 6, REQ-V190-EC-06): fires.** This release
   changes both `tool_specs()` (a fourth tool, REQ-V190-TOOL-01) and
   `SYSTEM_PROMPT` (one rule line, REQ-V190-TOOL-04), so
@@ -292,11 +298,17 @@ own contract holds frozen.
 | T6 | yes | general-purpose subagent (one retry after an infra 403; ratified erratum mid-task) | matched map |
 | T7 | yes | general-purpose subagent | matched map |
 | T8 | yes | general-purpose subagent (3 ratified live-tuning attempts) | matched map |
-| T9 | yes | general-purpose subagent (session hit an infra rate limit mid-task, orchestrator finished directly) | matched map |
+| T9 | partly — **deviation** | general-purpose subagent until its session hit an account-wide 429; the orchestrator then finished the task directly in main context | **departed from map.** The remaining work wrote files gates run (`devtools/mutation_check.py`, `config/quality_gates.yaml`, `tests/test_v15_standards.py` — commit `7bc7121`), which is §5.1's *writes source files* trigger. The reason recorded at the time — "bounded, mostly-command remaining work" — is a paraphrase, not one of §5.1's four closed-list exemptions, so this task is **unexplained**, not exempt. Recorded as a deviation by prompt 159 rather than rephrased into an exemption it does not meet |
 | T10 | yes | general-purpose subagent (one ratified erratum mid-task) | matched map |
-| T11 | yes | `code-reviewer` subagent (clean context) + one general-purpose fix subagent | matched map |
+| T11 | yes | `code-reviewer` subagent (clean context) + one general-purpose fix subagent | matched map (no task-brief file: the reviewer is driven by the diff — see RPT-02 item 4) |
+| T12 | yes | general-purpose subagent, briefed by file (`docs/spec/task-briefs/v190-T12.md`) | matched map |
+| T13 | no — *artefacts only* | — | matched map |
 
-(Filled in as each task lands.)
+Rows T12 and T13 were added by prompt 159; the table closed the run
+covering T0–T11 only, which `/verify-run` raised as an incomplete
+`REQ-V190-EC-07` item 6 artefact (12 of 14 tasks).
+
+**Counts: 11 delegated / 2 exempt (T0, T13) / 1 unexplained (T9).**
 
 ## T11 — clean-context review (REQ-V190-REV-01)
 
@@ -884,19 +896,17 @@ bypass. Evidence: `checks.py replay --range d6c1312..5f9c58f` (T13) shows
 
 ## Ledger row (paste into `economics.md`)
 
-Real and complete as of T12 — every cell below is a measurement or a
-named summary, no `TBD` remains, and (per REQ-V190-REV-02/RPT-02 item 13's
-"no self-referential SHA" rule) no SHA appears in this row or anywhere
-else in this report, since `ledger_header` (`config/quality_gates.yaml`)
-carries no SHA-bearing column and T12's own commit is this row's author.
-The report as a whole stays *provisional* in REQ-V190-REV-02's sense
-(the tip SHA itself lands only at T13); the "First run" cell's repair-
-cycle count is this task's own derivation from EC-01's fix+rerun
-definition against gate 7's three T8 attempts — T13 owns confirming it
-alongside gate 7's final ship/accept disposition:
+Real and complete — every cell below is a measurement or a named summary,
+no `TBD` remains, and (per REQ-V190-REV-02/RPT-02 item 13's "no
+self-referential SHA" rule) no SHA appears in this row or anywhere else in
+this report, since `ledger_header` (`config/quality_gates.yaml`) carries no
+SHA-bearing column. T13 confirmed the "First run" cell's repair-cycle count
+alongside gate 7's final ship/accept disposition, and prompt 159 de-
+provisionalised the row after `/verify-run` found it still reading as a T12
+snapshot — the same closing step v1.8.0's prompt 140 performed:
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.0 | 2026-09-12 | ≈204.4 KB (spec 174,186 B + delta 30,222 B) | 18 so far (141–158; 141 — spec authoring, 142 — go-run kickoff, 158 — this row, T12's version bump; T13's own prompt not yet counted) | no — gate 7 (`rag-eval`) drew 2 of the 4-cycle repair budget at T8 (`_RERANK_MAX_TOKENS` 128→1024→2048, then `_RERANK_TIMEOUT_S` 20.0→120.0, each its own fix-and-rerun) without reaching green, diagnosed as genuine run-to-run stochastic reasoning-length variance in the deployed thinking model (`qwen/qwen3.8-27b`), not a code defect — retrieval itself measured recall@5=1.000 on every mode across all 6 live runs; final ship/accept disposition deferred to T13, which also confirms this cycle count. Every other blocker across T0–T12 was a disclosed pre-existing-test/spec-list gap (an EC-03-class amendment) fixed before any gate ran red, or a clean-context review finding — never a red-gate-then-repair cycle drawn against the codebase itself | Disclosed, not hidden: erratum 1 (T1, REQ-V190-EC-03's amendment list missed three more `SCHEMA_VERSION`-literal tests, operator-ratified) alongside a real `add_vectors` 2-tuple-vs-3-column bug found and fixed pre-commit; erratum 2 (T2, RET-08's live wiring broke two more `test_v1_guardrails.py` tests, operator-ratified); a disclosed spec defect (T3, `T-V190-SEC-04` assigned to two different requirements by Appendix A, left unedited per operator decision) plus a test-strengthening erratum; erratum 3 (T4, a silently unsearchable zero-chunk PDF document, `EmptyDocumentError` guard added, operator-ratified); erratum 4 (T6, `tools_exposed` literal bump 3→4, operator-ratified; one infra 403 retry, no partial commit); a real bug found and fixed pre-commit (T7, `getFile`'s missing `file_path` misreported as DOCX corruption); gate 7's reranker completion contract (T8, see "First run"); erratum 5 (T10, a third self-precedented `report_path`-repoint break); T11's clean-context review — 1 🟡 fixed (the envelope worst-case-header comment's arithmetic), 1 🟡 formally waived (the already-disclosed `rag.py` timeout/token deviations) — plus one process-hygiene incident (a duplicate background invocation and a stray foreground probe, both caught via `git status`/`git diff` and cleanly reverted before affecting the authoritative run); T12's own required edit exposed two more pre-existing tests outside EC-03's list, both stopped-and-reported rather than self-resolved, both operator-ratified: `tests/test_v190_agents.py`'s count-bearing-lines check (renamed to `test_t_v190_rpt_05_agents_md_count_lines_landed_at_t12`, its own T10-era comment already anticipated this exact change) and `tests/test_v180_version.py` (REQ-V190-EC-03 forbids deletion; repointed from the live tree to the frozen `v1.8.0` git-tag blob — `git show v1.8.0:pyproject.toml`, the same convention `test_t_v170_acc_03_version_half` already established at v1.8.0's own T9 — establishing that every future version-pin test gets this same treatment at its own retirement, never deletion) | subagents' own harness-reported aggregates, see `docs/reports/report-v1.9.0.md` for the per-task breakdown; the interactive orchestrator session's own token count is not self-measurable by this harness | $0 marginal — Claude Code subscription-metered session, not per-token billed; live LM Studio inference (T0's `v190-baseline` bench, T8's gate-7 reranker attempts) is reference-priced only, no real money spent; no OpenRouter inference beyond gate 5/selftest-live's zero-token reachability checks | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.0 | 2026-09-12 | ≈204.4 KB (spec 174,186 B + delta 30,222 B) | 19 (141–159; 141 — spec authoring, 142 — the `go`-run kickoff, under whose umbrella T13's final acceptance also ran with no separate prompt file of its own, 158 — T12's version bump, 159 — the post-run docs fix closing `/verify-run`'s EC-07 item 6 and RPT-02 item 4 findings) | no — gate 7 (`rag-eval`) drew 2 of the 4-cycle repair budget at T8 (`_RERANK_MAX_TOKENS` 128→1024→2048, then `_RERANK_TIMEOUT_S` 20.0→120.0, each its own fix-and-rerun) without reaching green, diagnosed as genuine run-to-run stochastic reasoning-length variance in the deployed thinking model (`qwen/qwen3.8-27b`), not a code defect — retrieval itself measured recall@5=1.000 on every mode across all 6 live runs; final ship/accept disposition deferred to T13, which also confirms this cycle count. Every other blocker across T0–T12 was a disclosed pre-existing-test/spec-list gap (an EC-03-class amendment) fixed before any gate ran red, or a clean-context review finding — never a red-gate-then-repair cycle drawn against the codebase itself | Disclosed, not hidden: erratum 1 (T1, REQ-V190-EC-03's amendment list missed three more `SCHEMA_VERSION`-literal tests, operator-ratified) alongside a real `add_vectors` 2-tuple-vs-3-column bug found and fixed pre-commit; erratum 2 (T2, RET-08's live wiring broke two more `test_v1_guardrails.py` tests, operator-ratified); a disclosed spec defect (T3, `T-V190-SEC-04` assigned to two different requirements by Appendix A, left unedited per operator decision) plus a test-strengthening erratum; erratum 3 (T4, a silently unsearchable zero-chunk PDF document, `EmptyDocumentError` guard added, operator-ratified); erratum 4 (T6, `tools_exposed` literal bump 3→4, operator-ratified; one infra 403 retry, no partial commit); a real bug found and fixed pre-commit (T7, `getFile`'s missing `file_path` misreported as DOCX corruption); gate 7's reranker completion contract (T8, see "First run"); erratum 5 (T10, a third self-precedented `report_path`-repoint break); T11's clean-context review — 1 🟡 fixed (the envelope worst-case-header comment's arithmetic), 1 🟡 formally waived (the already-disclosed `rag.py` timeout/token deviations) — plus one process-hygiene incident (a duplicate background invocation and a stray foreground probe, both caught via `git status`/`git diff` and cleanly reverted before affecting the authoritative run); T12's own required edit exposed two more pre-existing tests outside EC-03's list, both stopped-and-reported rather than self-resolved, both operator-ratified: `tests/test_v190_agents.py`'s count-bearing-lines check (renamed to `test_t_v190_rpt_05_agents_md_count_lines_landed_at_t12`, its own T10-era comment already anticipated this exact change) and `tests/test_v180_version.py` (REQ-V190-EC-03 forbids deletion; repointed from the live tree to the frozen `v1.8.0` git-tag blob — `git show v1.8.0:pyproject.toml`, the same convention `test_t_v170_acc_03_version_half` already established at v1.8.0's own T9 — establishing that every future version-pin test gets this same treatment at its own retirement, never deletion) | subagents' own harness-reported aggregates, see `docs/reports/report-v1.9.0.md` for the per-task breakdown; the interactive orchestrator session's own token count is not self-measurable by this harness | $0 marginal — Claude Code subscription-metered session, not per-token billed; live LM Studio inference (T0's `v190-baseline` bench, T8's gate-7 reranker attempts) is reference-priced only, no real money spent; no OpenRouter inference beyond gate 5/selftest-live's zero-token reachability checks | claude-sonnet-5 | Claude Code |
 ```
 
 ## Tag and final gate results (RPT-02 item 13)
