@@ -23,11 +23,13 @@ TRY400 ISC004 RUF005 RUF007 PERF401 SIM105 SIM117 TRY004 PLW2901`, each hit
 read by hand per the brief. `PLW1510` (16 sites): every one already reads
 `.returncode` afterward, or (one `_docker_kill` best-effort site) treats a
 non-zero exit as expected — all 16 get explicit `check=False`, none needed
-`check=True`. `TRY400` (16 sites): 7 adopted `log.exception` (genuinely
+`check=True`. `TRY400` (16 sites): 10 adopted `log.exception` (genuinely
 unexpected paths — a startup `KeyError`/`TypeError` mixed into a
-`TelegramError` catch, two broad `except Exception` request/startup
-guards, two `devtools/bench.py` DB-open/read failures, one more scenario-
-prep failure, one `sqlite3.Error` in the document handler), 9 kept
+`TelegramError` catch, `bot.py`'s own broad `except Exception`
+dashboard-startup guard, `dashboard_server.py`'s two broad
+`except Exception`/DB-error request guards, five `devtools/bench.py`
+sites — one scenario-prep failure plus two DB-open/DB-read pairs, one
+`sqlite3.Error` in the document handler), 6 kept
 `log.error` with `# noqa: TRY400` and an inline reason (two `TelegramError`
 sites, two `ConfigError` sites — the latter pinned by
 `test_v12_patch.py`'s own "no Traceback in the log" assertion,
@@ -38,10 +40,13 @@ remaining 21 all read as intentional long-string wraps (deliberate
 canary/benchmark literals, HTML row builders, one SQL migration
 statement, one stats-line builder) — none a missing comma — parenthesised
 explicit via `ruff --unsafe-fixes`, diff read in full first.
-`RUF005`/`RUF007`/`PERF401`/`TRY004`/`PLW2901`: mechanical rewrites,
+`RUF005`/`RUF007`/`PERF401`/`PLW2901`: mechanical rewrites,
 `--unsafe-fixes` where offered, hand-rewritten where not (all 19 `PERF401`
-hits, all 6 `PLW2901` renames, 4 of 5 `TRY004` — the fifth is the
-`bench_scenarios.py` exclusion). `SIM105`/`SIM117`: every
+hits, all 6 `PLW2901` renames). `TRY004` (5 hits, per-site judgment, not
+mechanical): 4 kept `ValueError` with `# noqa: TRY004` (0 adopted after
+this task's own review corrected one site's initial `TypeError` adoption
+back to `ValueError`), the fifth is the `bench_scenarios.py` exclusion.
+`SIM105`/`SIM117`: every
 `contextlib.suppress`/merged-`with` rewrite read for identical exception
 set and identical enter/exit order (Python's own semantics for a
 comma-joined `with` statement are provably identical to the nested form

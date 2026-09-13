@@ -99,7 +99,13 @@ def _validate_attribute_value(key: str, value: object) -> None:
             raise ValueError(f"attribute {key!r} must be a list of str")
         return
     if not isinstance(value, _SCALAR_ATTRIBUTE_TYPES):
-        raise TypeError(f"attribute {key!r} has a non-serialisable value: {type(value).__name__}")
+        # nothing catches ValueError here specifically (spec-v1.6.0.md:487
+        # only says "anything else raises"); TypeError would split this
+        # validator's two branches across two exception types for no
+        # reason (v1.9.3 T3 review finding 7).
+        raise ValueError(  # noqa: TRY004 -- both branches must raise one type
+            f"attribute {key!r} has a non-serialisable value: {type(value).__name__}"
+        )
 
 
 @dataclass(frozen=True)

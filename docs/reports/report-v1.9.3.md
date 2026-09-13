@@ -472,6 +472,15 @@ on `5e62a4a` (v1.9.2); this task runs on the post-T1/T2/review tree
 current tree before each commit (below); the never/not-now table's own
 counts are historical (as the brief states) and unaffected by the verdict.
 
+**Disclosure:** `acd373a` (commit A) also carries a renumbering edit to
+`docs/spec/task-briefs/v193-T3.md` itself (prompt numbers 176/177 ->
+177/178, the entry count 112 -> 114) -- the coordinator staged that edit
+before this task started (per the run's own instructions, "the only
+change in the tree is a staged renumbering edit ... that belongs in your
+first commit"); the executor committed it as the first change in commit
+A, unmodified, without a separate disclosure sentence at the time. Named
+here per T3 review finding 6.
+
 ### Commit A -- prompt 177, `style: ruff autofix tier`
 
 Rules: `UP037 UP017 UP031 C420 C408 SIM300 SIM102 RET501 RET503 RET504
@@ -597,16 +606,30 @@ firing this rule (the outer `with`'s body must be solely the inner
 which context exits first; confirmed by re-running the full file green
 after each merge.
 
-**`TRY004`** (5 hits: 4 fixed, 1 excluded). `tracing.py:101`
-(`_validate_attribute_value`'s scalar-type check) -> `TypeError`: no test
-or caller catches `ValueError` here specifically (`set_attribute`'s own
-"unknown key" `ValueError` is a separate, unrelated raise). `devtools/
-dashboard.py:91,99,101` (`load_document`'s three type-check raises) kept
-as `ValueError` with `# noqa: TRY004` each: the function's own docstring
-("the benchmark file, or `ValueError` with a one-line reason",
-REQ-V160-DSH-05) and `main()`'s `except ValueError as exc:` (prints a
-clean CLI error, `EXIT_ERROR`) both depend on this exact type.
-`devtools/bench_scenarios.py:137` excluded (see Constraints).
+**`TRY004`** (5 hits: 0 adopted, 4 kept, 1 excluded -- revised by T3 review
+finding 7, see below). `devtools/dashboard.py:98,106,108`
+(`load_document`'s three type-check raises) kept as `ValueError` with `#
+noqa: TRY004` each: the function's own docstring ("the benchmark file, or
+`ValueError` with a one-line reason", REQ-V160-DSH-05) and `main()`'s
+`except ValueError as exc:` (prints a clean CLI error, `EXIT_ERROR`) both
+depend on this exact type. `devtools/bench_scenarios.py:137` excluded (see
+Constraints).
+
+**Erratum (T3 review finding 7):** this task originally adopted `tracing.py:
+102` (`_validate_attribute_value`'s scalar-type check) to `TypeError`,
+reasoning that nothing caught `ValueError` there specifically. The review
+found the same function's sibling branch (`:99`, the list-of-str check)
+still raises `ValueError`, so the fix split one validator's two branches
+across two exception types for no documented reason -- `spec-v1.6.0.md:487`
+says only "anything else raises" (no type specified), and
+`T-V160-TRC-09`'s existing test covers `set_attribute`'s own unrelated
+"unknown key" `ValueError` at `:221`, not this one. Reverted to
+`ValueError` with `# noqa: TRY004` and an inline reason (both branches must
+raise the same type) -- the revert's own reformatting moved the `raise`
+itself from `:102` to `:106` (the single-line form no longer fits under
+100 chars once `ValueError` and the trailing `noqa` comment are both
+back); `TRY004`'s own tally above corrected from "4 fixed" to "0 adopted,
+4 kept".
 
 **`PLW2901`** (6 hits, all mechanical loop-variable renames, semantics
 unchanged): `devtools/bench.py` (`convert()`'s `row`/`selected`'s `row` ->
@@ -619,43 +642,70 @@ unchanged): `devtools/bench.py` (`convert()`'s `row`/`selected`'s `row` ->
 because T1's own `Popen`-based `run_argv` rewrite already removed one
 `subprocess.run` site the brief's inventory counted): every site read for
 whether the caller checks `.returncode` afterward. All 16 got explicit
-`check=False`: `bot.py:646,680` (`_reap_orphaned_containers`, both
+`check=False`: `bot.py:659,686` (`_reap_orphaned_containers`, both
 docker-ps/docker-rm calls, `.returncode` read immediately after);
-`tools.py:562,578,601` (`docker_probe`, `docker_image_present`,
+`tools.py:562,579,603` (`docker_probe`, `docker_image_present`,
 `image_has_timeout`, all read `.returncode`); `tools.py:876` (`_docker_kill`
 -- no `.returncode` read at all, but its own docstring says "best effort:
 the client is already dead, the container may not be", matching the same
-non-fatal-by-design class); `devtools/mutation_check.py:1565`
-(`_shrink_counts`'s own docstring: "Returns `(count, returncode)` -- the
-caller must check the returncode itself"); `tests/test_bench.py:1889`,
+non-fatal-by-design class); `devtools/mutation_check.py:1563`
+(`_collect_count`'s own docstring, def `:1547`: "Returns `(count,
+returncode)` -- the caller must check the returncode itself"); `tests/test_bench.py:1889`,
 `tests/test_v13_carryover.py:214`, and all 7 `tests/test_v15_standards.py`
 sites (gitleaks/semgrep/mutation-CLI subprocess assertions, every one
 reads `.returncode` on the next line). **Zero `check=True` sites** -- no
 non-zero exit anywhere in this list was ever treated as a bug; the
 brief's other branch never fired.
 
-**`TRY400`** (16 hits, unchanged from the brief's count): 7 adopted
-`log.exception` (`bot.py:1437` document-handler `sqlite3.Error` -- an
+**`TRY400`** (16 hits, unchanged from the brief's count): **10 adopted**
+`log.exception` (`bot.py:1447` document-handler `sqlite3.Error` -- an
 unexpected DB failure, unlike its sibling classified branches which already
-`log.warning`; `bot.py:1998` `(TelegramError, KeyError, TypeError)` at
+`log.warning`; `bot.py:2008` `(TelegramError, KeyError, TypeError)` at
 startup -- the latter two are real bugs, not classified failures, and this
-runs once at boot, not in a hot loop; `bot.py:2071`
+runs once at boot, not in a hot loop; `bot.py:2081`
 `dashboard_server.build_server`'s broad `except Exception` startup guard;
 `dashboard_server.py:518,535` the request handler's DB-error and
 unhandled-exception guards; `devtools/bench.py:933,1097,1108,1155,1161` --
-a scenario-prep failure and two DB-open/DB-read pairs, both devtools
-harness paths where a full traceback aids debugging and there is no
-hot-loop noise concern). 9 kept `log.error` with `# noqa: TRY400` plus an
-inline reason comment: `bot.py:1485,1521` (both `TelegramError` --
-already-classified, retryable/fatal known from the exception itself);
-`bot.py:1983,2007` (both `ConfigError` -- the second already carried a
-`REQ-V12-ERR-01` comment this task cites verbatim: "a configuration
-refusal must look like one, not an unhandled traceback",
+one scenario-prep failure plus two DB-open/DB-read pairs (five sites, not
+three), both devtools harness paths where a full traceback aids debugging
+and there is no hot-loop noise concern). **6 kept** `log.error` with `#
+noqa: TRY400` plus an inline reason comment: `bot.py:1498,1536` (both
+`TelegramError` -- already-classified, retryable/fatal known from the
+exception itself); `bot.py:1996,2020` (both `ConfigError` -- the second
+already carried a `REQ-V12-ERR-01` comment this task cites verbatim: "a
+configuration refusal must look like one, not an unhandled traceback",
 `tests/test_v12_patch.py:759` asserts no `"Traceback"` text reaches the
-log for this exact seam); `tools.py:1242,1479` (both audit-log
+log for this exact seam); `tools.py:1245,1482` (both audit-log
 best-effort sites, "an audit failure is never fatal", a potentially hot
 path on every exec call). No caplog test pinned a level/message this task
 needed to repoint.
+
+**Erratum (T3 review finding 1):** this paragraph, `docs/llm-usage.md` row
+88, `docs/prompts/178-...md` and the `6fcf1fc` commit body all originally
+stated "7 adopted / 9 kept" -- an arithmetic slip against this same
+paragraph's own per-site list, which always totalled 10/6 (3 `bot.py` + 2
+`dashboard_server.py` + 5 `devtools/bench.py` adopted; 4 `bot.py` + 2
+`tools.py` kept). The tree was never wrong -- only the tally numeral, here
+and in the other three places named above, all corrected by this review's
+own commit (prompt 179) rather than by rewriting `6fcf1fc`.
+
+**Finding 8 (redaction):** `log.exception`'s own traceback and chained
+`__context__`/`__cause__` rendering are not passed through `redact()` --
+no logging-layer filter exists (`bot.py`'s logging setup is a plain
+`logging.basicConfig` call). Reviewed every one of the 10 adopted sites:
+no registered secret can reach those exception objects today
+(`TelegramError` is always built from already-redacted strings; the two
+`from None` re-raises breaking the httpx-URL exception chain live at
+`bot.py:171` (`except httpx.TransportError`) and `bot.py:190` (the
+non-JSON response branch); every remaining site is a bare
+`sqlite3.Error`/`OSError`/config-shape failure with no secret-bearing
+payload). So this is not a live leak, but the `redact(str(exc))` argument
+still passed into several of these `log.exception(...)` calls now reads
+as protective when it is not (the traceback itself already carries the
+unredacted exception text) -- listed here as a v1.10.0 hardening
+candidate: a redacting `logging.Filter` installed once at the root
+logger, rather than relying on every call site to redact its own
+formatted message.
 
 **`ISC004`** (32 hits total, 11 in `devtools/bench_scenarios.py` excluded
 -- see Constraints; 21 reviewed). All 21 read as `intentional`: `bot.py`
@@ -742,6 +792,13 @@ committed tree per T1's own dirty-tree requirement.
   and one beyond-brief generalisation (the `devtools/bench_scenarios.py`
   exclusion extended from `PERF401`/`SIM117` to the two rules that
   actually hit it, `TRY004`/`ISC004`) flagged for operator review.
+- T3 review -- delegated, brief
+  `docs/spec/task-briefs/v193-T3-review.md`; a clean-context (opus) review
+  of `acd373a`+`6fcf1fc` (no 🔴, one 🟠, seven 🟡), closed in one follow-up
+  commit (prompt 179) without rewriting either reviewed commit -- the
+  🟠 TRY400 tally correction and one 🟡 (`tracing.py`'s `TRY004` revert)
+  touch behaviour-adjacent numbers/code; the rest is citation and
+  placement paperwork.
 
 ## Ledger row (paste into `economics.md`)
 

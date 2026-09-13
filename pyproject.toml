@@ -42,17 +42,6 @@ select = [
     "SIM105", "SIM117", "TRY004", "PLW2901",
 ]
 
-# v1.9.3 T3 commit B: devtools/bench_scenarios.py is excluded from ruff
-# format for a byte-hash reason (see [tool.ruff.format] below,
-# REQ-V13-BEN-12) -- the same reason generalises to these two lint rules,
-# whose only fix here would rewrite this file's bytes and invalidate every
-# committed docs/assets/bench/*.json artefact's pinned scenarios_sha256().
-# The brief named this exclusion for PERF401/SIM117 (neither of which
-# actually hits this file); TRY004 (1 hit) and ISC004 (11 hits) do, so the
-# same exclusion applies to them instead. See docs/reports/report-v1.9.3.md.
-[tool.ruff.lint.per-file-ignores]
-"devtools/bench_scenarios.py" = ["TRY004", "ISC004"]
-
 # v1.9.3 T3: the ruff rule-family proposal table (docs/reports/report-v1.9.2.md),
 # decided and closed. One line per family never adopted -- the reason is
 # the decision; see docs/spec/task-briefs/v193-T3.md and
@@ -76,6 +65,17 @@ select = [
 # _dropped_spans): PLW0603
 # not now -- one pytest.raises(match=) pattern; fix when that test is
 # next touched: RUF043
+
+# v1.9.3 T3 commit B: devtools/bench_scenarios.py is excluded from ruff
+# format for a byte-hash reason (see [tool.ruff.format] below,
+# REQ-V13-BEN-12) -- the same reason generalises to these two lint rules,
+# whose only fix here would rewrite this file's bytes and invalidate every
+# committed docs/assets/bench/*.json artefact's pinned scenarios_sha256().
+# The brief named this exclusion for PERF401/SIM117 (neither of which
+# actually hits this file); TRY004 (1 hit) and ISC004 (11 hits) do, so the
+# same exclusion applies to them instead. See docs/reports/report-v1.9.3.md.
+[tool.ruff.lint.per-file-ignores]
+"devtools/bench_scenarios.py" = ["TRY004", "ISC004"]
 
 # v1.9.2 T1 (REQ-V15-NG-04): `docs/` was already out of scope for
 # formatting at spec-v1.5 (spec-v1.5.md:951 -- "ruff format also reaches
