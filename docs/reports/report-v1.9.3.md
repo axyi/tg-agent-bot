@@ -152,9 +152,129 @@ to validate a comment-and-timeout-number-only follow-up edit (the number
 above is this commit's own real, freshly-measured wall, unaffected by the
 follow-up edit itself).
 
+## T2 -- rerank tail
+
+Contract: `docs/spec/task-briefs/v193-T2.md` (prompt 175). Runs after T1
+landed (`07bb158`).
+
+### The evidence, and why the brief's own H1/H2 probe found nothing
+
+The brief's own probe (`Searcher`/`cfg` built the same way
+`devtools/rag_eval.py:596` does, `rag_rerank` off, real candidates fed to
+`rag.rerank`) ran the ten `questions.json` items in gate-7 order, then
+reverse order, then repeated the first item 5x with the timeout raised to
+60s: **25/25 calls fast (0.38-0.96s)**, one provider throughout
+(`DeepInfra`), `completion_tokens` 7-28 against the 128 budget. Neither H1
+(cold start -- the tail is not the first call) nor H2 (item-bound -- the
+same content is fast) was reproducible this way, because neither was the
+real defect: the probe's own `Searcher` never runs the conversation-aware
+smoke turn, and that turn constructs its own, differently-wired
+`Searcher`s.
+
+An in-process instrumented run of the real gate closed the gap:
+`httpx.Client.post` wrapped (filtered on the `response_format` payload key
+-- rerank's own fingerprint, no other call in this codebase sets it) to
+log one line per rerank-shaped HTTP attempt, then `devtools.rag_eval.main()`
+called directly -- the real gate, unmodified -- three sequential runs,
+alone on the box.
+
+| run | question (first 40 chars) | http_s | completion_tokens | provider | outcome |
+|---|---|---|---|---|---|
+| 1-3 | (all 12 deterministic items: 10 answerable + 2 null, x3 runs = 36 calls) | 0.37-1.48 | 7-28 | DeepInfra | ok |
+| 1 | `отпуск количество дней в год` (smoke turn's own agent-generated query) | 15.068 / 15.083 / 15.108 | None / None / None | None / None / None | timeout x3, then a DNS error on a 4th, unrelated call |
+| 2 | `отпуск количество дней в год` | 15.032 / 15.147 / 15.082 | None / None / None | None / None / None | timeout x3, then 0.698 ok (Google) on an independent follow-up call |
+| 2 | `количество недель отпуска в год` (turn 2's own query) | 0.485 | 11 | Google | ok |
+| 3 | `отпуск количество дней в год` | 15.042 / 15.108 / 15.134 | None / None / None | None / None / None | timeout x3, then 0.714 ok (Google) |
+| 3 | `количество недель отпуска в год` | 0.572 | 11 | Google | ok |
+
+Every timeout sits at the gate's own 15.0s ceiling, `provider=None` (no
+response body ever arrived to parse -- not a slow response, no response at
+all). Runs 2-3 also logged `provider lmstudio failed 3 times (LLMError);
+serving from openrouter` in the same window -- the *agent's own chat
+completion* failing over from LM Studio, a separate client entirely. That,
+plus the exact 15.0s ceiling, pointed away from "OpenRouter routes this
+content badly" and toward "this call is reaching the wrong client."
+
+Targeted follow-up: the exact agent-generated query text
+(`'отпуск количество дней в год'`), reranked in isolation with the timeout
+raised to 60s (the same seam the brief's probe uses), against the same
+retrieval funnel: **5/5 succeeded in 0.76-1.25s, all DeepInfra**. The
+content is not slow. The chronological position (last call of the run,
+appearing first in captured output only because `log.warning`'s stderr is
+unbuffered while `print_fn`'s stdout is not -- confirmed by the timestamps
+above, which put the timeouts at the *end* of each run) is not cold start
+either.
+
+### The defect
+
+`devtools/rag_eval.py`'s `run()` builds its scored `hybrid_rerank_searcher`
+with `llm=rerank_llm or llm` (`:438`) -- routes to the fast, configured
+reranker (`LLM_RERANK_MODEL`) exactly as `bot.py:950-958`'s live searcher
+does. `conversation_smoke()` (`:310-377`) took only a plain `llm` parameter
+and built *both* of its own `rag.Searcher`s with `llm=llm` -- the chat/
+agent completion client, LM Studio primary via the failover wrapper
+(`llm/failover.py`). The smoke turn's rerank calls never reached the
+routed reranker at all: they reached LM Studio, whose measured median
+per-rerank-call latency (v1.9.1 T1, `qwen/qwen3.8-27b`) is 196.9s --
+timing out at the gate's own 15.0s ceiling on every attempt, every run.
+
+### The fix
+
+`conversation_smoke()` gains a `rerank_llm=None` parameter; both
+`rag.Searcher` constructions now use `llm=rerank_llm or llm`, the same
+expression `run()`'s own scored searcher and `bot.py`'s live searcher
+already use. The call site (`:531-539`) passes `rerank_llm=rerank_llm`
+through. `_RERANK_TIMEOUT_S`/`_RERANK_MAX_ATTEMPTS` are unchanged -- this
+was never a rerank-model or timeout-sizing defect.
+
+New mutation entry `v193-smoke-reranks-on-chat-client` (reverts
+`searcher1`'s routing back to the chat client -- the file's own `find`
+string is unique to that one Searcher's block), killed by
+`test_t_v193_t2_conversation_smoke_reranks_via_rerank_llm_not_chat_llm`
+(`tests/test_v190_eval.py`): two distinct `_DynamicRerankLLM` doubles as
+`llm` (chat, scripted with the smoke's own two-turn agent script) and
+`rerank_llm` (bare); asserts `rerank_llm._rerank_calls == 2` (one per
+turn -- reverting either Searcher alone drops this to 1, still failing)
+and that the chat client never received a rerank-shaped call
+(`tool_definitions is None`).
+
+### Three consecutive clean gate-7 runs (proof)
+
+Run on the fixed, committed tree (`0fde4c3`), sequential, alone on the box,
+never concurrent with gate 6:
+
+| run | exit | wall | `rerank attempt … failed` lines | `provider lmstudio failed` lines | hybrid recall@5 | hybrid+rerank recall@5 |
+|---|---|---|---|---|---|---|
+| 1 | 0 | 268.800s | 0 | 0 | 1.000 | 1.000 (mrr 0.900) |
+| 2 | 0 | 233.347s | 0 | 0 | 1.000 | 1.000 (mrr 0.850) |
+| 3 | 0 | 250.700s | 0 | 0 | 1.000 | 1.000 (mrr 0.850) |
+
+All three: `gate-7: PASS`. The conversation-aware smoke's own advisory
+token-sharing check (TOOL-06, unrelated to this fix) still shows its
+pre-existing intermittent "fail" disposition in all three runs here (`turn
+2 recorded no search_documents call sharing a token with turn 1's
+question`) -- advisory, never gate-blocking, and out of this task's scope
+(it is about whether the follow-up turn's own query shares a token with
+turn 1's, not about which client reranks). The mutation-fix's own scope --
+zero retry lines, zero failover lines, the smoke turn's rerank calls
+routed to the fast reranker -- is fully confirmed.
+
+### Cost
+
+25 calls (brief's own probe) + 5 (targeted 60s repeat) $\approx$ \$0.012,
+plus three live gate-7 runs' own inference (the reranker plus the
+advisory conversation-aware smoke, at reference OpenRouter prices, no real
+spend tracked or exposed to this session) -- under the \$0.20 budget.
+
 ## Delegation record
 
 - T1 -- delegated, brief `docs/spec/task-briefs/v193-T1.md`.
+- T2 -- delegated, brief `docs/spec/task-briefs/v193-T2.md`; the diagnosis
+  (H1/H2 probe finding nothing, then an in-process instrumented gate run,
+  then a targeted 60s-timeout confirmation) and the fix were reached
+  through two coordinator course-corrections after the probe's initial
+  negative result -- recorded here since they changed the diagnosis from
+  "no fix warranted" to a real, precisely located wiring defect.
 
 ## Ledger row (paste into `economics.md`)
 

@@ -510,6 +510,44 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     assert "no search_documents call sharing a token" in detail2
 
 
+def test_t_v193_t2_conversation_smoke_reranks_via_rerank_llm_not_chat_llm(tmp_path):
+    # v1.9.3 T2 (docs/spec/task-briefs/v193-T2.md): both of conversation_smoke's
+    # Searchers must rerank through `rerank_llm` when one is configured --
+    # the same `llm=rerank_llm or llm` routing run()'s own scored
+    # hybrid_rerank_searcher and bot.py's live searcher already use. Before
+    # this fix, both Searchers here always reranked through the chat/agent
+    # client instead (the LM Studio-primary failover client in production),
+    # never the routed rerank model -- killed by mutation
+    # v193-smoke-reranks-on-chat-client.
+    corpus_dir = _write_synth_corpus(tmp_path)
+    documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
+    conn = _conn(tmp_path, name="rerank_llm.db")
+    embedder = FakeEmbedder(dim=DIM)
+    rag_eval.index_corpus(conn, embedder=embedder, documents_to_index=documents_to_index)
+    cfg = _cfg(tmp_path)
+
+    chat_llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks"))
+    rerank_llm = _DynamicRerankLLM()
+
+    ok, detail = rag_eval.conversation_smoke(
+        conn,
+        question="How many wombat specimens are in the colony?",
+        embedder=embedder,
+        llm=chat_llm,
+        rerank_llm=rerank_llm,
+        cfg=cfg,
+    )
+
+    assert ok is True
+    assert "wombat colony in weeks" in detail
+    # Both turns' Searchers must reach rerank_llm -- one call each -- so
+    # reverting either searcher1 or searcher2 alone still fails this.
+    assert rerank_llm._rerank_calls == 2, "not every turn's rerank call reached rerank_llm"
+    assert all(tool_definitions is not None for _messages, tool_definitions in chat_llm.calls), (
+        "the chat client received a rerank-shaped call (tool_definitions=None)"
+    )
+
+
 def test_t_v190_eval_03_freeze_reports_every_corpus_file_and_questions(tmp_path):
     corpus_dir = _write_synth_corpus(tmp_path)
     questions_path = _write_synth_questions(tmp_path)

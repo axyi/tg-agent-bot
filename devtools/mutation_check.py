@@ -1331,6 +1331,38 @@ MUTATIONS = [
         "own uncommitted edit) on a mutation path must block the run "
         "outright, never be silently mutated further on top of",
     },
+    # -- v1.9.3 T2 (docs/spec/task-briefs/v193-T2.md): conversation_smoke's
+    # first Searcher must rerank through `rerank_llm` (the routed reranker)
+    # when one is configured, never the chat/agent failover client -- this
+    # mutation reverts just that one Searcher back to the chat client,
+    # restoring the bug the gate's own smoke-turn timeouts traced to. ------
+    {
+        "id": "v193-smoke-reranks-on-chat-client",
+        "path": "devtools/rag_eval.py",
+        "find": (
+            "            llm=rerank_llm or llm,\n"
+            "            cfg=cfg,\n"
+            "            conv_id=conv_id,\n"
+            "            resolve_cost=resolve_cost,\n"
+            "        )\n"
+            "    )\n"
+            "    _turn(question, searcher1)\n"
+        ),
+        "replace": (
+            "            llm=llm,\n"
+            "            cfg=cfg,\n"
+            "            conv_id=conv_id,\n"
+            "            resolve_cost=resolve_cost,\n"
+            "        )\n"
+            "    )\n"
+            "    _turn(question, searcher1)\n"
+        ),
+        "why": "v1.9.3 T2: conversation_smoke's Searchers must rerank "
+        "through rerank_llm, the same llm=rerank_llm or llm routing "
+        "run()'s scored hybrid_rerank_searcher and bot.py's live searcher "
+        "already use -- reverting either Searcher back to the chat client "
+        "restores the LM Studio-routed rerank tail this task fixed",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

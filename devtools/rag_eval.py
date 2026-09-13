@@ -316,6 +316,7 @@ def conversation_smoke(
     cfg,
     resolve_cost=None,
     run_agent_outcome: Callable = agent.run_agent_outcome,
+    rerank_llm=None,
 ) -> tuple[bool, str]:
     """Two live turns: `question` (a real answerable item's text -- the
     caller's job, not a fact this module hardcodes, so the smoke test stays
@@ -323,7 +324,18 @@ def conversation_smoke(
     too), then the literal follow-up `«а в неделях?»`. `pass` when the
     second turn's recorded `search_documents` query shares a stemmed token
     with the first question's text -- evidence the follow-up was resolved
-    with the first turn's context in view, not asked in isolation."""
+    with the first turn's context in view, not asked in isolation.
+
+    v1.9.3 T2 (docs/spec/task-briefs/v193-T2.md): each turn's `Searcher`
+    reranks through `rerank_llm` when one is configured, `llm` (the chat/
+    agent completion client `_turn` also uses) otherwise -- the same
+    `llm=rerank_llm or llm` routing `run()`'s own scored
+    `hybrid_rerank_searcher` and `bot.py`'s live searcher already use.
+    Before this fix both Searchers here always reranked through the chat
+    client regardless -- the LM Studio-primary failover client, not the
+    routed rerank model -- which is exactly what put the smoke turn's own
+    rerank calls at LM Studio's much slower measured latency instead of
+    the fast reranker every other item in this gate uses."""
     conv_id = storage.get_or_create_active_conversation(conn, EVAL_USER_ID)
 
     def _turn(text: str, searcher) -> None:
@@ -345,7 +357,7 @@ def conversation_smoke(
             conn,
             user_id=EVAL_USER_ID,
             embedder=embedder,
-            llm=llm,
+            llm=rerank_llm or llm,
             cfg=cfg,
             conv_id=conv_id,
             resolve_cost=resolve_cost,
@@ -358,7 +370,7 @@ def conversation_smoke(
             conn,
             user_id=EVAL_USER_ID,
             embedder=embedder,
-            llm=llm,
+            llm=rerank_llm or llm,
             cfg=cfg,
             conv_id=conv_id,
             resolve_cost=resolve_cost,
@@ -536,6 +548,7 @@ def run(
             cfg=cfg,
             resolve_cost=resolve_cost,
             run_agent_outcome=run_agent_outcome,
+            rerank_llm=rerank_llm,
         )
         print_fn(f"  conversation-aware smoke: {'pass' if smoke_ok else 'fail'} -- {smoke_detail}")
     else:  # pragma: no cover -- questions.json always carries >= 1 answerable item
