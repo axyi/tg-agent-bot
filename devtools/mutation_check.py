@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -1281,6 +1282,23 @@ MUTATIONS = [
         "fallback, the exact flake gate 7 hit under T1's single-upstream "
         "model",
     },
+    # -- v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2.1): the
+    # ordered runner is a new way to silently lose a test file from the
+    # mutation gate (a future tests/sub/test_x.py, or a renamed pattern,
+    # could fall out of every tier while the gate still reports green over
+    # a smaller set) -- this mutation removes the once-per-invocation
+    # collect-count guard against exactly that. -------------------------
+    {
+        "id": "v192-mutation-order-shrink-unchecked",
+        "path": "devtools/mutation_check.py",
+        "find": "    if explicit_count != bare_count:\n",
+        "replace": "    if False:  # v192-mutation-order-shrink-unchecked\n",
+        "why": "v1.9.2 T2: the ordered runner's explicit test-file list "
+        "must collect the same node count as the bare `pytest --collect-"
+        "only -q` (testpaths) invocation -- without this check, a file "
+        "silently dropped from every ordering tier shrinks the gate's "
+        "coverage while it keeps reporting green",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -1316,8 +1334,120 @@ _SELF_CHECK_NODE_ID = (
 )
 
 
-def default_runner() -> int:
-    """Run the real suite once, `-x -q`, with a fresh bytecode cache.
+# --------------------------------------------------------------------------
+# v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2): default_runner
+# reorders the explicit test-file list it hands to pytest by relevance to
+# the mutation at hand, so a `-x` kill costs the time to the first relevant
+# failing test instead of pytest's default alphabetical-by-file order. This
+# is a pure performance property -- every ordering is a permutation of the
+# same complete file list, so the killed set is identical by construction.
+# --------------------------------------------------------------------------
+
+# cov-* mutations are killed by tests/test_v12_patch.py's own
+# `test_t_v12_cov_*` ids -- the only file naming `cov_0*` test ids (verified
+# by grep, brief v192-T2 section 2.1); no test file is named `test_cov_*`.
+_TIER1_PREFIX_OVERRIDE = {"cov": "test_v12_patch.py"}
+
+
+def _all_test_files(root: Path) -> list[Path]:
+    return sorted((root / "tests").rglob("test_*.py"))
+
+
+def _module_name(rel_path: str) -> str:
+    """`storage.py` -> `storage`; `llm/failover.py` -> `llm.failover`."""
+    return rel_path[:-3].replace("/", ".")
+
+
+def _imports(path: Path, module: str) -> bool:
+    pattern = rf"^(from|import)\s+{re.escape(module)}(\s|$|\.|,)"
+    return re.search(pattern, path.read_text(encoding="utf-8"), re.MULTILINE) is not None
+
+
+def _tier1_files(prefix: str, all_files: list[Path]) -> list[Path]:
+    override = _TIER1_PREFIX_OVERRIDE.get(prefix)
+    if override is not None:
+        return [p for p in all_files if p.name == override]
+    needle = f"test_{prefix}_"
+    return [p for p in all_files if p.name.startswith(needle)]
+
+
+def ordered_test_files(mutation: dict, root: Path = REPO_ROOT) -> list[Path]:
+    """The complete list of every test file, tiered by relevance to
+    `mutation`, first to last, stable within a tier -- never a subset:
+
+    1. test files whose name carries the entry's version prefix;
+    2. the test file named after the mutated module;
+    3. test files importing the mutated module directly;
+    4. test files importing a first-party module that imports it (one hop);
+    5. every remaining test file.
+    """
+    all_files = _all_test_files(root)
+    module = _module_name(mutation["path"])
+    prefix = mutation["id"].split("-", 1)[0]
+
+    ordered: list[Path] = []
+    seen: set[Path] = set()
+
+    def take(candidates: list[Path]) -> None:
+        for p in candidates:
+            if p not in seen:
+                seen.add(p)
+                ordered.append(p)
+
+    take(_tier1_files(prefix, all_files))
+
+    tier2_name = f"test_{Path(mutation['path']).stem}.py"
+    take([p for p in all_files if p.name == tier2_name])
+
+    take([p for p in all_files if _imports(p, module)])
+
+    first_party_importers = {
+        q.stem for q in root.glob("*.py") if q.name != "bot.py" and _imports(q, module)
+    }
+    take([p for p in all_files if any(_imports(p, m) for m in first_party_importers)])
+
+    take(all_files)
+
+    assert len(ordered) == len(all_files) and set(ordered) == set(all_files), (
+        "ordered_test_files must be a permutation of every test file, never a subset"
+    )
+    return ordered
+
+
+_COLLECT_COUNT_RE = re.compile(r": (\d+)\s*$")
+
+
+def _collect_count(root: Path, files: list[Path] | None = None) -> int:
+    """Sum of the per-file counts in `pytest --collect-only -q`'s own
+    output (`<path>: <n>` per file on this pytest version, no aggregate
+    total line) -- `files=None` collects via `testpaths` like the real
+    gate 3 invocation; an explicit list collects exactly those files (order
+    does not matter for a count)."""
+    argv = ["uv", "run", "--locked", "pytest", "--collect-only", "-q"]
+    if files is not None:
+        argv += [str(p.relative_to(root)) for p in files]
+    completed = subprocess.run(argv, cwd=root, capture_output=True, text=True)
+    return sum(
+        int(match.group(1))
+        for line in completed.stdout.splitlines()
+        if (match := _COLLECT_COUNT_RE.search(line))
+    )
+
+
+def _shrink_counts(root: Path = REPO_ROOT) -> tuple[int, int]:
+    """(explicit, bare) node counts -- equal iff the file-list mechanism
+    every ordering is built from still reaches every test file the bare,
+    no-args invocation collects via `testpaths` (REQ-V13-CO-06 /
+    REQ-V15-GATE-04's silent-shrink hole, checked once per invocation, not
+    per mutation)."""
+    all_files = _all_test_files(root)
+    return _collect_count(root, files=all_files), _collect_count(root, files=None)
+
+
+def default_runner(mutation: dict) -> int:
+    """Run the real suite once, `-x -q`, with a fresh bytecode cache, test
+    files explicitly ordered by relevance to `mutation` (see
+    `ordered_test_files`).
 
     Deselects the mutation table's own real-repo find-string check: that test
     asserts each `find` string is present in the untouched repo, so while a
@@ -1327,11 +1457,18 @@ def default_runner() -> int:
     """
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    completed = subprocess.run(
-        ["uv", "run", "--locked", "pytest", "-x", "-q", "--deselect", _SELF_CHECK_NODE_ID],
-        cwd=REPO_ROOT,
-        env=env,
-    )
+    files = ordered_test_files(mutation, REPO_ROOT)
+    argv = [
+        "uv",
+        "run",
+        "--locked",
+        "pytest",
+        "-x",
+        "-q",
+        "--deselect",
+        _SELF_CHECK_NODE_ID,
+    ] + [str(p.relative_to(REPO_ROOT)) for p in files]
+    completed = subprocess.run(argv, cwd=REPO_ROOT, env=env)
     return completed.returncode
 
 
@@ -1369,7 +1506,7 @@ def run_one(mutation: dict, *, runner, root: Path, restorer: _Restorer) -> tuple
     mutated = original.replace(mutation["find"], mutation["replace"], 1)
     try:
         path.write_text(mutated, encoding="utf-8")
-        code = runner()
+        code = runner(mutation)
     finally:
         restorer.restore_one(path)
 
@@ -1435,6 +1572,22 @@ def main(argv: list[str] | None = None) -> int:
         for mutation in MUTATIONS:
             print(f"{mutation['id']}\t{mutation['path']}\t{mutation['why']}")
         return 0
+
+    # v1.9.2 T2 silent-shrink guard, once per invocation (not per mutation):
+    # ordered_test_files reorders, never drops, a test file -- proven a
+    # permutation by construction there -- but the explicit-file-list
+    # mechanism itself is a new way to lose one silently (a future
+    # tests/sub/test_x.py, or a renamed pattern, could fall out of every
+    # tier while the gate still reports green over a smaller set). Compare
+    # node counts at the collection level instead of trusting the glob.
+    explicit_count, bare_count = _shrink_counts()
+    if explicit_count != bare_count:
+        print(
+            f"mutation runner file list shrink: explicit collection="
+            f"{explicit_count} bare collection={bare_count}",
+            file=sys.stderr,
+        )
+        return 1
 
     # REQ-V13-CO-06: a mistyped id used to select the empty set and report a
     # clean gate over zero mutations. Fail loudly instead.

@@ -24,11 +24,11 @@ def test_t_v12_mut_01_killed_and_survived_verdicts(tmp_path):
     killed = _mutation("m-killed", target, "original")
     survived = _mutation("m-survived", target, "original")
 
-    code = mc.run_all([killed], runner=lambda: 1, root=tmp_path)
+    code = mc.run_all([killed], runner=lambda _m: 1, root=tmp_path)
     assert code == 0
     assert target.read_text(encoding="utf-8") == "value = 'original'\n"
 
-    code = mc.run_all([survived], runner=lambda: 0, root=tmp_path)
+    code = mc.run_all([survived], runner=lambda _m: 0, root=tmp_path)
     assert code == 1
     assert target.read_text(encoding="utf-8") == "value = 'original'\n"
 
@@ -38,7 +38,7 @@ def test_t_v12_mut_01_errored_verdict_is_not_killed(tmp_path):
     mutation = _mutation("m-errored", target, "original")
 
     for code in (2, 3, 4, 5):
-        outcome = mc.run_all([mutation], runner=lambda code=code: code, root=tmp_path)
+        outcome = mc.run_all([mutation], runner=lambda _m, code=code: code, root=tmp_path)
         assert outcome == 1, f"exit code {code} must not be treated as a clean gate"
     assert target.read_text(encoding="utf-8") == "value = 'original'\n"
 
@@ -49,10 +49,10 @@ def test_t_v12_mut_02_drift_zero_or_two_occurrences_fails(tmp_path):
     zero = _mutation("m-drift-zero", target, "not present anywhere")
 
     before = target.read_text(encoding="utf-8")
-    assert mc.run_all([twice], runner=lambda: 1, root=tmp_path) == 1
+    assert mc.run_all([twice], runner=lambda _m: 1, root=tmp_path) == 1
     assert target.read_text(encoding="utf-8") == before
 
-    assert mc.run_all([zero], runner=lambda: 1, root=tmp_path) == 1
+    assert mc.run_all([zero], runner=lambda _m: 1, root=tmp_path) == 1
     assert target.read_text(encoding="utf-8") == before
 
 
@@ -61,7 +61,7 @@ def test_t_v12_mut_03_files_restored_after_a_normal_run(tmp_path):
     before = target.read_bytes()
     mutation = _mutation("m-normal", target, "original")
 
-    mc.run_all([mutation], runner=lambda: 1, root=tmp_path)
+    mc.run_all([mutation], runner=lambda _m: 1, root=tmp_path)
 
     assert target.read_bytes() == before
 
@@ -71,7 +71,7 @@ def test_t_v12_mut_03_files_restored_after_the_runner_raises(tmp_path):
     before = target.read_bytes()
     mutation = _mutation("m-raises", target, "original")
 
-    def exploding_runner():
+    def exploding_runner(_m):
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError):
@@ -85,7 +85,7 @@ def test_t_v12_mut_03_files_restored_after_a_killed_verdict(tmp_path):
     before = target.read_bytes()
     mutation = _mutation("m-killed-restore", target, "original")
 
-    mc.run_all([mutation], runner=lambda: 1, root=tmp_path)
+    mc.run_all([mutation], runner=lambda _m: 1, root=tmp_path)
 
     assert target.read_bytes() == before
 
@@ -112,7 +112,7 @@ def test_t_v12_mut_04_only_selects_a_single_entry(tmp_path):
     other = _write(tmp_path / "other.py", "value = 'other'\n")
     mutations.append(_mutation("second", other, "other", replace="second-mutated"))
 
-    def runner():
+    def runner(_m):
         seen.append(target.read_text(encoding="utf-8"))
         return 1
 
@@ -207,3 +207,68 @@ def test_t_v160_gate_02_mutation_v160_gate_mirrors_mutation_v15():
     assert isinstance(v160["timeout_seconds"], int) and v160["timeout_seconds"] > 0
 
     assert "mutation-v160" in config["profiles"]["pre-push"]
+
+
+# ---------------------------------------------------------------------------
+# v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2): the ordered runner.
+# ---------------------------------------------------------------------------
+
+
+def test_t_v192_ordered_test_files_is_a_permutation_for_every_mutation():
+    # Reordering is a pure performance property: every ordering must contain
+    # exactly the same files as the bare glob, for every real mutation entry
+    # -- never a subset (the silent-shrink hazard section 2.1 names).
+    all_files = mc._all_test_files(mc.REPO_ROOT)
+    for mutation in mc.MUTATIONS:
+        ordered = mc.ordered_test_files(mutation, mc.REPO_ROOT)
+        assert len(ordered) == len(all_files)
+        assert set(ordered) == set(all_files)
+
+
+def test_t_v192_ordered_test_files_tier1_is_the_version_prefixed_files_first():
+    mutation = next(m for m in mc.MUTATIONS if m["id"] == "v160-bind-address-widened")
+    ordered = mc.ordered_test_files(mutation, mc.REPO_ROOT)
+    v160_files = {p.name for p in ordered if p.name.startswith("test_v160_")}
+    assert v160_files == {
+        "test_v160_bench.py",
+        "test_v160_dashboard.py",
+        "test_v160_observability.py",
+    }
+    leading = {p.name for p in ordered[: len(v160_files)]}
+    assert leading == v160_files
+
+
+def test_t_v192_ordered_test_files_cov_prefix_maps_to_v12_patch():
+    mutation = next(m for m in mc.MUTATIONS if m["id"].startswith("cov-"))
+    ordered = mc.ordered_test_files(mutation, mc.REPO_ROOT)
+    assert ordered[0].name == "test_v12_patch.py"
+
+
+def test_t_v192_ordered_test_files_tier2_is_the_same_named_module_file():
+    # "sec-" has no tier1 test file (no test_sec_*.py), so tier 2 -- the
+    # file named after the mutated module -- leads.
+    mutation = next(m for m in mc.MUTATIONS if m["id"] == "sec-id-01-minted-id")
+    assert mutation["path"] == "agent.py"
+    ordered = mc.ordered_test_files(mutation, mc.REPO_ROOT)
+    assert ordered[0].name == "test_agent.py"
+
+
+def test_t_v192_mutation_order_shrink_check_blocks_before_running_anything(monkeypatch, capsys):
+    # A killer test for `v192-mutation-order-shrink-unchecked`: with the real
+    # (unmutated) check in place, a fabricated node-count mismatch must make
+    # main() fail loudly and never reach run_all. If the mutation neuters the
+    # check (turns it into `if False:`), main() falls through to the mocked
+    # run_all below instead -- a different, wrong return code and a spurious
+    # call -- which is exactly what "killed" means here. Never shells out to
+    # real pytest: `_shrink_counts` and `run_all` are both faked.
+    monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (100, 99))
+    calls = []
+    monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
+
+    code = mc.main(["--only", "v192-mutation-order-shrink-unchecked"])
+
+    assert code == 1
+    assert calls == []
+    err = capsys.readouterr().err
+    assert "100" in err
+    assert "99" in err

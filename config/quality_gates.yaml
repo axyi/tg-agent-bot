@@ -265,9 +265,14 @@ gates:
   # same rule whenever a gate's entry count or the suite's own size grows
   # materially; each gate below is measured and dated independently.
   #
-  # mutation-v15: measured 2026-09-04 (`time uv run --locked python
-  # devtools/mutation_check.py --select v15-`, this tree, 4/4 killed):
-  # real=1m39.497s (~100s) -> 2x ~200s, rounded up to 220s.
+  # mutation-v15: v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2)
+  # reordered default_runner's test-file list by relevance to the mutated
+  # module instead of pytest's default alphabetical order, so a `-x` kill
+  # costs the time to the first relevant failing test. Re-measured directly
+  # 2026-09-13 (`time uv run --locked python devtools/mutation_check.py
+  # --select v15-`, this tree, 4/4 killed): real=14.04s -> 2x ~28.08s,
+  # rounded up to 30s. Down from 220s (measured 2026-09-04 at 1m39.497s
+  # under the old alphabetical order, before this task's reordering).
   mutation-v15:
     kind: command
     result_mode: exit_status
@@ -276,7 +281,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 220
+    timeout_seconds: 30
 
   # spec-v1.6.0 T13/T14 (REQ-V160-GATE-02): the eleven v160-* entries of
   # section 15.4 (T13 landed ten; T14's review restored the spec's own
@@ -289,10 +294,17 @@ gates:
   # Orchestrator measured directly on 2026-09-05 (`time uv run --locked
   # python devtools/mutation_check.py --select v160-`, this tree, 11/11
   # killed): real=9m52.985s (592.985s) -> 2x ~1185.97s, rounded up to
-  # 1190s. (~54s/entry, consistent with T13's own rate -- every v160-*
-  # killer test lives in test_v160_*.py, which sorts last, so under
-  # `pytest -x` each kill runs nearly the whole suite before the first
-  # failure lands.)
+  # 1190s. (~54s/entry -- every v160-* killer test lived in
+  # test_v160_*.py, which sorted last under pytest's default alphabetical
+  # order, so each kill ran nearly the whole suite before the first
+  # failure landed.)
+  #
+  # v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2): default_runner
+  # now orders the explicit test-file list by relevance to the mutated
+  # module (test_v160_*.py leads for every v160-* entry via tier 1), so a
+  # kill costs the time to the first relevant failing test instead of the
+  # whole suite. Re-measured directly 2026-09-13, this tree, 11/11 killed:
+  # real=101.19s -> 2x ~202.38s, rounded up to 210s.
   mutation-v160:
     kind: command
     result_mode: exit_status
@@ -301,12 +313,18 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1190
+    timeout_seconds: 210
 
   # spec-v1.7.0 T9 (REQ-V170-GATE-02): the nine v170-* entries of section
   # 14.4. Measured directly 2026-09-07 (`time uv run --locked python
   # devtools/mutation_check.py --select v170-`, this tree, 9/9 killed):
   # real=8m53.680s (533.680s) -> 2x ~1067.36s, rounded up to 1070s.
+  #
+  # v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2): default_runner
+  # now orders the explicit test-file list by relevance to the mutated
+  # module instead of pytest's default alphabetical order. Re-measured
+  # directly 2026-09-13, this tree, 9/9 killed: real=25.46s -> 2x
+  # ~50.92s, rounded up to 60s.
   mutation-v170:
     kind: command
     result_mode: exit_status
@@ -315,7 +333,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1070
+    timeout_seconds: 60
 
   # spec-v1.8.0 T6 (REQ-V180-EC-10): the six v180-* entries of task-brief
   # v180-T6 (three chat-status/typing mechanisms already landed at T2/T3,
@@ -323,6 +341,14 @@ gates:
   # Measured directly 2026-09-09 (`time uv run --locked python
   # devtools/mutation_check.py --select v180-`, this tree, 6/6 killed):
   # real=6m42.000s (402s) -> 2x 804s, rounded up to 810s.
+  #
+  # v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2): default_runner
+  # now orders the explicit test-file list by relevance to the mutated
+  # module instead of pytest's default alphabetical order. Re-measured
+  # directly 2026-09-13, this tree, 6/6 killed: real=117.09s -> 2x
+  # ~234.18s, rounded up to 240s. (Less dramatic than the other four
+  # subsets: several v180-* entries' killer tests already sit in
+  # mid-alphabet files reached quickly even under the old order.)
   mutation-v180:
     kind: command
     result_mode: exit_status
@@ -331,7 +357,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 810
+    timeout_seconds: 240
 
   # spec-v1.9.0 T9 (REQ-V190-EC-10): the seven v190-* entries of task-brief
   # v190-T9 (RAG-over-documents isolation SEC-01..03, the delete path's
@@ -340,6 +366,11 @@ gates:
   # (`time uv run --locked python devtools/mutation_check.py --select
   # v190-`, this tree, 7/7 killed): real=8m29.464s (509.464s) -> 2x
   # ~1018.928s, rounded up to 1020s.
+  # v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 2): default_runner
+  # now orders the explicit test-file list by relevance to the mutated
+  # module instead of pytest's default alphabetical order. Re-measured
+  # directly 2026-09-13, this tree, 7/7 killed: real=23.41s -> 2x
+  # ~46.82s, rounded up to 50s.
   mutation-v190:
     kind: command
     result_mode: exit_status
@@ -348,7 +379,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1020
+    timeout_seconds: 50
 
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
