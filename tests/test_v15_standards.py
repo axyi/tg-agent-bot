@@ -1787,8 +1787,10 @@ _GATE_MATRIX_LABEL_TO_NAME = {
     "`mutation_check.py --select v170-`": "mutation-v170",
     "`mutation_check.py --select v180-`": "mutation-v180",
     "`mutation_check.py --select v190-`": "mutation-v190",
+    "`mutation_check.py --select v1100-`": "mutation-v1100",
     "`mutation_check.py` (all)": "mutation-all",
     "`rag_eval.py`": "rag-eval",
+    "`agent_eval.py`": "agent-eval",
     "`trivy fs`": "trivy",
     "`semgrep scan`": "semgrep",
     "`skylos`": "skylos",
@@ -1816,9 +1818,7 @@ def _parse_gate_matrix(spec_text: str) -> dict[str, dict[str, bool]]:
 
 
 def test_v15_gate_04_profile_matrix_agrees_with_the_spec_table():
-    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.9.0-delta-1.md").read_text(
-        encoding="utf-8"
-    )
+    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.10.0.md").read_text(encoding="utf-8")
     matrix = _parse_gate_matrix(spec_text)
     config = checks.load_gate_config()
 

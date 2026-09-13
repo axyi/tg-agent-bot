@@ -155,6 +155,7 @@ uv run --locked python bot.py --selftest
 uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
 uv run --locked python devtools/rag_eval.py
+uv run --locked python devtools/agent_eval.py
 ```
 
 Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1638
@@ -216,6 +217,9 @@ measured, non-thinking routed model via `LLM_RERANK_MODEL`) that made this
 gate structurally unable to finish under v1.9.0 — gate 7 is expected green
 at every commit from v1.9.1 on, the same standing requirement as every
 other gate, not a disclosed exception (see `docs/reports/report-v1.9.1.md`).
+Gate 8 is the agent evaluation gate (`devtools/agent_eval.py`) — red on a
+red-team category below its floor, the judge mean below 0.8, or an
+environment failure.
 
 Two environment variables (spec-v1.7.0): `LLM_REASONING_POLICY` (`model-default` | `off` | `by-purpose`, default `by-purpose`) and
 `LLM_REASONING_ON_PURPOSES` (comma-separated `tool-round`/`final`/`summary`,

@@ -532,6 +532,58 @@ what made the gate structurally unable to finish; see
 `docs/reports/report-v1.9.0.md`'s T8 section for that original diagnosis
 and `docs/reports/report-v1.9.1.md` for the measured before/after.
 
+## Agent evaluation (gate 8)
+
+`devtools/agent_eval.py` (spec-v1.10.0) is a three-level check of the bounded
+agent loop itself, not the RAG pipeline. Level 1 is a set of offline contract
+tests over inbound sanitisation, the outbound-text/redaction ordering and the
+tool-call wire contract — no live LLM call, run by `pytest` alongside every
+other module. Level 2 replays the twelve-case red-team dataset in
+`evals/agent/red_team.json` against the running bot — 5 prompt-injection
+cases, 4 hallucination cases and 3 memory-reset cases — and checks each reply
+with a deterministic, LLM-free checker; the blocking floors are per category
+and numeric: injection **5/5**, hallucination **≥ 3/4**, memory **3/3**.
+Level 3 sends the five general-knowledge questions of
+`evals/agent/judge_questions.json` through the bot and scores each reply on
+politeness, accuracy and conciseness with a second LLM acting as judge — the
+blocking floor is a **0.8** mean across all 15 scores — plus an advisory
+latency SLA (full-turn RTT against 4.0 s, first-token latency against 1.5 s
+where the route supports the probe) that is reported but never changes the
+exit code.
+
+The judge route is `LLM_JUDGE_MODEL` (default
+`openrouter:openai/gpt-4.1`, resolved the same way `LLM_RERANK_MODEL` and
+`LLM_EVAL_CHAT_MODEL` are — a `go`-request line overrides `.env`): always a
+separate, stronger model than the chat model under test, never the same one.
+The runner verifies only that the two are **different** — `judge.describe()
+!= <chat client>.describe()` — never that the judge is *stronger*; picking a
+model that actually outscores the one under test is an operator
+responsibility, not something this gate can check.
+
+Run it with:
+
+```bash
+uv run --locked python devtools/agent_eval.py
+```
+
+`--select <category|id-prefix>` narrows level 2 to one category
+(`injection`, `hallucination`, `memory`) or one dataset id prefix, for
+development against a single failing case without paying for a full run.
+
+Exit codes: **0** = every blocking metric passed; **1** = a blocking metric
+failed (a red-team category under its floor, or the judge mean under 0.8);
+**2** = an environment or infrastructure failure (an unreachable model or
+judge route, a missing `LLM_JUDGE_MODEL`, a dataset that fails validation, an
+`LLMError` on any live call, an unusable judge reply).
+
+| metric | result |
+|---|---|
+| injection | pending (T9) |
+| hallucination | pending (T9) |
+| memory | pending (T9) |
+| judge mean | pending (T9) |
+| latency (advisory) | pending (T9) |
+
 ## Add a skill
 
 Create `skills/<name>.md` with `---` frontmatter carrying `name` and
@@ -983,12 +1035,15 @@ uv run --locked python bot.py --selftest
 uv run --locked python bot.py --selftest-live
 uv run --locked python devtools/mutation_check.py
 uv run --locked python devtools/rag_eval.py
+uv run --locked python devtools/agent_eval.py
 ```
 
-Gates 1–4 and 6 are offline and unconditional; gates 5 and 7 need the live
+Gates 1–4 and 6 are offline and unconditional; gates 5, 7 and 8 need the live
 environment (gate 7 is spec-v1.9.0 T8's retrieval evaluation — it also
 spends real inference tokens on the reranker and an advisory three-turn
-conversation-aware smoke test; see `evals/rag/`). **Gate 7 passes as of
+conversation-aware smoke test; see `evals/rag/`; gate 8 is spec-v1.10.0's
+agent evaluation — see [Agent evaluation (gate 8)](#agent-evaluation-gate-8)).
+**Gate 7 passes as of
 v1.9.1** (`docs/reports/report-v1.9.1.md`): retrieval quality is solid
 (recall@5 = 1.000, page hit-rate = 1.000 on every mode — see
 [Documents (RAG)](#documents-rag)), and the rerank call now requests a

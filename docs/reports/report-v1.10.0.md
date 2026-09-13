@@ -227,7 +227,53 @@ existing `devtools/bench_scenarios.py` precedent exactly (a frozen
 byte-exact source slice that a lint/format autofix would otherwise
 corrupt) — reviewed and judged in-scope, not drift.
 
-## T6-T8 — not reached yet
+## T6 — gate 8 registration and documentation
+
+Contract: `docs/spec/task-briefs/v1100-T6.md`, prompt 198. Executor
+`claude-sonnet-5`, this commit.
+
+Registered `agent-eval` (gate 8) in `config/quality_gates.yaml` immediately
+after `rag-eval`, with T0's measured `timeout_seconds: 8200` (see T0's
+EVAL-01 computation above) and membership in the `full` profile only.
+Repointed `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
+(`tests/test_v15_standards.py`) at `docs/spec/spec-v1.10.0.md`'s own gate
+matrix (§13) and added the `agent_eval.py`/`mutation_check.py --select
+v1100-` labels. Repointed `lint-docs`'s `report_path` to this file and
+renamed/repointed `tests/test_v170_bench.py`'s
+`test_t_v1100_rpt_01_lint_docs_repointed_to_this_release` accordingly;
+added a structurally valid, all-`TBD` ledger row below (the same precedent
+as v1.8.0 T0's disclosed erratum 3 and v1.9.0 T10) so `lint-docs` stays
+green against this in-progress report from this commit on. Landed the
+eight-gate command block in `AGENTS.md` and README's `## Tests`, and wrote
+README's new `## Agent evaluation (gate 8)` section (RPT-04) with a
+placeholder numbers table (T10 fills it from T9's run). New
+`tests/test_v1100_gates.py`, 14 tests (`T-V1100-EVAL-01..03`). Gates 1–4,
+`checks.py doctor` and `checks.py lint-docs` all green.
+
+**Brief-vs-spec conflict found and resolved, disclosed here:** the task
+brief's step 1 instructed adding `mutation-v1100` to the `mutation-subsets`
+profile in this task, before T7 defines the `mutation-v1100` gate entry.
+Doing so breaks `_validate_profiles` (`devtools/checks.py:541-554`, an
+"unknown gate" error) the moment any test calls `load_gate_config()` —
+which most of `tests/test_v15_standards.py`, `tests/test_v1100_gates.py`
+and others do directly, not merely at collection time, contradicting the
+brief's own stated assumption. Spec §13 (REQ-V1100-GATE-02) states the gate
+entry and its `mutation-subsets` membership are **one requirement, both at
+T7** — "its name is added to the `mutation-subsets` profile … so
+`_validate_profiles` … stays green" only holds when both land together.
+Resolution: did **not** add `mutation-v1100` to `mutation-subsets` in this
+commit (left for T7); added
+`test_mutation_v1100_membership_is_t7s_job_not_yet_landed` to
+`tests/test_v1100_gates.py` pinning its current absence. Also found and
+fixed one collateral break outside the brief's touch list:
+`tests/test_v190_agents.py`'s
+`test_t_v195_ec_01_quality_gates_yaml_repoints_report_path` pinned the old
+`report-v1.9.5.md` string (the same per-release repoint-tracking pattern as
+the `test_v170_bench.py` test the brief did name) — renamed to
+`test_t_v1100_ec_01_...` and repointed at `report-v1.10.0.md`, disclosed
+here rather than silently expanded in scope.
+
+## T7-T8 — not reached yet
 
 ## T9 — not reached yet
 
@@ -237,4 +283,10 @@ corrupt) — reviewed and judged in-scope, not drift.
 
 ## Ledger row (paste into `economics.md`)
 
-*(filled at T10/T11 — provisional at T10, final SHA at T11)*
+Provisional — a structurally valid, all-`TBD` row (same precedent as
+v1.8.0 T0's disclosed erratum 3 and v1.9.0 T10), replaced with the real,
+complete row at T10 and de-provisionalised at T11:
+
+```
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+```

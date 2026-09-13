@@ -275,15 +275,15 @@ def test_t_v190_ec_01_readme_ec_13_partial_lift_sentence():
     assert "ng-05" in normalized or "non-goal" in normalized
 
 
-def test_t_v195_ec_01_quality_gates_yaml_repoints_report_path():
-    # REQ-V190-RPT-01: lint-docs' report_path tracks the current release and
-    # is repointed again at each one (T10 did 1.8.0 -> 1.9.0; v1.9.1 T2 did
-    # 1.9.0 -> 1.9.1; v1.9.2 T3 did 1.9.1 -> 1.9.2; v1.9.3 T4 did 1.9.2 ->
-    # 1.9.3; v1.9.4 T5 did 1.9.3 -> 1.9.4; this task, v1.9.5 T2, does
-    # 1.9.4 -> 1.9.5).
+def test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path():
+    # REQ-V190-RPT-01 / REQ-V1100-RPT-01: lint-docs' report_path tracks the
+    # current release and is repointed again at each one (T10 did 1.8.0 ->
+    # 1.9.0; v1.9.1 T2 did 1.9.0 -> 1.9.1; v1.9.2 T3 did 1.9.1 -> 1.9.2;
+    # v1.9.3 T4 did 1.9.2 -> 1.9.3; v1.9.4 T5 did 1.9.3 -> 1.9.4; v1.9.5 T2
+    # did 1.9.4 -> 1.9.5; this task, v1.10.0 T6, does 1.9.5 -> 1.10.0).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.9.5.md" in text
-    assert "report_path: docs/reports/report-v1.9.4.md" not in text
+    assert "report_path: docs/reports/report-v1.10.0.md" in text
+    assert "report_path: docs/reports/report-v1.9.5.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:
