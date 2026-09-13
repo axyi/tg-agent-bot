@@ -7,21 +7,25 @@ the run happens in a different session (`standards/workflow.md` §14).
 
 ```text
 go docs/spec/spec-v1.10.0.md
-Operator inputs: LLM_JUDGE_MODEL=openrouter:<model id>
 ```
 
-Exactly one operator input travels **as text in the request**
-(REQ-V1100-EC-05): the judge route in the project's routed-model syntax
-(`openrouter:<model id as OpenRouter lists it>`). It is never defaulted in
-code; a `go` request without it is a Stage 0 blocker. The judge must be a
-**different and stronger** model than the chat model on the box (lecture 10:
-judge ≠ model under test); the runner can only verify "different"
-(`describe()` inequality) — "stronger" is the operator's choice. Two
-**preconditions**, not inputs: `.env`'s `LMSTUDIO_BASE_URL` points at the
-box's **current** address (probe the three known addresses first, memory
-`reference-lmstudio-endpoints`), and the chat model named by
-`LMSTUDIO_MODEL` is loaded. `OPENROUTER_API_KEY` must be set for the judge
-route.
+No operator input is required (REQ-V1100-EC-05 after lab amendment A1):
+the judge route resolves from a `LLM_JUDGE_MODEL=…` line in the request
+text if one is given, otherwise from `.env`. **The defaults were chosen and
+written by the lab on 2026-09-13:**
+
+| Role | Value | Where it lives | Why |
+|---|---|---|---|
+| Model under test | `lmstudio` / `qwen/qwen3.8-27b` (the production chat route) | `.env` `LLM_PROVIDER`, `LMSTUDIO_MODEL`, `LMSTUDIO_BASE_URL=http://192.168.0.145:1234/v1` (live and loaded on 2026-09-13) | the spec tests the deployed route, not a fixed model; the report records the actual `describe()` pair |
+| Judge | `openrouter:openai/gpt-4.1` | `.env` `LLM_JUDGE_MODEL` (written), `.env.example` default line (T3 writes it), README/AGENTS env lines | GA, no reasoning mode (the protocol sends `reasoning=off`), structured outputs supported on OpenRouter, stronger than a 27B, $2/$8 per Mtok — five judge calls cost under a cent |
+| Judge fallback | `openrouter:openai/gpt-5.6-sol` | Stage 0 rule 5 of amendment A1 | only on a `response_format`/schema rejection at Stage 0 check 4; recorded in `## Operator inputs` |
+
+The judge must be **different** from the chat model — the runner refuses
+equality (`describe()` inequality); "stronger" is the lab's choice above.
+Preconditions: `.env`'s `LMSTUDIO_BASE_URL` points at the box's **current**
+address (probe the three known addresses first, memory
+`reference-lmstudio-endpoints`), the chat model named by `LMSTUDIO_MODEL`
+is loaded, and `OPENROUTER_API_KEY` is set for the judge route.
 
 Live work this release needs (everything else is offline against fakes):
 gate 5 (`--selftest-live`), gate 7 (`rag-eval`), T0's five preflight checks
@@ -182,6 +186,14 @@ log and every rationale.
 Two operator-visible consequences worth knowing before `go`: gate 8 costs
 one to two hours of box inference and runs once at T9 (a second time only
 if T11's dependency diff is not version-only); and the judge mean ≥ 0.8 is
-a **blocking** metric on a model the operator picks — a weak judge or a
-verbose chat model turns the release red through the stop route, by
-design.
+a **blocking** metric — a verbose chat model turns the release red through
+the stop route, by design.
+
+## Lab amendment A1 (2026-09-13, after the rounds closed)
+
+The operator asked the lab to choose the models and write the defaults.
+Judge `openrouter:openai/gpt-4.1` (fallback `openrouter:openai/gpt-5.6-sol`
+on a schema rejection at Stage 0), model under test = the production route
+`qwen/qwen3.8-27b`; `.env` carries the judge line; the `go` request needs
+no input; Stage 0 check 1 verifies the resolved route and its inequality
+with the chat model. Recorded in the spec's Appendix C as amendment A1.
