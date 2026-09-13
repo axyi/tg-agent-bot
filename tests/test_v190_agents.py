@@ -123,26 +123,25 @@ def test_t_v190_ec_01_agents_md_layout_bullets_present():
         assert entry in text, f"missing layout bullet: {entry!r}"
 
 
-def test_t_v194_rpt_05_agents_md_count_lines_landed_at_t5():
+def test_t_v195_rpt_05_agents_md_count_lines_landed_at_t2():
     # RPT-05: AGENTS.md's gate-3 test count and gate-6 mutation count lines
     # were written for v1.9.0 at T12 (1560 tests, 105 entries), then for
     # v1.9.1 at T2 (1593 tests, 108 entries), then for v1.9.2 at T3 (1601
-    # tests, 110 entries), then for v1.9.3 at T4 (1610 tests, 114 entries) --
-    # this test's own v1.9.3-era predecessor pinned those figures and named
-    # T4 as their landing point. v1.9.4 T1 (logging-layer redaction, two new
-    # `v194-*` mutation entries), T2 (gate-7 smoke's context-proof third
-    # turn, one new `v194-*` mutation entry), T3 (per-mutation hang timeout,
-    # two new `v194-*` mutation entries, five total) and T4 (PTH/RUF043 ruff
-    # adoption, zero new mutation entries -- two drifted entries re-derived,
-    # not added) added tests and mutation entries without updating either
-    # line (each task's own scope was its own fix, not the paperwork); T5
-    # (this task) lands the real, final post-run figures: 1634 tests
-    # (measured via `pytest --collect-only -q` on the tree after every other
-    # T5 edit, including this task's own new tests/test_v194_version.py) and
-    # 119 mutation entries.
+    # tests, 110 entries), then for v1.9.3 at T4 (1610 tests, 114 entries),
+    # then for v1.9.4 at T5 (1634 tests, 119 entries) -- this test's own
+    # v1.9.4-era predecessor pinned those figures and named T5 as their
+    # landing point. v1.9.5 T1 (bind the embedding pair at every
+    # init_schema call site, one new `v195-*` mutation entry, two new
+    # tests) and its review closure (exc_info assertion fix, one more new
+    # test, no new mutation entry) added tests and one mutation entry
+    # without updating either line (T1's own scope was the fix, not the
+    # paperwork); T2 (this task) lands the real, final post-run figures:
+    # 1638 tests (measured via `pytest` on the tree after every other T2
+    # edit, including this task's own new tests/test_v195_version.py) and
+    # 120 mutation entries.
     text = _read_agents_md()
-    assert "1634" in text
-    assert "119 entries" in text
+    assert "1638" in text
+    assert "120 entries" in text
 
 
 def test_t_v190_ec_01_readme_documents_rag_heading_present():
@@ -276,14 +275,15 @@ def test_t_v190_ec_01_readme_ec_13_partial_lift_sentence():
     assert "ng-05" in normalized or "non-goal" in normalized
 
 
-def test_t_v194_ec_01_quality_gates_yaml_repoints_report_path():
+def test_t_v195_ec_01_quality_gates_yaml_repoints_report_path():
     # REQ-V190-RPT-01: lint-docs' report_path tracks the current release and
     # is repointed again at each one (T10 did 1.8.0 -> 1.9.0; v1.9.1 T2 did
     # 1.9.0 -> 1.9.1; v1.9.2 T3 did 1.9.1 -> 1.9.2; v1.9.3 T4 did 1.9.2 ->
-    # 1.9.3; this task, v1.9.4 T5, does 1.9.3 -> 1.9.4).
+    # 1.9.3; v1.9.4 T5 did 1.9.3 -> 1.9.4; this task, v1.9.5 T2, does
+    # 1.9.4 -> 1.9.5).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.9.4.md" in text
-    assert "report_path: docs/reports/report-v1.9.3.md" not in text
+    assert "report_path: docs/reports/report-v1.9.5.md" in text
+    assert "report_path: docs/reports/report-v1.9.4.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:
