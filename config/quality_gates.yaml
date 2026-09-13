@@ -471,11 +471,18 @@ gates:
   # exists to absorb exactly this run-to-run spread).
   #
   # v1.9.2 T2 review (docs/spec/task-briefs/v192-T2-review.md finding 2):
-  # not re-measured in T2 -- this number still reflects the D2-only rule
+  # not re-measured in T2 -- that number still reflected the D2-only rule
   # (2x a measured direct run), predating both T2's reordering and the
-  # corrected survivor-safe rule above. T3 measures this gate under that
-  # corrected rule (2x measured killed-path wall + one full single-process
-  # suite run, rounded up to 10s), same as the five subsets above.
+  # corrected survivor-safe rule above.
+  #
+  # v1.9.2 T3 (gate 6, the authoritative all-110 run under the reordered
+  # runner): measured directly 2026-09-13 (`time uv run --locked python
+  # devtools/mutation_check.py`, no --select, this tree, 110/110 killed, 0
+  # survived, 0 errored, 0 drifted): real=11m20.49s (680.49s) -> 2x
+  # ~1360.98s + 70s (corrected survivor-safe rule above) = ~1430.98s,
+  # rounded up to 1440s. Down from 7910s (105 entries, pre-reorder,
+  # D2-only rule) -- consistent with T2's own ~7.9x per-subset speedup
+  # from relevance-ordered test files.
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -484,7 +491,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 7910
+    timeout_seconds: 1440
 
   hooks-installed:
     kind: command
@@ -529,7 +536,7 @@ gates:
                    38-v14-t8-default-selection.md, 39-v14-t9-mutations.md,
                    40-v14-t9-review.md, 41-v14-t10-report.md,
                    42-v14-t10-advisor-followup.md, 43-v14-verify-run-fixes.md]
-    report_path: docs/reports/report-v1.9.1.md
+    report_path: docs/reports/report-v1.9.2.md
     ledger_header: "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |"
     blocking: true
     diff_scoped: false

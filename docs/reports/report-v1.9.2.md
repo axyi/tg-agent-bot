@@ -700,3 +700,203 @@ suite's time is in section 1's ten tests, not in duplicates.
   (prompt 170)" under "T2 -- gate 6", one 🟡 under "T2 -- gate 3", the
   remaining 🟡s under "T2 -- gate 6" and the Constraints-verified /
   duplicates sections above).
+
+## T3 -- version bump, paperwork, authoritative gates, tag
+
+Contract: `docs/spec/task-briefs/v192-T3.md` (prompt 171). No logic
+changes: version literal, count-bearing documentation, and release
+paperwork only, on top of `b9e5174` (T1 + T2 + T2 review, seven commits
+ahead of `origin/main`).
+
+### Version
+
+`pyproject.toml`'s `project.version` 1.9.1 -> 1.9.2, `uv.lock` regenerated
+(`uv lock`, 25 packages resolved). `tests/test_v192_version.py`
+(`T-V192-VER-01`) proves it: run against the pre-bump tree, red --
+`AssertionError: assert '1.9.1' == '1.9.2'`; run again after the bump,
+green. `tests/test_v191_version.py` repointed to the frozen `v1.9.1`
+git-tag blob (`git show v1.9.1:pyproject.toml`, `subprocess.run` +
+`tomllib.loads`), the identical convention `tests/test_v180_version.py`
+and `tests/test_v190_version.py` already carry -- never deleted, per
+REQ-V190-EC-03. All four version tests (`v180`, `v190`, `v191`, `v192`)
+green together after the repoint.
+
+### Count-bearing lines (measured after every other T3 edit)
+
+- `pytest --collect-only -q`, final tree: **1601** tests (1600 in v1.9.2
+  T2's own close + this task's own new `tests/test_v192_version.py`).
+  `AGENTS.md`'s gate-3 line moved 1593 -> 1601, named as of "spec-v1.9.2
+  T3" instead of "spec-v1.9.1 T2".
+- Mutation entries: **110** (unchanged since v1.9.2 T2's review-findings
+  commit `b9e5174` -- T3 added no mutation entries). `AGENTS.md`'s gate-6
+  paragraph moved 108 -> 110, its narrative extended to name v1.9.2 T2's
+  two new entries (`v192-mutation-order-shrink-unchecked`,
+  `v192-mutation-order-shrink-zero-accepted`) alongside the reorder,
+  and to cite this report file.
+- `tests/test_v190_agents.py`'s own count-bearing test renamed
+  `test_t_v191_rpt_05_agents_md_count_lines_landed_at_t2` ->
+  `test_t_v192_rpt_05_agents_md_count_lines_landed_at_t3`, asserting
+  `"1601"` / `"110 entries"` (T2 review's own finding 3 deferred exactly
+  this repoint to T3, rather than naming it in the T3 brief).
+- README's release-history table: added a `v1.9.2` row (skylos 27 -> 0,
+  75 files reformatted; mutation runner reorder + `pytest-xdist`); the
+  `v1.9.1` row's own "; this release" clause removed, since v1.9.2 is now
+  the current release.
+- `config/quality_gates.yaml`'s `lint-docs.report_path` repointed
+  `report-v1.9.1.md` -> `report-v1.9.2.md` (REQ-V190-RPT-01, repointed
+  every release since T10); its two pinning tests
+  (`tests/test_v190_agents.py::test_t_v192_ec_01_quality_gates_yaml_repoints_report_path`,
+  `tests/test_v170_bench.py::test_t_v192_rpt_01_lint_docs_repointed_to_this_release`)
+  renamed and repointed the same way, following the `test_t_v192_*`
+  convention this task applies everywhere else. Found via the same
+  pre-flight-grep discipline v1.9.1 T2 and T2's own review used (`grep
+  -rn 'report-v1\.9\.1' tests/ config/`), not named in the T3 brief's own
+  "What to do" list.
+
+### Seven-gate table (this run, final tree, in order; nothing else on the
+box during gate 6; gate 6 and gate 7 run sequentially, never concurrent)
+
+| # | gate | command | exit | wall |
+|---|---|---|---|---|
+| 1 | uv sync | `uv sync --locked` | 0 | 0.021s |
+| 2 | ruff check | `uv run --locked ruff check .` | 0 | 0.035s |
+| 3 | pytest | `uv run --locked pytest` | 0 | 22.912s (1600 passed, 1 skipped -- 1601 collected) |
+| 4 | selftest | `uv run --locked python bot.py --selftest` | 0 | 0.542s |
+| 5 | selftest-live | `uv run --locked python bot.py --selftest-live` | 0 | 1.732s (config/db/docker(29.8.0)/telegram/lmstudio/embeddings/openrouter all OK) |
+| 6 | mutation (all) | `uv run --locked python devtools/mutation_check.py` | 0 | **680.49s (11m20.49s)** -- 110 mutations, 110 killed, 0 survived, 0 errored, 0 drifted |
+| 7 | rag-eval | `uv run --locked python devtools/rag_eval.py` | 0 | 186.998s (3m6.998s) -- hybrid recall@5=1.000, hybrid+rerank recall@5=1.000, both `hit@<=5` on every answerable item; PASS |
+
+**Gate-6 before/after:** v1.9.1's own authoritative gate-6 run (pre-T2,
+`docs/spec/task-briefs/v192-handoff.md:13`) was **61m39s (3699s) at 108
+entries**. This run: **680.49s (11m20.49s) at 110 entries** -- **~5.44x**
+faster, on the tree T2's reordering (and the two new entries) already
+landed on. This full-run ratio is lower than T2's own ~7.9x sampled ratio
+(five `--select` subsets, 37/108 entries, `docs/reports/report-v1.9.2.md`
+§"T2 -- gate 6") because the full run also carries every `v13-`/`v11-`/etc.
+entry the sample never re-measured directly -- see disclosure (c) below.
+
+### The two clean-context reviews (summarised; full detail already lives
+in the T1/T2 sections above -- cross-referenced here, not duplicated)
+
+- **T1 review** (`c21ffb3`, contract `v192-T1-review.md`, prompt 166):
+  🔴 a stale ledger row / commit body predating an amend; 🟠 x4 --
+  the same erratum's REQ-V170-NG-14 citation, `spec-v1.9.0-delta-1.md`
+  line-ref drift, and the `ruff-format-all` pre-commit gap; plus smaller
+  🟡 findings (full breakdown: "### Erratum on row 8" and the
+  "### Delegation record" under "## T1 -- whole-tree static analysis and
+  fixes" above). All closed in one commit, neither reviewed commit
+  rewritten.
+- **T2 review** (`b9e5174`, contract `v192-T2-review.md`, prompt 170):
+  🟠 the shrink guard failing open on a zero/error count; 🟠 three
+  mutation-gate timeouts unable to report a survivor before SIGKILL; plus
+  smaller 🟡 findings (full breakdown: "### Review findings closed
+  (prompt 170)" under "## T2 -- gate 6" above). All closed in one commit,
+  none of the three reviewed commits rewritten.
+
+### Disclosures
+
+- **(a) Commit-trailer model.** Every sonnet commit this release
+  (`6c9a904`, `d25d664`, `92b667c`, `c3a38ea`, `260c7e1`, and this task's
+  own commit) carries `Co-Authored-By: Claude Sonnet 5` -- accurate to
+  the actual executor model, non-conforming to whatever model string a
+  given task brief's own text named (T1's brief named none explicitly;
+  T2's brief section 6 named `Claude Opus 5`, recorded as a deviation in
+  its own report section). Both review commits (`c21ffb3`, `b9e5174`)
+  carry the same trailer, also accurate -- the reviewer model is
+  `claude-opus-5`, but the commit's own author/executor closing the
+  findings was `claude-sonnet-5` in both cases.
+- **(b) Gate-6 SIGKILL hazard on timeout.** Pre-existing:
+  `devtools/mutation_check.py` traps only `SIGINT`/`SIGTERM`, not
+  `SIGKILL` -- a gate-6 timeout leaves the mutated file on disk with no
+  survivor id ever printed (first disclosed in T2's own review, finding
+  2). Not fixed this task (no logic changes permitted in a version-bump
+  commit) -- listed as a **v1.10.0 item**.
+- **(c) Tightest mutation-\* timeouts, confirmed against the total.**
+  This run's gate 6 is the unselected `mutation-all` invocation, which
+  prints no per-subset wall (only a final per-mutation `id / outcome /
+  exit` table and the 110/110/0/0/0 summary line) -- there is no
+  per-subset wall from *this* run to re-check T2's review-time claim
+  against, so confirming against the total instead: 110 killed in
+  680.49s, **6.19s/entry average**, 0 survived/errored/drifted. That
+  average is consistent with T2 review's own individually re-measured
+  `--select` walls for the two named subsets (`mutation-v170` 25.46s/9
+  entries, `mutation-v190` 23.41s/7 entries) that back their corrected
+  timeouts (130s, 120s respectively, per the survivor-safe rule) --
+  neither timeout was exercised by this run (the full run uses
+  `mutation-all`'s own single timeout, not the five subset timeouts,
+  which only apply under the `pre-push` profile). `mutation-v15`'s own
+  corrected timeout (100s) sits at an even smaller margin above the 70s
+  survivor floor (30s) than either named subset (60s/50s) by this same
+  arithmetic; not re-litigated here since v1.9.2 T2's review already
+  closed that finding and T3 changes no per-subset timeout.
+- **(d) Pre-push profile: five subsets vs. `mutation-all`.** The
+  `pre-push` profile still runs only the five named `mutation-v*`
+  subsets (`mutation-v15`, `-v160`, `-v170`, `-v180`, `-v190` -- 37 of
+  110 entries; every `v11-`/`v12-`/`v13-`/`v170-other`/`v191-`/`v192-`
+  entry outside those five prefixes is *not* covered at push time, only
+  under `full`/`mutation-all`). This run's own `mutation-all` wall:
+  **680.49s** for all 110 entries. The five subsets' own summed wall
+  (T2's measurement, `docs/reports/report-v1.9.2.md` §"T2 -- gate 6"):
+  **281.19s** for 37 entries. The operator's two options, numbers written,
+  decision left to them: (1) keep `pre-push` as five partial subsets
+  (~281s, 34% entry coverage, fastest); (2) switch `pre-push` to
+  `mutation-all` itself (680.49s, 100% entry coverage, ~2.4x slower than
+  option 1 but still ~5.4x faster than v1.9.1's own 3699s baseline).
+
+### Open tail carried from v1.9.1
+
+v1.9.1's report disclosed one rerank call succeeding only on attempt 3.
+This run's gate-7 log shows the same thing again: `rerank attempt 1
+failed, retrying: llm request timed out` / `rerank attempt 2 failed,
+retrying: llm request timed out` / `provider lmstudio failed 3 times
+(LLMError); serving from openrouter` / `rerank succeeded on attempt 3
+after 15.72s`. The retry loop (v1.9.1 T3) did exactly what it was built
+for -- gate 7 still exits 0 -- but the underlying LM Studio-then-fallback
+latency pattern recurs run to run; not a regression, still an open tail,
+carried forward rather than investigated further (out of scope for a
+version-bump task). The advisory conversation-aware smoke, which failed
+in v1.9.1 T2's own run, **passed** in this run ("turn 2 query
+'количество недель отпуска в год' shares a token with turn 1's
+question") -- consistent with it being the main chat model's
+non-deterministic tool-call choice, not a regression either way.
+
+### Delegation record
+
+- T3 -- delegated, brief `docs/spec/task-briefs/v192-T3.md`, prompt 171,
+  this commit.
+- T1 -- delegated, brief `docs/spec/task-briefs/v192-T1.md`; T1 review --
+  clean-context review, delegated by brief `v192-T1-review.md`.
+- T2 -- delegated, brief `docs/spec/task-briefs/v192-T2.md`; T2 review --
+  clean-context review, delegated by brief `v192-T2-review.md`.
+- Every executor model named: T1/T2 implementer `claude-sonnet-5`; both
+  reviewers `claude-opus-5`; T3 (this task) implementer `claude-sonnet-5`.
+
+### Constraints verified
+
+- `.env` never read, printed or committed (`.env` grepped only for a
+  precondition line count, never opened); `data/`, `evals/rag/corpus`
+  never opened.
+- No `--no-verify`; not pushed (operator pushes).
+- Nothing else ran on the box during gate 6; gate 6 and gate 7 ran
+  sequentially, never concurrently.
+
+## Ledger row (paste into `economics.md`)
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.2 | 2026-09-13 | — (patch, no new spec; task briefs `docs/spec/task-briefs/v192-handoff.md`, `-T1.md`, `-T1-review.md`, `-T2.md`, `-T2-review.md`, `-T3.md`) | 8 (164–171) | yes — all seven gates green on the first authoritative run of the final tree | T1 1 🔴 / 4 🟠 / 5 🟡, T2 0 🔴 / 3 🟠 / 6 🟡 — all fixed | unknown (harness does not expose per-request usage) | $0 marginal (Claude Code subscription-metered session; live inference only on gates 5/7, at reference prices, no real spend tracked) | claude-sonnet-5 (both reviews: claude-opus-5) | Claude Code |
+```
+
+## Verdict
+
+**All seven gates green on the final tree; annotated tag `v1.9.2`
+created.** T1 closed 27 skylos findings and reformatted 75 files
+whole-tree (REQ-V15-NG-04); T2 cut gate 6's wall ~5.4x (61m39s -> 680.49s
+at 108->110 entries) and gate 3's wall ~3x (70s -> ~23-25s) via a
+relevance-ordered mutation runner and `pytest-xdist`; both phases'
+clean-context reviews closed everything they found, neither reviewed
+commit rewritten. T3 (this task) closed the patch: version 1.9.1 ->
+1.9.2, all count-bearing lines moved to the tree's real final numbers,
+and this report's own paperwork. The rerank retry tail from v1.9.1
+recurs (gate 7 still green); the gate-6 SIGKILL-on-timeout hazard and the
+pre-push five-subsets-vs-`mutation-all` tradeoff are both left as
+disclosed, undecided items for the operator.

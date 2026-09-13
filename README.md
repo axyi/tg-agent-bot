@@ -835,7 +835,8 @@ exactly as they are:
 | v1.5.1 | 1.5.1 | |
 | v1.6.0 | 1.6.0 | |
 | v1.9.0 | 1.9.0 | RAG over user documents |
-| v1.9.1 | 1.9.1 | rerank contract fix (`response_format` JSON schema, `LLM_RERANK_MODEL`) making gate 7 enforceable; this release |
+| v1.9.1 | 1.9.1 | rerank contract fix (`response_format` JSON schema, `LLM_RERANK_MODEL`) making gate 7 enforceable |
+| v1.9.2 | 1.9.2 | whole-tree static analysis (skylos 27 → 0, 75 files reformatted); mutation runner orders test files by relevance and `pytest-xdist` under gate 3, cutting gate-6/gate-3 walls; this release |
 
 ## Token economy
 
