@@ -5,6 +5,7 @@ can share configuration and redaction without an import cycle.
 """
 
 import ipaddress
+import logging
 import math
 import os
 import re
@@ -199,6 +200,39 @@ def redact(text: str) -> str:
     for secret in sorted(_secrets, key=len, reverse=True):
         result = result.replace(secret, REDACTION)
     return result
+
+
+class RedactingFormatter(logging.Formatter):
+    """A `Formatter` whose rendered line always passes through `redact()`.
+
+    v1.9.4 T1 (task-brief `v194-T1.md`): the ~105 hand-placed `redact()` call
+    sites never covered a `log.exception(...)` traceback -- `record.exc_info`
+    (and any chained `__cause__`/`__context__`) is rendered by the base
+    `Formatter` from a string it never sees. `Formatter.format` renders the
+    message, its args, `exc_info` and `stack_info` into one string before
+    this returns, so redacting that one rendered string covers all of them at
+    once. Deliberately not a `logging.Filter`: a filter runs before the
+    traceback is rendered and would miss exactly the text this exists for.
+    `redact` reads the live `_secrets` registry at format time, not a
+    snapshot taken at construction, so a secret registered after this
+    formatter is installed is still masked.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
+
+
+def install_redacting_logging(
+    handler: logging.Handler, fmt: str, datefmt: str | None = None
+) -> RedactingFormatter:
+    """Attach a `RedactingFormatter` built from `fmt`/`datefmt` to `handler`.
+
+    The one call every logging entry point makes (v1.9.4 T1) instead of
+    handing a plain `logging.Formatter` to `basicConfig`/a handler directly.
+    """
+    formatter = RedactingFormatter(fmt, datefmt=datefmt)
+    handler.setFormatter(formatter)
+    return formatter
 
 
 def max_secret_length() -> int:

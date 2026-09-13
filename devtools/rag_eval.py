@@ -19,6 +19,7 @@ import dataclasses
 import hashlib
 import io
 import json
+import logging
 import re
 import sys
 import tempfile
@@ -589,6 +590,18 @@ def run(
 
 
 def main() -> int:
+    # v1.9.4 T1: this entry point configured no root logger of its own, so
+    # its own warnings went to `logging`'s unredacted `lastResort` stderr
+    # handler -- a `basicConfig`-equivalent through the shared helper, same
+    # guard `basicConfig` itself uses (act only when root has no handler
+    # yet), gives gate 7's own log lines the same redaction as every other
+    # entry point.
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        config.install_redacting_logging(handler, "%(asctime)s %(levelname)s %(name)s %(message)s")
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
     try:
         cfg = load_config()
     except config.ConfigError as exc:

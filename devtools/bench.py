@@ -2489,7 +2489,10 @@ def _configure_logging(log_path: Path) -> None:
     for handler in list(root.handlers):
         root.removeHandler(handler)
     handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    # v1.9.4 T1: a redacting formatter, not a plain one -- this file's own
+    # tracebacks (and any chained exception) get the same masking every
+    # other entry point's log line does.
+    config.install_redacting_logging(handler, "%(asctime)s %(levelname)s %(name)s %(message)s")
     root.addHandler(handler)
     root.setLevel(logging.INFO)
 

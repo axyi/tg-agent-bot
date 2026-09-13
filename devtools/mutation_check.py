@@ -1390,6 +1390,44 @@ MUTATIONS = [
         "pre-fix defect (report-v1.9.2.md disclosure b): the tree is "
         "restored but the child is left running, orphaned",
     },
+    # -- v1.9.4 T1 (docs/spec/task-briefs/v194-T1.md): RedactingFormatter is
+    # the one seam that redacts a rendered log line -- message, args,
+    # exc_info and stack_info all at once -- so its own format() skipping
+    # redact() must be caught. Killed by tests 1-3 in
+    # tests/test_v194_redaction.py (message-args, exception-str and
+    # chained-cause secrets all reaching the emitted text unmasked). --------
+    {
+        "id": "v194-redacting-formatter-skips-redact",
+        "path": "config.py",
+        "find": "        return redact(super().format(record))\n",
+        "replace": "        return super().format(record)\n",
+        "why": "v1.9.4 T1: RedactingFormatter.format must return the "
+        "rendered line passed through redact(), not the rendered line "
+        "unredacted -- this is the one place a log.exception traceback (and "
+        "any chained __cause__/__context__) gets covered at all",
+    },
+    # -- v1.9.4 T1: devtools/bench.py's own root-logger setup must use the
+    # redacting formatter like every other entry point -- this mutation
+    # reverts it back to a plain logging.Formatter, restoring the pre-fix
+    # gap for the one entry point that writes to a file instead of stderr.
+    # Killed by test 5 in tests/test_v194_redaction.py (bench's own
+    # assertion on the installed handler's formatter type). ----------------
+    {
+        "id": "v194-bench-logging-unredacted",
+        "path": "devtools/bench.py",
+        "find": (
+            '    config.install_redacting_logging(handler, "%(asctime)s %(levelname)s '
+            '%(name)s %(message)s")\n'
+        ),
+        "replace": (
+            '    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s '
+            '%(name)s %(message)s"))  # v194-bench-logging-unredacted\n'
+        ),
+        "why": "v1.9.4 T1: bench._configure_logging's FileHandler must carry "
+        "config.RedactingFormatter, not a plain logging.Formatter -- this "
+        "process's own log lines (and any traceback) would otherwise reach "
+        "the benchmark log file unredacted",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

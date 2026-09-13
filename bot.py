@@ -1963,11 +1963,19 @@ _KNOWN_FLAGS = _EXCLUSIVE_FLAGS | {"--no-dashboard"}
 def main(argv: list[str] | None = None) -> int:
     global _started_at
     arguments = list(sys.argv[1:] if argv is None else argv)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        stream=sys.stderr,
-    )
+    # v1.9.4 T1: same condition `logging.basicConfig` itself guards on (only
+    # act when the root logger has no handler yet) -- an explicit handler is
+    # built here, instead of handing a plain format string to `basicConfig`,
+    # so the formatter is a `config.RedactingFormatter` (redacts a
+    # `log.exception` traceback too, never covered by a call-site `redact()`
+    # call) while every other observable -- format string, stream, level --
+    # is unchanged.
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        config.install_redacting_logging(handler, "%(asctime)s %(levelname)s %(name)s %(message)s")
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
     # A repeated flag, an unknown token, a positional argument, or combining
     # two exclusive flags (or an exclusive flag with --no-dashboard) is a
     # usage error -- exit 2, print USAGE, nothing runs.

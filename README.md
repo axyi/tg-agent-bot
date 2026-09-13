@@ -708,7 +708,11 @@ why the simpler, per-record form is accepted.
 
 Every registered secret is stripped from every tool envelope, every stored
 message, every outgoing Telegram text and every audit line. The database file is
-`0600`, and so is the audit log.
+`0600`, and so is the audit log. Since v1.9.4, every process's root logger also
+runs its rendered lines through a `RedactingFormatter` (`config.py`'s
+`install_redacting_logging`), so a `log.exception` traceback -- and any
+chained exception it carries -- is redacted by the same mechanism, not just
+by the ~105 hand-placed `redact()` call sites.
 
 Every `exec` and every `fetch` — including refused ones — appends one redacted
 JSON line to `AUDIT_LOG_PATH`:
