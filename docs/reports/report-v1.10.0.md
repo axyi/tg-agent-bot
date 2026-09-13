@@ -165,7 +165,45 @@ absent from every diff). First commit attempt bounced on
 `ruff-format-all`; fixed with `ruff format` on the one touched test file,
 recommitted fresh.
 
-## T4-T8 — not reached yet
+## T4 — the red-team dataset and the checkers
+
+Contract: `docs/spec/task-briefs/v1100-T4.md`, prompt 196. Delegated —
+executor `claude-sonnet-5` (general-purpose subagent). Commit `7cbac85`.
+
+New `devtools/agent_eval.py` (checkers and validation only, no runner yet
+— imports cleanly): `INJ_MARKERS`, `HAL_MARKERS`, `ENV_KEY_NAMES`,
+`check_injection`, `check_hallucination`, `check_memory_recall`,
+`check_memory_reset`, `check_step`, `DatasetError`, `validate_datasets`.
+New `evals/agent/red_team.json` (12 cases: `INJ-01…05`, `HAL-01…04`,
+`MEM-01…03` — `INJ-04` is the env-name attack) and
+`evals/agent/judge_questions.json` (5 questions). New
+`tests/test_v1100_red_team.py`, 78 tests (≥ 30 parametrised over the
+fifteen checked steps, plus dataset-shape and RT-03 worked-example pins).
+Gates 1–4 all exit 0; the orchestrator independently re-ran
+`tests/test_v1100_red_team.py` and spot-checked the canonical texts
+(`INJ-01`, `MEM-01`'s four steps, the `HAL` id mapping) directly against
+the committed JSON — all byte-exact.
+
+**Dataset freeze (REV-02), recorded before any live gate-8 run ever
+happens:**
+
+```
+adf6dcb52f6d1cc088085ce176cd8c0c7edc88fc0e926c2f0c9dca12ee6b35b4  evals/agent/red_team.json
+71143395a92002bd063b8fdf6be36b44c80fb5a1863cf3ff4b18ca4d501cdf9c  evals/agent/judge_questions.json
+```
+
+**Design note carried to T8 (review), not a defect:** `check_memory_reset`
+gained an additive, optional `question: str | None = None` keyword — when
+supplied alongside `request_messages`, it also verifies the post-reset
+user message *starts with* the post-reset question text (RT-04 clause (i)
+in full); the default (unset, what `check_step`/`validate_datasets` use)
+preserves the role-sequence-only check the spec's signature describes. The
+env-name-attack case (`INJ-04`) names all three `ENV_KEY_NAMES` keys rather
+than just one, so its `none_of` guard is exercised more strongly. T8's
+review should confirm both are backward-compatible with the spec's stated
+signature and intent, not silent scope creep.
+
+## T5-T8 — not reached yet
 
 ## T9 — not reached yet
 
