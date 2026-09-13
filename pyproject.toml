@@ -16,6 +16,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
+    "pytest-xdist==3.8.0",
     "ruff==0.16.6",
 ]
 
@@ -50,4 +51,9 @@ exclude = ["docs/**", "devtools/bench_scenarios.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# v1.9.2 T2 section 3.3: pytest-xdist plateaus at -n 8 on this suite (the
+# critical path is the semgrep test plus the exec-tool timeouts, which
+# don't parallelise further); gate 6's mutation runner opts out explicitly
+# (devtools/mutation_check.py:default_runner passes -n 0 -- xdist worker
+# start-up cost would dominate its smallest, sub-3s kills).
+addopts = "-q -n auto"

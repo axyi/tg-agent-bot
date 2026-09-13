@@ -1447,7 +1447,10 @@ def _shrink_counts(root: Path = REPO_ROOT) -> tuple[int, int]:
 def default_runner(mutation: dict) -> int:
     """Run the real suite once, `-x -q`, with a fresh bytecode cache, test
     files explicitly ordered by relevance to `mutation` (see
-    `ordered_test_files`).
+    `ordered_test_files`). `-n 0` keeps pytest-xdist loaded (`pyproject.toml`
+    now carries `-n auto` in `addopts`, section 3.3) but forces a single
+    process: xdist and this reordering do not compose, worker start-up cost
+    would dominate the smallest kills (~2-3s cases measured at section 2).
 
     Deselects the mutation table's own real-repo find-string check: that test
     asserts each `find` string is present in the untouched repo, so while a
@@ -1465,6 +1468,8 @@ def default_runner(mutation: dict) -> int:
         "pytest",
         "-x",
         "-q",
+        "-n",
+        "0",
         "--deselect",
         _SELF_CHECK_NODE_ID,
     ] + [str(p.relative_to(REPO_ROOT)) for p in files]

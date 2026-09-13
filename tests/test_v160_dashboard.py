@@ -702,7 +702,12 @@ def live_server(tmp_path, monkeypatch):
 
     server = dashboard_server.build_server(db_path=db_path, port=0)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # v1.9.2 T2 section 3.1: serve_forever's default poll_interval (0.5s)
+    # makes every shutdown() wait up to half a second -- fixture-only, no
+    # property under test changes.
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
     thread.start()
     try:
         yield port, db_path
@@ -856,7 +861,12 @@ def test_t_v160_srv_06_missing_database_is_503(tmp_path, monkeypatch):
     db_path = tmp_path / "does-not-exist.db"
     server = dashboard_server.build_server(db_path=db_path, port=0)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # v1.9.2 T2 section 3.1: serve_forever's default poll_interval (0.5s)
+    # makes every shutdown() wait up to half a second -- fixture-only, no
+    # property under test changes.
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
     thread.start()
     try:
         status, headers, _ = _request(port, "GET", "/api/health")

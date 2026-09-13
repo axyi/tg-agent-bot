@@ -50,17 +50,25 @@ def test_t_ex_03_timeout(tmp_path):
     assert elapsed < 5.0
 
 
-def test_t_ex_04_term_ignoring_child_is_killed(tmp_path):
+def test_t_ex_04_term_ignoring_child_is_killed(tmp_path, monkeypatch):
+    # v1.9.2 T2 section 3.2: EXEC_KILL_GRACE_S patched down from the
+    # production 5.0s to 0.5s, elapsed bound scaled to match -- this is the
+    # one of the two grace-period tests patched down; test_t_ex_05 below is
+    # kept at the real production EXEC_DRAIN_GRACE_S so that constant stays
+    # exercised at its shipped value somewhere in the suite.
+    monkeypatch.setattr(tools, "EXEC_KILL_GRACE_S", 0.5)
     code = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
     started = time.monotonic()
     result = run(tmp_path, code, timeout_s=1.0)
     elapsed = time.monotonic() - started
     assert result["timed_out"] is True
     assert result["exit_code"] == -9
-    assert elapsed < 12.0
+    assert elapsed < 4.0
 
 
 def test_t_ex_05_grandchild_holding_pipes_does_not_hang(tmp_path):
+    # v1.9.2 T2 section 3.2: kept at the production EXEC_DRAIN_GRACE_S
+    # (2.0s) -- see test_t_ex_04's comment above.
     code = (
         "import subprocess, sys; "
         "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])"

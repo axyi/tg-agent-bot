@@ -143,6 +143,13 @@ gates:
     diff_scoped: false
     timeout_seconds: 60
 
+  # v1.9.2 T2 (docs/spec/task-briefs/v192-T2.md section 3.3): pytest-xdist
+  # adopted (`-n auto` in pyproject.toml's addopts) -- same 2x-measured
+  # rule as the mutation-* gates below. Measured directly 2026-09-13 (`time
+  # uv run --locked pytest`, this tree, five consecutive runs, all exit 0):
+  # 23.42s, 24.80s, 24.57s, 25.23s, 24.83s -> worst case 25.23s -> 2x
+  # ~50.46s, rounded up to 60s. Down from 120s (set before this task, for a
+  # serial ~70-80s run).
   pytest:
     kind: command
     result_mode: exit_status
@@ -151,7 +158,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 120
+    timeout_seconds: 60
 
   selftest:
     kind: command
