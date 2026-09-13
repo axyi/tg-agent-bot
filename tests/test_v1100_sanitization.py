@@ -1,18 +1,23 @@
-"""spec-v1.10.0 T1: inbound sanitisation and outbound text.
+"""spec-v1.10.0 T1/T2: inbound sanitisation and outbound text.
 
-REQ-V1100-SAN-01 (pin only), REQ-V1100-SAN-02 (the UTF-16 inbound cap) and
+REQ-V1100-SAN-01 (pin only), REQ-V1100-SAN-02 (the UTF-16 inbound cap),
 REQ-V1100-OUT-01 (`reply_parts`: redact before split, at all five call
-sites). See `docs/spec/spec-v1.10.0.md` sec.3 and sec.12.
+sites) and REQ-V1100-OUT-02 (no `parse_mode`/`entities`, ever -- "satisfied
+by design", pinned rather than implemented). See `docs/spec/spec-v1.10.0.md`
+sec.3 and sec.12.
 """
 
+import inspect
 import itertools
+import json
 
+import httpx
 import pytest
 
 import bot
 import config
 from llm.base import LLMResponse
-from tests.fakes import FakeLLM, FakeTelegram, RecordingRunner
+from tests.fakes import FakeLLM, FakeTelegram, RecordingRunner, mock_llm_transport
 
 TOKEN = "123456789:sentinel-telegram-token-for-v1100-tests"
 USER_ID = 424242
@@ -258,3 +263,55 @@ def test_t_v1100_out_03_split_message_used_only_inside_reply_parts():
         "def reply_parts("
     )
     assert outside_reply_parts_def >= 5
+
+
+# --------------------------------------------------------------------------
+# T-V1100-OUT-04: the sendMessage payload is exactly {chat_id, text} through
+# the real `TelegramClient`, and the send-payload builder's own source
+# carries neither `parse_mode` nor `entities` (REQ-V1100-OUT-02).
+# --------------------------------------------------------------------------
+
+
+def tg_client(handler, token=TOKEN):
+    return bot.TelegramClient(token, client=httpx.Client(transport=mock_llm_transport(handler)))
+
+
+def test_t_v1100_out_04_send_payload_is_exactly_chat_id_and_text():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+    tg_client(handler).send_message(USER_ID, "hello *_[world]_*")
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.url.path.endswith("/sendMessage")
+    body = json.loads(request.content)
+    assert set(body) == {"chat_id", "text"}
+    assert "parse_mode" not in body
+    assert "entities" not in body
+
+
+def test_t_v1100_out_04_send_message_source_has_no_parse_mode_or_entities():
+    # Sliced to just this one method's source (never the whole repository --
+    # OUT-02's pin is on the send-payload builder, not on `bot.py` at large).
+    source = inspect.getsource(bot.TelegramClient.send_message)
+    assert "parse_mode" not in source
+    assert "entities" not in source
+
+
+# --------------------------------------------------------------------------
+# T-V1100-OUT-05: MarkdownV2 specials and unbalanced markup are delivered
+# verbatim, byte-equal -- no `parse_mode`, so nothing is ever escaped,
+# rejected, or otherwise reinterpreted (OUT-02, assignment row 3 by design).
+# --------------------------------------------------------------------------
+
+
+def test_t_v1100_out_05_markdownv2_specials_delivered_verbatim(conn, tmp_path):
+    cfg = make_cfg(tmp_path)
+    reply_text = "_*[](){}~`>#+-=|.! *bold [link](x ```unterminated fence\nstill open"
+    llm = FakeLLM([LLMResponse(reply_text, [], "stop")])
+    tg, _llm, _runner = process(conn, cfg, update(), llm=llm)
+    assert tg.sent == [(USER_ID, reply_text)]

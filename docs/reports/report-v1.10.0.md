@@ -131,7 +131,22 @@ boundary-straddling test instead. T7 must verify the real killer
 empirically when authoring the entry (GATE-02 already requires this) and
 should record `T-V1100-OUT-01` as the killer of record, not `-OUT-02`.
 
-## T2-T8 — not reached yet
+## T2 — outbound payload pin and the tool-call wire contract
+
+Contract: `docs/spec/task-briefs/v1100-T2.md`, prompt 194. Delegated —
+executor `claude-sonnet-5` (general-purpose subagent). Commit `fc88cdb`.
+No production source changed (`git diff --stat` against the parent
+touched only `tests/test_v1100_sanitization.py` and the new
+`tests/test_v1100_toolcall.py`) — OUT-02 and TC-01 were already-correct
+behaviour, pinned by 13 new tests (`T-V1100-OUT-04`, `-05`,
+`T-V1100-TC-01…03`). Gates 1–4: all exit 0 (pytest 1663 passed/1 skipped).
+First commit attempt was rejected by the `ruff-format-all` pre-commit
+gate; fixed with `ruff format` on the two touched files (never
+`--no-verify`) and re-committed fresh (no amend by the delegate — correct
+per policy; the orchestrator then folded in this task's brief/prompt
+files with one local amend, unpushed).
+
+## T3-T8 — not reached yet
 
 ## T9 — not reached yet
 
