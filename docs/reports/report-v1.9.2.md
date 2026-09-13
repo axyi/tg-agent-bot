@@ -462,6 +462,111 @@ per the same precedent T1's report already recorded for its own
 commits, rather than the brief's literal (and in this case incorrect)
 text.
 
+### Review findings closed (prompt 170)
+
+Clean-context review (`docs/spec/task-briefs/v192-T2-review.md`) of
+`92b667c` + `c3a38ea` + `260c7e1`: no 🔴, two 🟠 (both closed below, both
+in the new runner), six 🟡.
+
+**🟠 Finding 1 -- shrink guard fails open.** `_collect_count` summed
+`path: N` lines that pytest prints only at verbosity -2; the original
+code reached that verbosity only because `pyproject.toml`'s `addopts`
+(`-q`) plus the invocation's own explicit `-q` happened to add up to
+`-qq` -- an implicit dependency a future `addopts` change could break
+silently, and the code never read `completed.returncode`, so a real
+collection error (or a stray verbosity change) would sum to 0 on both
+sides and the guard would pass vacuously (0 == 0, "no shrink"). Fixed:
+`-qq` is now passed explicitly on both collect-only invocations (never
+relying on `addopts`); `_collect_count` returns `(count, returncode)`;
+`main()`'s guard now requires both returncodes `== 0` and both counts
+`> 0` before even comparing them, failing loudly naming which condition
+tripped. New mutation entry `v192-mutation-order-shrink-zero-accepted`
+(drops the `> 0` condition) with its own killer test (fakes `(0, 0, 0,
+0)`, mocks `run_all`, asserts `main()` returns 1 without calling it);
+a second new unit test covers the non-zero-returncode case directly
+(fakes `(1598, 1598, 2, 0)`, asserts rejection and that the stderr names
+`rc=2`). `--only v192-mutation-order-shrink-zero-accepted` killed;
+`--only v192-mutation-order-shrink-unchecked` still killed (its own find
+string, `if explicit_count != bare_count:`, is untouched by this fix --
+the 4-tuple return shape changed, but that specific comparison line did
+not move).
+
+**🟠 Finding 2 -- three mutation timeouts could not report a survivor.**
+`mutation-v15` (30s), `mutation-v170` (60s) and `mutation-v190` (50s)
+were sized purely by D2's "2x a measured *killed*-path run" rule --
+correct for a kill (a `-x` run stops at the first failing test) but
+wrong for a *survivor*: nothing fails, so the mutated tree runs the
+*whole* suite, single-process (`default_runner`'s own `-n 0`), which
+costs one full single-process suite run (measured directly, `time uv
+run --locked pytest -q -n 0`, this tree: 66.22s and 65.33s, two runs --
+close to the review's own ~69s estimate; the brief's literal "70 s,
+measured" figure is used in the rule and the comment, as instructed).
+All three of those timeouts sat below that ~70s floor: a surviving
+mutation would hit the gate timeout before the run could even print
+"survived", `checks.py` would SIGKILL `mutation_check.py` (which traps
+only `SIGINT`/`SIGTERM`), and the mutated file would stay on disk with
+no survivor id ever printed -- silently worse than a red gate. Fixed:
+`config/quality_gates.yaml` now states the corrected rule once, above
+`mutation-v15` (D2's own comment block, extended, not replaced):
+`timeout = 2 x measured killed-path wall + one full single-process suite
+run (70s, measured), rounded up to 10s`. Re-sized under it: `mutation-v15`
+30s -> **100s**, `mutation-v160` 210s -> **280s**, `mutation-v170` 60s ->
+**130s**, `mutation-v180` 240s -> **310s**, `mutation-v190` 50s ->
+**120s** (superseding the "Measured, before vs. after" table's numbers
+above, which reflected D2 alone). `mutation-all` is not re-measured
+under the corrected rule in T2 -- a note on that gate says so and points
+to T3. The SIGKILL-traps-only-SIGINT/SIGTERM hazard itself is
+pre-existing `checks.py` behaviour, out of this fix's scope by the
+review's own instruction -- noted here as a **v1.10.0 item**: a mutation
+gate timeout should ideally distinguish "survivor, ran out of time" from
+"hung", but `checks.py`'s SIGKILL path does not currently tell the two
+apart, and a survivor that happens to run past the timeout is reported
+identically to a hang.
+
+**🟡 Finding 6 -- ordering missed common import shapes.** `_imports`
+only matched `import <module>` / `from <module> import ...` with the
+dotted name spelled out verbatim, anchored to true line-start -- it
+missed `from devtools import bench` / `from llm import pricing` (the
+`from <pkg> import <submodule>` shape, which never spells the dotted
+name out) and indented imports (inside a function or a
+`TYPE_CHECKING` block); `_module_name` mapped `llm/__init__.py` to
+`llm.__init__` (code never imports that -- it imports `llm`, the
+package); tier 4's one-hop scan covered only top-level `*.py`, missing
+`llm/*.py` and `devtools/*.py` intermediaries. This mattered most for
+the 34 `v13-` entries, most of which mutate `devtools/bench.py` --
+every one of them fell through tier 3 empty before this fix. Fixed:
+`_imports` now also matches `from <pkg> import <sub>` (word-bounded, so
+`bench` doesn't false-match inside `bench_scenarios`) and allows leading
+whitespace; `_module_name` strips a trailing `.__init__`; tier 4 now
+scans `llm/*.py` and `devtools/*.py` too. Tiers re-printed for the two
+named entries (`ordered_test_files`, first 6 files):
+
+| entry | module | first 6 files |
+|---|---|---|
+| `v13-bench-gate-threshold` | `devtools.bench` | `test_v13_carryover.py`, `test_bench.py`, `test_dashboard.py`, `test_v14_patch.py`, `test_v160_bench.py`, `test_v170_bench.py` |
+| `v13-routing-agent-too` | `llm` (was `llm.__init__`) | `test_v13_carryover.py`, `test_agent.py`, `test_bench.py`, `test_failover.py`, `test_history_stub.py`, `test_llm.py` |
+
+`test_dashboard.py`, `test_v14_patch.py`, `test_v160_bench.py`,
+`test_v170_bench.py` (all `from devtools import bench...`) and
+`test_agent.py`/`test_bench.py`/`test_failover.py`/`test_history_stub.py`
+/`test_llm.py` (all `from llm import ...`) are now found by tier 3 --
+before this fix, none of them were, for either entry. Re-measured
+`--select v13-` once, alone, nothing concurrent, this tree: **34/34
+killed, real=3m30.542s (210.542s)** -- replacing the report's earlier
+rough "~=820s" projection for a full-108-entry run with an actual
+number for this, the largest single prefix: 210.542s / 34 entries =
+6.19s/entry, *faster* than the five-subset sample's blended 7.60s/entry
+average, consistent with tier 3 now catching these entries directly
+instead of falling through to tier 5.
+
+**🟡 Finding 7 -- shrink guard ran before id/prefix validation.**
+`_shrink_counts()` ran immediately after the `--list` check, before the
+unknown-`--only`-id and empty-`--select`-prefix checks -- so `--only
+typo` paid the collect-only overhead (two `pytest --collect-only`
+subprocess calls) before failing, instead of failing instantly as it did
+before this feature existed. Moved the shrink guard to run after both
+validation checks; behaviour for a valid id/prefix is unchanged.
+
 ## T2 -- gate 3
 
 Contract: `docs/spec/task-briefs/v192-T2.md` sections 3-4 (prompt 168,
@@ -514,41 +619,68 @@ constant is patched because it is the larger single test (bigger
 absolute saving), leaving `test_t_ex_05` to keep the real production
 value exercised somewhere in the suite.
 
+### Review finding closed (prompt 170)
+
+**🟡 Finding 5 -- the pytest gate's `60s` timeout comment didn't say
+whose box.** The 2x figure it is derived from (a `-n auto` run) is
+specific to this operator's 16-core machine; a smaller runner reading
+only "60s" has no way to know that number does not transfer. Reworded
+the comment to name the box explicitly and give this task's own
+worker-count reference points from the same tree (section 3.3's own
+sweep): serial (`-n 0`) ~70-80s, 4 workers 26.9s, 8 workers ~22-23s
+(plateau) -- so a 4-core operator knows to re-measure near the
+4-worker figure, not assume 60s.
+
 ## T2 -- duplicates
 
 Section 4's three cheap scans, none requiring a `mutation_check.py
 --only` proof run because none produced a removal candidate:
 
-- **(a) REQ-id frequency.** `grep -oE "REQ-[A-Z0-9-]+" tests/*.py` counted
-  each id's mentions; the highest, `REQ-V13-TOO-02` (10 mentions across
-  5 files), was spot-checked by hand -- each occurrence covers a distinct
-  sub-case (byte counts, envelope schema, guardrails, prefix windows),
-  not a duplicate assertion of the same property.
-- **(b) manual-parametrize candidates.** A test-name-family heuristic
-  (strip a trailing `_<digits>` and group) found zero families of 4+
-  near-identical names beyond what already uses
-  `@pytest.mark.parametrize` (e.g. `test_t_ex_13_cap_boundary`).
-- **(c) the brief's own top-10 `--durations` list.** Cross-checked: each
-  of the ~10 real-tool/timeout tests (semgrep, gitleaks, the two
+- **(a) REQ-id frequency.**
+  `grep -oREh "REQ-[A-Z0-9-]+" tests/*.py | sort | uniq -c | sort -rn`
+  counted each id's mentions; the highest, `REQ-V13-TOO-02` (10 mentions
+  across 5 files, `grep -n "REQ-V13-TOO-02" tests/*.py` to list them), was
+  spot-checked by hand -- each occurrence covers a distinct sub-case (byte
+  counts, envelope schema, guardrails, prefix windows), not a duplicate
+  assertion of the same property.
+- **(b) manual-parametrize candidates.** T2 review finding 8: command
+  added --
+  `grep -hoE "^def test_[a-z0-9_]+" tests/*.py | sed -E 's/_[0-9]+$//' | sort | uniq -c | sort -rn | awk '$1>=4'`
+  (strip a trailing `_<digits>` off every test function name, group, keep
+  families of 4+) found zero output -- zero families of 4+ near-identical
+  names beyond what already uses `@pytest.mark.parametrize` (e.g.
+  `test_t_ex_13_cap_boundary`).
+- **(c) the brief's own top-10 `--durations` list.** T2 review finding 8:
+  the list itself is reproduced by `uv run --locked pytest -q
+  --durations=50` (brief section 1's own command); this scan is a manual
+  cross-check against that output, not a script -- each of the ~10
+  real-tool/timeout tests it names (semgrep, gitleaks, the two
   `test_exec` grace tests, the nested-pytest pre-push test, the doctor
-  real-config test, the two `test_v15_scan_03`/bench-snapshot tests)
-  covers a distinct mechanism -- none is a faster stand-in for another.
+  real-config test, the two `test_v15_scan_03`/bench-snapshot tests) was
+  read and covers a distinct mechanism -- none is a faster stand-in for
+  another.
 
 **0 candidates removed with proof, 0 parametrize-merges found** -- the
 suite's time is in section 1's ten tests, not in duplicates.
 
 ### Constraints verified
 
-- Gate 6 `drifted` stays 0 after both commits: throwaway drift script,
-  **109/109** find strings match exactly once (108 before commit 1,
-  109 after -- the one new `v192-mutation-order-shrink-unchecked`
-  entry).
+- Gate 6 `drifted` stays 0 after every commit: throwaway drift script,
+  **110/110** find strings match exactly once (108 before commit 1, 109
+  after it -- the new `v192-mutation-order-shrink-unchecked` entry, 110
+  after prompt 170's own review-findings commit -- the new
+  `v192-mutation-order-shrink-zero-accepted` entry).
 - `mutation_check.py --list` output and `--only`/`--select` semantics
   unchanged; REQ-V13-CO-06 / REQ-V15-GATE-04 fail-loud behaviour
   unchanged; the self-check deselect (`_SELF_CHECK_NODE_ID`) unchanged.
 - Nothing ran concurrently with any `--only`/`--select` run or with the
   false-kill guard.
-- No count-bearing / version-pin test needed repointing.
+- T2 review (finding 3): stale count-bearing lines at `AGENTS.md:160`
+  (1593 tests), `AGENTS.md:169` (108 entries) and
+  `tests/test_v190_agents.py:139-140` (pinning both figures) now trail
+  the tree (1600 tests, 110 entries after this commit) -- deferred to
+  T3's version-bump commit, which owns them, rather than repointed here
+  (T2's own scope is performance, not the version-bump paperwork).
 - `.env`, `data/`, `evals/rag/corpus` were never opened; no `--no-verify`,
   not pushed.
 - Pre-push profile membership (five subsets vs. `mutation-all`) is
@@ -562,3 +694,9 @@ suite's time is in section 1's ten tests, not in duplicates.
   accurate to the executor model for this task (see the "Deviation:
   commit trailer model" note under "T2 -- gate 6" -- the brief's own
   text named a different model).
+- T2 review -- delegated, brief
+  `docs/spec/task-briefs/v192-T2-review.md` (prompt 170, one commit
+  closing all eight findings: two 🟠 in "Review findings closed
+  (prompt 170)" under "T2 -- gate 6", one 🟡 under "T2 -- gate 3", the
+  remaining 🟡s under "T2 -- gate 6" and the Constraints-verified /
+  duplicates sections above).

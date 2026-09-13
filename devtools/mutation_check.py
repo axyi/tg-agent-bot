@@ -1299,6 +1299,21 @@ MUTATIONS = [
         "silently dropped from every ordering tier shrinks the gate's "
         "coverage while it keeps reporting green",
     },
+    # -- v1.9.2 T2 review finding 1 (docs/spec/task-briefs/v192-T2-review.md):
+    # the shrink guard's two counts are trustworthy only once both are
+    # confirmed non-empty -- this mutation drops that guard, so a collection
+    # error or an empty collection (0 == 0) would pass vacuously as
+    # "no shrink". ---------------------------------------------------------
+    {
+        "id": "v192-mutation-order-shrink-zero-accepted",
+        "path": "devtools/mutation_check.py",
+        "find": "    if explicit_count <= 0 or bare_count <= 0:\n",
+        "replace": "    if False:  # v192-mutation-order-shrink-zero-accepted\n",
+        "why": "v1.9.2 T2 review: a collection error or a stray verbosity "
+        "change that makes both counts 0 must not read as '0 == 0, no "
+        "shrink' -- the guard must reject an empty collection outright, "
+        "not just a mismatched one",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -1354,13 +1369,34 @@ def _all_test_files(root: Path) -> list[Path]:
 
 
 def _module_name(rel_path: str) -> str:
-    """`storage.py` -> `storage`; `llm/failover.py` -> `llm.failover`."""
-    return rel_path[:-3].replace("/", ".")
+    """`storage.py` -> `storage`; `llm/failover.py` -> `llm.failover`;
+    `llm/__init__.py` -> `llm` (review finding 6: code imports the package
+    itself -- `from llm import build_llm_client`, `import llm.base` --
+    never `llm.__init__`)."""
+    dotted = rel_path[:-3].replace("/", ".")
+    if dotted.endswith(".__init__"):
+        return dotted[: -len(".__init__")]
+    return dotted
 
 
 def _imports(path: Path, module: str) -> bool:
-    pattern = rf"^(from|import)\s+{re.escape(module)}(\s|$|\.|,)"
-    return re.search(pattern, path.read_text(encoding="utf-8"), re.MULTILINE) is not None
+    """True if `path`'s source imports `module`, matching two shapes
+    (review finding 6): `import <module>` / `from <module> import ...`
+    directly (dotted or not, indented or not -- `^\\s*` allows a line
+    indented inside a function or a `TYPE_CHECKING` block), and, when
+    `module` is itself dotted (`pkg.sub`), `from <pkg> import <sub>` --
+    the shape `from devtools import bench` or `from llm import pricing`
+    uses, which never spells the dotted name out."""
+    text = path.read_text(encoding="utf-8")
+    direct = rf"^\s*(from|import)\s+{re.escape(module)}(\s|$|\.|,)"
+    if re.search(direct, text, re.MULTILINE):
+        return True
+    if "." in module:
+        pkg, _, sub = module.rpartition(".")
+        from_pkg = rf"^\s*from\s+{re.escape(pkg)}\s+import\s+.*\b{re.escape(sub)}\b"
+        if re.search(from_pkg, text, re.MULTILINE):
+            return True
+    return False
 
 
 def _tier1_files(prefix: str, all_files: list[Path]) -> list[Path]:
@@ -1369,6 +1405,19 @@ def _tier1_files(prefix: str, all_files: list[Path]) -> list[Path]:
         return [p for p in all_files if p.name == override]
     needle = f"test_{prefix}_"
     return [p for p in all_files if p.name.startswith(needle)]
+
+
+def _first_party_modules(root: Path) -> list[Path]:
+    """First-party modules a test file might import one hop away from the
+    mutated module: the top-level `*.py` files, plus `llm/*.py` and
+    `devtools/*.py` (review finding 6 -- this previously scanned only the
+    top level, so a one-hop importer of e.g. `devtools/bench.py` or an
+    `llm/` submodule was never found). `bot.py` stays excluded: it imports
+    nearly everything, so including it would make this tier moot."""
+    candidates = list(root.glob("*.py"))
+    candidates += list((root / "llm").glob("*.py"))
+    candidates += list((root / "devtools").glob("*.py"))
+    return [p for p in candidates if p.name != "bot.py"]
 
 
 def ordered_test_files(mutation: dict, root: Path = REPO_ROOT) -> list[Path]:
@@ -1402,7 +1451,9 @@ def ordered_test_files(mutation: dict, root: Path = REPO_ROOT) -> list[Path]:
     take([p for p in all_files if _imports(p, module)])
 
     first_party_importers = {
-        q.stem for q in root.glob("*.py") if q.name != "bot.py" and _imports(q, module)
+        _module_name(str(q.relative_to(root)))
+        for q in _first_party_modules(root)
+        if _imports(q, module)
     }
     take([p for p in all_files if any(_imports(p, m) for m in first_party_importers)])
 
@@ -1417,31 +1468,45 @@ def ordered_test_files(mutation: dict, root: Path = REPO_ROOT) -> list[Path]:
 _COLLECT_COUNT_RE = re.compile(r": (\d+)\s*$")
 
 
-def _collect_count(root: Path, files: list[Path] | None = None) -> int:
-    """Sum of the per-file counts in `pytest --collect-only -q`'s own
-    output (`<path>: <n>` per file on this pytest version, no aggregate
-    total line) -- `files=None` collects via `testpaths` like the real
-    gate 3 invocation; an explicit list collects exactly those files (order
-    does not matter for a count)."""
-    argv = ["uv", "run", "--locked", "pytest", "--collect-only", "-q"]
+def _collect_count(root: Path, files: list[Path] | None = None) -> tuple[int, int]:
+    """Runs `pytest --collect-only -qq` and sums the per-file `<path>: <n>`
+    lines that output format prints (no aggregate total line). `-qq` is
+    passed explicitly on this invocation's own argv -- review finding 1:
+    the format belongs to verbosity -2, not to "this pytest version"; the
+    original code relied on `pyproject.toml`'s `addopts` contributing a
+    second `-q` to reach that verbosity, so a future `addopts` change
+    elsewhere would silently break this parser. `files=None` collects via
+    `testpaths` like the real gate 3 invocation; an explicit list collects
+    exactly those files (order does not matter for a count). Returns
+    `(count, returncode)` -- the caller must check the returncode itself: a
+    non-zero one (a collection error, for instance) means the count is not
+    trustworthy, and must never be read as "0 tests, no shrink"."""
+    argv = ["uv", "run", "--locked", "pytest", "--collect-only", "-qq"]
     if files is not None:
         argv += [str(p.relative_to(root)) for p in files]
     completed = subprocess.run(argv, cwd=root, capture_output=True, text=True)
-    return sum(
+    count = sum(
         int(match.group(1))
         for line in completed.stdout.splitlines()
         if (match := _COLLECT_COUNT_RE.search(line))
     )
+    return count, completed.returncode
 
 
-def _shrink_counts(root: Path = REPO_ROOT) -> tuple[int, int]:
-    """(explicit, bare) node counts -- equal iff the file-list mechanism
-    every ordering is built from still reaches every test file the bare,
-    no-args invocation collects via `testpaths` (REQ-V13-CO-06 /
+def _shrink_counts(root: Path = REPO_ROOT) -> tuple[int, int, int, int]:
+    """(explicit_count, bare_count, explicit_rc, bare_rc) -- the counts are
+    trustworthy, and comparable, only once the caller has checked both
+    returncodes are 0 and both counts are > 0 (review finding 1: a
+    collection error or a stray verbosity change must not look like
+    "0 == 0, no shrink"). Equal counts (once trusted) mean the file-list
+    mechanism every ordering is built from still reaches every test file
+    the bare, no-args invocation collects via `testpaths` (REQ-V13-CO-06 /
     REQ-V15-GATE-04's silent-shrink hole, checked once per invocation, not
     per mutation)."""
     all_files = _all_test_files(root)
-    return _collect_count(root, files=all_files), _collect_count(root, files=None)
+    explicit_count, explicit_rc = _collect_count(root, files=all_files)
+    bare_count, bare_rc = _collect_count(root, files=None)
+    return explicit_count, bare_count, explicit_rc, bare_rc
 
 
 def default_runner(mutation: dict) -> int:
@@ -1578,22 +1643,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{mutation['id']}\t{mutation['path']}\t{mutation['why']}")
         return 0
 
-    # v1.9.2 T2 silent-shrink guard, once per invocation (not per mutation):
-    # ordered_test_files reorders, never drops, a test file -- proven a
-    # permutation by construction there -- but the explicit-file-list
-    # mechanism itself is a new way to lose one silently (a future
-    # tests/sub/test_x.py, or a renamed pattern, could fall out of every
-    # tier while the gate still reports green over a smaller set). Compare
-    # node counts at the collection level instead of trusting the glob.
-    explicit_count, bare_count = _shrink_counts()
-    if explicit_count != bare_count:
-        print(
-            f"mutation runner file list shrink: explicit collection="
-            f"{explicit_count} bare collection={bare_count}",
-            file=sys.stderr,
-        )
-        return 1
-
     # REQ-V13-CO-06: a mistyped id used to select the empty set and report a
     # clean gate over zero mutations. Fail loudly instead.
     if args.only is not None and all(m["id"] != args.only for m in MUTATIONS):
@@ -1605,6 +1654,42 @@ def main(argv: list[str] | None = None) -> int:
     # must not report a clean gate over an empty set.
     if args.select is not None and all(not m["id"].startswith(args.select) for m in MUTATIONS):
         print(f"no mutation id matches prefix: {args.select}", file=sys.stderr)
+        return 1
+
+    # v1.9.2 T2 silent-shrink guard, once per invocation (not per mutation),
+    # placed after the two id/prefix checks above (review finding 7 -- an
+    # invalid `--only`/`--select` fails instantly again, without paying the
+    # collect-only overhead): ordered_test_files reorders, never drops, a
+    # test file -- proven a permutation by construction there -- but the
+    # explicit-file-list mechanism itself is a new way to lose one silently
+    # (a future tests/sub/test_x.py, or a renamed pattern, could fall out of
+    # every tier while the gate still reports green over a smaller set).
+    # Compare node counts at the collection level instead of trusting the
+    # glob. Review finding 1: trust the counts only once both collect-only
+    # invocations actually succeeded and actually collected something --
+    # otherwise a collection error or a stray verbosity change would read
+    # as "0 == 0, no shrink" and pass vacuously.
+    explicit_count, bare_count, explicit_rc, bare_rc = _shrink_counts()
+    if explicit_rc != 0 or bare_rc != 0:
+        print(
+            f"mutation runner shrink guard: collect-only failed "
+            f"(explicit rc={explicit_rc}, bare rc={bare_rc})",
+            file=sys.stderr,
+        )
+        return 1
+    if explicit_count <= 0 or bare_count <= 0:
+        print(
+            f"mutation runner shrink guard: empty collection "
+            f"(explicit={explicit_count}, bare={bare_count})",
+            file=sys.stderr,
+        )
+        return 1
+    if explicit_count != bare_count:
+        print(
+            f"mutation runner file list shrink: explicit collection="
+            f"{explicit_count} bare collection={bare_count}",
+            file=sys.stderr,
+        )
         return 1
 
     if args.select is not None:

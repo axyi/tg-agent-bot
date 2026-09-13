@@ -255,13 +255,14 @@ def test_t_v192_ordered_test_files_tier2_is_the_same_named_module_file():
 
 def test_t_v192_mutation_order_shrink_check_blocks_before_running_anything(monkeypatch, capsys):
     # A killer test for `v192-mutation-order-shrink-unchecked`: with the real
-    # (unmutated) check in place, a fabricated node-count mismatch must make
-    # main() fail loudly and never reach run_all. If the mutation neuters the
-    # check (turns it into `if False:`), main() falls through to the mocked
-    # run_all below instead -- a different, wrong return code and a spurious
-    # call -- which is exactly what "killed" means here. Never shells out to
-    # real pytest: `_shrink_counts` and `run_all` are both faked.
-    monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (100, 99))
+    # (unmutated) check in place, a fabricated node-count mismatch (both
+    # returncodes clean, both counts positive) must make main() fail loudly
+    # and never reach run_all. If the mutation neuters the check (turns it
+    # into `if False:`), main() falls through to the mocked run_all below
+    # instead -- a different, wrong return code and a spurious call -- which
+    # is exactly what "killed" means here. Never shells out to real pytest:
+    # `_shrink_counts` and `run_all` are both faked.
+    monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (100, 99, 0, 0))
     calls = []
     monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
 
@@ -272,3 +273,35 @@ def test_t_v192_mutation_order_shrink_check_blocks_before_running_anything(monke
     err = capsys.readouterr().err
     assert "100" in err
     assert "99" in err
+
+
+def test_t_v192_mutation_order_shrink_check_rejects_zero_zero_collection(monkeypatch):
+    # A killer test for `v192-mutation-order-shrink-zero-accepted` (review
+    # finding 1): an empty collection (0, 0) with clean returncodes must be
+    # rejected outright -- 0 == 0 would otherwise pass the equality check
+    # too, so dropping only the `<= 0` guard falls all the way through to
+    # run_all. Faked throughout, never shells out to real pytest.
+    monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (0, 0, 0, 0))
+    calls = []
+    monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
+
+    code = mc.main(["--only", "v192-mutation-order-shrink-zero-accepted"])
+
+    assert code == 1
+    assert calls == []
+
+
+def test_t_v192_mutation_order_shrink_check_rejects_nonzero_returncode(monkeypatch, capsys):
+    # Review finding 1: a collect-only failure (non-zero returncode) must
+    # not be read through the counts at all -- even matching, positive
+    # counts must not pass when either invocation errored.
+    monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (1598, 1598, 2, 0))
+    calls = []
+    monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
+
+    code = mc.main(["--only", "v192-mutation-order-shrink-unchecked"])
+
+    assert code == 1
+    assert calls == []
+    err = capsys.readouterr().err
+    assert "rc=2" in err
