@@ -342,3 +342,223 @@ of a real finding.
 - Both `6c9a904` and `d25d664` carry `Co-Authored-By: Claude Sonnet 5`;
   accurate to the executor model for this task (verified against the
   session's own model-identity reminder), left as-is.
+
+## T2 -- gate 6
+
+Contract: `docs/spec/task-briefs/v192-T2.md` section 2 (prompt 167,
+commit `92b667c`). Baseline: `c21ffb3` (T1 closed), 108 mutation entries,
+`default_runner` running `pytest -x -q` over pytest's default
+alphabetical-by-file order.
+
+### The change
+
+`ordered_test_files(mutation, root)` builds the complete, ordered list of
+every test file (`tests/**/test_*.py`), tiered by relevance to the mutated
+module -- never a subset, a permutation of the bare glob by construction
+(asserted in the function itself):
+
+1. test files whose name carries the entry's version prefix
+   (`test_{prefix}_*.py`; `cov-` overridden to `test_v12_patch.py`, the
+   only file naming `cov_0*` test ids);
+2. the test file named after the mutated module (`storage.py` ->
+   `test_storage.py`);
+3. test files that import the mutated module directly;
+4. test files importing a first-party top-level module that imports it
+   (one hop, mirroring the brief's own scratch simulator);
+5. every remaining test file.
+
+`default_runner(mutation)` uses this ordering; `run_one` now calls
+`runner(mutation)` instead of `runner()` to carry it through. A
+once-per-invocation collect-count guard in `main()` (`_shrink_counts`,
+before the `--only`/`--select` dispatch, skipped only under `--list`)
+compares `pytest --collect-only -q` node counts between the explicit
+ordered file list and the bare `testpaths` invocation, closing the
+silent-shrink hole an explicit file list opens (REQ-V13-CO-06 /
+REQ-V15-GATE-04): a future `tests/sub/test_x.py`, or a renamed pattern,
+would otherwise fall out of every tier while the gate kept reporting
+green over a smaller set. The new mutation entry
+`v192-mutation-order-shrink-unchecked` mutates that check into a no-op;
+its killer test (`tests/test_mutation_check.py
+::test_t_v192_mutation_order_shrink_check_blocks_before_running_anything`)
+fakes both `_shrink_counts` (a fabricated mismatch) and `run_all` (a
+spy), and asserts `main()` returns 1 without ever calling `run_all` --
+never shells out to real pytest, so applying the mutation for real never
+risks the recursive full-suite run a naive killer test would trigger.
+
+### False-kill guard
+
+Per section 2.1: ran the **unmutated** tree once under each distinct
+ordering the runner produces. The brief estimated "about a dozen"
+(one per distinct mutated path); this tree has **18** distinct mutated
+paths across the (then-)109 entries. All 18 exit 0:
+
+| mutated path | representative entry | exit | wall |
+|---|---|---|---|
+| agent.py | cov-07-finish-redacts | 0 | 80.3s |
+| bot.py | cov-01-live-docker-sandbox-max-bytes | 0 | 79.5s |
+| config.py | sec-ssr-01-shape-check | 0 | 80.7s |
+| dashboard_render.py | v180-transcript-budget-removed | 0 | 79.3s |
+| dashboard_server.py | v160-bind-address-widened | 0 | 81.7s |
+| devtools/bench.py | v13-bench-gate-threshold | 0 | 82.0s |
+| devtools/bench_scenarios.py | v13-bench-turn-zero-based | 0 | 81.5s |
+| devtools/checks.py | v15-severity-comparison-inverted | 0 | 81.4s |
+| devtools/mutation_check.py | v13-only-typo-exit0 | 0 | 82.0s |
+| llm/__init__.py | v13-routing-agent-too | 0 | 81.3s |
+| llm/base.py | v13-usage-parse-none | 0 | 82.2s |
+| llm/failover.py | v170-failover-drops-reasoning | 0 | 80.8s |
+| llm/pricing.py | v13-cost-drops-output | 0 | 80.0s |
+| metrics.py | v13-resent-formula | 0 | 80.2s |
+| rag.py | v190-sources-fallback-dropped | 0 | 81.9s |
+| storage.py | v11-storage-add-tool-turn-redacts | 0 | 81.1s |
+| tools.py | cov-02-pre-run-refusal-incomplete | 0 | 82.2s |
+| tracing.py | v160-content-redact-bypassed | 0 | 82.0s |
+
+All 18 exit 0 -> every kill this reordering produces is attributable to
+the real mutation, not to an ordering artefact under `-x`.
+
+### Measured, before (`c21ffb3`, old alphabetical order) vs. after (this commit)
+
+Each `--select` subset run alone, sequential, nothing else running:
+
+| subset | entries | before | after | ratio |
+|---|---|---|---|---|
+| v15- | 4 | 98.33s | 14.04s | 7.0x |
+| v160- | 11 | 590.26s | 101.19s | 5.8x |
+| v170- | 9 | 565.75s | 25.46s | 22.2x |
+| v180- | 6 | 476.95s | 117.09s | 4.1x |
+| v190- | 7 | 495.91s | 23.41s | 21.2x |
+| **total** | **37** | **2227.2s** | **281.19s** | **7.9x** |
+
+All five subsets killed the same n/n before and after (4/4, 11/11, 9/9,
+6/6, 7/7) -- the ordering changed only which test ran first, never the
+killed set. `config/quality_gates.yaml`'s five `mutation-v*`
+`timeout_seconds` re-measured by the file's own 2x rule from the after
+numbers: v15 220s->30s, v160 1190s->210s, v170 1070s->60s, v180
+810s->240s, v190 1020s->50s. `mutation-all` is untouched -- T3's own
+re-measurement, per the brief's explicit boundary.
+
+Operator-facing estimate for a future full `mutation-all` run under this
+reordering (not run here): the measured subsets averaged 7.60s/entry
+(281.19s / 37 entries); scaled to the pre-T2 108-entry gate, ~=820s
+(~13.7min), versus the last directly measured `mutation-all` wall (T9,
+105 entries, 3953.309s ~= 66min) scaled the same way to 108 entries
+(~=4066s ~= 67.8min) -- a rough ~5x projected speedup. Caveat: 71 of the
+108 entries (mostly the 34 `v13-` entries) were not measured directly
+and may not track the sampled average; the tightest of the five
+re-measured timeouts (`mutation-v170` at 60s, `mutation-v190` at 50s)
+sit at absolute values where this run's own single measurement leaves
+less headroom against machine-load variance than the file's earlier,
+much larger timeouts did -- worth a second measurement at T3's
+authoritative run rather than trusted blind.
+
+### Deviation: commit trailer model
+
+`docs/spec/task-briefs/v192-T2.md` section 6 names
+`Co-Authored-By: Claude Opus 5` for both commits. The actual executor
+for this task is `claude-sonnet-5` (per this session's own
+model-identity reminder). Both commits carry
+`Co-Authored-By: Claude Sonnet 5` -- accurate to the real executor,
+per the same precedent T1's report already recorded for its own
+commits, rather than the brief's literal (and in this case incorrect)
+text.
+
+## T2 -- gate 3
+
+Contract: `docs/spec/task-briefs/v192-T2.md` sections 3-4 (prompt 168,
+commit `c3a38ea`).
+
+### xdist adoption
+
+`pytest-xdist` 3.8.0 (latest stable on PyPI, verified via `pip index
+versions pytest-xdist` at implementation time) added as a dev
+dependency; `pyproject.toml`'s `addopts` changed from `"-q"` to
+`"-q -n auto"` -- the brief's own measured plateau at 8 workers holds on
+this 16-core box. `devtools/mutation_check.py:default_runner` gained an
+explicit `-n 0` to stay single-process (xdist worker start-up cost would
+dominate the smallest kills the reordering above produces, some under
+3s); this flag could only be added in *this* commit, once xdist was an
+installed dependency -- added a commit earlier it makes pytest exit 4,
+"unrecognized arguments: -n" (verified empirically before the fix).
+
+Isolation proof (v1.5.1 D1 precedent -- fixtures leaking into the real
+repo): five consecutive `pytest -q` (`-n auto`) runs, all exit 0:
+23.42s, 24.80s, 24.57s, 25.23s, 24.83s; `git status --short` compared
+byte-for-byte across all five (`diff` of run 1 vs. run 5: identical) --
+only this run's own in-progress edits, no test-leaked files. Plus one
+`--dist loadfile` run: 38.82s, exit 0, same clean status.
+
+`config/quality_gates.yaml`'s `pytest` gate `timeout_seconds`
+re-measured by the file's 2x rule from the worst of the five isolation
+runs: 25.23s -> 2x ~=50.46s -> 60s (down from 120s, which had been set
+for the old ~70-80s serial run and was already under the file's own 2x
+rule even before this task).
+
+### Fixture cost (section 3.1)
+
+`live_server`'s `serve_forever` (three call sites: `test_v160_dashboard
+.py:705,859`, `test_v180_conversations.py:479`) now passes
+`poll_interval=0.01` instead of the default 0.5s -- fixture-only, no
+property under test changes.
+
+### Grace-period costs (section 3.2)
+
+`test_t_ex_04_term_ignoring_child_is_killed` monkeypatches
+`tools.EXEC_KILL_GRACE_S` from the production 5.0s down to 0.5s and
+scales its `elapsed <` bound from 12.0 to 4.0 (measured 6.00s -> 1.51s,
+real headroom against the bound, not tuned to the observation).
+`test_t_ex_05_grandchild_holding_pipes_does_not_hang` is the one kept at
+the real production `EXEC_DRAIN_GRACE_S` (2.0s, measured 4.04s,
+unchanged) -- both tests' own comments say which is which and why, per
+the brief's "say which one in the report" instruction: `test_t_ex_04`'s
+constant is patched because it is the larger single test (bigger
+absolute saving), leaving `test_t_ex_05` to keep the real production
+value exercised somewhere in the suite.
+
+## T2 -- duplicates
+
+Section 4's three cheap scans, none requiring a `mutation_check.py
+--only` proof run because none produced a removal candidate:
+
+- **(a) REQ-id frequency.** `grep -oE "REQ-[A-Z0-9-]+" tests/*.py` counted
+  each id's mentions; the highest, `REQ-V13-TOO-02` (10 mentions across
+  5 files), was spot-checked by hand -- each occurrence covers a distinct
+  sub-case (byte counts, envelope schema, guardrails, prefix windows),
+  not a duplicate assertion of the same property.
+- **(b) manual-parametrize candidates.** A test-name-family heuristic
+  (strip a trailing `_<digits>` and group) found zero families of 4+
+  near-identical names beyond what already uses
+  `@pytest.mark.parametrize` (e.g. `test_t_ex_13_cap_boundary`).
+- **(c) the brief's own top-10 `--durations` list.** Cross-checked: each
+  of the ~10 real-tool/timeout tests (semgrep, gitleaks, the two
+  `test_exec` grace tests, the nested-pytest pre-push test, the doctor
+  real-config test, the two `test_v15_scan_03`/bench-snapshot tests)
+  covers a distinct mechanism -- none is a faster stand-in for another.
+
+**0 candidates removed with proof, 0 parametrize-merges found** -- the
+suite's time is in section 1's ten tests, not in duplicates.
+
+### Constraints verified
+
+- Gate 6 `drifted` stays 0 after both commits: throwaway drift script,
+  **109/109** find strings match exactly once (108 before commit 1,
+  109 after -- the one new `v192-mutation-order-shrink-unchecked`
+  entry).
+- `mutation_check.py --list` output and `--only`/`--select` semantics
+  unchanged; REQ-V13-CO-06 / REQ-V15-GATE-04 fail-loud behaviour
+  unchanged; the self-check deselect (`_SELF_CHECK_NODE_ID`) unchanged.
+- Nothing ran concurrently with any `--only`/`--select` run or with the
+  false-kill guard.
+- No count-bearing / version-pin test needed repointing.
+- `.env`, `data/`, `evals/rag/corpus` were never opened; no `--no-verify`,
+  not pushed.
+- Pre-push profile membership (five subsets vs. `mutation-all`) is
+  unchanged, per the brief's explicit reservation of that decision for
+  the operator at T3.
+
+### Delegation record
+
+- T2 -- delegated, brief `docs/spec/task-briefs/v192-T2.md`.
+- Both `92b667c` and `c3a38ea` carry `Co-Authored-By: Claude Sonnet 5`;
+  accurate to the executor model for this task (see the "Deviation:
+  commit trailer model" note under "T2 -- gate 6" -- the brief's own
+  text named a different model).
