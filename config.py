@@ -153,6 +153,12 @@ class Config:
     # default, unset, keeps the smoke on whatever client `rag_eval.py`
     # already builds).
     llm_eval_chat_model: str = ""
+    # v1.10.0 addition (docs/spec/task-briefs/v1100-T3.md, REQ-V1100-CFG-01):
+    # exactly `llm_eval_chat_model`'s shape, for gate 8's LLM-as-a-judge
+    # purpose -- always routed to a separate, stronger model, never the chat
+    # model under test. Empty is the default -- the runner (T5) refuses to
+    # run rather than silently falling back to the main client.
+    llm_judge_model: str = ""
     # v1.6.0 addition (REQ-V160-TRC-09): gates the four opt-in content
     # attributes on spans. Off by default -- content never leaves the
     # process unless an operator turns this on explicitly.
@@ -428,6 +434,24 @@ def load_config(
             )
         eval_chat_model = f"{routed_provider}:{routed_name}"
 
+    # v1.10.0 T3 (docs/spec/task-briefs/v1100-T3.md): the judge purpose
+    # routes the same way, one env var later -- gate 8's LLM-as-a-judge only,
+    # always a separate model, never affecting the agent's own client.
+    judge_model = ""
+    routed_judge = parse_routed_model(_value(source, "LLM_JUDGE_MODEL"), "LLM_JUDGE_MODEL")
+    if routed_judge is not None:
+        routed_provider, routed_name = routed_judge
+        configured = (
+            bool(lmstudio_base_url and lmstudio_model)
+            if routed_provider == "lmstudio"
+            else bool(openrouter_api_key and openrouter_model)
+        )
+        if not configured:
+            raise ConfigError(
+                f"LLM_JUDGE_MODEL routes the judge to {routed_provider}, which is not configured"
+            )
+        judge_model = f"{routed_provider}:{routed_name}"
+
     manual_input_price, manual_output_price = _parse_manual_prices(source)
 
     # Paths are resolved before anything is created on disk: REQ-V1-CFG-03 must be
@@ -532,6 +556,7 @@ def load_config(
         llm_summary_model=summary_model,
         llm_rerank_model=rerank_model,
         llm_eval_chat_model=eval_chat_model,
+        llm_judge_model=judge_model,
         obs_capture_content=_parse_bool(source, "OBS_CAPTURE_CONTENT", False),
         dashboard_enabled=_parse_bool(source, "DASHBOARD_ENABLED", True),
         dashboard_port=_parse_int(source, "DASHBOARD_PORT", 8765, 1024, 65535),

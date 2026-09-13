@@ -146,7 +146,26 @@ gate; fixed with `ruff format` on the two touched files (never
 per policy; the orchestrator then folded in this task's brief/prompt
 files with one local amend, unpushed).
 
-## T3-T8 — not reached yet
+## T3 — the judge route configuration
+
+Contract: `docs/spec/task-briefs/v1100-T3.md`, prompt 195. Delegated —
+executor `claude-sonnet-5` (general-purpose subagent). Commit `b74a358`.
+`Config.llm_judge_model` (`config.py:150-155`, default `""`), the
+`LLM_JUDGE_MODEL` routing/validation block in `load_config`
+(`config.py:429-446`, the exact `ConfigError` text
+`"LLM_JUDGE_MODEL routes the judge to <provider>, which is not
+configured"`), a `purpose == "judge"` branch in `llm.build_llm_client`
+(`llm/__init__.py:64-68`, after `eval-chat`, identical shape, unset falls
+through to the main client), and `.env.example:98-102` (the uncommented
+default `LLM_JUDGE_MODEL=openrouter:openai/gpt-4.1`, `LLM_RERANK_MODEL`'s
+convention, not `LLM_EVAL_CHAT_MODEL`'s commented-out one). New
+`tests/test_v1100_config.py`, 12 tests (`T-V1100-CFG-01…04`). Gates 1–4
+all exit 0. The real `.env` was never opened (confirmed gitignored,
+absent from every diff). First commit attempt bounced on
+`ruff-format-all`; fixed with `ruff format` on the one touched test file,
+recommitted fresh.
+
+## T4-T8 — not reached yet
 
 ## T9 — not reached yet
 

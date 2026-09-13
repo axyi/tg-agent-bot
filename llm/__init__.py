@@ -45,6 +45,8 @@ def build_llm_client(
     `purpose="rerank"` (v1.9.1 T1) mirrors this exactly, on `LLM_RERANK_MODEL`.
     `purpose="eval-chat"` (v1.9.4 T2) mirrors it again, on
     `LLM_EVAL_CHAT_MODEL` -- gate 7's smoke-turn chat completions only.
+    `purpose="judge"` (v1.10.0 T3) mirrors it once more, on
+    `LLM_JUDGE_MODEL` -- gate 8's LLM-as-a-judge purpose only.
     """
     if purpose == "summary":
         routed = parse_summary_model(cfg.llm_summary_model)
@@ -58,6 +60,11 @@ def build_llm_client(
             return _client_for(cfg, provider, client, model=model)
     if purpose == "eval-chat":
         routed = parse_routed_model(cfg.llm_eval_chat_model, "LLM_EVAL_CHAT_MODEL")
+        if routed is not None:
+            provider, model = routed
+            return _client_for(cfg, provider, client, model=model)
+    if purpose == "judge":
+        routed = parse_routed_model(cfg.llm_judge_model, "LLM_JUDGE_MODEL")
         if routed is not None:
             provider, model = routed
             return _client_for(cfg, provider, client, model=model)
