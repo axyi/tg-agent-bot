@@ -181,7 +181,12 @@ relevance-ordered runner's own silent-shrink guard) alongside reordering
 `docs/reports/report-v1.9.0.md`, `docs/reports/report-v1.9.1.md` and
 `docs/reports/report-v1.9.2.md`);
 `--select <prefix>` runs a named subset
-(mutually exclusive with `--only`), e.g. `--select v190-`. Gate 7
+(mutually exclusive with `--only`), e.g. `--select v190-`. v1.9.3 T1: the
+gate refuses to start (exit 1, naming the path) if any mutation path's
+working tree differs from the committed `HEAD` blob, so `pre-push` now
+fails fast on WIP edits to one of those files -- commit or `git stash`
+first, or `git restore --staged --worktree <path>` if it is a leftover
+mutation. Gate 7
 (`devtools/rag_eval.py`, spec-v1.9.0 T8) is the retrieval evaluation: it
 needs the live environment like gate 5, spends real inference on the
 reranker and an advisory conversation smoke, and exits 0 only when

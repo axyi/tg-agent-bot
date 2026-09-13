@@ -16,12 +16,13 @@ profiles:
                selftest, selftest-live, rag-eval, mutation-all, gitleaks-tree,
                trivy, semgrep, skylos, hooks-installed, doctor, lint-docs]
   # v1.9.3 T1: bookkeeping only -- `checks.py run --profile` only accepts
-  # pre-commit/pre-push/full (`devtools/checks.py:1657`'s argparse
+  # pre-commit/pre-push/full (`devtools/checks.py:1714`'s argparse
   # `choices`), so this profile is structurally unreachable from any hook
   # or CLI invocation. It exists solely so the five `mutation-v*` gates
   # below satisfy `_validate_profiles`'s "every gate must be named by some
-  # profile" invariant (`devtools/checks.py:538-550`) now that no *hook*
-  # profile references them -- they stay real, runnable gates via
+  # profile" invariant (`devtools/checks.py:540-552`, the orphan check
+  # itself at `:549-551`) now that no *hook* profile references them --
+  # they stay real, runnable gates via
   # `mutation_check.py --select <prefix>` directly, kept for this
   # release's T2/T3 re-measurements and any future per-range work.
   mutation-subsets: [mutation-v15, mutation-v160, mutation-v170, mutation-v180,
@@ -213,6 +214,16 @@ gates:
   # devtools/rag_eval.py`, this tree, 2026-09-12: real=4m47.388s (~287.4s)
   # -> 2x ~574.8s, rounded up to 580s, following the same rule the
   # mutation-* gates below already use.
+  #
+  # v1.9.3 T1+T2 review (docs/spec/task-briefs/v193-T12-review.md finding
+  # 6): re-derived from this release's own slowest measured wall rather
+  # than v1.9.1's stale anchor -- three fixed-tree runs (`aa8d576`) at
+  # 268.8s/233.3s/250.7s plus the reviewer's independent 232.4s, slowest
+  # 268.8s -> 2x ~537.6s, still comfortably under 580s (see
+  # docs/reports/report-v1.9.3.md's T2 section for the per-phase timing
+  # that explains why these walls run longer than v1.9.2's 186.998s).
+  # 580s kept as-is: it already carries more margin than the 2x rule alone
+  # would require.
   rag-eval:
     kind: command
     result_mode: exit_status
@@ -518,15 +529,16 @@ gates:
   # SIGKILLed only the direct `uv` child, orphaning `mutation_check.py`
   # with no chance to restore a mutated file) and added a new entry
   # (`v193-mutation-dirty-tree-unchecked`, 111 total). Re-measured directly
-  # on this commit's tree (`ceb4a11`), alone, nothing else on the box
+  # on this commit's tree (`07bb158`), alone, nothing else on the box
   # (`time uv run --locked python devtools/mutation_check.py`, no
   # --select, 111/111 killed, 0 survived, 0 errored, 0 drifted):
   # real=13m34.449s (814.449s) -> 2x ~1628.898s + 70s (survivor-safe rule
   # above) = ~1698.898s, rounded up to 1700s. Up from 1440s at 110 entries
-  # -- one more entry plus this commit's own two new git-show subprocess
-  # calls per distinct mutation path account for some of the jump, the
-  # rest consistent with this box's own documented shared/contended
-  # variance (noted at every earlier re-measurement above).
+  # -- the new dirty-tree check itself is one `git show` per distinct
+  # mutation path, once per invocation (sub-second total, not per-mutation),
+  # so this jump is not attributable to it; consistent instead with this
+  # box's own documented shared/contended variance (noted at every earlier
+  # re-measurement above; v1.9.3 T1+T2 review finding 5).
   mutation-all:
     kind: command
     result_mode: exit_status

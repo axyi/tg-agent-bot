@@ -1007,7 +1007,11 @@ exec-backend line renders the version probed at **startup**, not a live one.
 `devtools/mutation_check.py` is a standard-library-only mutation-testing gate:
 for each of a fixed list of one-line production edits, it applies the edit,
 reruns the suite, restores the original byte-for-byte, and fails if the suite
-stayed green (the edit "survived" — meaning nothing tests that line).
+stayed green (the edit "survived" — meaning nothing tests that line). Before
+any of that, it refuses to start (exit 1, naming the path) if a listed
+mutation path's working tree already differs from the committed `HEAD` blob
+— commit, stash, or `git restore --staged --worktree <path>` a leftover
+mutation, then re-run.
 
 ### Verification
 

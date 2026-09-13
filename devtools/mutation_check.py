@@ -1363,6 +1363,34 @@ MUTATIONS = [
         "already use -- reverting either Searcher back to the chat client "
         "restores the LM Studio-routed rerank tail this task fixed",
     },
+    # -- v1.9.3 T1+T2 review (docs/spec/task-briefs/v193-T12-review.md
+    # finding 1): the original SIGTERM-before-SIGKILL test proved only that
+    # the *direct* child received the signal -- this mutation drops process-
+    # group signalling back to pid-only signalling, which a grandchild
+    # process (spawned by the timed-out child) would never receive. --------
+    {
+        "id": "v193-gate-timeout-kills-direct-child-only",
+        "path": "devtools/checks.py",
+        "find": "        os.killpg(proc.pid, signal.SIGTERM)\n",
+        "replace": "        os.kill(proc.pid, signal.SIGTERM)\n",
+        "why": "v1.9.3 T1+T2 review finding 1: a grandchild of the timed-out "
+        "gate's direct child (e.g. mutation_check.py's own tracked pytest "
+        "child, one process-group member among several) must receive "
+        "SIGTERM too -- os.kill(pid) reaches only the direct child",
+    },
+    # -- v1.9.3 T1+T2 review (finding 2): the signal handler's own call to
+    # terminate the tracked child had no mutation coverage. -----------------
+    {
+        "id": "v193-signal-handler-leaves-child-running",
+        "path": "devtools/mutation_check.py",
+        "find": "        _terminate_current_child()\n",
+        "replace": "        pass  # v193-signal-handler-leaves-child-running\n",
+        "why": "v1.9.3 T1+T2 review finding 2: a signal this process "
+        "receives mid-run must terminate the tracked pytest child before "
+        "restoring the tree and exiting -- dropping the call restores the "
+        "pre-fix defect (report-v1.9.2.md disclosure b): the tree is "
+        "restored but the child is left running, orphaned",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -1814,9 +1842,16 @@ def main(argv: list[str] | None = None) -> int:
         for rel_path in dirty:
             print(f"  {rel_path}", file=sys.stderr)
         print(
-            "inspect with `git diff <path>`; if this is a leftover mutation "
-            "(not your own edit), `git checkout -- <path>` restores it, "
-            "then re-run.",
+            # v1.9.3 T1+T2 review (docs/spec/task-briefs/v193-T12-review.md
+            # finding 4): `git diff <path>` shows nothing for a *staged*
+            # edit, and `git checkout -- <path>` then restores from the
+            # index (the staged content), not HEAD -- a loop for exactly
+            # that case. `git diff HEAD -- <path>` compares against HEAD
+            # regardless of staging; `git restore --staged --worktree <path>`
+            # restores both the index and the working tree from HEAD.
+            "inspect with `git diff HEAD -- <path>`; if this is a leftover "
+            "mutation (not your own edit), `git restore --staged --worktree "
+            "<path>` restores it from HEAD, then re-run.",
             file=sys.stderr,
         )
         return 1

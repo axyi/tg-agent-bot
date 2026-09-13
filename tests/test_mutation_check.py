@@ -4,6 +4,7 @@ Every test here injects a fake runner and operates on a throwaway file tree
 under `tmp_path` — never the real suite, never the real repository.
 """
 
+import signal
 import subprocess
 
 import pytest
@@ -352,13 +353,19 @@ def test_t_v193_mutation_dirty_tree_check_blocks_before_running_anything(monkeyp
     # A killer test for `v193-mutation-dirty-tree-unchecked`: with the real
     # check in place, a fabricated dirty path must make main() refuse and
     # never reach run_all. If the mutation neuters the check (turns it into
-    # `if False:`), main() falls through to the mocked run_all below instead
-    # -- a different, wrong return code and a spurious call -- exactly what
-    # "killed" means here. Never touches the real repo tree: the blob-vs-
-    # working-tree comparison itself is faked, not exercised.
+    # `if False:`), main() falls through to the shrink guard and then the
+    # mocked run_all below instead -- a different, wrong return code and a
+    # spurious call -- exactly what "killed" means here. Never touches the
+    # real repo tree: the blob-vs-working-tree comparison itself is faked,
+    # not exercised. `_shrink_counts` is also faked (review
+    # docs/spec/task-briefs/v193-T12-review.md finding 10) -- without this,
+    # a *mutated* run falls through to the real, offline-suite-breaking
+    # `_shrink_counts`, which shells out to `pytest --collect-only` twice;
+    # this test must stay fully offline regardless of which branch it takes.
     monkeypatch.setattr(
         mc, "_dirty_mutation_paths", lambda mutations, root=mc.REPO_ROOT: ["devtools/checks.py"]
     )
+    monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (1, 1, 0, 0))
     calls = []
     monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
 
@@ -368,3 +375,74 @@ def test_t_v193_mutation_dirty_tree_check_blocks_before_running_anything(monkeyp
     assert calls == []
     err = capsys.readouterr().err
     assert "devtools/checks.py" in err
+
+
+# ---------------------------------------------------------------------------
+# v1.9.3 T1+T2 review (docs/spec/task-briefs/v193-T12-review.md finding 2):
+# `_CURRENT_CHILD`/`_terminate_current_child`/the handler's call to it had no
+# test and no mutation coverage.
+# ---------------------------------------------------------------------------
+
+
+class _FakeChildProc:
+    """A `subprocess.Popen`-shaped double: no real process anywhere."""
+
+    def __init__(self, pid, *, already_exited=False):
+        self.pid = pid
+        self._returncode = 0 if already_exited else None
+        self.wait_calls = 0
+
+    def poll(self):
+        return self._returncode
+
+    def wait(self, timeout=None):
+        self.wait_calls += 1
+        self._returncode = 0
+        return self._returncode
+
+
+def test_t_v193_terminate_current_child_sends_sigterm_to_the_process_group(monkeypatch):
+    proc = _FakeChildProc(pid=99999)
+    monkeypatch.setattr(mc, "_CURRENT_CHILD", proc)
+    killpg_calls = []
+    monkeypatch.setattr(mc.os, "killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+
+    mc._terminate_current_child()
+
+    assert killpg_calls == [(99999, signal.SIGTERM)]
+    assert proc.wait_calls == 1
+
+
+def test_t_v193_terminate_current_child_is_a_noop_when_none_or_already_exited(monkeypatch):
+    killpg_calls = []
+    monkeypatch.setattr(mc.os, "killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+
+    monkeypatch.setattr(mc, "_CURRENT_CHILD", None)
+    mc._terminate_current_child()
+    assert killpg_calls == []
+
+    monkeypatch.setattr(mc, "_CURRENT_CHILD", _FakeChildProc(pid=1, already_exited=True))
+    mc._terminate_current_child()
+    assert killpg_calls == []
+
+
+def test_t_v193_signal_handler_terminates_child_before_restoring_and_exiting(monkeypatch):
+    # Order matters: a signal this process receives mid-run must terminate
+    # the running pytest child *before* the tree is restored and the
+    # process exits -- terminating after restore_all (or not at all) is
+    # exactly the pre-fix defect (report-v1.9.2.md disclosure b).
+    calls = []
+    monkeypatch.setattr(mc, "_terminate_current_child", lambda: calls.append("terminate"))
+    restorer = mc._Restorer()
+    monkeypatch.setattr(restorer, "restore_all", lambda: calls.append("restore"))
+
+    previous = mc._install_signal_handlers(restorer)
+    try:
+        handler = signal.getsignal(signal.SIGTERM)
+        with pytest.raises(SystemExit) as exc_info:
+            handler(signal.SIGTERM, None)
+        assert exc_info.value.code == 1
+    finally:
+        mc._restore_signal_handlers(previous)
+
+    assert calls == ["terminate", "restore"]

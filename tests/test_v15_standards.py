@@ -632,26 +632,81 @@ def test_v15_scan_03_fail_closed_timeout(tmp_path: Path):
 
 
 def test_v193_t1_fix2_timeout_sends_sigterm_before_sigkill(tmp_path: Path, monkeypatch):
-    # v1.9.3 T1 commit B, fix 2 (docs/spec/task-briefs/v193-T1.md): a timed-
-    # out gate must be SIGTERMed (giving a well-behaved child -- e.g.
-    # mutation_check.py's own tree-restoring handler -- a chance to run)
-    # before it is SIGKILLed. A child that only traps SIGTERM and writes a
-    # marker file, never exiting on its own after that, can only leave the
-    # marker if it actually received SIGTERM; a SIGKILL-only path would kill
-    # it with no marker written. `checks.run_argv`'s own
-    # `_TERMINATE_GRACE_S` is patched down so the whole timeout+grace path
-    # stays well under 2s.
+    # v1.9.3 T1 commit B, fix 2 (docs/spec/task-briefs/v193-T1.md); rewritten
+    # per the T1+T2 review (docs/spec/task-briefs/v193-T12-review.md finding
+    # 1): the original version's direct-child-only marker proved nothing
+    # about *process-group* signalling -- swapping `os.killpg` for
+    # `os.kill(proc.pid, ...)` (the pre-fix defect) still passed it, since
+    # the direct child received the signal either way. A **grandchild** --
+    # spawned by the timed-out direct child, in the same process group
+    # (`start_new_session=True` makes the direct child the group leader; a
+    # plain `subprocess.Popen` grandchild joins that same group by default)
+    # -- can only receive SIGTERM via `os.killpg`; `os.kill(proc.pid, ...)`
+    # would touch only the direct child's pid, never the grandchild's.
+    #
+    # Deterministic, no sleep races: the grandchild writes a "ready" flag
+    # file the instant its SIGTERM handler is installed; the direct child
+    # polls for that flag (bounded loop, 5s ceiling -- generous, since the
+    # real wait is a handful of milliseconds) before it too sleeps past the
+    # gate's own 1s timeout. `_TERMINATE_GRACE_S` is patched down so the
+    # whole timeout+grace path stays well under 2s.
     marker = tmp_path / "sigterm-received.marker"
-    script = (
+    ready = tmp_path / "grandchild-ready.flag"
+    grandchild_script = (
         "import signal, time\n"
         f"signal.signal(signal.SIGTERM, lambda *_: open({str(marker)!r}, 'w').close())\n"
+        f"open({str(ready)!r}, 'w').close()\n"
+        "time.sleep(30)\n"
+    )
+    direct_child_script = (
+        "import os, subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild_script!r}])\n"
+        "deadline = time.monotonic() + 5.0\n"
+        f"while not os.path.exists({str(ready)!r}) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.01)\n"
         "time.sleep(30)\n"
     )
     monkeypatch.setattr(checks, "_TERMINATE_GRACE_S", 0.3)
-    result = checks.run_argv([sys.executable, "-c", script], tmp_path, 1)
+    result = checks.run_argv([sys.executable, "-c", direct_child_script], tmp_path, 1)
     assert not result.ok
     assert "timed out after 1s" in result.error
-    assert marker.exists()
+    assert marker.exists(), "the grandchild (not just the direct child) must receive SIGTERM"
+
+
+def test_v193_t12_review_finding3_exit_status_message_includes_stderr_tail(tmp_path: Path):
+    # v1.9.3 T1+T2 review (docs/spec/task-briefs/v193-T12-review.md finding
+    # 3): a failed exit_status gate's own stderr (e.g. mutation_check.py's
+    # refusal message, naming a dirty path) previously never reached the
+    # operator -- only "gate <name> exited <code>". Bounded to the last
+    # five non-empty stderr lines; stdout is never included.
+    repo = _init_repo(tmp_path)
+    _commit_all(repo)
+    script = (
+        "import sys\n"
+        "for i in range(1, 8):\n"
+        "    print('stderr line ' + str(i), file=sys.stderr)\n"
+        "print('stdout line, never in the message', file=sys.stdout)\n"
+        "sys.exit(1)\n"
+    )
+    gate = {
+        "kind": "command",
+        "result_mode": "exit_status",
+        "argv": [sys.executable, "-c", script],
+        "placeholders": {},
+        "success_exit_codes": [0],
+        "blocking": True,
+        "diff_scoped": False,
+        "timeout_seconds": 10,
+    }
+    result = _exec(gate, repo)
+    assert result.ran is True
+    assert result.blocked is True
+    assert "gate stub exited 1" in result.message
+    for i in range(3, 8):
+        assert f"stderr line {i}" in result.message
+    assert "stderr line 1" not in result.message
+    assert "stderr line 2" not in result.message
+    assert "stdout line" not in result.message
 
 
 def test_v15_scan_03_fail_closed_unparseable(tmp_path: Path):

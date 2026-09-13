@@ -1150,6 +1150,22 @@ def run_argv(
     return CommandResult(True, proc.returncode, stdout, stderr, None)
 
 
+# v1.9.3 T1+T2 review (docs/spec/task-briefs/v193-T12-review.md finding 3):
+# a failed `exit_status` gate previously reported only its exit code -- the
+# child's stderr (the refusal message a gate like `mutation_check.py`
+# prints, for instance) never reached the operator. Bounded, plain (no
+# `config.redact` -- that would pull `python-dotenv` into this
+# standard-library-only module for a registry `checks.py` never populates,
+# since it never calls `config.load_config()`/reads `.env`; every gate this
+# repository defines is a local dev-tool invocation, not raw secret output).
+_STDERR_TAIL_LINES = 5
+
+
+def _stderr_tail(stderr: bytes) -> str:
+    lines = [line for line in stderr.decode("utf-8", "replace").splitlines() if line.strip()]
+    return "\n".join(lines[-_STDERR_TAIL_LINES:])
+
+
 def render_token(token: str, values: dict[str, str]) -> str:
     def _sub(match: re.Match[str]) -> str:
         name = match.group(1)
@@ -1289,9 +1305,11 @@ def execute_command_gate(
     if result_mode == "exit_status":
         if cmd.returncode in gate["success_exit_codes"]:
             return GateResult(name, ran=True, blocked=False, message="clean")
-        return GateResult(
-            name, ran=True, blocked=gate["blocking"], message=f"gate {name} exited {cmd.returncode}"
-        )
+        message = f"gate {name} exited {cmd.returncode}"
+        tail = _stderr_tail(cmd.stderr)
+        if tail:
+            message += f"\n{tail}"
+        return GateResult(name, ran=True, blocked=gate["blocking"], message=message)
 
     if cmd.returncode in gate["success_exit_codes"]:
         raw_findings: list[dict[str, Any]] = []

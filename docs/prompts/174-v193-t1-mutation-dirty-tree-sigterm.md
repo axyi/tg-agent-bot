@@ -1,4 +1,10 @@
-# Prompt 174 — v1.9.3 T1 commit B: mutation runner restores a leftover mutated tree on start-up; gate timeouts terminate before they kill
+# Prompt 174 — v1.9.3 T1 commit B: mutation runner refuses a leftover mutated tree on start-up; gate timeouts terminate before they kill
+
+(v1.9.3 T1+T2 review, docs/spec/task-briefs/v193-T12-review.md finding 9:
+the task brief's own commit-B title said "restores"; the implementation
+refuses and reports, it never silently restores over a possible real edit
+-- this file's title is corrected to match; the brief's original title
+stays as written, unchanged, in `docs/spec/task-briefs/v193-T1.md`.)
 
 - **Date:** 2026-09-13
 - **Executor model:** claude-sonnet-5
