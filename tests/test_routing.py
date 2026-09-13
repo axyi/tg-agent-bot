@@ -353,12 +353,21 @@ def test_v195_main_binds_vec_chunks_and_the_rag_state_key(tmp_path, monkeypatch)
 
 
 def test_v195_main_exits_2_when_startup_schema_binding_refuses(tmp_path, monkeypatch, caplog):
-    """Wiring the pair into main() makes _bind_new_embedding_pair's and
-    _rebind_embedding_pair's ConfigError (orphaned vec_chunks, or the pair
-    changed while documents exist) reachable from main() for the first
-    time -- same exit-2-with-message shape as every other startup config
-    refusal (load_config's own ConfigError catch, _startup_docker_wiring's),
-    not an unhandled traceback."""
+    """Proves main()'s own wiring: a ConfigError raised from
+    _init_startup_schema (here synthetic, via monkeypatch) is caught by
+    main()'s new except clause -- same exit-2-with-message shape as every
+    other startup config refusal (load_config's own ConfigError catch,
+    _startup_docker_wiring's), not an unhandled traceback. The end-to-end
+    claim -- that a *real* ConfigError from _bind_new_embedding_pair/
+    _rebind_embedding_pair reaches this same clause -- is proved separately
+    by test_v195_main_exits_2_on_a_real_pair_change_refusal below, against
+    a real database, not a monkeypatched raise.
+
+    LogRecord.getMessage() is only `msg % args` -- it never renders
+    exc_info, so a substring check against it is structurally incapable of
+    catching a traceback leak (it would stay green even if the except
+    clause used log.exception(...)). r.exc_info is None is what actually
+    proves no exception got attached to the record."""
     cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db")
     captured, built = {}, []
     _stub_startup(monkeypatch, cfg, captured, built)
@@ -371,7 +380,52 @@ def test_v195_main_exits_2_when_startup_schema_binding_refuses(tmp_path, monkeyp
     with caplog.at_level(logging.ERROR):
         assert bot.main([]) == 2
     assert any("configuration error" in r.getMessage() for r in caplog.records)
-    assert all("Traceback" not in r.getMessage() for r in caplog.records)
+    assert all(r.exc_info is None for r in caplog.records)
+
+
+def test_v195_main_exits_2_on_a_real_pair_change_refusal(tmp_path, monkeypatch, caplog):
+    """The end-to-end proof finding 2 asked for: a real database, indexed
+    under one embedding pair with a document already present, started with
+    a *different* configured pair. _rebind_embedding_pair's real
+    ConfigError (STO-04: the pair changed while documents exist) must
+    propagate out of storage.init_schema, through _init_startup_schema,
+    and be caught by main()'s own except clause -- exit 2, the redacted
+    message logged, no traceback -- exactly like the synthetic-raise test
+    above, but proving the real storage-layer exception reaches it, not a
+    monkeypatched stand-in. The pair and the document must both survive
+    untouched (STO-04: "raised without altering anything")."""
+    db_path = tmp_path / "main.db"
+    conn = storage.connect(db_path)
+    storage.init_schema(conn, embedding_dim=16, embedding_model="old-model")
+    storage.add_document(
+        conn,
+        user_id=USER_ID,
+        filename="a.txt",
+        file_type="txt",
+        created_at="2026-01-01T00:00:00Z",
+        size_bytes=5,
+        text_chars=5,
+        page_count=None,
+        chunk_count=1,
+        sha256="x" * 8,
+    )
+    conn.close()
+
+    cfg = make_cfg(tmp_path, db_path=db_path, embedding_model="new-model", embedding_dim=16)
+    captured, built = {}, []
+    _stub_startup(monkeypatch, cfg, captured, built)
+
+    with caplog.at_level(logging.ERROR):
+        assert bot.main([]) == 2
+    assert any("configuration error" in r.getMessage() for r in caplog.records)
+    assert all(r.exc_info is None for r in caplog.records)
+
+    conn2 = storage.connect_readonly(db_path)
+    try:
+        assert storage.get_state(conn2, "rag.embedding") == "old-model:16"
+        assert storage.document_count_all(conn2) == 1
+    finally:
+        conn2.close()
 
 
 # --------------------------------------------------------------------------
