@@ -841,7 +841,8 @@ exactly as they are:
 | v1.9.0 | 1.9.0 | RAG over user documents |
 | v1.9.1 | 1.9.1 | rerank contract fix (`response_format` JSON schema, `LLM_RERANK_MODEL`) making gate 7 enforceable |
 | v1.9.2 | 1.9.2 | whole-tree static analysis (skylos 27 → 0, 75 files reformatted); mutation runner orders test files by relevance and `pytest-xdist` under gate 3, cutting gate-6/gate-3 walls |
-| v1.9.3 | 1.9.3 | pre-push runs `mutation-all` (one authoritative run, not five subsets); gate-timeout SIGTERM-before-SIGKILL fix (no more orphaned, unrestored mutated tree); gate-7 rerank third-attempt tail fixed; ruff rule-family proposal adopted (`select` + `never`); this release |
+| v1.9.3 | 1.9.3 | pre-push runs `mutation-all` (one authoritative run, not five subsets); gate-timeout SIGTERM-before-SIGKILL fix (no more orphaned, unrestored mutated tree); gate-7 rerank third-attempt tail fixed; ruff rule-family proposal adopted (`select` + `never`) |
+| v1.9.4 | 1.9.4 | secrets redacted at the logging layer (`RedactingFormatter`, every entry point); gate-7 smoke gains a context-proof third turn, measurable via the opt-in `LLM_EVAL_CHAT_MODEL`; a hung mutation is terminated and reported by id after 180s instead of tripping only the gate's own timeout; `PTH*`/`RUF043` ruff rows adopted; this release |
 
 ## Token economy
 

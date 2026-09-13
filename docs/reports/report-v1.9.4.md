@@ -527,3 +527,191 @@ no search_documents call sharing a token with turn 1's question` /
 AND evidence) passes correctly against the real production corpus, and
 finding 1's `WARNING` fix took effect: zero INFO-level lines in this run's
 entire captured output (previously ~88/run).
+
+## T5 -- version bump, paperwork, authoritative gates, tag
+
+Contract: `docs/spec/task-briefs/v194-T5.md`, prompt 187.
+
+**Version.** `pyproject.toml`'s `project.version` 1.9.3 -> 1.9.4, `uv.lock`
+regenerated to match (`uv lock`). `tests/test_v194_version.py`
+(`T-V194-VER-01`) red before the bump (`AssertionError: assert '1.9.3' ==
+'1.9.4'`), green after. `tests/test_v193_version.py` repointed to the
+frozen `v1.9.3` git-tag blob (`git show v1.9.3:pyproject.toml`), the same
+convention `tests/test_v180_version.py`, `tests/test_v190_version.py`,
+`tests/test_v191_version.py` and `tests/test_v192_version.py` already
+carry, never deleted (REQ-V190-EC-03).
+
+**Count-bearing lines**, measured after every other edit in this task:
+1634 tests (`pytest --collect-only -q`, 1633 passed + 1 skipped), 119
+mutation entries (unchanged by this task's own edits -- all five new
+`v194-*` entries were already landed by T1/T2/T3). `AGENTS.md`'s gate-3
+line moved 1610 -> 1634, its gate-6 line moved 114 -> 119 with the
+narrative extended to name all five new `v194-*` entries by task
+(T1's `v194-redacting-formatter-skips-redact`/`v194-bench-logging-
+unredacted`, T2's `v194-smoke-turn3-gold-unchecked`, T3's `v194-mutation-
+hang-unbounded`/`v194-mutation-hang-reported-as-killed`), attributed to
+"v1.9.4 T5", the task landing the paperwork for all of them.
+`tests/test_v190_agents.py`'s and `tests/test_v170_bench.py`'s own
+count-bearing/report_path tests renamed (`test_t_v193_*` -> `test_t_v194_*`)
+and repointed to assert 1634/119 and `report-v1.9.4.md`. README's release
+table gained a `v1.9.4` row; the `v1.9.3` row's own "this release" clause
+dropped. `config/quality_gates.yaml`'s `lint-docs.report_path` repointed
+`report-v1.9.3.md` -> `report-v1.9.4.md` (REQ-V190-RPT-01).
+
+**Gate-6 timeout re-derived.** This task's own authoritative gate-6 run
+(below) measured 780.879s at 119 entries, above the margin `1530s`
+(measured at 114 entries, v1.9.3 T4) left. Re-sized by the file's own
+survivor-safe rule: 2x780.879s + 70s = ~1631.758s, rounded up to **1640s**
+(`config/quality_gates.yaml`'s `mutation-all.timeout_seconds`, comment
+extended in place). `rag-eval.timeout_seconds` (1120s, set at T2/the
+review) re-checked against this run's own 382.527s wall (gate 7 below) --
+comfortably under, unchanged.
+
+## Gates (T5, final tree, verbatim from AGENTS.md, in order)
+
+Nothing else on the box during gate 6; gate 6 and gate 7 not run
+concurrently. Gate 7 on the production route (`LLM_EVAL_CHAT_MODEL`
+unset).
+
+| # | Gate | Exit | Wall |
+| --- | --- | --- | --- |
+| 1 | `uv sync --locked` | 0 | 0.017s |
+| 2 | `ruff check .` | 0 | 0.045s |
+| 3 | `pytest` | 0 | 23.707s (1633 passed, 1 skipped, 1634 collected) |
+| 4 | `bot.py --selftest` | 0 | 0.555s |
+| 5 | `bot.py --selftest-live` | 0 | 3.199s (all seven live checks OK, including `lmstudio`) |
+| 6 | `mutation_check.py` (no `--select`) | 0 | 780.879s (119/119 killed, 0 survived, 0 errored, 0 drifted) |
+| 7 | `rag_eval.py` | 0 | 382.527s (PASS: hybrid recall@5=1.000, hybrid+rerank recall@5=1.000; advisory conversation-aware smoke -- TOOL-06 pin: fail, turn 2 answered from turn-1 context with no `search_documents` call, the same non-defect model-behaviour the T1+T2/T2 sections already document; context-proof: pass, turn 3 returned the gold source `vacation_policy.md`) |
+
+**Gate-6 wall, chronological:** 727.799s @ 114 entries (v1.9.3 T4) ->
+780.879s @ 119 entries (this run, T5, the authoritative final-tree run).
+Up from T4's own number, consistent with five more entries plus this
+box's own documented shared/contended-machine variance (noted at every
+re-measurement in `config/quality_gates.yaml`'s `mutation-all` comment
+history) rather than any change in the mutation set itself.
+`mutation-all.timeout_seconds` re-sized by the file's own survivor-safe
+rule from this run's wall: 1530s -> 1640s (2x780.879s + 70s =
+1631.758s, rounded up). Every other timeout touched this release
+re-checked against this run's walls: `rag-eval.timeout_seconds` kept at
+1120s, re-checked against this run's own 382.527s (comfortably under it,
+consistent with A1/A2's own 549.801-557.692s and the review's own
+342.687s, all inside the same margin) -- unchanged.
+
+## Delegation record
+
+Every executor model named: T1/T2/T3/T4 implementer `claude-sonnet-5`;
+the review `claude-opus-5`; T5 (this task) implementer `claude-sonnet-5`.
+
+- T1 -- delegated, brief `docs/spec/task-briefs/v194-T1.md`; executor
+  `claude-sonnet-5`; commit `505bbf7` (secrets redacted at the logging
+  layer, `RedactingFormatter` + four entry points).
+- T2 -- delegated (offline half: turn 3, the opt-in routing purpose,
+  tests, mutation entry, paperwork), brief
+  `docs/spec/task-briefs/v194-T2.md`; executor `claude-sonnet-5`; commit
+  `b5db300` (gate-7 smoke gains a context-proof turn). The five live
+  measurement runs (A1/A2/B1/B1'/B2') were run directly by the
+  coordinator (real money, sequenced alone on the box), who then decided
+  the recommendation and re-derived the gate-7 timeout.
+- T2 measurement addendum -- a coordinator-authored follow-up (no
+  separate task-brief file), prompt 185
+  (`185-v194-t2-measurement-addendum.md`), docs-only: three more live
+  measurement runs (C1/C2/D1/D2) settling the route question the T2
+  B-rows had left open, run directly by the coordinator.
+- T3 -- delegated, brief `docs/spec/task-briefs/v194-T3.md`; executor
+  `claude-sonnet-5`; commit `4667d16` (a hung mutation is terminated and
+  reported by id).
+- T4 -- delegated, brief `docs/spec/task-briefs/v194-T4.md`; executor
+  `claude-sonnet-5`; commit `4253678` (the `PTH`/`RUF043` ruff tail
+  adopted, `PLW0603` moved to "never").
+- Review -- delegated, brief `docs/spec/task-briefs/v194-review.md`; a
+  clean-context (`claude-opus-5`) review of the five landed commits (no
+  🔴, one 🟠, seven 🟡 -- 8 total), closed in one follow-up commit
+  (`fcb7ec8`, prompt 186, executor `claude-sonnet-5`) without rewriting
+  any of the five reviewed commits.
+- T5 -- delegated, brief `docs/spec/task-briefs/v194-T5.md`; executor
+  `claude-sonnet-5`; this commit (version bump, count-bearing lines,
+  paperwork, seven gates, tag).
+
+## Disclosures
+
+- **Trailer string.** Every commit in this release carries
+  `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`, matching the
+  session's own named attribution string exactly -- no mismatch to
+  disclose this release.
+- **`LLM_EVAL_CHAT_MODEL` -- decision left to the operator, both numbers
+  stated.** T2's own recommendation is to leave the variable unset (the
+  production route): both smoke verdicts (`TOOL-06` pin and context-proof)
+  read `pass` on the production route (A1 557.692s, A2 549.801s), and no
+  OpenRouter candidate tried across either round (`mistral-small-24b`,
+  `mistral-nemo`, `gpt-4o-mini`, `gemini-2.5-flash`) keeps the smoke
+  meaningful. The one route that does stay meaningful,
+  `lmstudio:qwen/qwen3.5-9b` (D1 121.923s, D2 121.404s, both verdicts
+  `pass`), is ~4.5x faster than production but does not reduce box
+  contention (the same LM Studio box already runs the production model)
+  and is ~30x slower than the fastest-but-meaningless OpenRouter routes.
+  This report states both numbers and T2's own recommendation; the
+  operator may still choose to set `LLM_EVAL_CHAT_MODEL` to the local
+  route for a faster (still meaningful) gate 7 at the cost of shared-box
+  contention -- left to the operator, not decided by this task.
+- **Redaction hardening -- closed.** The v1.9.3 T1+T2 review's open tail
+  (redaction at the logging layer, no code change at the time) is closed
+  by T1 (`RedactingFormatter` at every entry point) and hardened further
+  by the review's own finding 2 (the cached `record.exc_text` also
+  redacted). No longer an open item.
+- **Two v1.10 candidates carried forward** (see Open tail below): LM
+  Studio model-swap measurement, and the smoke/agent prompt not compelling
+  a document search for every capable model.
+
+## Open tail
+
+- The v1.9.3 T1+T2 review's redaction-hardening open tail is **closed**
+  (see Disclosures above).
+- Two genuinely open items, carried to v1.10.0:
+  1. **LM Studio model-swap measurement.** The gate-7 wall grew from
+     v1.9.3's 268s to this release's ~550-560s; turns 1+2 alone (no code
+     change touching them) already grew 253s -> 386-394s, consistent with
+     LM Studio swapping the loaded chat model out for the embedding model
+     between turns and back, paying a reload-like cost on every call
+     rather than only the first (see T2's "Wall attribution" paragraph).
+     Stated as a hypothesis with numbers, not a proven mechanism --
+     v1.10 candidate: instrument LM Studio's own loaded-model state (or
+     its request log) across a full gate-7 run to measure model swaps
+     directly.
+  2. **The smoke/agent prompt does not compel a document search.** Both
+     T2's addendum (`gpt-4o-mini`, `gemini-2.5-flash`) and the review's
+     own confirmation run found that a strong, reliable tool-caller can
+     still answer entirely from its own general knowledge instead of
+     calling `search_documents`, when nothing in the system prompt or the
+     tool's own description forces a document check first. Out of this
+     release's scope (a smoke-test measurement task, not a system-prompt
+     change) -- v1.10 candidate: tighten the system prompt or the tool
+     description to compel a document search when the user has documents
+     indexed.
+
+## Ledger row (paste into `economics.md`)
+
+Review findings counted from the review brief itself, not from memory:
+`docs/spec/task-briefs/v194-review.md` (no 🔴, one 🟠, seven 🟡 -- 8
+total), closed.
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.4 | 2026-09-13 | — (patch, no new spec; task briefs `docs/spec/task-briefs/v194-T1.md`, `-T2.md`, `-T3.md`, `-T4.md`, `-review.md`, `-T5.md`) | 7 (181–187) | yes — all seven gates green on the authoritative run of the final tree | review 0 🔴 / 1 🟠 / 7 🟡 (8) — all fixed | unknown (harness does not expose per-request usage) | $0 marginal (Claude Code subscription-metered session; live inference on gates 5/7 and T2's ten measurement runs across task+addendum+review, at reference/list prices, well under $0.10 combined, no metered spend tracked) | claude-sonnet-5 (review: claude-opus-5) | Claude Code |
+```
+
+## Verdict
+
+All seven gates green on the final tree (see "Gates (T5)" above); the
+operator's "по всем трём предложенным пунктам и прочим хвостам" is closed
+in full: secrets are masked at the logging layer (T1); gate 7's smoke has
+a context-proof third turn whose chat route is measurable via
+`LLM_EVAL_CHAT_MODEL`, decision left to the operator with both numbers
+(T2); a hung mutation is reported `errored` with its id after 180s
+instead of tripping the gate's own coarse timeout nameless (T3); the
+`PTH`/`RUF043` "not now" rows are adopted, `PLW0603` moved to "never"
+(T4); the review's own eight findings (no 🔴, one 🟠, seven 🟡) are all
+closed without rewriting any of the five reviewed commits. The v1.9.3
+T1+T2 review's redaction-hardening open tail is closed; two genuinely
+open items are carried to v1.10.0 (see Open tail). Version bumped
+1.9.3 -> 1.9.4, count-bearing lines at their real final numbers (1634
+tests, 119 mutation entries), annotated tag `v1.9.4` created on the
+release commit. PASS.
