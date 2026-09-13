@@ -1487,6 +1487,29 @@ MUTATIONS = [
         "branch to pytest's own KILLED exit code would hide every hang "
         "behind a false-positive clean kill",
     },
+    # -- v1.9.5 T1 (docs/spec/task-briefs/v195-T1.md, GitHub issue #3):
+    # main()'s own call site must route through _init_startup_schema, which
+    # always passes cfg.embedding_dim/cfg.embedding_model -- this mutation
+    # reverts it back to the old bare storage.init_schema(conn), restoring
+    # the pre-fix defect (vec_chunks and the rag.embedding state key never
+    # created on a RAG-configured deployment). Killed by
+    # tests/test_routing.py's
+    # test_v195_main_binds_vec_chunks_and_the_rag_state_key (through
+    # bot.main, not a hand-built connection). ---------------------------
+    {
+        "id": "v195-init-schema-drops-the-pair",
+        "path": "bot.py",
+        "find": "        _init_startup_schema(conn, cfg)\n    except ConfigError as exc:\n",
+        "replace": (
+            "        storage.init_schema(conn)  # v195-init-schema-drops-the-pair\n"
+            "    except ConfigError as exc:\n"
+        ),
+        "why": "v1.9.5 T1: main() must call _init_startup_schema(conn, cfg), "
+        "never storage.init_schema(conn) bare -- the bare call is exactly "
+        "GitHub issue #3's bug (every document upload fails with 'Storage "
+        "error. The document was not saved.' because vec_chunks is never "
+        "created)",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

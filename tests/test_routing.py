@@ -5,6 +5,8 @@ every assertion here is offline: fakes for the clients, a mapping for the
 environment, and no transport is ever asked for a response.
 """
 
+import logging
+
 import httpx
 import pytest
 
@@ -315,6 +317,61 @@ def test_rte_01_main_builds_no_second_client_when_the_variable_is_unset(tmp_path
     assert bot.main([]) == 0
     assert built == ["agent"]
     assert captured["summary_llm"] is None
+
+
+# --------------------------------------------------------------------------
+# v1.9.5 T1 (GitHub issue #3, REQ-V190-STO-04) -- all three of bot.py's
+# storage.init_schema call sites must route through the shared
+# _init_startup_schema helper, which always passes the configured embedding
+# pair, so vec_chunks and the rag.embedding state key are bound at startup
+# on a RAG-configured deployment instead of only at the first document
+# insert (where the table's absence raised OperationalError).
+# --------------------------------------------------------------------------
+
+
+def test_v195_main_binds_vec_chunks_and_the_rag_state_key(tmp_path, monkeypatch):
+    """The AC's own regression test, through bot.main -- not a hand-built
+    connection with embedding_dim= passed explicitly. Red on pre-fix HEAD
+    (main()'s storage.init_schema(conn) call is bare, so a fresh database
+    never gets vec_chunks or the rag.embedding key); green once main()
+    routes through _init_startup_schema(conn, cfg)."""
+    cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db", embedding_model="m", embedding_dim=16)
+    captured, built = {}, []
+    _stub_startup(monkeypatch, cfg, captured, built)
+
+    assert bot.main([]) == 0
+
+    conn = storage.connect_readonly(cfg.db_path)
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vec_chunks'"
+        ).fetchone()
+        assert row is not None
+        assert storage.get_state(conn, "rag.embedding") == "m:16"
+    finally:
+        conn.close()
+
+
+def test_v195_main_exits_2_when_startup_schema_binding_refuses(tmp_path, monkeypatch, caplog):
+    """Wiring the pair into main() makes _bind_new_embedding_pair's and
+    _rebind_embedding_pair's ConfigError (orphaned vec_chunks, or the pair
+    changed while documents exist) reachable from main() for the first
+    time -- same exit-2-with-message shape as every other startup config
+    refusal (load_config's own ConfigError catch, _startup_docker_wiring's),
+    not an unhandled traceback."""
+    cfg = make_cfg(tmp_path, db_path=tmp_path / "main.db")
+    captured, built = {}, []
+    _stub_startup(monkeypatch, cfg, captured, built)
+
+    def raise_config_error(conn, cfg):
+        raise ConfigError("synthetic vec_chunks binding refusal")
+
+    monkeypatch.setattr(bot, "_init_startup_schema", raise_config_error)
+
+    with caplog.at_level(logging.ERROR):
+        assert bot.main([]) == 2
+    assert any("configuration error" in r.getMessage() for r in caplog.records)
+    assert all("Traceback" not in r.getMessage() for r in caplog.records)
 
 
 # --------------------------------------------------------------------------
