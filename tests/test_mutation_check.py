@@ -206,7 +206,13 @@ def test_t_v160_gate_02_mutation_v160_gate_mirrors_mutation_v15():
     # (D2, v1.5.1) -- both gates follow the same 2x-measured rule
     assert isinstance(v160["timeout_seconds"], int) and v160["timeout_seconds"] > 0
 
-    assert "mutation-v160" in config["profiles"]["pre-push"]
+    # v1.9.3 T1 (docs/spec/task-briefs/v193-T1.md commit A): `pre-push` now
+    # runs `mutation-all` instead of the five `mutation-v*` subsets, which
+    # moved to the inert `mutation-subsets` bookkeeping profile so the
+    # config loader's orphan-gate check still passes -- repointed, not
+    # deleted, per this task's own constraint.
+    assert "mutation-v160" in config["profiles"]["mutation-subsets"]
+    assert "mutation-v160" not in config["profiles"]["pre-push"]
 
 
 # ---------------------------------------------------------------------------

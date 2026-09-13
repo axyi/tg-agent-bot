@@ -18,6 +18,14 @@ refreshed at v1.9.2 T1's review pass, prompt 166 — verified with
 `grep -n` against the tree at that commit; re-verify before trusting them
 against a later one, since line numbers drift with unrelated edits.)
 
+v1.9.3 T1 (docs/spec/task-briefs/v193-T1.md commit A): `pre-push`'s cell
+moves `yes` -> `—` on the five `mutation_check.py --select vNNN-` rows and
+`—` -> `yes` on the `mutation_check.py` (all) row -- `pre-push` now runs
+the one all-entries gate instead of the five partial subsets; every row
+stays present (`test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
+asserts every label in `_GATE_MATRIX_LABEL_TO_NAME` is still a row here),
+only their `pre-push` cells move.
+
 v1.9.2 T1 (REQ-V15-NG-04): the single `ruff format --check` row split into
 `(staged)`/`(tree)`, the same split `ruff check` already has, once the
 whole-tree reformat closed the debt spec-v1.5 parked and `ruff-format-all`
@@ -42,12 +50,12 @@ own comment there explains why `ruff-format` itself cannot simply retire:
 | `bot.py --selftest` | — | yes | yes |
 | `bot.py --selftest-live` | — | — | yes |
 | `rag_eval.py` | — | — | yes |
-| `mutation_check.py --select v15-` | — | yes | — |
-| `mutation_check.py --select v160-` | — | yes | — |
-| `mutation_check.py --select v170-` | — | yes | — |
-| `mutation_check.py --select v180-` | — | yes | — |
-| `mutation_check.py --select v190-` | — | yes | — |
-| `mutation_check.py` (all) | — | — | yes |
+| `mutation_check.py --select v15-` | — | — | — |
+| `mutation_check.py --select v160-` | — | — | — |
+| `mutation_check.py --select v170-` | — | — | — |
+| `mutation_check.py --select v180-` | — | — | — |
+| `mutation_check.py --select v190-` | — | — | — |
+| `mutation_check.py` (all) | — | yes | yes |
 | `trivy fs` | — | yes | yes |
 | `semgrep scan` | — | yes | yes |
 | `skylos` | — | yes | yes |
