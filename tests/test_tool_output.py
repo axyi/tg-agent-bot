@@ -647,16 +647,16 @@ def test_too_06_a_hard_linked_target_never_reaches_the_outside_inode(tmp_path):
     sandbox = tmp_path / "sandbox"
     (sandbox / "fetch").mkdir(parents=True)
     os.link(outside, sandbox / "fetch" / hashed_name())
-    assert os.stat(outside).st_nlink == 2
+    assert outside.stat().st_nlink == 2
 
     envelope = fetched(sandbox, "z" * 3000, content_type="text/plain")
     assert envelope["saved_to"] == f"fetch/{hashed_name()}"
     assert envelope["save_error"] is None
     assert outside.read_text(encoding="utf-8") == "precious"
-    assert os.stat(outside).st_nlink == 1
+    assert outside.stat().st_nlink == 1
     saved = sandbox / "fetch" / hashed_name()
     assert saved.read_text(encoding="utf-8") == "z" * 3000
-    assert os.stat(saved).st_ino != os.stat(outside).st_ino
+    assert saved.stat().st_ino != outside.stat().st_ino
 
 
 def test_too_06_a_second_save_of_the_same_url_replaces_the_file(tmp_path):

@@ -280,7 +280,7 @@ MUTATIONS = [
     {
         "id": "sec-qta-03-chmod-and-retry",
         "path": "bot.py",
-        "find": "    os.chmod(path, stat.S_IRWXU)\n",
+        "find": "            p.chmod(stat.S_IRWXU)\n",
         "replace": "",
         "why": "REQ-V12-QTA-03: the startup cleanup must survive a chmod-000 subdirectory",
     },
@@ -565,7 +565,7 @@ MUTATIONS = [
     {
         "id": "v13-symlink-chmod",
         "path": "bot.py",
-        "find": ("            if os.path.islink(path):\n                continue\n"),
+        "find": ("            if p.is_symlink():\n                continue\n"),
         "replace": "",
         "why": "REQ-V13-CO-01: the recovery chmod must skip a symlink, never its target",
     },

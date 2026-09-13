@@ -585,20 +585,21 @@ def _remove_sandbox_entry(entry: Path) -> None:
     them — the container ran as the bot's own uid); then retry the whole
     removal once, letting a second failure propagate to the caller."""
     if entry.is_symlink() or not entry.is_dir():
-        os.unlink(entry)
+        entry.unlink()
         return
     failed_paths: list[str] = []
     shutil.rmtree(entry, onexc=lambda _func, path, _exc: failed_paths.append(path))
     if failed_paths:
         for path in failed_paths:
+            p = Path(path)
             # REQ-V13-CO-01: `os.chmod` follows symlinks, so a symlink the
             # first pass could not unlink would have its *target* — a
             # bot-owned file anywhere on the host — chmod-ed to `u+rwX`.
             # A symlink never needs a mode change: unlinking it needs only
             # its parent directory's mode, which this same loop fixes.
-            if os.path.islink(path):
+            if p.is_symlink():
                 continue
-            os.chmod(path, stat.S_IRWXU)
+            p.chmod(stat.S_IRWXU)
         shutil.rmtree(entry)
 
 
@@ -738,7 +739,7 @@ def _refuse_shared_parent(parent: Path) -> None:
     on a pre-existing file, which `O_NOFOLLOW` + `O_TRUNC` + the `fstat`
     checks above defeat; a non-sticky one does not even need a pre-existing
     file, so it is refused outright."""
-    st = os.stat(parent)
+    st = parent.stat()
     if (st.st_mode & 0o002) and not (st.st_mode & stat.S_ISVTX):
         raise ConfigError(
             f'"{parent}" is world-writable and not sticky; move DB_PATH out of a shared directory'

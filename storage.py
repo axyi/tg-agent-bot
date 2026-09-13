@@ -477,15 +477,15 @@ def connect_readonly(db_path: Path) -> sqlite3.Connection:
 
 def _restrict_permissions(db_path: Path) -> None:
     """REQ-V1-SEC-04: the conversation store is readable by its owner only."""
-    os.chmod(db_path, 0o600)
+    db_path.chmod(0o600)
     for suffix in ("-wal", "-shm"):
         with contextlib.suppress(FileNotFoundError):
-            os.chmod(str(db_path) + suffix, 0o600)
+            Path(str(db_path) + suffix).chmod(0o600)
     # `config.PROJECT_ROOT` is read at call time so that a monkeypatched root is
     # honoured; the project root itself is never chmod-ed.
     parent = Path(os.path.normpath(db_path.parent))
     if parent != Path(os.path.normpath(config.PROJECT_ROOT)):
-        os.chmod(parent, 0o700)
+        parent.chmod(0o700)
 
 
 def init_schema(

@@ -668,7 +668,7 @@ def sandbox_usage(path: Path) -> tuple[int, str]:
                     status = SCAN_CUT_SHORT
                 return (total, status)
             try:
-                entry_stat = os.lstat(os.path.join(root, name))
+                entry_stat = Path(root, name).lstat()
             except OSError:
                 status = SCAN_INCOMPLETE
                 continue
@@ -686,7 +686,7 @@ def _process_start_ticks(pid: int) -> int:
     parentheses. `line.split()[21]` would silently read the wrong field for any
     such process.
     """
-    with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+    with Path(f"/proc/{pid}/stat").open(encoding="utf-8") as fh:
         line = fh.read()
     remainder = line.rsplit(")", 1)[1]
     return int(remainder.split()[19])
@@ -1228,7 +1228,7 @@ def append_audit(path: Path, record: dict) -> None:
     not take the tool call down with it."""
     try:
         line = config.redact(json.dumps(record, ensure_ascii=False))
-        existed = os.path.exists(path)
+        existed = path.exists()
         handle = os.fdopen(
             os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600),
             "a",
@@ -1237,7 +1237,7 @@ def append_audit(path: Path, record: dict) -> None:
         with handle:
             handle.write(line + "\n")
         if not existed:
-            os.chmod(path, 0o600)
+            path.chmod(0o600)
     except OSError as exc:
         # TRY400: an audit-log write failure is never fatal (this sink is
         # best-effort, like `_docker_kill`); a traceback on a potentially

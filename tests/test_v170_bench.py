@@ -37,7 +37,7 @@ _ACC03_ALLOWED_SELECTION_FILES = frozenset(
 
 
 def _load_real_baseline() -> dict:
-    with open(_REAL_BASELINE_PATH) as f:
+    with _REAL_BASELINE_PATH.open() as f:
         return json.load(f)
 
 
@@ -307,7 +307,7 @@ def test_n7_tag_escape_refused_before_any_filesystem_write(monkeypatch, capsys):
 
 
 def test_t_v170_ver_01_version_matches_independent_tomllib_read(capsys):
-    with open(_REAL_PROJECT_ROOT / "pyproject.toml", "rb") as handle:
+    with (_REAL_PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
         expected = tomllib.load(handle)["project"]["version"]
     assert bot_module.main(["--version"]) == 0
     assert capsys.readouterr().out == f"tg-agent-bot {expected}\n"
@@ -337,7 +337,7 @@ def _acc03_cand_v170_documents(root: Path = _REAL_PROJECT_ROOT) -> list[tuple[st
     bench_dir = root / "docs" / "assets" / "bench"
     docs = []
     for path in sorted(bench_dir.glob("cand-v170-*.json")):
-        with open(path, encoding="utf-8") as handle:
+        with path.open(encoding="utf-8") as handle:
             docs.append((path.stem, json.load(handle)))
     return docs
 

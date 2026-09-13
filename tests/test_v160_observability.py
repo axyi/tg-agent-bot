@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import re
 import sqlite3
 
 import pytest
@@ -229,7 +230,7 @@ def test_t_v160_trc_02_nested_span_inherits_trace_and_records_parent():
 def test_t_v160_trc_09_set_attribute_rejects_unlisted_key():
     with (
         tracing.start_span("s", tracing.KIND_INTERNAL) as span,
-        pytest.raises(ValueError, match="bogus.key"),
+        pytest.raises(ValueError, match=re.escape("bogus.key")),
     ):
         span.set_attribute("bogus.key", "x")
 

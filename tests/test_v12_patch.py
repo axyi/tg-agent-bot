@@ -10,6 +10,7 @@ import logging
 import socket
 import stat
 import sys
+from pathlib import Path
 
 import httpx
 import pytest
@@ -603,12 +604,12 @@ def test_t_v12_orp_01_start_ticks_survives_a_space_in_comm(monkeypatch):
     )
     fabricated = f"4242 (my weird (proc) name) {remainder}\n"
 
-    def fake_open(path, *args, **kwargs):
-        if path == "/proc/4242/stat":
+    def fake_open(self, *args, **kwargs):
+        if str(self) == "/proc/4242/stat":
             return io.StringIO(fabricated)
-        raise AssertionError(f"unexpected open: {path}")
+        raise AssertionError(f"unexpected open: {self}")
 
-    monkeypatch.setattr(tools, "open", fake_open, raising=False)
+    monkeypatch.setattr(Path, "open", fake_open)
     assert tools._process_start_ticks(4242) == 999888
 
 

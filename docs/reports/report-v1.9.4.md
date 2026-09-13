@@ -278,3 +278,63 @@ subagent performed the implementation and its own offline acceptance
 directly against `docs/spec/task-briefs/v194-T3.md` (no live/paid
 component); the coordinator independently re-ran acceptance, verified the
 diff, and committed.
+
+## T4 -- the "not now" ruff rows, now
+
+Contract: `docs/spec/task-briefs/v194-T4.md`, prompt 184.
+
+**Closed.** The two remaining "not now" rows of v1.9.3 T3's ruff decision
+table: `PTH*` (18 hits: `os.chmod`/`os.stat`/`os.unlink`/`os.path.islink`/
+`os.path.exists`/`os.path.join`/`open()` sites across `bot.py`, `storage.py`,
+`tools.py` and three test files) and `RUF043` (1 hit: an ambiguous
+`pytest.raises(match="bogus.key")` in `tests/test_v160_observability.py`,
+`.` a regex metacharacter, fixed with `re.escape(...)`, discrimination
+verified by hand against a mutated message before landing). Both now join
+`[tool.ruff.lint].select`. `PLW0603`'s row moves from "not now" to "never"
+(the module-state pattern `_shutdown`/`_started_at`/`_dropped_spans` rely
+on) with no change to its lint behaviour.
+
+**Per-rule tally:** PTH101 5 (`storage.py` `_restrict_permissions` x3,
+`bot.py` `_remove_sandbox_entry` x1, `tools.py` `append_audit` x1); PTH116 5
+(`bot.py` `_refuse_shared_parent` x1, `tests/test_tool_output.py`'s
+hardlink/inode test x4); PTH123 4 (`tools.py` `_process_start_ticks`'s
+`/proc/<pid>/stat` open, `tests/test_v170_bench.py` x3); PTH110/PTH114/
+PTH118/PTH108 1 each (`tools.py`'s `append_audit`/`sandbox_usage`, `bot.py`'s
+`_remove_sandbox_entry` x2); RUF043 1. **19/19 fixed, zero `noqa`** -- no
+`storage.py` rewrite changed a mode bit or exception path, so the brief's
+own escape hatch was never needed. Every rewrite kept identical semantics:
+`storage.py`'s `Path(str(db_path) + suffix)` string-arithmetic (never
+`.with_suffix`, which would replace the `.db` extension) and its exact
+`FileNotFoundError` suppression scope; `tools.py`'s `append_audit` left its
+raw `os.open`/`os.fdopen` fd pair (`O_WRONLY | O_APPEND | O_CREAT` with an
+explicit `0o600` create mode) untouched -- not equivalent to `Path.open()`.
+`devtools/bench_scenarios.py` (byte-hash-frozen, REQ-V13-BEN-12) has no
+PTH/RUF043 hits, so no new `per-file-ignores` entry was needed.
+
+One unplanned, in-scope adaptation: `tests/test_v12_patch.py`'s
+`test_t_v12_orp_01_start_ticks_survives_a_space_in_comm` monkeypatched the
+module-level `tools.open`, which `_process_start_ticks`'s rewrite
+(`open(...)` -> `Path(...).open(...)`) no longer calls -- adapted to
+monkeypatch `Path.open` instead, same fake-`io.StringIO` fixture, same
+assertion, no behaviour change to the code under test. `pytest`'s collected
+count moved 1631 -> 1631 passed (unchanged pass/skip split; no test added
+or removed, only one adapted).
+
+**Drift/re-derive record.** Two of 119 mutation entries drifted after
+`bot.py`'s rewrite (both matched the old `os.chmod(path, ...)`/
+`os.path.islink(path)` lines, which no longer exist verbatim):
+`sec-qta-03-chmod-and-retry` (`find` re-derived to
+`"            p.chmod(stat.S_IRWXU)\n"`) and `v13-symlink-chmod` (`find`
+re-derived to `"            if p.is_symlink():\n                continue\n"`),
+both with identical mutation semantics against the new pathlib shape.
+Drift script after re-derivation: 119/119 matched, 0 drifted. Both
+re-derived entries run by the coordinator via `--only` after commit (below).
+
+README.md and AGENTS.md were grepped for "PTH"/"RUF043"/"PLW0603" -- neither
+names a count for these rules, so neither needed an edit.
+
+**Delegation record.** Executor model: `claude-sonnet-5` (Claude Code). This
+subagent performed the implementation and its own offline acceptance
+directly against `docs/spec/task-briefs/v194-T4.md`; the coordinator
+independently re-ran acceptance, verified the diff and the two re-derived
+mutation entries, and committed.
