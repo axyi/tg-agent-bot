@@ -44,7 +44,7 @@ wrapped with timestamps):
   strictly sequential.
 - Amend only `docs/reports/report-v1.9.4.md`'s T2 measurement table
   (extended) and its Recommendation paragraph (rewritten from the full,
-  now sixteen-row table) plus `docs/llm-usage.md` (a new row) -- no code
+  now nine-row table) plus `docs/llm-usage.md` (a new row) -- no code
   change, no re-opening of the already-reviewed T2 commit.
 - Commit as a docs-only follow-up (this prompt file, the report edit, the
   llm-usage row) -- never amended into `b5db300`.

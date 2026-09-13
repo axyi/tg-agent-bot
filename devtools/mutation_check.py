@@ -1400,12 +1400,15 @@ MUTATIONS = [
     {
         "id": "v194-redacting-formatter-skips-redact",
         "path": "config.py",
-        "find": "        return redact(super().format(record))\n",
-        "replace": "        return super().format(record)\n",
+        "find": "        formatted = redact(super().format(record))\n",
+        "replace": "        formatted = super().format(record)\n",
         "why": "v1.9.4 T1: RedactingFormatter.format must return the "
         "rendered line passed through redact(), not the rendered line "
         "unredacted -- this is the one place a log.exception traceback (and "
-        "any chained __cause__/__context__) gets covered at all",
+        "any chained __cause__/__context__) gets covered at all. Re-derived "
+        "in the v1.9.4 review (finding 2) when format() grew a second "
+        "statement (redacting the cached record.exc_text too); same "
+        "semantics, new line text.",
     },
     # -- v1.9.4 T1: devtools/bench.py's own root-logger setup must use the
     # redacting formatter like every other entry point -- this mutation

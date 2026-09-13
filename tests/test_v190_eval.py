@@ -122,6 +122,17 @@ class _DynamicRerankLLM:
 _SYNTH_VACATION = (
     "Wombat colony population reached forty specimens this season according to the survey.\n"
 )
+# v1.9.4 review (finding 3): a second vacation-policy fixture that also
+# carries rag_eval._SMOKE_GOLD_EVIDENCE_2 verbatim, for tests exercising the
+# tightened turn-3 matcher (filename AND evidence, not filename alone).
+# Never the default -- only opted into via _write_synth_corpus's
+# `vacation_text` parameter -- so every other test's recall/page-hit
+# assertions (sized against _SYNTH_VACATION's own exact content/length)
+# stay unaffected.
+_SYNTH_VACATION_WITH_TRANSFER = (
+    _SYNTH_VACATION + "Unused colony transfer allowance permits carrying over не более 10 дней "
+    "worth of colony transfers annually.\n"
+)
 _SYNTH_ONBOARDING = (
     "Giraffe herd size documented seventeen animals near the savanna region reported today.\n"
 )
@@ -164,10 +175,10 @@ _SYNTH_QUESTIONS = [
 ]
 
 
-def _write_synth_corpus(tmp_path):
+def _write_synth_corpus(tmp_path, *, vacation_text: str = _SYNTH_VACATION):
     corpus_dir = tmp_path / "corpus"
     corpus_dir.mkdir()
-    (corpus_dir / "vacation_policy.md").write_text(_SYNTH_VACATION, encoding="utf-8")
+    (corpus_dir / "vacation_policy.md").write_text(vacation_text, encoding="utf-8")
     (corpus_dir / "onboarding.txt").write_text(_SYNTH_ONBOARDING, encoding="utf-8")
     (corpus_dir / "expenses.docx.md").write_text(_SYNTH_EXPENSES, encoding="utf-8")
     (corpus_dir / "security_guidelines.pdf.txt").write_text(_SYNTH_SECURITY, encoding="ascii")
@@ -309,7 +320,11 @@ def test_t_v190_eval_04_every_evidence_occurs_in_its_extracted_source_text():
 
 
 def test_t_v190_eval_02_run_offline_exits_zero_with_correct_metrics(tmp_path):
-    corpus_dir = _write_synth_corpus(tmp_path)
+    # v1.9.4 review (finding 3): the tightened turn-3 matcher needs the gold
+    # evidence phrase indexed too, not just the gold filename, for this
+    # test's own "conversation-aware smoke (context-proof): pass" assertion
+    # to still hold.
+    corpus_dir = _write_synth_corpus(tmp_path, vacation_text=_SYNTH_VACATION_WITH_TRANSFER)
     questions_path = _write_synth_questions(tmp_path)
     conn = _conn(tmp_path)
     embedder = FakeEmbedder(dim=DIM)
@@ -500,7 +515,11 @@ def test_t_v190_eval_03_first_hit_miss():
 
 
 def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
-    corpus_dir = _write_synth_corpus(tmp_path)
+    # v1.9.4 review (finding 3): the tightened turn-3 matcher needs the gold
+    # evidence phrase in the indexed text too, not just the gold filename --
+    # this test's own focus is turn 2's TOOL-06 pin, so it opts into the
+    # evidence-carrying fixture to keep its ctx_ok/ctx_ok2 assertions valid.
+    corpus_dir = _write_synth_corpus(tmp_path, vacation_text=_SYNTH_VACATION_WITH_TRANSFER)
     questions_path = _write_synth_questions(tmp_path)
     documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
     del questions_path  # only the corpus is needed directly in this test
@@ -536,7 +555,7 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     assert "no search_documents call sharing a token" in detail2
     # Turn 2's TOOL-06 pin failing (advisory, token-overlap) is independent
     # of turn 3's context-proof verdict -- the corpus still carries the gold
-    # source, so turn 3 still passes here.
+    # source and its evidence, so turn 3 still passes here.
     assert ctx_ok2 is True
 
 
@@ -546,7 +565,10 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
 
 
 def test_t_v194_t2_conversation_smoke_turn3_calls_search_and_hits_gold(tmp_path):
-    corpus_dir = _write_synth_corpus(tmp_path)
+    # v1.9.4 review (finding 3): the tightened matcher requires the gold
+    # evidence phrase in the retrieved passage's text, not just the gold
+    # filename -- index the vacation fixture that carries it.
+    corpus_dir = _write_synth_corpus(tmp_path, vacation_text=_SYNTH_VACATION_WITH_TRANSFER)
     documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
     conn = _conn(tmp_path, name="turn3-hit.db")
     embedder = FakeEmbedder(dim=DIM)
@@ -566,16 +588,15 @@ def test_t_v194_t2_conversation_smoke_turn3_calls_search_and_hits_gold(tmp_path)
 
 
 def test_t_v194_t2_conversation_smoke_turn3_calls_search_and_misses_gold(tmp_path):
+    # v1.9.4 review (finding 3): the right file is indexed, but its content
+    # lacks the specific evidence -- the plain _SYNTH_VACATION text (the
+    # default) does NOT contain "не более 10 дней", so the gold file IS
+    # retrieved (it's the only chunk sharing any vocabulary with "wombat"),
+    # just without matching evidence. Right file, wrong passage: a stronger,
+    # more precise exercise of the tightened matcher than dropping the file
+    # from the index entirely.
     corpus_dir = _write_synth_corpus(tmp_path)
-    # The gold source is never indexed at all -- with this pigeonhole corpus
-    # every search call returns every indexed chunk, so dropping
-    # vacation_policy.md from the index is what guarantees a miss here,
-    # independent of the query text turn 3 actually issues.
-    documents_to_index = [
-        (filename, data)
-        for filename, data in rag_eval.load_corpus_documents(corpus_dir)
-        if filename != "vacation_policy.md"
-    ]
+    documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
     conn = _conn(tmp_path, name="turn3-miss.db")
     embedder = FakeEmbedder(dim=DIM)
     rag_eval.index_corpus(conn, embedder=embedder, documents_to_index=documents_to_index)
@@ -590,10 +611,10 @@ def test_t_v194_t2_conversation_smoke_turn3_calls_search_and_misses_gold(tmp_pat
         cfg=cfg,
     )
     assert ctx_ok is False
-    assert "vacation_policy.md" in ctx_detail
     assert "wombat colony carryover" in ctx_detail  # _smoke_script's default turn3_query
-    # The failure detail names the top sources actually returned instead.
-    assert "onboarding.txt" in ctx_detail or "expenses.docx" in ctx_detail
+    # The right file IS among turn 3's recorded top sources -- it just
+    # didn't carry the transfer-specific evidence, hence the miss.
+    assert "vacation_policy.md" in ctx_detail
 
 
 def test_t_v194_t2_conversation_smoke_turn3_makes_no_call(tmp_path):
@@ -625,7 +646,12 @@ def test_t_v193_t2_conversation_smoke_reranks_via_rerank_llm_not_chat_llm(tmp_pa
     # client instead (the LM Studio-primary failover client in production),
     # never the routed rerank model -- killed by mutation
     # v193-smoke-reranks-on-chat-client.
-    corpus_dir = _write_synth_corpus(tmp_path)
+    #
+    # v1.9.4 review (finding 3): the tightened turn-3 matcher needs the gold
+    # evidence phrase indexed too, not just the gold filename -- this test's
+    # own focus is rerank routing, so it opts into the evidence-carrying
+    # fixture to keep its ctx_ok assertion valid.
+    corpus_dir = _write_synth_corpus(tmp_path, vacation_text=_SYNTH_VACATION_WITH_TRANSFER)
     documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
     conn = _conn(tmp_path, name="rerank_llm.db")
     embedder = FakeEmbedder(dim=DIM)

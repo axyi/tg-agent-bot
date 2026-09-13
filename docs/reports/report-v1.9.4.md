@@ -94,11 +94,26 @@ be a large diff with mutation-`find` fallout, and defence in depth (both the
 call-site guards and the logging-layer mechanism active at once) is the
 intended end state, not a replacement of one by the other.
 
+**Correction (added at the v1.9.4 review, finding 2).** `RedactingFormatter.
+format()` redacted only its own returned string; `logging.Formatter.format`
+(stdlib) caches the unredacted traceback onto `record.exc_text` as a side
+effect before this class's own `redact()` call ever sees it, so a second
+handler on the same record with a plain `Formatter` would have read that
+cached attribute back raw. Fixed: `format()` now also redacts `record.
+exc_text` in place once populated. Latent today (every entry point installs
+exactly one handler) but closed rather than left as a documented risk. New
+test `test_t_v194_red_03b_second_plain_handler_reads_redacted_exc_text`
+(two handlers on one logger, the second with a plain `Formatter`, same
+chained-exception record -- both outputs masked). Mutation entry
+`v194-redacting-formatter-skips-redact` re-derived (its `find` text moved
+when `format()` grew a second statement); same semantics, killed again.
+
 **Delegation record.** Executor model: `claude-sonnet-5` (Claude Code). This
 subagent performed the implementation directly (seam, four entry points,
 five tests, two mutation entries, paperwork) against
 `docs/spec/task-briefs/v194-T1.md`; the coordinator verifies the report
-against the brief and commits.
+against the brief and commits. Finding 2 (below) was closed later, at the
+v1.9.4 review.
 
 ## T2 -- gate-7 smoke
 
@@ -122,9 +137,19 @@ item 1 ("Сколько дней отпуска можно перенести н
 `vacation_policy.md`), phrased so it cannot be answered from turns 1-2's own
 context. `_RecordingSearcher` now also keeps each call's `SearchResult`.
 Verdict: `pass` iff turn 3 made >= 1 `search_documents` call **and** at
-least one call's returned passages carry the gold source (filename
-equality, the same convention `first_hit` uses for the scored questions) --
-`fail` with the recorded queries and top sources otherwise. Turn 2's own
+least one call's returned passages carry the gold source **and** its gold
+evidence (`_SMOKE_GOLD_EVIDENCE_2 = "не более 10 дней"`, tightened at the
+v1.9.4 review's finding 3 -- originally filename-only, which any
+vacation-related hit would satisfy since turn 1 already proves the same
+file is reachable; `contains_evidence`, the same filename-AND-evidence
+matcher `first_hit` uses for the scored questions) -- `fail` with the
+recorded queries and top sources otherwise. This proves the third turn's
+search actually retrieved the passage that answers the transfer question,
+not merely that some vacation-related page was found; it still does not
+prove the query *used* turns 1-2's context to get there (a query naming
+the transfer rule directly, without drawing on prior-turn context, would
+also pass) -- the TOOL-06 pin covers context carry, this verdict covers
+"went to the documents for the new fact." Turn 2's own
 verdict is unchanged in substance; `conversation_smoke()` now returns
 `(tool06_ok, tool06_detail, context_proof_ok, context_proof_detail)` and
 `run()` prints both as separate advisory lines (`conversation-aware smoke
@@ -239,18 +264,76 @@ A1's own wall, effectively unsafe with the third turn added) -- this
 figure is unchanged by the addendum, which touched no OpenRouter/LM
 Studio route the gate runs by default.
 
-**Cost.** All five runs' live inference (12 rerank calls per run on
-`LLM_RERANK_MODEL`'s route, plus the smoke turns on whichever route was
-active), tallied by hand from the instrumented runs' own `llm_call` log
-rows (this harness does not attach `cost_usd` on this path):
-`mistralai/mistral-small-24b-instruct-2501` 75,603 prompt + 1,476
-completion tokens across 69 calls; `mistralai/mistral-nemo` 5,183 prompt +
-78 completion tokens across 7 calls (B1's three failed 404 calls carried no
-billable usage). At each model's public OpenRouter list price (low-cost
-tier, both well under $0.10/1M tokens blended), this totals well under
-$0.05 -- comfortably inside the brief's $0.30 cap; no exact per-request
-cost is exposed to this session, so this is a bounds estimate, not a
-metered figure.
+**Wall attribution (added at the v1.9.4 review, prompt 186 -- a hypothesis
+with the numbers, not a finding).** The growth from v1.9.3's 268s to this
+task's 557s (A1) is not cleanly "the third turn's fault": the per-turn
+table above shows turns 1+2 *alone* already grew from v1.9.3's combined
+253s to 394.247s (A1: 173.828+220.419) / 386.449s (A2: 203.718+182.731) --
+a 133-141s growth with no turn added there at all -- while turn 3 itself
+contributes ~150s (151.238s A1 / 149.292s A2) of the remaining delta.
+133-141s of the ~289s total growth is therefore unattributed to any code
+change in this release. The addendum's D1/D2 rows are the only direct
+evidence available: `lmstudio:qwen/qwen3.5-9b` showed no JIT-load
+speedup on its second run (121.923s -> 121.404s, essentially flat)
+despite being "already loaded" from the first run, consistent with LM
+Studio swapping the loaded chat model out between calls to a *different*
+model (the embedding model, used before/between turns for retrieval) and
+back, paying a reload-like cost on every call rather than only the first
+one. This does not, however, cleanly explain turn 2's own growth in
+particular: turn 2 makes no retrieval call at all (no embedding-model
+swap should intervene) yet is the single slowest turn in A1 (220.419s).
+Stated honestly as a hypothesis the numbers are consistent with, not a
+proven mechanism -- **v1.10 candidate: instrument LM Studio's own loaded-
+model state (or its request log) across a full gate-7 run to measure
+model swaps directly**, rather than inferring them from wall time alone.
+
+**v1.10 candidate (added at the v1.9.4 review, prompt 186): the smoke's
+own prompt may not compel a document search.** The review's own
+instrumented confirmation run (`gpt-4o-mini` route) found the same thing
+this task's addendum found: `tools=4`, `tool_choice=auto` and identical
+budgets reach the model correctly (this is not a route defect), yet
+`gpt-4o-mini` -- a strong, reliable tool-caller in general use -- answers
+turn 1 entirely from its own general knowledge instead of calling
+`search_documents`: `"Согласно Трудовому кодексу Российской Федерации,
+минимальная продолжительность е"` (80 characters, the instrumented
+probe's own truncation; the full reply continues fluently and never
+invokes a tool). The candidate for v1.10: the agent's system prompt / the
+`search_documents` tool's own description does not compel a document
+search for a user who has documents indexed and a question those
+documents can answer -- a general-knowledge-capable model will answer
+from its own training data instead when nothing forces it to check the
+user's documents first. Out of this task's scope (a smoke-test
+measurement task, not a system-prompt change), but worth a dedicated
+v1.10 item.
+
+**Cost (revised at the v1.9.4 review, prompt 186 -- corrected run count and
+tally).** Ten live gate-7 runs' inference to date, not five: this task's
+own A1/A2/B1/B1'/B2' (5), the addendum's C1/C2/D1/D2 (4, `docs/prompts/
+185-v194-t2-measurement-addendum.md`), and the review's own confirmation
+run on the `gpt-4o-mini` route (1, cited in `docs/spec/task-briefs/
+v194-review.md`) -- tallied by hand from each run's own `llm_call` log rows
+(this harness does not attach `cost_usd` on this path):
+
+- `mistralai/mistral-small-24b-instruct-2501`, `rerank` purpose (every run
+  above routes its 12 scored retrieval items' rerank through it,
+  regardless of which route the smoke turns used): 135,177 prompt + 2,653
+  completion tokens across 118 calls.
+- `mistralai/mistral-small-24b-instruct-2501`, `agent` purpose (B1's three
+  404 attempts): 0 billable tokens, 3 calls.
+- `mistralai/mistral-nemo`, `agent` purpose (B1'/B2'): 5,183 prompt + 78
+  completion tokens across 7 calls.
+- `openai/gpt-4o-mini`, `agent` purpose, combined across this task's own
+  C1 and the review's own repeat run: 3,155 prompt (1,576 + the review's
+  1,579) + 267 completion tokens (131 + 136).
+- `google/gemini-2.5-flash`, `agent` purpose (C2): 1,314 prompt + 90
+  completion tokens across 3 calls.
+- `lmstudio:qwen/qwen3.5-9b` (D1/D2): local, no token cost.
+
+At each OpenRouter model's public list price (all low-cost tiers, well
+under $0.10/1M tokens blended), this totals well under $0.10 across all
+ten runs combined -- comfortably inside T2's own $0.30 cap and the
+addendum's separate $0.20 cap; no exact per-request cost is exposed to
+this session, so this remains a bounds estimate, not a metered figure.
 
 **Delegation record.** Executor model: `claude-sonnet-5` (Claude Code). The
 offline half (turn 3, the opt-in routing purpose, tests, mutation entry,
@@ -313,6 +396,13 @@ sentinel mapped to `1`/KILLED instead) -- both killed by test 1, run by the
 coordinator after commit (`mutation_check.py` is itself a mutation path).
 `AGENTS.md`'s gate-6 paragraph gained one sentence naming this behaviour;
 no count literal in it was touched.
+
+**Acceptance record (added at the v1.9.4 review, finding 6): prompt 183's
+own `--select v15-` acceptance run (4/4 killed, the real end-to-end path
+with the new `wait(timeout=...)`) was performed at the time but its wall
+was never recorded anywhere. Re-run once, alone, as part of this review's
+own closure: see the "Review (prompt 186)" section's Acceptance below for
+the wall.
 
 **Delegation record.** Executor model: `claude-sonnet-5` (Claude Code). This
 subagent performed the implementation and its own offline acceptance
@@ -379,3 +469,61 @@ subagent performed the implementation and its own offline acceptance
 directly against `docs/spec/task-briefs/v194-T4.md`; the coordinator
 independently re-ran acceptance, verified the diff and the two re-derived
 mutation entries, and committed.
+
+## Review (prompt 186) -- clean-context findings closed
+
+Review of `505bbf7` `b5db300` `4667d16` `4253678` `fcb7ec8` (opus, clean
+context; every probe re-run; six `--only` kills; one instrumented gate-7 run
+on the `gpt-4o-mini` route). No 🔴. Contract: `docs/spec/task-briefs/
+v194-review.md`, prompt 186. One commit closes all eight findings.
+
+1. 🟠 `devtools/rag_eval.py` root logger at `INFO` -> `WARNING` (~88 INFO
+   lines/run no longer bury `checks.py`'s stderr tail). Test extended.
+2. 🟡 `RedactingFormatter` now also redacts the cached `record.exc_text`,
+   not just its own returned string -- see T1 section's "Correction" above.
+3. 🟡 Turn 3's gold matcher tightened to filename **and** evidence (`first_
+   hit`'s own convention) -- see T2 section's "Turn 3 -- context-proof"
+   paragraph above, updated in place.
+4. 🟡 T2's Cost paragraph corrected: ten live runs, not five (see T2
+   section's "Cost" paragraph, rewritten in place).
+5. 🟡 `docs/llm-usage.md` row 94: "`PTH*` (19 hits" corrected to "18 hits,
+   19 total with `RUF043`".
+6. 🟡 T3's `--select v15-` acceptance wall, never recorded: see this
+   section's own Acceptance below.
+7. 🟡 Gate-7 wall attribution: a hypothesis-with-numbers paragraph added to
+   T2 (turns 1+2 alone already grew 253s -> 386-394s, unexplained by the
+   third turn; a v1.10 item to measure LM Studio model swaps directly, not
+   infer them from wall time). `docs/prompts/185-...md`'s "sixteen-row"
+   and `docs/llm-usage.md` row 95's "eight-row" both corrected to the
+   table's real nine rows.
+8. 🟡 The review's own `gpt-4o-mini` confirmation (tools reach the payload
+   correctly; the model still answers from general knowledge) added to T2
+   as a v1.10 candidate -- see T2 section's second new paragraph above.
+
+**Delegation record.** Executor model: `claude-sonnet-5` (Claude Code).
+Findings 1-3 (code + tests) were implemented by a subagent against this
+review brief; findings 4-8 (documentation only) were closed directly by
+the coordinator in parallel (disjoint files, no overlap); the coordinator
+independently re-ran full acceptance, verified every diff, and committed
+all eight findings in one commit.
+
+**Acceptance** (sequential, nothing concurrent, self-excluding `pgrep`
+checked before each live/mutation step): `ruff check .` 0; `ruff format
+--check .` 0; `pytest` 0, 1633 collected (1632 passed, 1 skipped);
+`bot.py --selftest` 0; `checks.py lint-docs` 0; drift 119/119;
+`mutation_check.py --only v194-smoke-turn3-gold-unchecked` killed;
+`mutation_check.py --only v194-redacting-formatter-skips-redact` killed;
+`mutation_check.py --select v15-` 4/4 killed, wall 16.011s;
+`devtools/rag_eval.py` (production route, alone) exit 0, wall 342.687s
+(real; down from A1/A2's ~550-560s -- this run's own turn 2 happened to
+answer from context again without a search call, the same non-defect
+model behaviour documented throughout this task, so both a fast run and a
+slow run are within the smoke's known variance), both smoke lines
+printed: `conversation-aware smoke (TOOL-06 pin): fail -- turn 2 recorded
+no search_documents call sharing a token with turn 1's question` /
+`conversation-aware smoke (context-proof): pass -- turn 3 queries
+['перенос отпуска на следующий год'] returned the gold source
+'vacation_policy.md'` -- confirming finding 3's tightened matcher (filename
+AND evidence) passes correctly against the real production corpus, and
+finding 1's `WARNING` fix took effect: zero INFO-level lines in this run's
+entire captured output (previously ~88/run).

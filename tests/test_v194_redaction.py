@@ -100,6 +100,40 @@ def test_t_v194_red_03_chained_cause_masked():
     assert "direct cause" in text
 
 
+def test_t_v194_red_03b_second_plain_handler_reads_redacted_exc_text():
+    # v1.9.4 review (finding 2): `logging.Formatter.format` caches the
+    # rendered traceback onto `record.exc_text` the first time it runs. A
+    # second handler on the SAME logger (both see the same LogRecord), with
+    # a plain `Formatter` that never calls `redact()` itself, would read
+    # that cached attribute back verbatim -- unless `RedactingFormatter`
+    # also redacts `record.exc_text` in place, not just its own returned
+    # string. Order matters: the redacting handler must run first so the
+    # cache is already masked by the time the plain handler reads it.
+    secret = "sentinel-secret-v194-red-03b-cause"
+    config.register_secret(secret)
+    logger, stream = _stringio_logger("test_v194_red_03b")
+
+    plain_stream = io.StringIO()
+    plain_handler = logging.StreamHandler(plain_stream)
+    plain_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(plain_handler)
+
+    try:
+        try:
+            raise ValueError(f"root cause {secret}")
+        except ValueError as cause:
+            raise RuntimeError("wrapped") from cause
+    except RuntimeError:
+        logger.exception("failed")
+
+    redacted_text = stream.getvalue()
+    plain_text = plain_stream.getvalue()
+    assert secret not in redacted_text
+    assert config.REDACTION in redacted_text
+    assert secret not in plain_text
+    assert config.REDACTION in plain_text
+
+
 def test_t_v194_red_04_secret_registered_after_install_still_masked():
     # The formatter is installed (and one line already emitted) before the
     # secret is registered -- a snapshot taken at install time would never
@@ -151,5 +185,8 @@ def test_t_v194_red_05_entry_points_install_redacting_formatter(tmp_path, monkey
         root = logging.getLogger()
         assert len(root.handlers) == 1
         assert isinstance(root.handlers[0].formatter, config.RedactingFormatter)
+        # v1.9.4 review (finding 1): WARNING, not INFO -- gate 7's own root
+        # logger must not bury checks.py's stderr tail under INFO noise.
+        assert root.level == logging.WARNING
     finally:
         _restore_root_handlers(saved, saved_level)

@@ -222,10 +222,25 @@ class RedactingFormatter(logging.Formatter):
     `redact` reads the live `_secrets` registry at format time, not a
     snapshot taken at construction, so a secret registered after this
     formatter is installed is still masked.
+
+    v1.9.4 review (finding 2): `logging.Formatter.format` (stdlib), when
+    `record.exc_info` is set and `record.exc_text` is still falsy, renders
+    the traceback and *caches* the unredacted result onto the record itself
+    (`record.exc_text = self.formatException(...)`) before appending it to
+    the string it returns. Redacting only the returned string leaves that
+    cached attribute raw on the record; a second handler on the same record
+    with a plain `Formatter` would read the cached `exc_text` back and emit
+    the traceback unmasked. So this also redacts `record.exc_text` in place
+    once `super().format()` has populated it, which is latent today (every
+    entry point installs exactly one handler) but keeps any future second
+    handler safe.
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        return redact(super().format(record))
+        formatted = redact(super().format(record))
+        if record.exc_text:
+            record.exc_text = redact(record.exc_text)
+        return formatted
 
 
 def install_redacting_logging(

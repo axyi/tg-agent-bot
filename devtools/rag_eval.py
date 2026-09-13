@@ -103,6 +103,14 @@ _SMOKE_FOLLOWUP_2 = "а сколько из них можно перенести
 # what those tests exercise too -- swapping the real eval corpus's second
 # answerable item's source would need this constant updated by hand.
 _SMOKE_GOLD_SOURCE_2 = "vacation_policy.md"
+# evals/rag/questions.json item 1's expected_evidence -- like _SMOKE_GOLD_SOURCE_2,
+# a real-corpus constant, not threaded through from run(). Tightens turn 3's
+# verdict to match first_hit's own matcher (filename AND evidence, not
+# filename alone): the same file passing on filename alone would be true
+# for ANY vacation-related search (already proven by turn 1's own hit),
+# never demonstrating that the *follow-up*'s specific answer -- the
+# transfer-limit rule -- was actually retrieved.
+_SMOKE_GOLD_EVIDENCE_2 = "не более 10 дней"
 
 
 # ---------------------------------------------------------------------------
@@ -361,9 +369,19 @@ def conversation_smoke(
       for a real reason).
     - context-proof: `pass` iff the third turn made at least one
       `search_documents` call **and** at least one of its calls' returned
-      passages carries the gold source `_SMOKE_GOLD_SOURCE_2` -- the same
-      filename-equality convention `first_hit` uses to score the pinned
-      questions, applied here to a passage set instead of a ranked list.
+      passages carries the gold source `_SMOKE_GOLD_SOURCE_2` **and**
+      contains the gold evidence `_SMOKE_GOLD_EVIDENCE_2` (`contains_evidence`,
+      the same filename-AND-evidence matcher `first_hit` uses to score the
+      pinned questions). v1.9.4 review (finding 3): this proves the third
+      turn's search actually retrieved the passage that answers the
+      transfer question -- both filename and evidence -- not merely that
+      some vacation-related page was found (turn 1 already proves that much
+      against the same file). It still does NOT prove the query *used*
+      turns 1-2's context to get there -- a query that happens to name the
+      transfer rule directly, without drawing on any prior-turn context,
+      would also pass. The TOOL-06 pin above covers "context was carried
+      between turns"; this verdict covers "the agent went back to the
+      documents for the new, specific fact."
 
     v1.9.3 T2 (docs/spec/task-briefs/v193-T2.md): each turn's `Searcher`
     reranks through `rerank_llm` when one is configured, `llm` (the chat/
@@ -445,7 +463,9 @@ def conversation_smoke(
 
     turn3_sources = [[p.filename for p in result.passages] for result in searcher3.results]
     turn3_hit = any(
-        p.filename == _SMOKE_GOLD_SOURCE_2 for result in searcher3.results for p in result.passages
+        p.filename == _SMOKE_GOLD_SOURCE_2 and contains_evidence(p.text, _SMOKE_GOLD_EVIDENCE_2)
+        for result in searcher3.results
+        for p in result.passages
     )
     if searcher3.queries and turn3_hit:
         context_proof_ok = True
@@ -689,7 +709,11 @@ def main() -> int:
         handler = logging.StreamHandler(sys.stderr)
         config.install_redacting_logging(handler, "%(asctime)s %(levelname)s %(name)s %(message)s")
         root_logger.addHandler(handler)
-        root_logger.setLevel(logging.INFO)
+        # v1.9.4 review (finding 1): WARNING, not INFO -- the brief asked
+        # only for gate 7's *warnings* to be redacted; INFO buries
+        # checks.py's five-line stderr tail on a failing gate under ~88
+        # INFO lines/run (httpx POSTs, storage llm_call rows).
+        root_logger.setLevel(logging.WARNING)
     try:
         cfg = load_config()
     except config.ConfigError as exc:
