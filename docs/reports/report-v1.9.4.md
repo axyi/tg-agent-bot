@@ -159,6 +159,10 @@ scratch script never committed):
 | B1 | `LLM_EVAL_CHAT_MODEL=openrouter:mistralai/mistral-small-24b-instruct-2501` | n/a (all 3 turns errored) | TOOL-06 pin: fail (no call); context-proof: fail (no call) | none |
 | B1' | `LLM_EVAL_CHAT_MODEL=openrouter:mistralai/mistral-nemo` (brief's contingency, tried once after B1 failed) | 18.116s | TOOL-06 pin: fail (no call); context-proof: fail (no call) | none |
 | B2' | `LLM_EVAL_CHAT_MODEL=openrouter:mistralai/mistral-nemo` | 15.544s | TOOL-06 pin: fail (no call); context-proof: fail (no call) | none |
+| C1 | `LLM_EVAL_CHAT_MODEL=openrouter:openai/gpt-4o-mini` (addendum, prompt 185) | 17.196s | TOOL-06 pin: fail (no call); context-proof: fail (no call) | none |
+| C2 | `LLM_EVAL_CHAT_MODEL=openrouter:google/gemini-2.5-flash` (addendum) | 17.837s | TOOL-06 pin: fail (no call); context-proof: fail (no call) | none |
+| D1 | `LLM_EVAL_CHAT_MODEL=lmstudio:qwen/qwen3.5-9b` (addendum, first/JIT run) | 121.923s | TOOL-06 pin: fail (no call, answered from context); context-proof: pass | none |
+| D2 | `LLM_EVAL_CHAT_MODEL=lmstudio:qwen/qwen3.5-9b` (addendum, second/steady-state run) | 121.404s | TOOL-06 pin: fail (no call, answered from context); context-proof: pass | none |
 
 `mistralai/mistral-small-24b-instruct-2501` cannot complete the agent loop's
 tool-calling request at all through OpenRouter: every one of the three
@@ -174,6 +178,29 @@ verdicts read `fail` for a real reason (the model answered from its own
 un-grounded guess: "21 рабочих дня в год", "14 дней", "6 рабочих дней",
 none matching the corpus), not a harness defect.
 
+**Addendum (prompt 185, docs-only follow-up commit, after this task's own
+commit landed).** The coordinator's own review of the B-row results found
+they settled the two named models, not the route: measure three more
+candidates, one gate-7 run each (the local model run twice, JIT load on
+first call), same instrumented technique, ≤ $0.20 budget. C1
+(`openai/gpt-4o-mini`, the reference tool-caller) and C2
+(`google/gemini-2.5-flash`) both **never called `search_documents` in any
+of their three turns** -- C1 answered every turn from its own general
+Labor-Code knowledge (ungrounded but fluent), C2 flatly declined all three
+("no access to that information"). Since C1 is a strong, reliable
+tool-caller in general use and still made zero tool calls here, **the
+smoke's own turn-1 prompt does not compel a `search_documents` call for
+every capable model** -- this is a property of the prompt/tool-exposure,
+not evidence against any one model, exactly the addendum's own hypothesis.
+D1/D2 (`lmstudio:qwen/qwen3.5-9b`, local, run twice) both called
+`search_documents` on turns 1 and 3 and both turn-3 calls hit the gold
+source (context-proof: pass on both runs) -- the smoke is meaningful on
+this model -- but wall stayed ~121s on both D1 and D2, no JIT-load
+speedup observed on the second run (the box appears to swap the loaded
+LM Studio model between the embedding calls and this chat model within
+one run, so every run re-incurs a load-like cost, not just the first).
+No retry/429 lines in any of the four addendum runs.
+
 Per-turn completion times (seconds, `smoke turn N: start`/`done` deltas):
 
 | run | turn 1 | turn 2 | turn 3 |
@@ -182,21 +209,35 @@ Per-turn completion times (seconds, `smoke turn N: start`/`done` deltas):
 | A2 (production) | 203.718 | 182.731 | 149.292 |
 | B1' (nemo) | 0.977 | 1.688 | 0.926 |
 | B2' (nemo) | 0.877 | 0.612 | 0.521 |
+| C1 (gpt-4o-mini) | 1.042 | 0.643 | 0.970 |
+| C2 (gemini-2.5-flash) | 0.814 | 0.661 | 0.657 |
+| D1 (qwen3.5-9b, run 1) | 52.318 | 12.773 | 44.799 |
+| D2 (qwen3.5-9b, run 2) | 47.766 | 12.769 | 45.557 |
 
-**Recommendation.** Leave `LLM_EVAL_CHAT_MODEL` unset in `.env` (the
-brief's own default). The alternate route cuts gate 7's wall by ~97% (from
-~550-560s to ~15-18s), but the brief's own named candidate model cannot
-make a tool call at all on OpenRouter today, and the one working
-substitute found (`mistral-nemo`) is not reliable enough at actually
-calling `search_documents` to keep the smoke meaningful -- both its
-verdicts are real fails, not advisory noise, so it would silently degrade
-gate 7's own regression-catching value for the sake of wall time. The
-production route stays the default, correctly exercising both verdicts as
-`pass` on both A1 and A2. `config/quality_gates.yaml`'s `rag-eval.
-timeout_seconds` is re-derived from A1/A2 (the production route, the
-default) under the file's own rule: slowest wall 557.692s -> 2x ~1115.4s,
-rounded up to **1120s** (was 580s -- already only 22s above A1's own wall,
-effectively unsafe with the third turn added).
+**Recommendation (revised, full table).** Leave `LLM_EVAL_CHAT_MODEL`
+unset in `.env` -- still the right call, but for a sharper reason after
+the addendum: no candidate tried across either round beats the production
+route on *both* speed and a meaningful smoke simultaneously. The two
+OpenRouter models that fail to call a tool at all (`mistral-small-24b`,
+structurally, 404) or fail to call the *right* tool (`mistral-nemo`) are
+joined by two more capable OpenRouter models (`gpt-4o-mini`,
+`gemini-2.5-flash`) that also never call `search_documents` -- strong
+evidence the smoke's own prompt, not model capability, is why the fast
+OpenRouter route goes silent, so no OpenRouter substitute is likely to
+fix this without a prompt change (out of this task's scope). The one
+route that *did* stay meaningful, `lmstudio:qwen/qwen3.5-9b` (both
+context-proof verdicts pass), bought no wall-time win at all (~121s vs.
+production's ~550-560s is still a ~4.5x cut, but nowhere near the
+OpenRouter routes' ~30x, and the local box already runs the production
+model too, so this doesn't reduce contention). The production route
+(`qwen/qwen3.8-27b` on LM Studio) stays the default, correctly exercising
+both verdicts as `pass` on both A1 and A2. `config/quality_gates.yaml`'s
+`rag-eval.timeout_seconds` is re-derived from A1/A2 (the production
+route, the default) under the file's own rule: slowest wall 557.692s ->
+2x ~1115.4s, rounded up to **1120s** (was 580s -- already only 22s above
+A1's own wall, effectively unsafe with the third turn added) -- this
+figure is unchanged by the addendum, which touched no OpenRouter/LM
+Studio route the gate runs by default.
 
 **Cost.** All five runs' live inference (12 rerank calls per run on
 `LLM_RERANK_MODEL`'s route, plus the smoke turns on whichever route was
