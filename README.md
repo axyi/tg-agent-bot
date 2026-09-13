@@ -836,7 +836,8 @@ exactly as they are:
 | v1.6.0 | 1.6.0 | |
 | v1.9.0 | 1.9.0 | RAG over user documents |
 | v1.9.1 | 1.9.1 | rerank contract fix (`response_format` JSON schema, `LLM_RERANK_MODEL`) making gate 7 enforceable |
-| v1.9.2 | 1.9.2 | whole-tree static analysis (skylos 27 → 0, 75 files reformatted); mutation runner orders test files by relevance and `pytest-xdist` under gate 3, cutting gate-6/gate-3 walls; this release |
+| v1.9.2 | 1.9.2 | whole-tree static analysis (skylos 27 → 0, 75 files reformatted); mutation runner orders test files by relevance and `pytest-xdist` under gate 3, cutting gate-6/gate-3 walls |
+| v1.9.3 | 1.9.3 | pre-push runs `mutation-all` (one authoritative run, not five subsets); gate-timeout SIGTERM-before-SIGKILL fix (no more orphaned, unrestored mutated tree); gate-7 rerank third-attempt tail fixed; ruff rule-family proposal adopted (`select` + `never`); this release |
 
 ## Token economy
 

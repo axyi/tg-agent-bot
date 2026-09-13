@@ -539,6 +539,16 @@ gates:
   # so this jump is not attributable to it; consistent instead with this
   # box's own documented shared/contended variance (noted at every earlier
   # re-measurement above; v1.9.3 T1+T2 review finding 5).
+  #
+  # v1.9.3 T4 (gate 6, the authoritative all-114 run on the final release
+  # tree, alone, nothing else on the box): measured directly
+  # (`time uv run --locked python devtools/mutation_check.py`, no
+  # --select, 114/114 killed, 0 survived, 0 errored, 0 drifted):
+  # real=12m7.799s (727.799s) -> 2x ~1455.598s + 70s (survivor-safe rule
+  # above) = ~1525.598s, rounded up to 1530s. Down from 1700s at 111
+  # entries (T1) despite three more entries -- consistent with this box's
+  # own documented shared/contended variance (noted at every earlier
+  # re-measurement above), so the fresh measurement is used as-is.
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -547,7 +557,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1700
+    timeout_seconds: 1530
 
   hooks-installed:
     kind: command
@@ -592,7 +602,7 @@ gates:
                    38-v14-t8-default-selection.md, 39-v14-t9-mutations.md,
                    40-v14-t9-review.md, 41-v14-t10-report.md,
                    42-v14-t10-advisor-followup.md, 43-v14-verify-run-fixes.md]
-    report_path: docs/reports/report-v1.9.2.md
+    report_path: docs/reports/report-v1.9.3.md
     ledger_header: "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |"
     blocking: true
     diff_scoped: false

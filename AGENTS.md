@@ -157,8 +157,8 @@ uv run --locked python devtools/mutation_check.py
 uv run --locked python devtools/rag_eval.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1601
-tests as of spec-v1.9.2 T3). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1610
+tests as of spec-v1.9.3 T4). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its
@@ -166,20 +166,26 @@ Telegram message. **Gate 5 must be fully green at every commit, including its
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 110 entries as of v1.9.2 T2 (up
-from 105 at spec-v1.9.0's close; T9 added seven `v190-*` entries covering
-RAG per-user isolation (the vector KNN and BM25 queries, `list_documents`/
-`document_id_for`'s owner predicates), the delete path's `vec_chunks`
-cleanup, the upload size precheck, and the sources-fallback rendering,
-v1.9.1 T1 added two more `v191-*` entries covering the rerank
+the test suite once per mutation) — 114 entries as of v1.9.3 T1+T2 review
+(up from 105 at spec-v1.9.0's close; T9 added seven `v190-*` entries
+covering RAG per-user isolation (the vector KNN and BM25 queries,
+`list_documents`/`document_id_for`'s owner predicates), the delete path's
+`vec_chunks` cleanup, the upload size precheck, and the sources-fallback
+rendering, v1.9.1 T1 added two more `v191-*` entries covering the rerank
 `response_format` contract and `LLM_RERANK_MODEL` routing, T3 added one more
-(`v191-rerank-retry-dropped`, covering the retryable-429 retry loop), and
+(`v191-rerank-retry-dropped`, covering the retryable-429 retry loop),
 v1.9.2 T2 added two more (`v192-mutation-order-shrink-unchecked` and
 `v192-mutation-order-shrink-zero-accepted`, both covering the new
 relevance-ordered runner's own silent-shrink guard) alongside reordering
-`default_runner`'s test-file list by relevance to the mutated module; see
-`docs/reports/report-v1.9.0.md`, `docs/reports/report-v1.9.1.md` and
-`docs/reports/report-v1.9.2.md`);
+`default_runner`'s test-file list by relevance to the mutated module, and
+v1.9.3 added four more: T1 commit B's `v193-mutation-dirty-tree-unchecked`
+(the dirty-tree refusal itself), T2's `v193-smoke-reranks-on-chat-client`
+(the rerank-routing fix), and the T1+T2 review's
+`v193-gate-timeout-kills-direct-child-only` and
+`v193-signal-handler-leaves-child-running` (both covering the
+gate-timeout/signal-handling hardening); see
+`docs/reports/report-v1.9.0.md`, `docs/reports/report-v1.9.1.md`,
+`docs/reports/report-v1.9.2.md` and `docs/reports/report-v1.9.3.md`);
 `--select <prefix>` runs a named subset
 (mutually exclusive with `--only`), e.g. `--select v190-`. v1.9.3 T1: the
 gate refuses to start (exit 1, naming the path) if any mutation path's

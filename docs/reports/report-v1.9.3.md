@@ -774,36 +774,163 @@ lint-docs` 0; drift script 114/114 (0 drifted, after re-derivation);
 `mutation_check.py --only v13-fetch-save-reuses-inode` killed, run on the
 committed tree per T1's own dirty-tree requirement.
 
+## Gates (T4, final tree, verbatim from AGENTS.md, in order)
+
+Nothing else on the box during gate 6; gate 6 and gate 7 not run
+concurrently.
+
+| # | Gate | Exit | Wall |
+| --- | --- | --- | --- |
+| 1 | `uv sync --locked` | 0 | 0.021s |
+| 2 | `ruff check .` | 0 | 0.045s |
+| 3 | `pytest` | 0 | 21.854s (1609 passed, 1 skipped, 1610 collected) |
+| 4 | `bot.py --selftest` | 0 | 0.566s |
+| 5 | `bot.py --selftest-live` | 0 | 1.751s (all seven live checks OK, including `lmstudio`) |
+| 6 | `mutation_check.py` (no `--select`) | 0 | 727.799s (114/114 killed, 0 survived, 0 errored, 0 drifted) |
+| 7 | `rag_eval.py` | 0 | 233.742s (PASS: hybrid recall@5=1.000, hybrid+rerank recall@5=1.000; advisory conversation-aware smoke read "fail" -- turn 2 issued no `search_documents` call sharing a token with turn 1, the same model-behaviour non-defect the T1+T2 review's finding 7 already documented, never blocking) |
+
+**Gate-6 wall, chronological:** 680.49s @ 110 entries (v1.9.2 T3) ->
+814.449s @ 111 entries (v1.9.3 T1 commit B, its own re-measurement) ->
+727.799s @ 114 entries (this run, T4, the authoritative final-tree run).
+Down from T1's own number despite three more entries, consistent with
+this box's own documented shared/contended-machine variance (noted at
+every re-measurement in `config/quality_gates.yaml`'s `mutation-all`
+comment history) rather than any change in the mutation set itself.
+`mutation-all.timeout_seconds` re-sized by the file's own survivor-safe
+rule from this run's wall: 1700s -> 1530s (2x727.799s + 70s =
+1525.598s, rounded up). Every other timeout touched this release
+re-checked against this run's walls: `rag-eval.timeout_seconds` kept at
+580s, re-checked against this run's own 233.742s (T1+T2 review's own
+268.8s derivation for the same gate is also comfortably under it) --
+unchanged.
+
 ## Delegation record
 
-- T1 -- delegated, brief `docs/spec/task-briefs/v193-T1.md`.
-- T2 -- delegated, brief `docs/spec/task-briefs/v193-T2.md`; the diagnosis
-  (H1/H2 probe finding nothing, then an in-process instrumented gate run,
-  then a targeted 60s-timeout confirmation) and the fix were reached
-  through two coordinator course-corrections after the probe's initial
-  negative result -- recorded here since they changed the diagnosis from
-  "no fix warranted" to a real, precisely located wiring defect.
+Every executor model named: T1/T2/T3 implementer `claude-sonnet-5`; both
+reviews `claude-opus-5`; T4 (this task) implementer `claude-sonnet-5`.
+
+- T1 -- delegated, brief `docs/spec/task-briefs/v193-T1.md`; executor
+  `claude-sonnet-5`; commits `bff8dc4` (pre-push runs `mutation-all`),
+  `07bb158` (dirty-tree refusal, SIGTERM-before-SIGKILL, `v193-mutation-
+  dirty-tree-unchecked`).
+- T2 -- delegated, brief `docs/spec/task-briefs/v193-T2.md`; executor
+  `claude-sonnet-5`; commit `aa8d576` (gate-7 smoke turn reranks via
+  `rerank_llm`, not the chat client). The diagnosis (H1/H2 probe finding
+  nothing, then an in-process instrumented gate run, then a targeted
+  60s-timeout confirmation) and the fix were reached through two
+  coordinator course-corrections after the probe's initial negative
+  result -- recorded here since they changed the diagnosis from "no fix
+  warranted" to a real, precisely located wiring defect.
 - T1+T2 review -- delegated, brief
-  `docs/spec/task-briefs/v193-T12-review.md`; a clean-context (opus)
-  review of the three landed commits, closed in one follow-up commit
-  without rewriting any of them.
-- T3 -- delegated, brief `docs/spec/task-briefs/v193-T3.md`; two sequential
-  commits (prompts 177, 178), a mutation-drift re-derivation between them,
-  and one beyond-brief generalisation (the `devtools/bench_scenarios.py`
+  `docs/spec/task-briefs/v193-T12-review.md`; a clean-context
+  (`claude-opus-5`) review of the three landed commits (no 🔴, three 🟠,
+  eight 🟡), closed in one follow-up commit (`b630b3c`, prompt 176,
+  executor `claude-sonnet-5`) without rewriting any of the three reviewed
+  commits.
+- T3 -- delegated, brief `docs/spec/task-briefs/v193-T3.md`; executor
+  `claude-sonnet-5`; two sequential commits (`acd373a` prompt 177,
+  `6fcf1fc` prompt 178), a mutation-drift re-derivation between them, and
+  one beyond-brief generalisation (the `devtools/bench_scenarios.py`
   exclusion extended from `PERF401`/`SIM117` to the two rules that
-  actually hit it, `TRY004`/`ISC004`) flagged for operator review.
+  actually hit it, `TRY004`/`ISC004`) flagged for operator review (see
+  Disclosures).
 - T3 review -- delegated, brief
-  `docs/spec/task-briefs/v193-T3-review.md`; a clean-context (opus) review
-  of `acd373a`+`6fcf1fc` (no 🔴, one 🟠, seven 🟡), closed in one follow-up
-  commit (prompt 179) without rewriting either reviewed commit -- the
+  `docs/spec/task-briefs/v193-T3-review.md`; a clean-context
+  (`claude-opus-5`) review of `acd373a`+`6fcf1fc` (no 🔴, one 🟠, seven
+  🟡), closed in one follow-up commit (`ec1cf5f`, prompt 179, executor
+  `claude-sonnet-5`) without rewriting either reviewed commit -- the
   🟠 TRY400 tally correction and one 🟡 (`tracing.py`'s `TRY004` revert)
   touch behaviour-adjacent numbers/code; the rest is citation and
   placement paperwork.
+- T4 -- delegated, brief `docs/spec/task-briefs/v193-T4.md`; executor
+  `claude-sonnet-5`; this commit (version bump, count-bearing lines,
+  paperwork, seven gates, tag).
+
+## Disclosures
+
+- **Trailer string.** Every commit in this release carries
+  `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`, matching the
+  session's own named attribution string exactly -- no mismatch to
+  disclose this release (contrast v1.9.2's disclosure (a)).
+- **Gate-6 SIGKILL hazard -- closed.** v1.9.2's disclosure (b) (a gate
+  timeout SIGKILLed only the direct `uv` child, orphaning
+  `mutation_check.py` with no chance to restore a mutated file) is fixed
+  by T1 commit `07bb158`: the runner now refuses to start on a dirty
+  mutation-path tree, and a timeout SIGTERMs the tracked child before any
+  SIGKILL, giving it a chance to restore. No longer an open item.
+- **Pre-push profile -- decided.** v1.9.2's disclosure (d) (five subsets
+  vs. one `mutation-all` run) is resolved by the operator's own order
+  (`docs/spec/task-briefs/v193-T1.md`, quoted at the top of this report):
+  T1 commit `bff8dc4` switches `pre-push` to `mutation-all`. The five
+  `mutation-v*` gate definitions stay, kept runnable via `--select` for
+  future per-range work, but are no longer wired into any hook profile.
+- **`devtools/bench_scenarios.py` exclusion -- beyond-brief, unconfirmed.**
+  T3's own brief named only `PERF401`/`SIM117` for this file's exclusion;
+  neither hit it, but `TRY004`/`ISC004` did, and T3 applied the same
+  exclude-and-disclose treatment to both on the reasoning that the
+  underlying reason (the file's bytes are hashed and pinned into
+  committed benchmark artefacts) applies regardless of which rule
+  triggers a rewrite. Already landed in `acd373a`; flagged here again for
+  the operator to confirm or override.
+- **Sequencing: seven things landed after gate 7 finished.** The same
+  class v1.9.2's erratum (prompt 172) disclosed. Gate 6 and gate 7 ran on
+  a tree that did not yet contain: `docs/prompts/180-v193-t4-version-bump.md`,
+  this "Gates (T4)" table and the gate-6 wall-chain paragraph, this
+  Disclosures section and the Open tail section, the Ledger row, the
+  Verdict, `docs/reports/tg-post-v1.9.3.md`, and `docs/llm-usage.md` row
+  90 -- all of them use gates 6/7's own results as input, so they could
+  only be written afterward. `mutation-all.timeout_seconds`'s 1700s ->
+  1530s resize also landed after gate 6, from that run's own wall.
+  Re-run on the tree as committed, after all of the above: `uv sync
+  --locked` 0, `uv run --locked ruff check .` 0, `uv run --locked pytest`
+  0 (1609 passed, 1 skipped, unchanged), `checks.py lint-docs` 0 -- these
+  four are the only gates a doc-only diff can reach (gate 3 reaches
+  `AGENTS.md`'s and `config/quality_gates.yaml`'s text via
+  `tests/test_v190_agents.py`/`tests/test_v170_bench.py`). Gates 4/5/6/7
+  were **not** re-run: gate 4 (`bot.py --selftest`) and gate 5
+  (`--selftest-live`) touch no file this task's trailing edits changed;
+  re-running an 11-12 minute mutation pass and a live rag-eval to
+  validate a comment/table/paperwork-only edit was judged not worth it,
+  the same call v1.9.2 T3's own erratum made explicit.
+
+## Open tail
+
+- The v1.9.1/v1.9.2 open tail (one rerank call succeeding only on attempt
+  3) is **closed**: T2 diagnosed and fixed it (`aa8d576`), and three
+  consecutive gate-7 runs after the fix show zero retry lines (see "T2 --
+  rerank tail" above).
+- One genuinely open item, carried to v1.10.0: **redaction hardening**
+  (T1+T2 review finding 8). `log.exception`'s traceback and chained
+  `__context__`/`__cause__` rendering are not passed through `redact()` --
+  reviewed and confirmed not a live leak at any of the 10 adopted
+  `log.exception` sites today, but the `redact(str(exc))` argument at
+  several call sites reads as protective when the traceback itself
+  already carries the unredacted text. Proposed direction: a redacting
+  `logging.Filter` installed once at the root logger, rather than relying
+  on every call site. No code change this release.
 
 ## Ledger row (paste into `economics.md`)
 
-<!-- filled at T4 (version bump), the same convention v1.9.2 T3 used -->
+Review findings counted from the review briefs themselves, not from
+memory: `docs/spec/task-briefs/v193-T12-review.md` (no 🔴, three 🟠, eight
+🟡 — 11 total) and `docs/spec/task-briefs/v193-T3-review.md` (no 🔴, one
+🟠, seven 🟡 — 8 total), both closed.
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.3 | 2026-09-13 | — (patch, no new spec; task briefs `docs/spec/task-briefs/v193-T1.md`, `-T2.md`, `-T12-review.md`, `-T3.md`, `-T3-review.md`, `-T4.md`) | 8 (173–180) | yes — all seven gates green on the authoritative run of the final tree (see Disclosures: gates 1–3 plus `lint-docs` re-run once more after this task's own trailing doc edits, all green; gates 4/5/6/7 not re-run, not gate-reachable by a doc-only diff) | T1+T2 review 0 🔴 / 3 🟠 / 8 🟡 (11), T3 review 0 🔴 / 1 🟠 / 7 🟡 (8) — all fixed | unknown (harness does not expose per-request usage) | $0 marginal (Claude Code subscription-metered session; live inference on gates 5/7 and T2's diagnostic probe calls, at reference prices, no real spend tracked) | claude-sonnet-5 (both reviews: claude-opus-5) | Claude Code |
+```
 
 ## Verdict
 
-<!-- filled at T4 -->
+All seven gates green on the final tree (see "Gates (T4)" above); the
+three tails the operator ordered closed are closed (pre-push now runs
+`mutation-all` and the gate-timeout/SIGKILL hazard is fixed, T1; the
+rerank third-attempt tail is diagnosed and fixed, T2; the ruff
+rule-family proposal is decided and applied, T3); the v1.9.1/v1.9.2 open
+tail (the rerank attempt-3 tail) is closed; one genuinely open item is
+carried to v1.10.0 (redaction hardening, see Open tail); one flagged
+item awaits operator confirmation (the `bench_scenarios.py` `TRY004`/
+`ISC004` exclusion, see Disclosures). Version bumped 1.9.2 → 1.9.3,
+count-bearing lines at their real final numbers (1610 tests, 114
+mutation entries), annotated tag `v1.9.3` created on the release commit.
+PASS.
