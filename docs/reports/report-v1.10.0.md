@@ -1,0 +1,117 @@
+# tg-agent-bot v1.10.0 -- report skeleton (T0)
+
+Assignment 7 in full: a test suite for the agent's core, in three levels
+(deterministic/contract, red-team, judge+latency), implemented as offline
+`pytest` additions plus one new live gate, `devtools/agent_eval.py`
+(gate 8, `agent-eval`). Spec: `docs/spec/spec-v1.10.0.md`. Base: `c84d739`
+(tag `v1.9.5` at the same commit lineage; `<base>` for `replay --range` is
+`c84d739`, current `HEAD` before this run's first commit — the spec
+header's `a3e0a93` is stale, superseded by the four spec-authoring commits
+that landed after it; `T-V1100-EC-01` compares against the `v1.9.5` **tag**
+blob, unaffected by this correction).
+
+This file is filled progressively: T0 (this skeleton), T4 (dataset
+`sha256`s), T9 (the one live gate-8 run and its tables), T10 (version bump,
+provisional report), T11 (final evidence-only commit). Sections not yet
+reached read "not reached: T<n>".
+
+## T0 — preflight
+
+`<base>` = `c84d739`. Spec `sha256`:
+`9023da66f8cc1ec70054f88ef62f03bde27bc5905964ebef14b44ed1d022a303`.
+
+### Stage 0 — five checks, in order
+
+1. **Judge route resolved and distinct.** `LLM_JUDGE_MODEL` is not yet a
+   `Config` field (CFG-01 lands T3) and `build_llm_client` has no
+   `purpose="judge"` branch yet (also T3) — resolved on the unchanged tree
+   by reading the raw `LLM_JUDGE_MODEL` value through `parse_routed_model`
+   and constructing the routed client directly via `llm._client_for`, the
+   same primitives T3 wires into `build_llm_client`. Value:
+   `openrouter:openai/gpt-4.1`, source **`.env`** (no `go`-request line).
+   `judge.describe() = ('openrouter', 'openai/gpt-4.1')`,
+   `chat.describe() = ('lmstudio', 'qwen/qwen3.8-27b')` — distinct. PASS.
+2. **`GET {LMSTUDIO_BASE_URL}/models` lists `LMSTUDIO_MODEL`.** `qwen/qwen3.8-27b`
+   present among 16 models listed. PASS.
+3. **One timed plain chat turn on the production route.** Question
+   «Ответь одним словом: столица Нидерландов?», reply `"\n\nАмстердам"`,
+   elapsed **24.90s** (well under `cfg.llm_timeout_s` = 600s). PASS.
+   `t_turn = 24.90s`.
+4. **One strict-schema judge call**, §8's two labelled spec-block fences
+   (`judge-protocol-1`, `judge-protocol-2`) copied verbatim into a heredoc,
+   on the fixed sample (question/reference/reply as REV-04 Stage 0 specifies).
+   `openai/gpt-4.1` accepted `response_format` on the first attempt — **no
+   fallback to `gpt-5.6-sol` was needed**. Parsed reply:
+   `{"politeness": 1, "accuracy": 1, "conciseness": 1, "reason": "Ответ
+   вежливый, точный и краткий. Указана правильная столица без лишней
+   информации."}`. `describe()` pairs as in check 1, unequal. PASS.
+5. **`uv lock` no-op.** `uv lock` on the unchanged tree, then
+   `git diff --exit-code -- uv.lock`: empty diff. PASS.
+
+No Stage 0 blocker. The run proceeds past T0.
+
+### EVAL-01 timeout computation
+
+`R = HTTP_ATTEMPT_LIMIT = 9` (`agent.py:45`); `max_calls = 23 * 9 + 12 = 219`;
+`t_turn = 24.90s` (check 3); `timeout_seconds = ceil_to_100(1.5 * 219 * 24.90)
+= ceil_to_100(8179.65) = 8200`, floor 1800, no cap → **`agent-eval.timeout_seconds
+= 8200`** (T6 writes this into `config/quality_gates.yaml`).
+
+### Gates 1-7 on the unchanged tree (gate 8 n/a — script does not exist yet)
+
+Nothing else on the box during gate 6; gate 6 and gate 7 not run
+concurrently.
+
+| # | Gate | Exit | Wall |
+| --- | --- | --- | --- |
+| 1 | `uv sync --locked` | 0 | ~0.9s (resolve) |
+| 2 | `ruff check .` | 0 | fast, all checks passed |
+| 3 | `pytest` | 0 | 1638 collected (re-measured floor, matches recorded baseline) |
+| 4 | `bot.py --selftest` | 0 | `selftest: OK` |
+| 5 | `bot.py --selftest-live` | 0 | all seven live checks OK, including `lmstudio` |
+| 6 | `mutation_check.py` (no `--select`) | 0 | 120/120 killed, 0 survived/errored/drifted |
+| 7 | `rag_eval.py` | 0 | hybrid recall@5=1.000, hybrid+rerank recall@5=1.000, PASS; advisory conversation-aware smoke -- TOOL-06 pin: pass, context-proof: pass (gold source `vacation_policy.md` returned) |
+| 8 | `agent_eval.py` | n/a | script does not exist yet |
+
+`doctor`: `[PASS] doctor: all tools at pin, hooks installed`. Hooks:
+`install_hooks.py --check`: `hooks installed correctly`.
+
+### Delegation record (T0)
+
+T0 -- not delegated -- *commands only* (EC-04's exemption: the five Stage 0
+checks and the seven gates are commands whose redacted output goes into
+this skeleton; the skeleton, the prompt file and the ledger block are prose
+no gate compiles, imports or runs). Executor model: `claude-sonnet-5`.
+
+### Disclosure -- a transient false positive during gate 6
+
+Mid-gate-6, an automated background security-review plugin flagged an
+apparent SSRF regression in `tools.py` (the `_check_resolved_scope` guard
+"removed"). Investigated immediately: `mutation_check.py` was actively
+mid-cycle on its `v12-...` PID-reuse mutation (`_process_start_ticks`,
+`devtools/mutation_check.py:253`), which mutates the tracked file in place
+before reverting it (documented pre-existing behaviour). `git diff` at the
+time showed only that mutation's edit, not the SSRF guard; `_check_resolved_scope`
+was present and called at both of its call sites throughout. No SSRF
+regression occurred; the tree was clean (`git status --porcelain` empty)
+once gate 6 finished with 120/120 killed.
+
+## Operator inputs
+
+- **Resolved `LLM_JUDGE_MODEL`:** `openrouter:openai/gpt-4.1`
+- **Source:** `.env` (the `go` request carried no `LLM_JUDGE_MODEL=` line)
+- **Chat client `describe()`:** `('lmstudio', 'qwen/qwen3.8-27b')` (expected pair per lab amendment A1, confirmed)
+- **Judge client `describe()`:** `('openrouter', 'openai/gpt-4.1')`
+- **Stage 0 check-4 fallback used:** no
+
+## T1-T8 — not reached yet
+
+## T9 — not reached yet
+
+## T10 — not reached yet
+
+## T11 — not reached yet
+
+## Ledger row (paste into `economics.md`)
+
+*(filled at T10/T11 — provisional at T10, final SHA at T11)*
