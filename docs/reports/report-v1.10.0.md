@@ -104,7 +104,34 @@ once gate 6 finished with 120/120 killed.
 - **Judge client `describe()`:** `('openrouter', 'openai/gpt-4.1')`
 - **Stage 0 check-4 fallback used:** no
 
-## T1-T8 — not reached yet
+## T1 — inbound sanitisation and outbound text
+
+Contract: `docs/spec/task-briefs/v1100-T1.md`, prompt 193. Delegated —
+executor `claude-sonnet-5` (general-purpose subagent). Commit `a3b3f8a`.
+
+`bot.py` gains `utf16_length()` (`:305-307`) and `reply_parts()` (`:310-312`,
+`split_message(redact(text))`); the inbound cap (`:887`) now compares
+`utf16_length(text) > MAX_MESSAGE_CHARS`; all five `split_message(` call
+sites (`:911`, `:927`, `:1003`, `:1082`, `:1484`) now call `reply_parts(`.
+`split_message(` occurs exactly twice in the final source (its own `def`
+and inside `reply_parts`). New file `tests/test_v1100_sanitization.py`, 13
+tests covering `T-V1100-SAN-01…03`, `T-V1100-OUT-01…03`, including a
+boundary-straddling regression test empirically verified against a
+`split_message(text)`-instead-of-`redact`-first mutation. Gates 1–4: all
+exit 0 (pytest 1650 passed/1 skipped); `tests/test_v1_guardrails.py:556,
+:571` and `tests/test_telegram.py:223` stay green, unamended.
+
+**Finding carried to T7 (not a defect, a mutation-table correction):** the
+delegate found that mutation `v1100-reply-parts-split-before-redact`'s
+spec-table killer (`T-V1100-OUT-02`) does not actually kill it in isolation
+— `agent.py:366`'s `finish()` already redacts the agent-reply path before
+`bot.py` ever splits it, so `T-V1100-OUT-02`'s scenario passes unchanged
+under that mutation. The mutation is killed by the new `T-V1100-OUT-01`
+boundary-straddling test instead. T7 must verify the real killer
+empirically when authoring the entry (GATE-02 already requires this) and
+should record `T-V1100-OUT-01` as the killer of record, not `-OUT-02`.
+
+## T2-T8 — not reached yet
 
 ## T9 — not reached yet
 

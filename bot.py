@@ -302,6 +302,16 @@ def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
     return parts
 
 
+def utf16_length(text: str) -> int:
+    """Telegram counts UTF-16 code units, exactly as `split_message` does."""
+    return sum(2 if ord(char) > 0xFFFF else 1 for char in text)
+
+
+def reply_parts(text: str) -> list[str]:
+    """Redact first, then split: a secret can never straddle a part boundary."""
+    return split_message(redact(text))
+
+
 class RateLimiter:
     """A token bucket per Telegram user id.
 
@@ -874,7 +884,7 @@ def process_update(
         log.info("update %d is not a text message; answered with a hint", update_id)
         _send(tg, chat_id, [NON_TEXT_REPLY])
         return
-    if len(text) > MAX_MESSAGE_CHARS:
+    if utf16_length(text) > MAX_MESSAGE_CHARS:
         log.info("update %d exceeds the message length cap; rejected", update_id)
         _send(tg, chat_id, [TOO_LONG_REPLY])
         return
@@ -898,7 +908,7 @@ def process_update(
             _send(
                 tg,
                 chat_id,
-                split_message(
+                reply_parts(
                     _render_status(
                         conn,
                         cfg,
@@ -914,7 +924,7 @@ def process_update(
             )
             return
         if name == "/stats":
-            _send(tg, chat_id, split_message(_render_stats(conn, from_id)))
+            _send(tg, chat_id, reply_parts(_render_stats(conn, from_id)))
             return
         if name == "/summary":
             _handle_summary(conn, tg, cfg, llm, chat_id, from_id, resolve_cost, summary_llm)
@@ -990,7 +1000,7 @@ def process_update(
     reply = outcome.reply
     if not outcome.failed and searcher is not None and searcher.calls:
         reply, _ = rag.attach_sources(reply, searcher.calls)
-    sent_ok = _send(tg, chat_id, split_message(reply))
+    sent_ok = _send(tg, chat_id, reply_parts(reply))
     status.finish(ok=sent_ok and not outcome.failed)
 
 
@@ -1069,7 +1079,7 @@ def _handle_summary(
         _send(tg, chat_id, [SUMMARY_FAILED_REPLY])
         return
     storage.add_summary(conn, conv_id, from_id, summary)
-    _send(tg, chat_id, split_message(_render_summary(summary)))
+    _send(tg, chat_id, reply_parts(_render_summary(summary)))
 
 
 def _render_summary(summary_json: str) -> str:
@@ -1471,7 +1481,7 @@ def _handle_documents(conn, tg, chat_id: int, from_id: int) -> None:
         _send(tg, chat_id, [DOCUMENTS_EMPTY_REPLY])
         return
     lines = [f"Your documents ({len(rows)}):"] + [_render_document_line(row) for row in rows]
-    _send(tg, chat_id, split_message("\n".join(lines)))
+    _send(tg, chat_id, reply_parts("\n".join(lines)))
 
 
 def _handle_delete(conn, tg, chat_id: int, from_id: int, argument: str) -> None:
