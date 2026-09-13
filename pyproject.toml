@@ -81,6 +81,14 @@ select = [
 # same exclusion applies to them instead. See docs/reports/report-v1.9.3.md.
 [tool.ruff.lint.per-file-ignores]
 "devtools/bench_scenarios.py" = ["TRY004", "ISC004"]
+# spec-v1.10.0 T5 (REQ-V1100-JDG-04, T-V1100-JDG-08): `parse_judge_reply`
+# between the `# BEGIN/END SPEC JUDGE PROTOCOL` markers must stay byte-for-byte
+# identical to docs/spec/spec-v1.10.0.md Sec.8's fenced blocks -- a later
+# task's test compares the two source slices verbatim, so no lint-driven
+# edit (a `ValueError` -> `TypeError` rewrite) can land inside it. Same
+# exception as devtools/bench_scenarios.py above, for the same reason (a
+# frozen byte-exact source slice), one rule.
+"devtools/agent_eval.py" = ["TRY004"]
 
 # v1.9.2 T1 (REQ-V15-NG-04): `docs/` was already out of scope for
 # formatting at spec-v1.5 (spec-v1.5.md:951 -- "ruff format also reaches
@@ -98,8 +106,17 @@ select = [
 # record, never edited to match new bytes. Reformatting the file would
 # silently invalidate all of them. Lint (ruff check) still covers both
 # exclusions below; only the formatter skips them.
+#
+# devtools/agent_eval.py is excluded for the same class of reason
+# (spec-v1.10.0 T5, REQ-V1100-JDG-04, T-V1100-JDG-08): `ruff format` would
+# rewrite the `# BEGIN/END SPEC JUDGE PROTOCOL` slice (splitting the
+# `JUDGE_RESPONSE_FORMAT` dict's inline keys onto their own lines, adding
+# blank lines around `_reject_constant`/`JUDGE_KEYS`/`parse_judge_reply`),
+# breaking its byte-for-byte identity with docs/spec/spec-v1.10.0.md Sec.8's
+# two fenced blocks. Lint (ruff check) still covers the whole file; only the
+# formatter skips it.
 [tool.ruff.format]
-exclude = ["docs/**", "devtools/bench_scenarios.py"]
+exclude = ["docs/**", "devtools/bench_scenarios.py", "devtools/agent_eval.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

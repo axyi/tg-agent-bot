@@ -203,7 +203,31 @@ than just one, so its `none_of` guard is exercised more strongly. T8's
 review should confirm both are backward-compatible with the spec's stated
 signature and intent, not silent scope creep.
 
-## T5-T8 — not reached yet
+## T5 — the gate-8 runner, offline
+
+Contract: `docs/spec/task-briefs/v1100-T5.md`, prompt 197. Delegated —
+executor `claude-sonnet-5` (general-purpose subagent). Commit `f86dfb9`.
+
+Extended `devtools/agent_eval.py` with the whole runner: `RequestRecorder`/
+`probe_headers`/`ttft_probe` (LAT-02/-03), `RecordingLLM`/`_refusing_runner`
+(RUN-02), the judge protocol between `# BEGIN/END SPEC JUDGE PROTOCOL`
+markers (`devtools/agent_eval.py:911-969`) — **independently re-verified
+byte-identical** by the orchestrator against
+`/home/akh/.claude/jobs/bdd457e0/tmp/judge-protocol.py` (the exact text
+extracted from the spec at T0, used unchanged since), `worst_case_calls`/
+`gate8_timeout_seconds`/`GATE8_DEPENDENCIES`/`dependency_diff_is_version_only`,
+and `run()`/`main()` with the full `--select`/`--print-dependencies`/error-matrix
+contract. New `tests/test_v1100_runner.py`, 86 tests, entirely offline
+(`httpx.MockTransport`, scripted fakes, injected clocks) — independently
+re-run by the orchestrator, all green. Gates 1–4 all exit 0.
+
+`pyproject.toml` gained one `ruff` per-file-ignore (`TRY004`) and one
+`ruff format` exclude entry for `devtools/agent_eval.py`, mirroring the
+existing `devtools/bench_scenarios.py` precedent exactly (a frozen
+byte-exact source slice that a lint/format autofix would otherwise
+corrupt) — reviewed and judged in-scope, not drift.
+
+## T6-T8 — not reached yet
 
 ## T9 — not reached yet
 
