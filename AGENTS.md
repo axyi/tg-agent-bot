@@ -157,8 +157,8 @@ uv run --locked python devtools/mutation_check.py
 uv run --locked python devtools/rag_eval.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1634
-tests as of spec-v1.9.4 T5). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1638
+tests as of spec-v1.9.5 T2). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
 LM Studio and an OpenRouter key); it spends no inference tokens and sends no
 Telegram message. **Gate 5 must be fully green at every commit, including its
@@ -166,7 +166,7 @@ Telegram message. **Gate 5 must be fully green at every commit, including its
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 119 entries as of v1.9.4 T5
+the test suite once per mutation) — 120 entries as of v1.9.5 T2
 (up from 105 at spec-v1.9.0's close; T9 added seven `v190-*` entries
 covering RAG per-user isolation (the vector KNN and BM25 queries,
 `list_documents`/`document_id_for`'s owner predicates), the delete path's
@@ -183,16 +183,19 @@ v1.9.3 added four more: T1 commit B's `v193-mutation-dirty-tree-unchecked`
 (the rerank-routing fix), and the T1+T2 review's
 `v193-gate-timeout-kills-direct-child-only` and
 `v193-signal-handler-leaves-child-running` (both covering the
-gate-timeout/signal-handling hardening), and v1.9.4 added five more: T1's
+gate-timeout/signal-handling hardening), v1.9.4 added five more: T1's
 `v194-redacting-formatter-skips-redact` and `v194-bench-logging-unredacted`
 (the logging-layer redaction mechanism and its bench-entry-point wiring),
 T2's `v194-smoke-turn3-gold-unchecked` (the gate-7 smoke's context-proof
 third turn), and T3's `v194-mutation-hang-unbounded` and
-`v194-mutation-hang-reported-as-killed` (the per-mutation hang timeout);
-see
+`v194-mutation-hang-reported-as-killed` (the per-mutation hang timeout),
+and v1.9.5 T1 added one more, `v195-init-schema-drops-the-pair` (`bot.py`'s
+three `storage.init_schema` call sites routed through one shared
+`_init_startup_schema` helper that always passes the configured embedding
+pair -- GitHub issue #3); see
 `docs/reports/report-v1.9.0.md`, `docs/reports/report-v1.9.1.md`,
-`docs/reports/report-v1.9.2.md`, `docs/reports/report-v1.9.3.md` and
-`docs/reports/report-v1.9.4.md`);
+`docs/reports/report-v1.9.2.md`, `docs/reports/report-v1.9.3.md`,
+`docs/reports/report-v1.9.4.md` and `docs/reports/report-v1.9.5.md`);
 `--select <prefix>` runs a named subset
 (mutually exclusive with `--only`), e.g. `--select v190-`. v1.9.3 T1: the
 gate refuses to start (exit 1, naming the path) if any mutation path's
