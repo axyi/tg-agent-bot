@@ -1683,7 +1683,7 @@ def run_selftest() -> int:
         tg = _SelftestTelegram()
         conn = storage.connect(cfg.db_path)
         try:
-            storage.init_schema(conn)
+            _init_startup_schema(conn, cfg)
             process_update(
                 _SELFTEST_UPDATE,
                 conn=conn,
@@ -1804,7 +1804,7 @@ def _live_db(cfg: Config) -> int:
     try:
         conn = storage.connect(cfg.db_path)
         try:
-            storage.init_schema(conn)
+            _init_startup_schema(conn, cfg)
             version = storage.schema_version(conn)
         finally:
             conn.close()
@@ -1961,6 +1961,17 @@ _EXCLUSIVE_FLAGS = frozenset({"--selftest", "--selftest-live", "--version"})
 _KNOWN_FLAGS = _EXCLUSIVE_FLAGS | {"--no-dashboard"}
 
 
+def _init_startup_schema(conn: sqlite3.Connection, cfg: Config) -> None:
+    """REQ-V190-STO-04: the one place `storage.init_schema` is ever called
+    from `bot.py` -- `main()`, `run_selftest()` and `_live_db()` all call
+    this, never `storage.init_schema` directly, so the configured embedding
+    pair cannot drift out of one of the three call sites again (the bug
+    behind GitHub issue #3: a bare `init_schema(conn)` leaves `vec_chunks`
+    and the `rag.embedding` state key never created on a RAG-configured
+    deployment)."""
+    storage.init_schema(conn, embedding_dim=cfg.embedding_dim, embedding_model=cfg.embedding_model)
+
+
 def main(argv: list[str] | None = None) -> int:
     global _started_at
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -2007,7 +2018,18 @@ def main(argv: list[str] | None = None) -> int:
 
     _started_at = time.monotonic()
     conn = storage.connect(cfg.db_path)
-    storage.init_schema(conn)
+    try:
+        _init_startup_schema(conn, cfg)
+    except ConfigError as exc:
+        # REQ-V12-ERR-01: a configuration refusal must look like one, not an
+        # unhandled traceback -- same shape as load_config's own catch above
+        # and _startup_docker_wiring's below. This is what makes
+        # _bind_new_embedding_pair's/_rebind_embedding_pair's ConfigError
+        # (orphaned vec_chunks, or the pair changed while documents exist)
+        # reachable from main() for the first time.
+        log.error("configuration error: %s", redact(str(exc)))  # noqa: TRY400
+        conn.close()
+        return 2
     skills = tools.load_skills(PROJECT_ROOT / "skills")
     client = httpx.Client()
     tg = TelegramClient(cfg.telegram_bot_token, client=client)
