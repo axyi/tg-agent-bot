@@ -4,6 +4,8 @@ Every test here injects a fake runner and operates on a throwaway file tree
 under `tmp_path` — never the real suite, never the real repository.
 """
 
+import subprocess
+
 import pytest
 
 from devtools import checks
@@ -268,6 +270,10 @@ def test_t_v192_mutation_order_shrink_check_blocks_before_running_anything(monke
     # instead -- a different, wrong return code and a spurious call -- which
     # is exactly what "killed" means here. Never shells out to real pytest:
     # `_shrink_counts` and `run_all` are both faked.
+    # v1.9.3 T1 commit B, fix 1 added an earlier main()-level guard (the
+    # dirty-tree check) that also inspects the real repo tree; bypass it
+    # here so this test still exercises only the shrink guard it names.
+    monkeypatch.setattr(mc, "_dirty_mutation_paths", lambda *a, **k: [])
     monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (100, 99, 0, 0))
     calls = []
     monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
@@ -287,6 +293,7 @@ def test_t_v192_mutation_order_shrink_check_rejects_zero_zero_collection(monkeyp
     # rejected outright -- 0 == 0 would otherwise pass the equality check
     # too, so dropping only the `<= 0` guard falls all the way through to
     # run_all. Faked throughout, never shells out to real pytest.
+    monkeypatch.setattr(mc, "_dirty_mutation_paths", lambda *a, **k: [])
     monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (0, 0, 0, 0))
     calls = []
     monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
@@ -301,6 +308,7 @@ def test_t_v192_mutation_order_shrink_check_rejects_nonzero_returncode(monkeypat
     # Review finding 1: a collect-only failure (non-zero returncode) must
     # not be read through the counts at all -- even matching, positive
     # counts must not pass when either invocation errored.
+    monkeypatch.setattr(mc, "_dirty_mutation_paths", lambda *a, **k: [])
     monkeypatch.setattr(mc, "_shrink_counts", lambda root=mc.REPO_ROOT: (1598, 1598, 2, 0))
     calls = []
     monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
@@ -311,3 +319,52 @@ def test_t_v192_mutation_order_shrink_check_rejects_nonzero_returncode(monkeypat
     assert calls == []
     err = capsys.readouterr().err
     assert "rc=2" in err
+
+
+# ---------------------------------------------------------------------------
+# v1.9.3 T1 commit B, fix 1 (docs/spec/task-briefs/v193-T1.md): refuse to
+# start while a mutation path already differs from the committed HEAD blob.
+# ---------------------------------------------------------------------------
+
+
+def _git(args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def test_t_v193_dirty_mutation_paths_detects_a_byte_difference_from_head(tmp_path):
+    target = tmp_path / "target.py"
+    target.write_text("value = 'original'\n", encoding="utf-8")
+    _git(["init", "-q"], tmp_path)
+    _git(["add", "target.py"], tmp_path)
+    _git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], tmp_path)
+
+    # Clean: matches HEAD exactly.
+    clean_mutation = {"id": "x", "path": "target.py", "find": "a", "replace": "b", "why": "w"}
+    assert mc._dirty_mutation_paths([clean_mutation], root=tmp_path) == []
+
+    # Plant a byte difference relative to the committed HEAD blob -- the same
+    # shape a leftover mutation (or an operator's own uncommitted edit) takes.
+    target.write_text("value = 'dirty'\n", encoding="utf-8")
+    assert mc._dirty_mutation_paths([clean_mutation], root=tmp_path) == ["target.py"]
+
+
+def test_t_v193_mutation_dirty_tree_check_blocks_before_running_anything(monkeypatch, capsys):
+    # A killer test for `v193-mutation-dirty-tree-unchecked`: with the real
+    # check in place, a fabricated dirty path must make main() refuse and
+    # never reach run_all. If the mutation neuters the check (turns it into
+    # `if False:`), main() falls through to the mocked run_all below instead
+    # -- a different, wrong return code and a spurious call -- exactly what
+    # "killed" means here. Never touches the real repo tree: the blob-vs-
+    # working-tree comparison itself is faked, not exercised.
+    monkeypatch.setattr(
+        mc, "_dirty_mutation_paths", lambda mutations, root=mc.REPO_ROOT: ["devtools/checks.py"]
+    )
+    calls = []
+    monkeypatch.setattr(mc, "run_all", lambda *a, **k: calls.append((a, k)) or 0)
+
+    code = mc.main(["--only", "v193-mutation-dirty-tree-unchecked"])
+
+    assert code == 1
+    assert calls == []
+    err = capsys.readouterr().err
+    assert "devtools/checks.py" in err

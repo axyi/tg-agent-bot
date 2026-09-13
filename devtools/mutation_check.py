@@ -1314,6 +1314,23 @@ MUTATIONS = [
         "shrink' -- the guard must reject an empty collection outright, "
         "not just a mismatched one",
     },
+    # -- v1.9.3 T1 commit B, fix 1 (docs/spec/task-briefs/v193-T1.md): a
+    # gate timeout that SIGKILLs this runner's direct child (pre-fix-2)
+    # left a mutated file on disk with no survivor id printed and no
+    # signal ever reaching this process to restore it. Fix 1 refuses to
+    # even start a new run while any mutation path already differs from
+    # the committed HEAD blob, rather than silently overwriting what could
+    # be an operator's own uncommitted edit. This mutation drops that
+    # refusal outright, restoring the pre-fix hazard. ----------------------
+    {
+        "id": "v193-mutation-dirty-tree-unchecked",
+        "path": "devtools/mutation_check.py",
+        "find": "    if dirty:\n",
+        "replace": "    if False:  # v193-mutation-dirty-tree-unchecked\n",
+        "why": "v1.9.3 T1 fix 1: a leftover mutated file (or an operator's "
+        "own uncommitted edit) on a mutation path must block the run "
+        "outright, never be silently mutated further on top of",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -1493,6 +1510,43 @@ def _collect_count(root: Path, files: list[Path] | None = None) -> tuple[int, in
     return count, completed.returncode
 
 
+def _dirty_mutation_paths(mutations: list[dict], root: Path = REPO_ROOT) -> list[str]:
+    """Every distinct `mutation['path']` (v1.9.3 T1 commit B, fix 1) whose
+    working-tree bytes differ from the committed `HEAD` blob -- read via
+    `git show HEAD:<path>`, the same git-objects-only source of truth
+    `checks.py`'s own `replay` command uses (REQ-V15-SCAN-01), never the
+    filesystem. This is a different, new check from the pre-existing
+    find-string drift check `run_one` already does per mutation (that one
+    detects a `find` string occurring zero or twice in the *current*
+    working tree, mutated or not) -- this one detects the working tree
+    disagreeing with `HEAD` *before* any mutation is ever applied.
+
+    A path git can't produce a `HEAD` blob for (renamed/new file, or `root`
+    is not a git repository at all) is not reported dirty here -- there is
+    nothing to compare bytes against, and `run_one`'s own drift check still
+    catches an actually-broken find string regardless."""
+    seen: list[str] = []
+    for mutation in mutations:
+        path = mutation["path"]
+        if path not in seen:
+            seen.append(path)
+
+    dirty: list[str] = []
+    for rel_path in seen:
+        committed = subprocess.run(
+            ["git", "show", f"HEAD:{rel_path}"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+        if committed.returncode != 0:
+            continue
+        working_path = root / rel_path
+        if not working_path.exists() or working_path.read_bytes() != committed.stdout:
+            dirty.append(rel_path)
+    return dirty
+
+
 def _shrink_counts(root: Path = REPO_ROOT) -> tuple[int, int, int, int]:
     """(explicit_count, bare_count, explicit_rc, bare_rc) -- the counts are
     trustworthy, and comparable, only once the caller has checked both
@@ -1509,6 +1563,42 @@ def _shrink_counts(root: Path = REPO_ROOT) -> tuple[int, int, int, int]:
     return explicit_count, bare_count, explicit_rc, bare_rc
 
 
+# v1.9.3 T1 commit B, fix 2 (docs/spec/task-briefs/v193-T1.md): the same
+# SIGTERM-then-grace-then-SIGKILL grace this release's `checks.py:run_argv`
+# gives a timed-out gate's process group -- sized identically, kept as this
+# module's own constant rather than importing `checks` (REQ-V12-TREE-01:
+# this module stays standard-library only and no third-party or sibling-
+# devtools-module coupling).
+_TERMINATE_GRACE_S = 5.0
+
+# Set by `default_runner` while its `pytest` child is alive, cleared once it
+# exits; read by the SIGINT/SIGTERM handler below so a signal this process
+# receives mid-run can terminate that child's whole process group before
+# restoring the tree and exiting. `None` outside a real subprocess run (every
+# test-injected `runner` never touches this).
+_CURRENT_CHILD: subprocess.Popen | None = None
+
+
+def _terminate_current_child() -> None:
+    proc = _CURRENT_CHILD
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=_TERMINATE_GRACE_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait()
+
+
 def default_runner(mutation: dict) -> int:
     """Run the real suite once, `-x -q`, with a fresh bytecode cache, test
     files explicitly ordered by relevance to `mutation` (see
@@ -1522,7 +1612,14 @@ def default_runner(mutation: dict) -> int:
     mutation is applied it fails on its own bookkeeping regardless of whether
     any functional test catches the mutation, which would make every mutation
     look "killed" for the wrong reason.
+
+    Runs the child in its own process group (`start_new_session=True`) and
+    tracks it in `_CURRENT_CHILD` for the run's duration (v1.9.3 T1 commit B,
+    fix 2) so a SIGINT/SIGTERM this process receives while the suite is
+    running terminates the child too, instead of leaving it orphaned while
+    only the tree gets restored.
     """
+    global _CURRENT_CHILD
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     files = ordered_test_files(mutation, REPO_ROOT)
@@ -1538,8 +1635,12 @@ def default_runner(mutation: dict) -> int:
         "--deselect",
         _SELF_CHECK_NODE_ID,
     ] + [str(p.relative_to(REPO_ROOT)) for p in files]
-    completed = subprocess.run(argv, cwd=REPO_ROOT, env=env)
-    return completed.returncode
+    proc = subprocess.Popen(argv, cwd=REPO_ROOT, env=env, start_new_session=True)
+    _CURRENT_CHILD = proc
+    try:
+        return proc.wait()
+    finally:
+        _CURRENT_CHILD = None
 
 
 def _install_signal_handlers(restorer: _Restorer) -> tuple:
@@ -1548,6 +1649,10 @@ def _install_signal_handlers(restorer: _Restorer) -> tuple:
     process (its own test suite does exactly that)."""
 
     def _handler(_signum, _frame):
+        # v1.9.3 T1 commit B, fix 2: terminate the running pytest child (if
+        # any) before restoring the tree -- previously this handler restored
+        # the tree but left the child running, orphaned.
+        _terminate_current_child()
         restorer.restore_all()
         sys.exit(1)
 
@@ -1654,6 +1759,34 @@ def main(argv: list[str] | None = None) -> int:
     # must not report a clean gate over an empty set.
     if args.select is not None and all(not m["id"].startswith(args.select) for m in MUTATIONS):
         print(f"no mutation id matches prefix: {args.select}", file=sys.stderr)
+        return 1
+
+    # v1.9.3 T1 commit B, fix 1 (docs/spec/task-briefs/v193-T1.md): refuse to
+    # start a run while any mutation path already differs from the
+    # committed HEAD blob -- a leftover mutation from an earlier run this
+    # gate's own timeout (or an external SIGKILL) left mutated, and an
+    # operator's own uncommitted edit, are indistinguishable by bytes;
+    # overwriting a real edit is worse than refusing a red gate. Placed
+    # after the two id/prefix checks above for the same reason the shrink
+    # guard is (an invalid --only/--select still fails instantly, without
+    # paying this check's own git-show overhead), and before the shrink
+    # guard since there is no point collecting node counts on a tree this
+    # run refuses to touch anyway.
+    dirty = _dirty_mutation_paths(MUTATIONS)
+    if dirty:
+        print(
+            "mutation runner refuses to start: the following mutation "
+            "path(s) already differ from the committed HEAD blob:",
+            file=sys.stderr,
+        )
+        for rel_path in dirty:
+            print(f"  {rel_path}", file=sys.stderr)
+        print(
+            "inspect with `git diff <path>`; if this is a leftover mutation "
+            "(not your own edit), `git checkout -- <path>` restores it, "
+            "then re-run.",
+            file=sys.stderr,
+        )
         return 1
 
     # v1.9.2 T2 silent-shrink guard, once per invocation (not per mutation),

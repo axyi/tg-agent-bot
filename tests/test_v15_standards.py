@@ -631,6 +631,29 @@ def test_v15_scan_03_fail_closed_timeout(tmp_path: Path):
     assert "timed out" in result.message
 
 
+def test_v193_t1_fix2_timeout_sends_sigterm_before_sigkill(tmp_path: Path, monkeypatch):
+    # v1.9.3 T1 commit B, fix 2 (docs/spec/task-briefs/v193-T1.md): a timed-
+    # out gate must be SIGTERMed (giving a well-behaved child -- e.g.
+    # mutation_check.py's own tree-restoring handler -- a chance to run)
+    # before it is SIGKILLed. A child that only traps SIGTERM and writes a
+    # marker file, never exiting on its own after that, can only leave the
+    # marker if it actually received SIGTERM; a SIGKILL-only path would kill
+    # it with no marker written. `checks.run_argv`'s own
+    # `_TERMINATE_GRACE_S` is patched down so the whole timeout+grace path
+    # stays well under 2s.
+    marker = tmp_path / "sigterm-received.marker"
+    script = (
+        "import signal, time\n"
+        f"signal.signal(signal.SIGTERM, lambda *_: open({str(marker)!r}, 'w').close())\n"
+        "time.sleep(30)\n"
+    )
+    monkeypatch.setattr(checks, "_TERMINATE_GRACE_S", 0.3)
+    result = checks.run_argv([sys.executable, "-c", script], tmp_path, 1)
+    assert not result.ok
+    assert "timed out after 1s" in result.error
+    assert marker.exists()
+
+
 def test_v15_scan_03_fail_closed_unparseable(tmp_path: Path):
     repo = _init_repo(tmp_path)
     _commit_all(repo)

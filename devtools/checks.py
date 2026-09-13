@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1092,23 +1094,60 @@ class CommandResult:
     error: str | None = None
 
 
+# v1.9.3 T1 commit B (docs/spec/task-briefs/v193-T1.md, fix 2): a gate
+# whose own child forks further children (gate 6's `uv` -> `pytest` ->
+# `mutation_check.py`'s tracked `pytest` subprocess) must have its whole
+# process *group* signalled, not just the direct child `subprocess.run`
+# used to SIGKILL -- SIGKILL is instant and never gives a child's own
+# SIGTERM/SIGINT handler (e.g. `mutation_check.py`'s tree-restoring one)
+# a chance to run. This grace is deliberately short: every gate's own
+# `timeout_seconds` above already sizes the *normal* run, so this is pure
+# shutdown overhead paid only on the timeout path.
+_TERMINATE_GRACE_S = 5.0
+
+
+def _terminate_process_group(proc: subprocess.Popen) -> None:
+    """SIGTERM the timed-out child's whole process group first, giving it
+    `_TERMINATE_GRACE_S` to exit on its own (its handler, if any, runs);
+    SIGKILL the group only if it is still alive after the grace. Reaps
+    the process either way so no zombie is left behind."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.communicate(timeout=_TERMINATE_GRACE_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.communicate()
+
+
 def run_argv(
     argv: list[str], cwd: Path, timeout_seconds: int, *, input_bytes: bytes | None = None
 ) -> CommandResult:
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             argv,
             cwd=cwd,
-            input=input_bytes,
-            capture_output=True,
-            timeout=timeout_seconds,
-            check=False,
+            stdin=subprocess.PIPE if input_bytes is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         return CommandResult(False, None, b"", b"", f"binary not found: {exc}")
+
+    try:
+        stdout, stderr = proc.communicate(input=input_bytes, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
         return CommandResult(False, None, b"", b"", f"timed out after {timeout_seconds}s")
-    return CommandResult(True, proc.returncode, proc.stdout, proc.stderr, None)
+    return CommandResult(True, proc.returncode, stdout, stderr, None)
 
 
 def render_token(token: str, values: dict[str, str]) -> str:

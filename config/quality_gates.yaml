@@ -510,13 +510,23 @@ gates:
   #
   # v1.9.3 T1 commit A (docs/spec/task-briefs/v193-T1.md): `pre-push` now
   # runs this gate instead of the five `mutation-v*` subsets above, so
-  # every push pays this gate's own wall (680.49s measured above, at 110
-  # entries) once, in full, rather than five partial subset walls. The
-  # 1440s timeout above stands unchanged under the amended rule for this
-  # commit; commit B of the same task fixes the gate-timeout/SIGKILL
-  # hazard this gate was already exposed to (docs/reports/report-v1.9.2.md
-  # disclosure b) and re-measures this timeout fresh on its own tree,
-  # superseding the number above.
+  # every push pays this gate's own wall in full, once, rather than five
+  # partial subset walls.
+  #
+  # v1.9.3 T1 commit B: fixed the gate-timeout/SIGKILL hazard this gate was
+  # exposed to (docs/reports/report-v1.9.2.md disclosure b -- a timeout
+  # SIGKILLed only the direct `uv` child, orphaning `mutation_check.py`
+  # with no chance to restore a mutated file) and added a new entry
+  # (`v193-mutation-dirty-tree-unchecked`, 111 total). Re-measured directly
+  # on this commit's tree (`ceb4a11`), alone, nothing else on the box
+  # (`time uv run --locked python devtools/mutation_check.py`, no
+  # --select, 111/111 killed, 0 survived, 0 errored, 0 drifted):
+  # real=13m34.449s (814.449s) -> 2x ~1628.898s + 70s (survivor-safe rule
+  # above) = ~1698.898s, rounded up to 1700s. Up from 1440s at 110 entries
+  # -- one more entry plus this commit's own two new git-show subprocess
+  # calls per distinct mutation path account for some of the jump, the
+  # rest consistent with this box's own documented shared/contended
+  # variance (noted at every earlier re-measurement above).
   mutation-all:
     kind: command
     result_mode: exit_status
@@ -525,7 +535,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 1440
+    timeout_seconds: 1700
 
   hooks-installed:
     kind: command
