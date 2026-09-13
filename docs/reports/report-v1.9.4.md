@@ -219,3 +219,62 @@ by the coordinator; the coordinator then ran the five live measurement runs
 above directly (real money, sequenced alone on the box), decided the
 recommendation, re-derived the gate timeout, and finishes this report
 section, `docs/llm-usage.md` row 92, and the commit.
+
+## T3 -- hung mutation reported by id
+
+Contract: `docs/spec/task-briefs/v194-T3.md`, prompt 183.
+
+**The gap.** The only timeout around a mutation run was the gate's own
+(`config/quality_gates.yaml`'s `mutation-all.timeout_seconds`, 1530s): if one
+`pytest` invocation hangs, the whole gate runs to 1530s and the output names
+no mutation at all -- the operator cannot tell "one hung" from "the box was
+slow".
+
+**The fix.** `devtools/mutation_check.py`'s `default_runner` now bounds its
+child with `proc.wait(timeout=_MUTATION_TIMEOUT_S)` (`_MUTATION_TIMEOUT_S =
+180.0`, sized at >2x the slowest legitimate single run measured on this box,
+the ~70s single-process full-suite fallback for a survivor from v1.9.2 T2 --
+also small enough that the gate's own 1530s budget still catches roughly 8
+hung mutations before the gate itself trips). On `subprocess.TimeoutExpired`
+it terminates the child via the existing `_terminate_current_child()` (the
+same process-group SIGTERM-then-SIGKILL path a signal already uses --
+reused, not reimplemented), prints the mutation id and elapsed time, and
+returns a sentinel exit code (`_HUNG_EXIT_CODE = 124`, coreutils' own
+`timeout` exit code) that `run_one`'s existing exit-code mapping (`1`
+KILLED, `0` SURVIVED, anything else ERRORED) already classifies `ERRORED`
+with no changes to `run_one`/`run_all`. No fifth outcome string. Tree
+restoration goes through `run_one`'s existing `finally:
+restorer.restore_one(path)`, confirmed unchanged -- no second restore path
+was added.
+
+One incidental fix during implementation: the new `_terminate_current_child()`
+call site inside `default_runner` needed a distinguishing trailing comment,
+since its bare call would otherwise have been byte-identical to the existing
+`v193-signal-handler-leaves-child-running` mutation's own `find` string,
+breaking that entry's "exactly once in the file" invariant -- no behaviour
+change, confirmed by the drift script (119/119 matched after).
+
+**Tests.** `tests/test_mutation_check.py` gains
+`test_t_v194_t3_hang_is_errored_with_id_and_tree_restored` (a real child --
+`sleep 30` substituted for the real pytest invocation via a monkeypatched
+`Popen`, under `_MUTATION_TIMEOUT_S = 0.5` -- so the real SIGTERM/SIGKILL
+group-terminate path is exercised; the run itself happens inside a
+throwaway `python -c` subprocess bounded by `subprocess.run(timeout=5)`,
+since `run_all` installs signal handlers via `signal.signal()`, which only
+works on a process's main thread and so cannot be hosted in a plain
+`threading.Thread` as the brief's own suggested mechanism assumed -- the
+brief explicitly leaves the mechanism negotiable) and
+`test_t_v194_t3_normal_kill_within_timeout_unaffected_by_hang_guard` (an
+ordinary `KILLED` run is unaffected by the new guard). Mutation entries:
+`v194-mutation-hang-unbounded` (`wait(timeout=...)` reverted to a bare
+`wait()`) and `v194-mutation-hang-reported-as-killed` (the timeout branch's
+sentinel mapped to `1`/KILLED instead) -- both killed by test 1, run by the
+coordinator after commit (`mutation_check.py` is itself a mutation path).
+`AGENTS.md`'s gate-6 paragraph gained one sentence naming this behaviour;
+no count literal in it was touched.
+
+**Delegation record.** Executor model: `claude-sonnet-5` (Claude Code). This
+subagent performed the implementation and its own offline acceptance
+directly against `docs/spec/task-briefs/v194-T3.md` (no live/paid
+component); the coordinator independently re-ran acceptance, verified the
+diff, and committed.

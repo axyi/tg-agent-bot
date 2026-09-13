@@ -20,6 +20,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -1448,6 +1449,41 @@ MUTATIONS = [
         "dropping the gold-source condition would let a wrong-source hit "
         "pass silently as a real REQ-V190-TOOL-06-adjacent regression",
     },
+    # -- v1.9.4 T3 (docs/spec/task-briefs/v194-T3.md): the only timeout
+    # around a mutation run used to be the gate's own (1530s), which reports
+    # no mutation id at all -- this mutation reverts `default_runner`'s
+    # bounded `proc.wait(timeout=_MUTATION_TIMEOUT_S)` back to a bare
+    # `proc.wait()`, restoring the pre-fix gap where a hung child blocks
+    # forever instead of being terminated and reported by id. Killed by
+    # tests/test_mutation_check.py's real-child hang test (a genuinely
+    # unbounded wait leaves the test's own bounded join unable to observe a
+    # return within its 5s budget). ------------------------------------
+    {
+        "id": "v194-mutation-hang-unbounded",
+        "path": "devtools/mutation_check.py",
+        "find": "        return proc.wait(timeout=_MUTATION_TIMEOUT_S)\n",
+        "replace": "        return proc.wait()  # v194-mutation-hang-unbounded\n",
+        "why": "v1.9.4 T3: default_runner must bound the child to "
+        "_MUTATION_TIMEOUT_S, not wait on it forever -- a hung mutation "
+        "must be terminated and reported by id, not left to the gate's own "
+        "much coarser timeout",
+    },
+    # -- v1.9.4 T3: the timeout branch's sentinel exit code must map to
+    # ERRORED (via run_one's existing exit-code rule), never KILLED -- this
+    # mutation makes default_runner return pytest's own KILLED exit code (1)
+    # instead of the hang sentinel, so a hung mutation would misreport as a
+    # legitimate kill. Killed by the same real-child hang test's outcome
+    # assertion (exit code 1, summary line's killed/errored counts). ------
+    {
+        "id": "v194-mutation-hang-reported-as-killed",
+        "path": "devtools/mutation_check.py",
+        "find": "        return _HUNG_EXIT_CODE\n",
+        "replace": "        return 1  # v194-mutation-hang-reported-as-killed\n",
+        "why": "v1.9.4 T3: a hung mutation must be reported ERRORED (with "
+        "its id and elapsed time), never KILLED -- mapping the timeout "
+        "branch to pytest's own KILLED exit code would hide every hang "
+        "behind a false-positive clean kill",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -1712,6 +1748,26 @@ def _terminate_current_child() -> None:
     proc.wait()
 
 
+# v1.9.4 T3 (docs/spec/task-briefs/v194-T3.md): the per-mutation timeout that
+# turns "the box was slow" into "this mutation hung". Before this release the
+# only timeout around a mutation run was the gate's own
+# (`config/quality_gates.yaml` `mutation-all.timeout_seconds`, 1530s), which
+# reports no mutation id at all -- the operator cannot tell "one hung" from
+# "the box was slow". 180.0 is sized from the slowest legitimate single run
+# measured on this box: the full-suite single-process fallback for a
+# survivor, ~70s (v1.9.2 T2) -- 180s is > 2x that, and still small enough
+# that the gate's own 1530s budget catches roughly 1530 / 180 ~= 8 hung
+# mutations before the gate itself trips.
+_MUTATION_TIMEOUT_S = 180.0
+
+# The sentinel `default_runner` returns when a mutation hangs past
+# `_MUTATION_TIMEOUT_S` -- neither pytest's 1 (KILLED) nor 0 (SURVIVED), so
+# `run_one`'s existing exit-code mapping already classifies it ERRORED with
+# no changes there. 124 mirrors coreutils' own `timeout` command exit code
+# for the same situation.
+_HUNG_EXIT_CODE = 124
+
+
 def default_runner(mutation: dict) -> int:
     """Run the real suite once, `-x -q`, with a fresh bytecode cache, test
     files explicitly ordered by relevance to `mutation` (see
@@ -1731,6 +1787,14 @@ def default_runner(mutation: dict) -> int:
     fix 2) so a SIGINT/SIGTERM this process receives while the suite is
     running terminates the child too, instead of leaving it orphaned while
     only the tree gets restored.
+
+    v1.9.4 T3: also bounds the child to `_MUTATION_TIMEOUT_S`. A hang (a
+    test waiting on a socket, a sandbox container that never exits) is
+    terminated the same way as a signal this process receives
+    (`_terminate_current_child` -- reused, not reimplemented) and reported
+    by printing the mutation id and elapsed time before returning
+    `_HUNG_EXIT_CODE`, a sentinel `run_one`'s existing exit-code mapping
+    already classifies `ERRORED` with no changes there.
     """
     global _CURRENT_CHILD
     env = dict(os.environ)
@@ -1750,8 +1814,14 @@ def default_runner(mutation: dict) -> int:
     ] + [str(p.relative_to(REPO_ROOT)) for p in files]
     proc = subprocess.Popen(argv, cwd=REPO_ROOT, env=env, start_new_session=True)
     _CURRENT_CHILD = proc
+    started = time.monotonic()
     try:
-        return proc.wait()
+        return proc.wait(timeout=_MUTATION_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        _terminate_current_child()  # reuse: same group-terminate path as a signal
+        elapsed = time.monotonic() - started
+        print(f"  {mutation['id']}: hung after {elapsed:.1f}s (killed)")
+        return _HUNG_EXIT_CODE
     finally:
         _CURRENT_CHILD = None
 

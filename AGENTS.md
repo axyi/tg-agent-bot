@@ -192,7 +192,10 @@ gate refuses to start (exit 1, naming the path) if any mutation path's
 working tree differs from the committed `HEAD` blob, so `pre-push` now
 fails fast on WIP edits to one of those files -- commit or `git stash`
 first, or `git restore --staged --worktree <path>` if it is a leftover
-mutation. Gate 7
+mutation. v1.9.4 T3: a mutation whose own child hangs past
+`_MUTATION_TIMEOUT_S` (180s) is terminated the same way a signal already is
+and reported `errored` with its id and elapsed time, instead of being left
+to trip only the gate's own much coarser 1530s timeout, unnamed. Gate 7
 (`devtools/rag_eval.py`, spec-v1.9.0 T8) is the retrieval evaluation: it
 needs the live environment like gate 5, spends real inference on the
 reranker and an advisory conversation smoke, and exits 0 only when

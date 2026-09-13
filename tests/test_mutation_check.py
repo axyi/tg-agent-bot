@@ -6,6 +6,8 @@ under `tmp_path` — never the real suite, never the real repository.
 
 import signal
 import subprocess
+import sys
+import time
 
 import pytest
 
@@ -446,3 +448,92 @@ def test_t_v193_signal_handler_terminates_child_before_restoring_and_exiting(mon
         mc._restore_signal_handlers(previous)
 
     assert calls == ["terminate", "restore"]
+
+
+# ---------------------------------------------------------------------------
+# v1.9.4 T3 (docs/spec/task-briefs/v194-T3.md): a hung mutation is reported
+# by id, not by the gate's own 1530s timeout. Test 1's child is real (never
+# a `_FakeChildProc` double), because the thing under test is
+# `_terminate_current_child`'s real process-group termination racing a real
+# timeout -- but the *test itself* is never at the mercy of the code under
+# test: `run_all` installs signal handlers, which only works on a process's
+# main thread, so a plain `threading.Thread` cannot host it (`signal.signal`
+# raises `ValueError` off the main thread). Test 1 instead runs the call in
+# a throwaway `python -c` subprocess and bounds it with `subprocess.run`'s
+# own `timeout=`, so a regression that makes the wait genuinely unbounded
+# raises `subprocess.TimeoutExpired` in the test process within its own 5s
+# bound instead of hanging it (the orphaned `sleep 30` grandchild, detached
+# in its own session, is harmless and exits well before it would matter).
+# ---------------------------------------------------------------------------
+
+
+_HUNG_TEST_SCRIPT = """
+import pathlib
+import subprocess as _subprocess
+
+from devtools import mutation_check as mc
+
+mc._MUTATION_TIMEOUT_S = 0.5
+
+_real_popen = _subprocess.Popen
+
+
+def _fake_popen(_argv, **kwargs):
+    # Spawns a real child that outlives the timeout -- never the real
+    # pytest invocation `default_runner` builds -- so the real
+    # group-terminate path (`_terminate_current_child`, SIGTERM then a
+    # SIGKILL escalation) is actually exercised.
+    return _real_popen(["sleep", "30"], **kwargs)
+
+
+mc.subprocess.Popen = _fake_popen
+
+mutation = {mutation!r}
+code = mc.run_all([mutation], runner=mc.default_runner, root=pathlib.Path({root!r}))
+print("EXITCODE", code)
+"""
+
+
+def test_t_v194_t3_hang_is_errored_with_id_and_tree_restored(tmp_path):
+    target = _write(tmp_path / "target.py", "value = 'original'\n")
+    mutation = _mutation("v194-t3-hang", target, "original")
+    script = _HUNG_TEST_SCRIPT.format(mutation=mutation, root=str(tmp_path))
+
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=mc.REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("hung mutation run did not return within the test's own 5s bound")
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2, f"took {elapsed:.1f}s -- the real timeout should short-circuit fast"
+    assert proc.returncode == 0, proc.stderr
+    assert "EXITCODE 1" in proc.stdout
+    assert "hung" in proc.stdout
+    assert mutation["id"] in proc.stdout
+    assert "1 errored" in proc.stdout
+    assert target.read_bytes() == b"value = 'original'\n"
+
+
+def test_t_v194_t3_normal_kill_within_timeout_unaffected_by_hang_guard(tmp_path, monkeypatch):
+    target = _write(tmp_path / "target.py", "value = 'original'\n")
+    mutation = _mutation("v194-t3-normal-kill", target, "original")
+
+    real_popen = subprocess.Popen
+
+    def fake_popen(_argv, **kwargs):
+        return real_popen([sys.executable, "-c", "import sys; sys.exit(1)"], **kwargs)
+
+    monkeypatch.setattr(mc.subprocess, "Popen", fake_popen)
+
+    code = mc.run_all([mutation], runner=mc.default_runner, root=tmp_path)
+
+    assert code == 0
+    assert target.read_bytes() == b"value = 'original'\n"
