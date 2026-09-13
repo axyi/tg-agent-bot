@@ -440,7 +440,7 @@ def test_t_v190_sto_06_empty_index_rebind_model_change(tmp_path):
     storage.init_schema(conn, embedding_dim=16, embedding_model="m2")
 
     assert storage.get_state(conn, "rag.embedding") == "m2:16"
-    doc_id, chunk_id = _document_with_vector(conn, dim=16)
+    doc_id, _chunk_id = _document_with_vector(conn, dim=16)
     assert storage.document_id_for(conn, user_id=1, filename="a.txt") == doc_id
     conn.close()
 

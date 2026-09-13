@@ -105,7 +105,7 @@ def test_t_ag_04_tool_execution_limit(conn):
 
 
 def test_t_ag_05_excess_calls_in_one_response(conn):
-    reply, llm, runner, _, conv = run(conn, [tool_response(5), answer("ok")])
+    reply, _llm, runner, _, conv = run(conn, [tool_response(5), answer("ok")])
     assert reply == "ok"
     assert len(runner.argv_calls) == 3
     stored = rows(conn, conv)
@@ -140,7 +140,7 @@ def test_t_ag_07_malformed_calls_all_get_results(conn):
         ToolCall("call_a", "exec", EXEC_ARGS),
     ]
     script = [LLMResponse("", calls, "tool_calls"), answer("ok")]
-    reply, llm, runner, _, conv = run(conn, script)
+    reply, _llm, _runner, _, conv = run(conn, script)
     assert reply == "ok"
     stored = rows(conn, conv)
     wire = json.loads(stored[1]["tool_calls_json"])
@@ -160,7 +160,7 @@ def test_t_ag_07_malformed_calls_all_get_results(conn):
 
 def test_t_ag_08_retryable_error_then_success(conn):
     script = [LLMError("llm http 500", retryable=True), answer("recovered")]
-    reply, llm, runner, sleeps, _ = run(conn, script)
+    reply, llm, _runner, sleeps, _ = run(conn, script)
     assert reply == "recovered"
     assert len(llm.calls) == 2
     assert sleeps == [agent.RETRY_SLEEP_S]
@@ -171,7 +171,7 @@ def test_t_ag_08_retryable_error_then_success(conn):
 
 def test_t_ag_09_retry_pool_exhausted(conn):
     script = [LLMError("llm http 503", retryable=True) for _ in range(9)]
-    reply, llm, runner, sleeps, conv = run(conn, script)
+    reply, llm, _runner, sleeps, conv = run(conn, script)
     assert len(llm.calls) == agent.HTTP_ATTEMPT_LIMIT
     assert len(sleeps) == 8
     assert reply == agent.FALLBACK_LLM_ERROR.format(reason="llm http 503")
@@ -182,7 +182,7 @@ def test_t_ag_09_retry_pool_exhausted(conn):
 
 def test_t_ag_10_non_retryable_error(conn):
     script = [LLMError("llm http 400: bad", retryable=False)]
-    reply, llm, runner, sleeps, _ = run(conn, script)
+    reply, llm, _runner, sleeps, _ = run(conn, script)
     assert len(llm.calls) == 1
     assert sleeps == []
     assert reply == agent.FALLBACK_LLM_ERROR.format(reason="llm http 400: bad")
@@ -191,7 +191,7 @@ def test_t_ag_10_non_retryable_error(conn):
 def test_t_ag_11_tool_calls_while_tools_are_none(conn):
     script = [tool_response(3) for _ in range(4)]
     script.append(LLMResponse("late answer", [call(0)], "tool_calls"))
-    reply, llm, runner, _, conv = run(conn, script)
+    reply, _llm, runner, _, conv = run(conn, script)
     assert reply == "late answer"
     assert len(runner.argv_calls) == 12
     assert len([r for r in rows(conn, conv) if r["role"] == "tool"]) == 12
@@ -200,7 +200,7 @@ def test_t_ag_11_tool_calls_while_tools_are_none(conn):
 def test_t_ag_11_tool_calls_while_tools_are_none_without_content(conn):
     script = [tool_response(3) for _ in range(4)]
     script.append(LLMResponse("", [call(0)], "tool_calls"))
-    reply, llm, runner, _, conv = run(conn, script)
+    reply, _llm, runner, _, conv = run(conn, script)
     assert reply == agent.FALLBACK_NO_ANSWER
     assert len(runner.argv_calls) == 12
     assert rows(conn, conv)[-1]["content"] == agent.FALLBACK_NO_ANSWER
@@ -209,7 +209,7 @@ def test_t_ag_11_tool_calls_while_tools_are_none_without_content(conn):
 def test_t_ag_12_empty_content_triggers_one_repair_round(conn):
     # REQ-V1-RP-03: the first empty response buys one repair round, not the fallback.
     empty = [LLMResponse("", [], "stop"), LLMResponse("", [], "stop")]
-    reply, llm, runner, _, conv = run(conn, empty)
+    reply, llm, _runner, _, conv = run(conn, empty)
     assert reply == agent.FALLBACK_EMPTY
     assert len(llm.calls) == 2
     assert llm.calls[0][0][-1]["content"] != agent.EMPTY_REPAIR_INSTRUCTION
@@ -222,14 +222,14 @@ def test_t_ag_12_empty_content_triggers_one_repair_round(conn):
 
 def test_t_ag_12_repaired_empty_response_answers(conn):
     script = [LLMResponse("", [], "stop"), answer("recovered")]
-    reply, llm, runner, _, conv = run(conn, script)
+    reply, llm, _runner, _, _conv = run(conn, script)
     assert reply == "recovered"
     assert len(llm.calls) == 2
 
 
 def test_t_ag_13_system_prompt(conn):
     skills = tools.load_skills(REPO_ROOT / "skills")
-    reply, llm, runner, _, conv = run(conn, [answer("ok")], skills=skills)
+    _reply, llm, _runner, _, _conv = run(conn, [answer("ok")], skills=skills)
     system = llm.calls[0][0][0]
     assert system["role"] == "system"
     # REQ-V13-CCH-01: the clock left the prefix; it rides on the user message.
@@ -277,7 +277,7 @@ def test_t_ag_14_weather_skill_url_reaches_the_fetcher(conn, monkeypatch):
     )
     runner = RecordingRunner()
     runner.forbid_real_processes(monkeypatch)
-    reply, llm, runner, _, conv = run(conn, script, skills=skills, runner=runner, fetcher=fetcher)
+    reply, _llm, runner, _, conv = run(conn, script, skills=skills, runner=runner, fetcher=fetcher)
     assert reply == "Koln: sunny"
     # No process was started (forbid_real_processes) and no request left the process
     # (the `no_network` conftest fixture); only the injected fetcher saw the URL.

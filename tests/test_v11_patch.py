@@ -330,13 +330,13 @@ def test_t_v11_trn_04_no_secrets_registered_matches_v1_behaviour(tmp_path):
 
 
 def test_t_v11_orp_01_wrap_timeout_prefix_and_label():
-    base = dict(
-        image="python:3.13-slim",
-        sandbox="/srv/sandbox",
-        uid=1000,
-        gid=1000,
-        container_name="tgexec-deadbeef",
-    )
+    base = {
+        "image": "python:3.13-slim",
+        "sandbox": "/srv/sandbox",
+        "uid": 1000,
+        "gid": 1000,
+        "container_name": "tgexec-deadbeef",
+    }
     with_wrap = tools.build_docker_argv(["uname"], wrap_timeout=True, **base)
     without_wrap = tools.build_docker_argv(["uname"], wrap_timeout=False, **base)
 

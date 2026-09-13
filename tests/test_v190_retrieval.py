@@ -367,7 +367,7 @@ def test_t_v190_ret_07_rerank_retries_a_retryable_failure_and_succeeds(tmp_path)
         conn=conn,
         conv_id=conv_id,
         resolve_cost=None,
-        sleep=lambda s: sleeps.append(s),
+        sleep=sleeps.append,
     )
 
     assert [p.chunk_id for p in result] == [2, 1]
@@ -460,7 +460,7 @@ def test_t_v190_ret_07_rerank_returns_none_on_timeout(tmp_path):
         conn=conn,
         conv_id=conv_id,
         resolve_cost=None,
-        sleep=lambda s: sleeps.append(s),
+        sleep=sleeps.append,
     )
 
     assert result is None

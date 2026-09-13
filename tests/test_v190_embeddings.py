@@ -38,7 +38,7 @@ def client_for(handler):
 def vector_response(vectors, *, shuffle=False):
     entries = [{"index": i, "embedding": v} for i, v in enumerate(vectors)]
     if shuffle:
-        entries = list(reversed(entries))
+        entries.reverse()
     return {"data": entries}
 
 
@@ -321,18 +321,18 @@ def test_t_v190_ret_01_error_hierarchy():
 
 
 def minimal_cfg(**overrides):
-    fields = dict(
-        telegram_bot_token="123456789:sentinel-token-for-v190-ret-09",
-        allowed_tg_ids=frozenset({1}),
-        llm_provider="lmstudio",
-        lmstudio_base_url="http://localhost:1234/v1",
-        lmstudio_model="m",
-        openrouter_api_key="",
-        openrouter_model="",
-        llm_timeout_s=120.0,
-        exec_workdir=Path("/nonexistent/sandbox"),
-        db_path=Path("/nonexistent/bot.db"),
-    )
+    fields = {
+        "telegram_bot_token": "123456789:sentinel-token-for-v190-ret-09",
+        "allowed_tg_ids": frozenset({1}),
+        "llm_provider": "lmstudio",
+        "lmstudio_base_url": "http://localhost:1234/v1",
+        "lmstudio_model": "m",
+        "openrouter_api_key": "",
+        "openrouter_model": "",
+        "llm_timeout_s": 120.0,
+        "exec_workdir": Path("/nonexistent/sandbox"),
+        "db_path": Path("/nonexistent/bot.db"),
+    }
     fields.update(overrides)
     return config.Config(**fields)
 

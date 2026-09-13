@@ -77,7 +77,7 @@ def test_t_v13_co_02_owner_key_binding_drives_the_reap(docker_stub, sandbox):  #
         image="python:3.13-slim",
         docker_ok=True,
     )
-    run_argv = [c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["run"]][0]
+    run_argv = next(c["argv"] for c in docker_stub.calls() if c["argv"][:1] == ["run"])
     owner_labels = [a for a in run_argv if a.startswith("tgexec-owner=")]
     assert owner_labels == [f"tgexec-owner={tools.owner_key()}"]
 

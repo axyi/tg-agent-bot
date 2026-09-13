@@ -525,7 +525,7 @@ def test_prc02_the_resolver_reaches_the_summarizer(conn, tmp_path, monkeypatch, 
 
     def fake_summarize(conn_, conv_id, llm, cfg, *, resolve_cost=None, **_kwargs):
         seen["resolve_cost"] = resolve_cost
-        return None
+        return
 
     monkeypatch.setattr(agent, "summarize_conversation", fake_summarize)
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
@@ -627,9 +627,9 @@ def test_prc03_every_basis_form_is_stored_and_rendered(conn, basis):
     stored = conn.execute("SELECT cost_basis FROM llm_calls").fetchone()["cost_basis"]
     assert stored == basis
     # Reference prices are estimates and `/stats` says so, in the OBS-07 layout.
-    line = [
+    line = next(
         row for row in bot._render_stats(conn, USER_ID).splitlines() if row.startswith("Est. cost:")
-    ][0]
+    )
     assert line == f"Est. cost: $0.0123 | $0.0123 (basis: {basis} | {basis})"
 
 

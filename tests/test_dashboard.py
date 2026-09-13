@@ -210,7 +210,7 @@ def document(runs, **meta):
             "pricing": None,
             "skipped_scenarios": [],
             "only": None,
-            "env_flags": {key: None for key in bench.ENV_FLAG_KEYS},
+            "env_flags": dict.fromkeys(bench.ENV_FLAG_KEYS),
             "config_sha256": "c" * 64,
             "constants": {"REQUEST_DEFAULTS": {}},
         },

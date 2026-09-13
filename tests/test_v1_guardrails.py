@@ -159,7 +159,7 @@ def test_t_v1_red_01_tool_envelopes_are_redacted(conn):
 def test_t_v1_red_02_outgoing_and_incoming_text_is_redacted(conn, tmp_path):
     config.register_secret(SENTINEL)
     cfg = make_cfg(tmp_path)
-    tg, llm, _ = process(
+    tg, _llm, _ = process(
         conn,
         cfg,
         update(text=f"my key is {SENTINEL}"),
@@ -556,9 +556,9 @@ def test_t_v1_rl_01_token_bucket(conn, tmp_path):
 def test_t_v1_rl_01_over_length_messages_consume_no_token(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     limiter = bot.RateLimiter(1, 6.0, clock=lambda: 1000.0)
-    tg, llm, _ = process(conn, cfg, update(text="x" * 4001, update_id=1), limiter=limiter)
+    tg, _llm, _ = process(conn, cfg, update(text="x" * 4001, update_id=1), limiter=limiter)
     assert tg.sent == [(USER_ID, "Message too long (over 4000 characters). Please shorten it.")]
-    tg, llm, _ = process(
+    tg, _llm, _ = process(
         conn,
         cfg,
         update(text="short", update_id=2),
@@ -588,7 +588,7 @@ def test_unauthorized_senders_never_reach_the_bucket(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     limiter = bot.RateLimiter(1, 6.0, clock=lambda: 1000.0)
     process(conn, cfg, update(update_id=1, user_id=999), limiter=limiter)
-    tg, llm, _ = process(
+    tg, _llm, _ = process(
         conn,
         cfg,
         update(update_id=2),

@@ -28,7 +28,40 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "RUF100"]
+select = [
+    "E", "F", "I", "B", "RUF100",
+    # v1.9.3 T3 commit A (REQ-V15-NG-04 continuation): the ruff autofix
+    # tier -- mechanical, behaviour-preserving rewrites only, added
+    # rule-level (never family-level, so no never-listed sibling rule
+    # rides along). See docs/reports/report-v1.9.3.md's "T3" section.
+    "UP037", "UP017", "UP031", "C420", "C408", "SIM300", "SIM102",
+    "RET501", "RET503", "RET504", "FURB105", "FURB110", "FURB167",
+    "FURB187", "FURB192", "PIE810", "RUF015", "RUF059", "PLW0108",
+]
+
+# v1.9.3 T3: the ruff rule-family proposal table (docs/reports/report-v1.9.2.md),
+# decided and closed. One line per family never adopted -- the reason is
+# the decision; see docs/spec/task-briefs/v193-T3.md and
+# docs/reports/report-v1.9.3.md's "T3" section for the full rationale.
+# never -- `assert` is pytest's contract; a per-file-ignore for tests/
+# would still leave S105/S106 (false positives on names like
+# LLM_RERANK_MODEL) and S603/S607 (intentional subprocess sites): S101
+# never -- magic-value noise: PLR2004
+# never -- vanilla-args style, no defect class: TRY003
+# never -- protocol/callback signatures (skylos already audits unused
+# params with per-site reasons): ARG001, ARG002, ARG005
+# never -- refactor policy, not a defect: PLR09xx (complexity), PLR0913, PLR0917
+# never -- devtools/ CLIs print by design: T20
+# never -- renaming public exception classes is an API change: N818
+# never -- the bot's "never crash the loop" policy; each site logs: BLE001
+# never -- lazy imports by design (start-up cost, optional deps): PLC0415
+# never -- Cyrillic in user-facing strings: RUF001, RUF002, RUF003
+# not now -- os.chmod/os.stat in storage.py are deliberate mode-bit code;
+# pathlib rewrite is a v1.10 style task: PTH*
+# not now -- module-level state pattern (_shutdown, _started_at,
+# _dropped_spans): PLW0603
+# not now -- one pytest.raises(match=) pattern; fix when that test is
+# next touched: RUF043
 
 # v1.9.2 T1 (REQ-V15-NG-04): `docs/` was already out of scope for
 # formatting at spec-v1.5 (spec-v1.5.md:951 -- "ruff format also reaches

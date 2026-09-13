@@ -260,7 +260,7 @@ def build_payload(
         # can never overwrite one of the seven protected keys.
         collision = _PROTECTED_PAYLOAD_KEYS & reasoning_fields.keys()
         if collision:
-            key = sorted(collision)[0]
+            key = min(collision)
             raise ValueError(f"reasoning_fields collides with a protected key: {key}")
         payload.update(reasoning_fields)
     if response_format is not None:
@@ -272,7 +272,7 @@ def build_payload(
         fields = {"response_format": response_format}
         collision = _PROTECTED_PAYLOAD_KEYS & fields.keys()
         if collision:
-            key = sorted(collision)[0]
+            key = min(collision)
             raise ValueError(f"response_format collides with a protected key: {key}")
         payload.update(fields)
     return payload

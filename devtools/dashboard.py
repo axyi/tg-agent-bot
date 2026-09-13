@@ -246,7 +246,7 @@ def render(document: dict, compare: dict | None = None) -> str:
     return dashboard_render.render(document, compare, breakdown=breakdown, blocks=blocks)
 
 
-def usage_rows_from_document(document: dict) -> list["metrics.UsageRow"]:
+def usage_rows_from_document(document: dict) -> list[metrics.UsageRow]:
     """Adapts a benchmark document's `summary.totals` into a single-row
     `UsageRow` list, named after the document's own tag: a benchmark file has
     no natural multi-group breakdown (REQ-V160-MET-01's per-provider grouping

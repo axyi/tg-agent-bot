@@ -186,7 +186,7 @@ def test_t_v14_scn_01_s01_check_accepts_capability_paraphrase():
         "окружении. Спроси что-нибудь конкретное!",
     ]
     for answer in v13_candidate_answers:
-        assert re.search(pattern, answer, re.I | re.S), answer
+        assert re.search(pattern, answer, re.IGNORECASE | re.DOTALL), answer
 
     v13_baseline_answers = [
         "Привет! Вот что я умею:\n\n- Отвечать на вопросы и объяснять темы\n"
@@ -201,9 +201,9 @@ def test_t_v14_scn_01_s01_check_accepts_capability_paraphrase():
         "Спрашивай — помогу!",
     ]
     for answer in v13_baseline_answers:
-        assert re.search(pattern, answer, re.I | re.S), answer
+        assert re.search(pattern, answer, re.IGNORECASE | re.DOTALL), answer
 
     off_topic = "Сегодня хорошая погода, а как у тебя дела? Расскажи о своих планах на выходные."
     refusing = "Извините, я не могу ответить на этот вопрос."
-    assert re.search(pattern, off_topic, re.I | re.S) is None
-    assert re.search(pattern, refusing, re.I | re.S) is None
+    assert re.search(pattern, off_topic, re.IGNORECASE | re.DOTALL) is None
+    assert re.search(pattern, refusing, re.IGNORECASE | re.DOTALL) is None

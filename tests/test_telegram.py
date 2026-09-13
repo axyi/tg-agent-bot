@@ -103,13 +103,13 @@ def test_t_tg_02_poison_updates(conn, tmp_path, caplog):
         (from_bot, "3"),
         (group_chat, "4"),
     ):
-        tg, llm, runner = process(conn, cfg, upd)
+        tg, llm, _runner = process(conn, cfg, upd)
         assert tg.sent == []
         assert llm.calls == []
         assert storage.get_state(conn, "last_update_id") == expected_cursor
 
     for upd in (missing_id, not_a_dict):
-        tg, llm, runner = process(conn, cfg, upd)
+        tg, llm, _runner = process(conn, cfg, upd)
         assert tg.sent == []
         assert storage.get_state(conn, "last_update_id") == "4"
 
@@ -119,7 +119,7 @@ def test_t_tg_02_poison_updates(conn, tmp_path, caplog):
     # an unlisted sender is dropped as a group message, not as an intruder.
     caplog.clear()
     with caplog.at_level(logging.WARNING):
-        tg, llm, runner = process(conn, cfg, update(update_id=5, user_id=999, chat_type="group"))
+        tg, llm, _runner = process(conn, cfg, update(update_id=5, user_id=999, chat_type="group"))
     assert not any("unauthorized" in r.getMessage() for r in caplog.records)
     assert tg.sent == []
 
@@ -129,7 +129,7 @@ def test_t_tg_03_non_text_message(conn, tmp_path):
     upd = update(update_id=9)
     del upd["message"]["text"]
     upd["message"]["photo"] = [{"file_id": "x"}]
-    tg, llm, runner = process(conn, cfg, upd)
+    tg, llm, _runner = process(conn, cfg, upd)
     assert tg.sent == [(USER_ID, "I can only process plain text messages.")]
     assert counts(conn) == (0, 0)
     assert llm.calls == []
@@ -240,7 +240,7 @@ def test_t_tg_08_new_command(conn, tmp_path):
     storage.add_user_message(conn, first, "earlier")
 
     for i, text in enumerate(("/new", "/new@ThisBot", "/new keep this", " /NEW "), start=10):
-        tg, llm, runner = process(conn, cfg, update(text=text, update_id=i))
+        tg, llm, _runner = process(conn, cfg, update(text=text, update_id=i))
         assert tg.sent == [(USER_ID, "New conversation started.")]
         assert llm.calls == []
     active = conn.execute(
@@ -249,7 +249,7 @@ def test_t_tg_08_new_command(conn, tmp_path):
     assert active == 1
     assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 5
 
-    tg, llm, runner = process(conn, cfg, update(text="/new@OtherBot", update_id=20))
+    tg, llm, _runner = process(conn, cfg, update(text="/new@OtherBot", update_id=20))
     assert tg.sent == []
     assert llm.calls == []
     assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 5
@@ -285,7 +285,7 @@ def test_t_tg_10_partial_delivery(conn, tmp_path, caplog):
     long_answer = "x" * 9000
     tg = FakeTelegram(fail_on=2, error=bot.TelegramError("telegram sendMessage http 500"))
     with caplog.at_level(logging.ERROR):
-        tg, llm, runner = process(
+        tg, _llm, _runner = process(
             conn,
             cfg,
             update(update_id=3),

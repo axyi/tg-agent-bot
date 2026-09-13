@@ -1716,11 +1716,10 @@ def _install_signal_handlers(restorer: _Restorer) -> tuple:
         restorer.restore_all()
         sys.exit(1)
 
-    previous = (
+    return (
         signal.signal(signal.SIGINT, _handler),
         signal.signal(signal.SIGTERM, _handler),
     )
-    return previous
 
 
 def _restore_signal_handlers(previous: tuple) -> None:
@@ -1781,7 +1780,7 @@ def run_all(
     errored = sum(1 for _, o, _ in results if o == ERRORED)
     drifted = sum(1 for _, o, _ in results if o == DRIFTED)
 
-    print("")
+    print()
     print(f"{'id':<40} {'outcome':<10} exit")
     for mutation_id, outcome, code in results:
         print(f"{mutation_id:<40} {outcome:<10} {code if code is not None else '-'}")

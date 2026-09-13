@@ -535,7 +535,7 @@ def test_t_v160_dsh_09_served_span_attribute_keys_is_the_allowlist_minus_four():
         - tracing.CONTENT_ATTRIBUTE_KEYS
         - {"gen_ai.tool.call.id", "tg_agent.tool.fingerprint"}
     )
-    assert dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS == expected
+    assert expected == dashboard_render.SERVED_SPAN_ATTRIBUTE_KEYS
     # erratum: spec-v1.7.0 T5, REQ-V170-OBS-02 vs. REQ-V170-EC-03 -- same
     # authorised class as prompt 107's blocker (a pinned count invalidated by
     # this release's own mandated addition, tg_agent.reasoning.requested).
@@ -783,7 +783,7 @@ def test_n4_unlisted_paths_are_404_no_traversal_no_normalisation(live_server):
 def test_t_v160_srv_10_host_header_rejected_cases(live_server):
     port, _ = live_server
     good = f"127.0.0.1:{port}"
-    for bad_host in (f"evil.example.com:{port}", f"127.0.0.1:{port}@evil", "localhost:%d" % port):
+    for bad_host in (f"evil.example.com:{port}", f"127.0.0.1:{port}@evil", f"localhost:{port}"):
         status, headers, body = _request(port, "GET", "/", host=bad_host)
         assert status == 400
         for name in SECURITY_HEADER_NAMES:
@@ -839,7 +839,7 @@ def test_t_v160_api_01_health_shape(live_server):
 
 def test_t_v160_api_02_unknown_trace_id_is_404_not_empty_200(live_server):
     port, _ = live_server
-    status, _, body = _request(port, "GET", "/api/traces/" + "a" * 32)
+    status, _, _body = _request(port, "GET", "/api/traces/" + "a" * 32)
     assert status == 404
     status, _, _ = _request(port, "GET", "/traces/" + "a" * 32)
     assert status == 404
@@ -880,7 +880,7 @@ def test_t_v160_srv_06_missing_database_is_503(tmp_path, monkeypatch):
 
 
 def test_t_v160_srv_06_connect_readonly_cannot_write(live_server):
-    port, db_path = live_server
+    _port, db_path = live_server
     conn = storage.connect_readonly(db_path)
     try:
         with pytest.raises(sqlite3.Error):
@@ -891,7 +891,7 @@ def test_t_v160_srv_06_connect_readonly_cannot_write(live_server):
 
 def test_t_v160_dsh_08_head_matches_get_headers_empty_body(live_server):
     port, _ = live_server
-    get_status, get_headers, get_body = _request(port, "GET", "/api/health")
+    get_status, get_headers, _get_body = _request(port, "GET", "/api/health")
     head_status, head_headers, head_body = _request(port, "HEAD", "/api/health")
     assert head_status == get_status
     assert head_headers.get("Content-Length") == get_headers.get("Content-Length")

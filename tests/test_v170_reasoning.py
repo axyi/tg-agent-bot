@@ -259,7 +259,7 @@ def test_t_v170_pol_03_the_shipped_table_matches_stage_a():
 
 
 def test_t_v170_pol_03_reasoning_default_constant():
-    assert REASONING_DEFAULT == ReasoningRequest("default", None, "final")
+    assert ReasoningRequest("default", None, "final") == REASONING_DEFAULT
 
 
 # --------------------------------------------------------------------------
@@ -539,7 +539,7 @@ def test_n4_reasoning_fields_containing_messages_raises():
 
 
 def test_t_v170_pol_06_message_patch_never_mutates_the_callers_list():
-    captured, transport = _capture_payload()
+    _captured, transport = _capture_payload()
     client = LMStudioClient("http://x/v1", "m", 5.0, httpx.Client(transport=transport))
     original = [{"role": "user", "content": "hi"}]
     mech = ReasoningMechanism("c:assistant-prefill", message_patch=("append_assistant", "X"))

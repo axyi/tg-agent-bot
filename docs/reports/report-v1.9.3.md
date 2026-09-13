@@ -435,6 +435,105 @@ v193-gate-timeout-kills-direct-child-only` killed; `mutation_check.py
 grandchild SIGTERM test run 5x standalone, 5/5 green; the single
 instrumented gate-7 run above, exit 0, wall 267.821s.
 
+## T3 -- ruff families
+
+Contract: `docs/spec/task-briefs/v193-T3.md`. Runs after T1+T2 landed
+(`aa8d576`, the review commit that followed both). Closes
+`docs/reports/report-v1.9.2.md`'s proposal table of ruff families the
+project does not select: **adopt** what is mechanical and
+behaviour-preserving, **never** what is noise or policy, decided per the
+operator's ruling ("закрывай хвосты все сейчас").
+
+### The decision table (verbatim from the brief)
+
+| family | hits | verdict |
+|---|---|---|
+| `S101` | 3689 | never -- `assert` is pytest's contract; a per-file-ignore for `tests/` would still leave `S105/S106` (25 false positives on names like `LLM_RERANK_MODEL`) and `S603/S607` (27 intentional `subprocess` sites) |
+| `PLR2004` | 474 | never -- magic-value noise |
+| `TRY003` | 277 | never -- vanilla-args style, no defect class |
+| `ARG001/002/005` | 362 | never -- protocol/callback signatures (skylos already audits unused params with per-site reasons) |
+| `PLR09xx` complexity, `PLR0913/0917` | ~120 | never -- refactor policy, not a defect |
+| `T20` | 61 | never -- `devtools/` CLIs print by design |
+| `N818` | 6 | never -- renaming public exception classes is an API change |
+| `BLE001` | 20 | never -- the bot's "never crash the loop" policy; each site logs |
+| `PLC0415` | 28 | never -- lazy imports by design (start-up cost, optional deps) |
+| `RUF001/002/003` | 72 | never -- Cyrillic in user-facing strings |
+| `PTH*` | 24 | not now -- `os.chmod`/`os.stat` in `storage.py` are deliberate mode-bit code; pathlib rewrite is a v1.10 style task |
+| `PLW0603` | 3 | not now -- module-level state pattern (`_shutdown`, `_started_at`, `_dropped_spans`) |
+| `RUF043` | 1 | not now -- one `pytest.raises(match=)` pattern; fix when that test is next touched |
+
+All thirteen rows landed as a comment block in `pyproject.toml`'s
+`[tool.ruff.lint]`, closing the table -- no further carry-forward.
+
+**Note on the brief's own inventory:** the brief's hit counts were measured
+on `5e62a4a` (v1.9.2); this task runs on the post-T1/T2/review tree
+(`aa8d576`+review), which already touched `devtools/checks.py`,
+`devtools/mutation_check.py` and `devtools/rag_eval.py`. Re-measured on the
+current tree before each commit (below); the never/not-now table's own
+counts are historical (as the brief states) and unaffected by the verdict.
+
+### Commit A -- prompt 177, `style: ruff autofix tier`
+
+Rules: `UP037 UP017 UP031 C420 C408 SIM300 SIM102 RET501 RET503 RET504
+FURB105 FURB110 FURB167 FURB187 FURB192 PIE810 RUF015 RUF059 PLW0108`.
+Re-measured on this tree: 83 hits (vs. the brief's 5e62a4a-era count for the
+same rules, materially unchanged -- these rules are untouched by T1/T2's
+subprocess/rerank-routing edits).
+
+- **Safe `--fix`** (8 rules, 31 hits): `UP037` (2), `UP017` (1), `FURB110`
+  (1), `FURB105` (1), `RET501` (1), `FURB167` (17), `SIM300` (5), `C420`
+  (3). All mechanical (`re.S`->`re.DOTALL`, `re.I`->`re.IGNORECASE`,
+  `{k: None for k in x}`->`dict.fromkeys(x)`, quoted-annotation unquoting --
+  verified every touched file already carries `from __future__ import
+  annotations`, `return None`->`return`, yoda-condition flips).
+- **`--unsafe-fixes`, each diff hunk read** (10 rules, 15 of 18 hits
+  auto-fixed): `PIE810` (1, two `startswith` calls merged into one
+  tuple-arg call), `RET504` (1, drops an intermediate `previous =` binding
+  in `mutation_check.py:_install_signal_handlers` -- confirmed `previous`
+  had no other use), `PLW0108` (3, `lambda x: f(x)`->`f` -- confirmed each
+  callable's arity/signature matches the lambda's forwarding exactly:
+  `sleeps.append`, `str`), `FURB192` (4, `sorted(x)[0]`->`min(x)` in
+  `llm/base.py` x2, `config.py`, `devtools/bench.py` -- **all four read**:
+  none carries a custom `key=`, so there is no tie-breaking difference
+  between `sorted()[0]` and `min()`), `RUF015` (2, `[...][0]`->`next(...)`
+  in two tests -- both post-assertion contexts already guarantee a
+  non-empty match), `FURB187` (1, `list(reversed(x))`->`x.reverse()` in a
+  test where `x` is a freshly-built list with no other alias), `C408` (2,
+  `dict(...)`->`{...}` literal in two tests, same keyword args), `RET503`
+  (1, `dashboard_server.py`'s `_route` gains an explicit trailing `return
+  None`, matching its own `-> None` signature and every other branch's
+  implicit `None`).
+  - **`RUF059`** (34, all auto-fixed as rename-to-`_name`, never a dropped
+    unpacking -- confirmed by reading the full diff: every hit keeps its
+    tuple/unpacking shape, only the unused binding gains an `_` prefix).
+    One orphan surfaced by the earlier `UP017` fix: `storage.py`'s
+    `from datetime import datetime, timezone` gained `UTC` and left
+    `timezone` unused (`F401`) -- removed (not part of any of the 19
+    rules; a cleanup of an import this task's own edit made dead).
+  - **3 hits ruff would not auto-fix**, hand-rewritten and checked for
+    identical fall-through semantics: `UP031` (1,
+    `tests/test_v160_dashboard.py:786`, `"localhost:%d" % port` ->
+    `f"localhost:{port}"`); `SIM102` (2) -- `tests/test_v190_isolation.py`
+    (a nested `if "user_id" in body and "documents" in body: continue`
+    merged into its outer `if` with `and`; the outer `if`'s only body
+    statement was the inner `if`, so merging changes nothing when the
+    combined condition is false -- falls through to `offenders.append`
+    either way) and `tests/test_v190_tool.py` (same shape, an
+    `ast.Import`-guarded `any(...)` check merged with `and`).
+- Then all 19 rules added to `pyproject.toml`'s `[tool.ruff.lint].select`,
+  rule-level (never family-level, so no never-listed sibling rides along),
+  alongside the never/not-now comment block above.
+
+Acceptance: `ruff check .` 0; `ruff format --check .` 0; `pytest` 0, 1609
+collected (1608 passed, 1 skipped, unchanged); `bot.py --selftest` 0;
+`checks.py lint-docs` 0; drift script 114/114, 0 drifted.
+`devtools/bench_scenarios.py` untouched (none of these 19 rules' hits land
+there). README/AGENTS.md grepped for `E, F, I` / `select`: the only hits
+(`AGENTS.md:183-184`) are about the mutation gate's own `--select <prefix>`
+CLI flag, not the ruff rule set -- nothing there names the actual `select`
+list, so nothing needed changing (the same "grepped, nothing to change"
+outcome T1 recorded for its own grep).
+
 ## Delegation record
 
 - T1 -- delegated, brief `docs/spec/task-briefs/v193-T1.md`.

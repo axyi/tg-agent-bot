@@ -483,9 +483,10 @@ def _forbidden_file_io(source: str) -> set[str]:
             found.add("Path")
         if isinstance(node, ast.Attribute) and node.attr == "write_bytes":
             found.add("write_bytes")
-        if isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] == "tempfile" for alias in node.names):
-                found.add("tempfile")
+        if isinstance(node, ast.Import) and any(
+            alias.name.split(".")[0] == "tempfile" for alias in node.names
+        ):
+            found.add("tempfile")
         if isinstance(node, ast.ImportFrom) and node.module == "tempfile":
             found.add("tempfile")
     return found

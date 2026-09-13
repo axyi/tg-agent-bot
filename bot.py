@@ -1177,7 +1177,7 @@ def _fit(lines: list[str]) -> str:
 
 
 def _pair(left, right, render=None) -> str:
-    render = render or (lambda value: str(value))
+    render = render or (str)
     return f"{_cell(left, render)} | {_cell(right, render)}"
 
 

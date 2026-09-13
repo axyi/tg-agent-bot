@@ -201,13 +201,13 @@ def _row_cells(row_html: str) -> list[tuple[str, bool]]:
 
 def _tbody_rows(html: str) -> list[str]:
     rows: list[str] = []
-    for tbody in re.findall(r"<tbody>\n?(.*?)\n?</tbody>", html, re.S):
-        rows.extend(re.findall(r"<tr>.*?</tr>", tbody, re.S))
+    for tbody in re.findall(r"<tbody>\n?(.*?)\n?</tbody>", html, re.DOTALL):
+        rows.extend(re.findall(r"<tr>.*?</tr>", tbody, re.DOTALL))
     return rows
 
 
 def _thead_row(html: str) -> str:
-    return re.search(r"<thead>(<tr>.*?</tr>)</thead>", html, re.S).group(1)
+    return re.search(r"<thead>(<tr>.*?</tr>)</thead>", html, re.DOTALL).group(1)
 
 
 # ----------------------------------------------------------------------------
@@ -335,7 +335,7 @@ def test_t_v180_dsh_03_exactly_eight_colour_literals_in_style_and_palette():
 
 
 def _extract_nav_pairs(html: str) -> list[tuple[str, str]]:
-    nav_html = re.search(r"<nav>(.*?)</nav>", html, re.S).group(1)
+    nav_html = re.search(r"<nav>(.*?)</nav>", html, re.DOTALL).group(1)
     return [(label, href) for href, label in re.findall(r'<a href="([^"]*)">([^<]*)</a>', nav_html)]
 
 

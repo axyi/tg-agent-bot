@@ -579,7 +579,7 @@ def _parse_purposes(source: Mapping[str, str], key: str, default: str) -> frozen
 
     unknown = tags - set(REASONING_TAGS)
     if unknown:
-        raise ConfigError(f"{key} contains an unknown tag: {sorted(unknown)[0]}")
+        raise ConfigError(f"{key} contains an unknown tag: {min(unknown)}")
     return tags
 
 

@@ -250,7 +250,7 @@ def test_span_row_keys_is_derived_and_excludes_attributes_json_and_conv_id():
         "conv_seq",
         "attributes",
     }
-    assert bench.SPAN_ROW_KEYS == expected
+    assert expected == bench.SPAN_ROW_KEYS
     assert "attributes_json" not in bench.SPAN_ROW_KEYS
     assert "conv_id" not in bench.SPAN_ROW_KEYS
     assert "attributes" in bench.SPAN_ROW_KEYS
@@ -273,7 +273,7 @@ def test_required_tool_row_keys_excludes_exactly_trace_id_and_span_id():
     v1.3-shaped `tool_calls` row (this standing baseline's own shape) was
     silently unreadable, masked only because a bare `bench_schema` mismatch
     always raised first."""
-    assert bench.REQUIRED_TOOL_ROW_KEYS == bench.TOOL_ROW_KEYS - {"trace_id", "span_id"}
+    assert bench.TOOL_ROW_KEYS - {"trace_id", "span_id"} == bench.REQUIRED_TOOL_ROW_KEYS
 
 
 def test_a_v13_shaped_tool_calls_row_validates_without_trace_id_or_span_id():

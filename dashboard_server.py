@@ -605,6 +605,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 _not_found(is_api=is_api)
             return self._api_conversation(conv_id, query, send_body=send_body)
         _not_found(is_api=is_api)
+        return None
 
     # ------------------------------------------------------------------
     # pages

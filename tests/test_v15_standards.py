@@ -1080,7 +1080,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
     import re as _re
 
     real_config = (checks.REPO_ROOT / ".gitleaks.toml").read_text()
-    control_config = _re.sub(r"\n\[\[allowlists\]\].*", "", real_config, flags=_re.S)
+    control_config = _re.sub(r"\n\[\[allowlists\]\].*", "", real_config, flags=_re.DOTALL)
     assert control_config != real_config
 
     repo = _init_repo(tmp_path)

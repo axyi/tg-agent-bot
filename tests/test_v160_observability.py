@@ -241,7 +241,7 @@ def test_t_v160_trc_09_content_attributes_present_when_capture_is_true():
     with tracing.start_span("s", tracing.KIND_CLIENT) as span:
         for key in tracing.CONTENT_ATTRIBUTE_KEYS:
             tracing.set_content_attribute(span, key, "some content", capture=True)
-        assert tracing.CONTENT_ATTRIBUTE_KEYS <= span.attributes.keys()
+        assert span.attributes.keys() >= tracing.CONTENT_ATTRIBUTE_KEYS
 
 
 # --- T-V160-TRC-11 -----------------------------------------------------
@@ -1462,7 +1462,7 @@ def test_t_v160_tq_04_end_to_end_through_run_agent(conn):
         LLMResponse("", [malformed], "tool_calls"),
         LLMResponse("done", [], "stop"),
     ]
-    reply, llm, conv = run(conn, script)
+    reply, _llm, _conv = run(conn, script)
     assert reply == "done"
     rows = tool_rows(conn)
     assert [r["outcome"] for r in rows] == ["error", "error", "refused_repeat"]

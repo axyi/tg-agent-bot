@@ -125,7 +125,7 @@ def context_growth(calls: Sequence) -> dict[str, float]:
     than two agent calls grew by nothing and contributes 0 to every role."""
     agent_calls = [call for call in calls if call["purpose"] == "agent"]
     if len(agent_calls) < 2:
-        return {role: 0.0 for role in PROMPT_ROLE_KEYS}
+        return dict.fromkeys(PROMPT_ROLE_KEYS, 0.0)
     first = _by_role(agent_calls[0])
     last = _by_role(agent_calls[-1])
     return {role: float(last.get(role, 0) - first.get(role, 0)) for role in PROMPT_ROLE_KEYS}

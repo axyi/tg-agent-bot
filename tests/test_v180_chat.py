@@ -368,7 +368,7 @@ class _ProductionTg:
 def test_t_v180_chat_10_successful_outcome_deletes_status_no_failed_edit(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     tg = _ProductionTg()
-    tg, llm, runner = process(
+    tg, _llm, _runner = process(
         conn,
         cfg,
         update(text="hi", update_id=1),
@@ -384,7 +384,7 @@ def test_t_v180_chat_10_successful_outcome_deletes_status_no_failed_edit(conn, t
 def test_t_v180_chat_10_structurally_failed_outcome_marks_status_failed_no_delete(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     tg = _ProductionTg()
-    tg, llm, runner = process(
+    tg, _llm, _runner = process(
         conn,
         cfg,
         update(text="hi", update_id=2),

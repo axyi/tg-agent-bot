@@ -505,7 +505,7 @@ def _valid_source_lines(pairs: list[tuple[str, int | None]]) -> set[str]:
 
 def _is_source_line(line: str) -> bool:
     stripped = line.strip()
-    return stripped.startswith("Source:") or stripped.startswith("Sources:")
+    return stripped.startswith(("Source:", "Sources:"))
 
 
 def _strip_source_lines(reply: str, *, keep: set[str]) -> tuple[str, bool]:

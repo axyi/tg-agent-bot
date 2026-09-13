@@ -234,12 +234,17 @@ def test_t_v190_sec_05_every_runtime_statement_is_user_scoped(module):
                 # SEC-05's one point-delete exception: ownership is carried by
                 # the user-scoped select earlier in this same function body.
                 continue
-            if "chunks" in sql and "documents" not in sql and "vec_chunks" not in sql:
+            if (
+                "chunks" in sql
+                and "documents" not in sql
+                and "vec_chunks" not in sql
+                and "user_id" in body
+                and "documents" in body
+            ):
                 # `chunks` itself carries no `user_id` column; `add_chunks`'s
                 # bare per-row INSERT is authorised only because this same
                 # function body holds a `documents` ownership check first.
-                if "user_id" in body and "documents" in body:
-                    continue
+                continue
             offenders.append((node.name, sql))
 
     assert offenders == []

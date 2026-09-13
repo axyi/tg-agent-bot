@@ -1054,7 +1054,7 @@ def _bar_chart_svg(
     return "".join(parts)
 
 
-def histogram_svg(histogram: "metrics.Histogram", *, width: int, height: int, title: str) -> str:
+def histogram_svg(histogram: metrics.Histogram, *, width: int, height: int, title: str) -> str:
     """One bar per bucket of a `metrics.Histogram`; the `<desc>` names the
     metric, its unit and the total count (REQ-V160-DSH-04)."""
     labels = _bucket_labels(histogram.boundaries)

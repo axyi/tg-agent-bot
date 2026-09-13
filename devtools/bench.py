@@ -479,10 +479,10 @@ def _evaluate(check, scenario: Scenario, obs: Observation) -> dict:
     if answer is None:
         return _outcome(False, f"no answer for turn {check.turn}")
     if kind == bench_scenarios.ANSWER_REGEX:
-        found = re.search(check.pattern, answer, re.I | re.S) is not None
+        found = re.search(check.pattern, answer, re.IGNORECASE | re.DOTALL) is not None
         return _outcome(found, "pattern not found")
     if kind == bench_scenarios.ANSWER_NOT_REGEX:
-        found = re.search(check.pattern, answer, re.I | re.S) is not None
+        found = re.search(check.pattern, answer, re.IGNORECASE | re.DOTALL) is not None
         return _outcome(not found, "forbidden pattern found")
     if kind == bench_scenarios.ANSWER_MAX_CHARS:
         return _outcome(
@@ -718,7 +718,7 @@ def _top_turn(runs: Sequence[dict]) -> dict | None:
 def _context_growth(runs: Sequence[dict]) -> dict:
     roles = metrics.PROMPT_ROLE_KEYS
     if not runs:
-        return {role: 0.0 for role in roles}
+        return dict.fromkeys(roles, 0.0)
     per_run = [metrics.context_growth(run["llm_calls"]) for run in runs]
     return {role: sum(growth.get(role, 0.0) for growth in per_run) / len(per_run) for role in roles}
 
@@ -1026,7 +1026,7 @@ def _run_turns(
         llm = llm_factory(cfg)
         runner = runner_factory(cfg)
         fetcher = fetcher_factory(cfg)
-        tg_id = sorted(cfg.allowed_tg_ids)[0]
+        tg_id = min(cfg.allowed_tg_ids)
         for index, text in enumerate(scenario.turns, start=1):
             before = len(recorder.sent)
             bot.process_update(
@@ -1281,7 +1281,7 @@ def check_document(
         note = _validate(document, scenarios, mode=mode)
     except _Invalid as invalid:
         return invalid.code, invalid.reason
-    return EXIT_OK, note if note else "valid"
+    return EXIT_OK, note or "valid"
 
 
 def _validate(document: Any, scenarios: Sequence[Scenario], *, mode: str = "strict") -> str | None:

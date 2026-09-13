@@ -9,7 +9,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import sqlite_vec
@@ -625,7 +625,7 @@ def _existing_version(conn: sqlite3.Connection) -> int | None:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def get_or_create_active_conversation(conn: sqlite3.Connection, tg_user_id: int) -> int:
