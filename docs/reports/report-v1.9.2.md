@@ -779,18 +779,20 @@ entry the sample never re-measured directly -- see disclosure (c) below.
 in the T1/T2 sections above -- cross-referenced here, not duplicated)
 
 - **T1 review** (`c21ffb3`, contract `v192-T1-review.md`, prompt 166):
-  🔴 a stale ledger row / commit body predating an amend; 🟠 x4 --
-  the same erratum's REQ-V170-NG-14 citation, `spec-v1.9.0-delta-1.md`
-  line-ref drift, and the `ruff-format-all` pre-commit gap; plus smaller
-  🟡 findings (full breakdown: "### Erratum on row 8" and the
-  "### Delegation record" under "## T1 -- whole-tree static analysis and
-  fixes" above). All closed in one commit, neither reviewed commit
-  rewritten.
+  **1 🔴 / 4 🟠 / 4 🟡 (9 findings)** -- 🔴 a stale ledger row / commit body
+  predating an amend; 🟠 x4 -- the same erratum's REQ-V170-NG-14 citation,
+  `spec-v1.9.0-delta-1.md` line-ref drift, and the `ruff-format-all`
+  pre-commit gap; plus 4 🟡 findings (full breakdown: "### Erratum on row
+  8" and the "### Delegation record" under "## T1 -- whole-tree static
+  analysis and fixes" above). All closed in one commit, neither reviewed
+  commit rewritten.
 - **T2 review** (`b9e5174`, contract `v192-T2-review.md`, prompt 170):
-  🟠 the shrink guard failing open on a zero/error count; 🟠 three
-  mutation-gate timeouts unable to report a survivor before SIGKILL; plus
-  smaller 🟡 findings (full breakdown: "### Review findings closed
-  (prompt 170)" under "## T2 -- gate 6" above). All closed in one commit,
+  **0 🔴 / 3 🟠 / 5 🟡 (8 findings)** -- 🟠 the shrink guard failing open on
+  a zero/error count; 🟠 three mutation-gate timeouts unable to report a
+  survivor before SIGKILL; 🟠 a report claim about count-bearing
+  repointing that was already stale; plus 5 🟡 findings (full breakdown:
+  "### Review findings closed (prompt 170)" under "## T2 -- gate 6"
+  above). All closed in one commit,
   none of the three reviewed commits rewritten.
 
 ### Disclosures
@@ -822,13 +824,26 @@ in the T1/T2 sections above -- cross-referenced here, not duplicated)
   `--select` walls for the two named subsets (`mutation-v170` 25.46s/9
   entries, `mutation-v190` 23.41s/7 entries) that back their corrected
   timeouts (130s, 120s respectively, per the survivor-safe rule) --
-  neither timeout was exercised by this run (the full run uses
-  `mutation-all`'s own single timeout, not the five subset timeouts,
-  which only apply under the `pre-push` profile). `mutation-v15`'s own
-  corrected timeout (100s) sits at an even smaller margin above the 70s
-  survivor floor (30s) than either named subset (60s/50s) by this same
-  arithmetic; not re-litigated here since v1.9.2 T2's review already
-  closed that finding and T3 changes no per-subset timeout.
+  neither timeout was exercised by this run -- **erratum**: gate 6 was
+  invoked exactly as `AGENTS.md` lists it, `uv run --locked python
+  devtools/mutation_check.py` directly, not through `checks.py run
+  --profile ...`; no `quality_gates.yaml` timeout applied to this
+  invocation at all, `mutation-all`'s 1440s included (that value only
+  binds a run made through the `checks.py` gate executor). The five
+  named subset timeouts bind only their own `--select` invocations under
+  the `pre-push`/`full` profiles, never this direct one either.
+  `mutation-v15`'s own corrected timeout (100s) sits at an even smaller
+  margin above the 70s survivor floor (30s) than either named subset
+  (60s/50s) by this same arithmetic; not re-litigated here since v1.9.2
+  T2's review already closed that finding and T3 changes no per-subset
+  timeout. One more note while on this topic: this file's own history
+  documents the box as shared and contended (`mutation-all`'s comment
+  block: 5040s/4690s/5620s/7910s across four earlier releases, moving
+  both up and down run to run with no code change) -- `mutation-all`'s
+  new 1440s carries much less slack against that variance than 7910s
+  ever did, so a loaded run overrunning it lands on disclosure (b)'s
+  SIGKILL-leaves-a-mutated-file path where 7910s practically never
+  could. Stated, not fixed -- the operator's call together with (d).
 - **(d) Pre-push profile: five subsets vs. `mutation-all`.** The
   `pre-push` profile still runs only the five named `mutation-v*`
   subsets (`mutation-v15`, `-v160`, `-v170`, `-v180`, `-v190` -- 37 of
@@ -842,6 +857,25 @@ in the T1/T2 sections above -- cross-referenced here, not duplicated)
   (~281s, 34% entry coverage, fastest); (2) switch `pre-push` to
   `mutation-all` itself (680.49s, 100% entry coverage, ~2.4x slower than
   option 1 but still ~5.4x faster than v1.9.1's own 3699s baseline).
+- **(e) The seven-gate table is not quite "the final tree."** Five
+  things landed in this same commit *after* gate 7 finished, using gate
+  6's and gate 7's own results as their input: `config/quality_gates.yaml`'s
+  `mutation-all.timeout_seconds` (7910->1440, computed from gate 6's own
+  wall); this report's whole "T3" section (including this table and
+  every disclosure in it); `docs/reports/tg-post-v1.9.2.md`;
+  `docs/llm-usage.md` row 81; and the ledger row below. None of the
+  seven gates can be re-run against a tree that includes its own report
+  of itself -- the same structural point v1.9.1's report made ("a
+  mutation gate is only as valid as the suite it ran against") and the
+  v1.8.0 `/verify-run` finding this task's own brief cites. What *was*
+  re-run, after the `quality_gates.yaml` edit, on the tree as actually
+  committed: `ruff check .` (0), `ruff format --check .` (0), `pytest`
+  (0, 1601 collected, same as the table above -- no test reads
+  `mutation-all.timeout_seconds`), `checks.py lint-docs` (0). Gates 4/5/6/7
+  were not re-run (gate 6 in particular is the one gate the changed value
+  could even apply to, and re-running the authoritative 11m20s mutation
+  pass a second time to validate a comment-and-timeout edit was judged
+  not worth it -- flagged here instead of silently asserted).
 
 ### Open tail carried from v1.9.1
 
@@ -863,13 +897,20 @@ non-deterministic tool-call choice, not a regression either way.
 ### Delegation record
 
 - T3 -- delegated, brief `docs/spec/task-briefs/v192-T3.md`, prompt 171,
-  this commit.
+  commit `c431987`.
+- T3 erratum (this section's own finding-count fix, disclosure (e), and
+  the disclosure-(c) correction) -- prompt 172, *artefacts only* (report,
+  ledger row, prompt log, tg-post -- no code or test file touched, no
+  gate re-run required by the exemption itself; gate 3 was re-run anyway,
+  see disclosure (e)), one of the four closed-list exemptions from
+  `standards/workflow.md` §5.1, this commit.
 - T1 -- delegated, brief `docs/spec/task-briefs/v192-T1.md`; T1 review --
   clean-context review, delegated by brief `v192-T1-review.md`.
 - T2 -- delegated, brief `docs/spec/task-briefs/v192-T2.md`; T2 review --
   clean-context review, delegated by brief `v192-T2-review.md`.
 - Every executor model named: T1/T2 implementer `claude-sonnet-5`; both
-  reviewers `claude-opus-5`; T3 (this task) implementer `claude-sonnet-5`.
+  reviewers `claude-opus-5`; T3 and its erratum (this task) implementer
+  `claude-sonnet-5`.
 
 ### Constraints verified
 
@@ -880,10 +921,22 @@ non-deterministic tool-call choice, not a regression either way.
 - Nothing else ran on the box during gate 6; gate 6 and gate 7 ran
   sequentially, never concurrently.
 
+**Erratum on the Bugs column below (found while assembling this section,
+prompt 172):** the T3 task brief's own text (`v192-T3.md`, "What to
+do" §3) reads "T1 1 🔴 / 4 🟠 / 5 🟡, T2 0 🔴 / 3 🟠 / 6 🟡", summing to 10
+and 9 findings respectively. Counting the two review briefs directly
+(`docs/spec/task-briefs/v192-T1-review.md` items 1-9,
+`v192-T2-review.md` items 1-8) gives **9** (1/4/4) and **8** (0/3/5) --
+matching `c21ffb3`'s own commit message ("closes all nine findings")
+and this report's T2 delegation record ("closing all eight findings"),
+both written before this task existed. The row below uses the counted
+figures, not the brief's; the brief's arithmetic is one 🟡 over on each
+side, source not identified.
+
 ## Ledger row (paste into `economics.md`)
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.2 | 2026-09-13 | — (patch, no new spec; task briefs `docs/spec/task-briefs/v192-handoff.md`, `-T1.md`, `-T1-review.md`, `-T2.md`, `-T2-review.md`, `-T3.md`) | 8 (164–171) | yes — all seven gates green on the first authoritative run of the final tree | T1 1 🔴 / 4 🟠 / 5 🟡, T2 0 🔴 / 3 🟠 / 6 🟡 — all fixed | unknown (harness does not expose per-request usage) | $0 marginal (Claude Code subscription-metered session; live inference only on gates 5/7, at reference prices, no real spend tracked) | claude-sonnet-5 (both reviews: claude-opus-5) | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.9.2 | 2026-09-13 | — (patch, no new spec; task briefs `docs/spec/task-briefs/v192-handoff.md`, `-T1.md`, `-T1-review.md`, `-T2.md`, `-T2-review.md`, `-T3.md`) | 9 (164–172) | yes — all seven gates green on the first authoritative run of the final tree (see disclosure (e): a handful of paperwork-only edits landed in the same commit after gate 7, none of them gate-reachable except gate 3, which was re-run green) | T1 1 🔴 / 4 🟠 / 4 🟡 (9), T2 0 🔴 / 3 🟠 / 5 🟡 (8) — all fixed | unknown (harness does not expose per-request usage) | $0 marginal (Claude Code subscription-metered session; live inference only on gates 5/7, at reference prices, no real spend tracked) | claude-sonnet-5 (both reviews: claude-opus-5) | Claude Code |
 ```
 
 ## Verdict
