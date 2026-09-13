@@ -427,7 +427,7 @@ def test_median_run_falls_back_to_tokens_when_any_run_has_no_cost():
 
 
 def test_the_token_fallback_is_decided_per_scenario():
-    runs = priced("S01", [0.030, 0.010, 0.020]) + [run("S02", 1, llm_rows=[llm_row(9, cost=None)])]
+    runs = [*priced("S01", [0.03, 0.01, 0.02]), run("S02", 1, llm_rows=[llm_row(9, cost=None)])]
     grouped = dashboard.scenario_runs(document(runs))
     assert dashboard.median_key(grouped["S01"]) == "cost_usd"
     assert dashboard.median_key(grouped["S02"]) == "tokens"

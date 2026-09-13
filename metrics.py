@@ -383,7 +383,7 @@ def usage_by(conn: sqlite3.Connection, *, group: str, since: date | None = None)
     usage_rows.sort(key=lambda r: r.key)
     if len(usage_rows) > USAGE_BY_CAP:
         head, tail = usage_rows[:USAGE_BY_CAP], usage_rows[USAGE_BY_CAP:]
-        usage_rows = head + [_fold_usage_rows(tail)]
+        usage_rows = [*head, _fold_usage_rows(tail)]
     return usage_rows
 
 

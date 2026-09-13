@@ -1896,6 +1896,7 @@ def test_cli_module_runs_as_a_script():
         capture_output=True,
         cwd=str(bench.REPO_ROOT),
         timeout=120,
+        check=False,
     )
     assert result.returncode == 1  # not valid json — but the module imported
 

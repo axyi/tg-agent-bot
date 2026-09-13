@@ -8,6 +8,7 @@ Offline, deterministic, no I/O. PDF pages come from
 """
 
 import inspect
+import itertools
 
 import documents
 from devtools.pdf_fixture import write_pdf
@@ -52,7 +53,7 @@ def test_t_v190_doc_04_no_chunk_ever_exceeds_hard_max():
 def test_t_v190_doc_04_new_material_after_first_chunk_is_at_most_1000():
     text = "".join(f"word{i} " for i in range(500))
     chunks = documents.chunk_text(text)
-    for prev, cur in zip(chunks, chunks[1:], strict=False):
+    for prev, cur in itertools.pairwise(chunks):
         new_material = cur.char_end - prev.char_end
         assert new_material <= 1000
 
@@ -61,7 +62,7 @@ def test_t_v190_doc_04_overlap_is_exactly_200_between_consecutive_chunks():
     text = "".join(f"word{i} " for i in range(500))
     chunks = documents.chunk_text(text)
     assert len(chunks) > 1
-    for prev, cur in zip(chunks, chunks[1:], strict=False):
+    for prev, cur in itertools.pairwise(chunks):
         assert prev.char_end - cur.char_start == 200
 
 
@@ -74,7 +75,7 @@ def test_t_v190_doc_04_overlap_is_exactly_200_across_paragraph_boundaries():
     text = "\n\n".join([para] * 6)
     chunks = documents.chunk_text(text)
     assert len(chunks) > 1
-    for prev, cur in zip(chunks, chunks[1:], strict=False):
+    for prev, cur in itertools.pairwise(chunks):
         assert prev.char_end - cur.char_start == 200
 
 
@@ -131,7 +132,7 @@ def test_t_v190_doc_04_sentence_still_too_long_is_hard_cut_at_target_not_hard_ma
     text = "a" * 3500
     chunks = documents.chunk_text(text)
     assert len(chunks[0].text) == 1000
-    for prev, cur in zip(chunks, chunks[1:], strict=False):
+    for prev, cur in itertools.pairwise(chunks):
         new_material = cur.char_end - prev.char_end
         assert new_material <= 1000
 

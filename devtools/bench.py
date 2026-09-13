@@ -930,7 +930,7 @@ def _execute_run(
     try:
         run_cfg = _run_config(cfg, run_dir)
     except Exception as exc:
-        log.error(
+        log.exception(
             "run %s-%d could not be prepared: %s", scenario.id, repeat, config.redact(str(exc))
         )
         return _run_record(scenario, repeat, Observation(), 0, FAIL_HARNESS_ERROR), None
@@ -1094,7 +1094,7 @@ def _read_rows(db_path: Path) -> tuple[list[dict], list[dict], list[str]]:
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     except sqlite3.Error as exc:
-        log.error("the run database could not be opened: %s", config.redact(str(exc)))
+        log.exception("the run database could not be opened: %s", config.redact(str(exc)))
         return [], [], []
     conn.row_factory = sqlite3.Row
     try:
@@ -1105,11 +1105,11 @@ def _read_rows(db_path: Path) -> tuple[list[dict], list[dict], list[str]]:
             for row in conn.execute("SELECT summary_json FROM summaries ORDER BY id")
         ]
     except sqlite3.Error as exc:
-        log.error("the run database could not be read: %s", config.redact(str(exc)))
+        log.exception("the run database could not be read: %s", config.redact(str(exc)))
         return [], [], []
     finally:
         conn.close()
-    return _with_conv_seq(llm_rows, tool_rows) + (goals,)
+    return (*_with_conv_seq(llm_rows, tool_rows), goals)
 
 
 def _summary_goal(summary_json: str) -> str:
@@ -1131,8 +1131,8 @@ def _with_conv_seq(llm_rows: list[dict], tool_rows: list[dict]) -> tuple[list[di
 
     def convert(rows: list[dict]) -> list[dict]:
         converted = []
-        for row in rows:
-            row = dict(row)
+        for raw_row in rows:
+            row = dict(raw_row)
             row["conv_seq"] = order[row.pop("conv_id")]
             converted.append(row)
         return converted
@@ -1152,13 +1152,13 @@ def _read_spans(db_path: Path, *, scenario_id: str, bench_tag: str | None) -> li
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     except sqlite3.Error as exc:
-        log.error("the run database could not be opened: %s", config.redact(str(exc)))
+        log.exception("the run database could not be opened: %s", config.redact(str(exc)))
         return []
     conn.row_factory = sqlite3.Row
     try:
         rows = [dict(row) for row in conn.execute("SELECT * FROM spans ORDER BY id")]
     except sqlite3.Error as exc:
-        log.error("the run database could not be read: %s", config.redact(str(exc)))
+        log.exception("the run database could not be read: %s", config.redact(str(exc)))
         return []
     finally:
         conn.close()
@@ -1179,8 +1179,8 @@ def _read_spans(db_path: Path, *, scenario_id: str, bench_tag: str | None) -> li
     for row in selected:
         order.setdefault(row["conv_id"], len(order) + 1)
     converted = []
-    for row in selected:
-        row = dict(row)
+    for raw_row in selected:
+        row = dict(raw_row)
         row["conv_seq"] = order[row.pop("conv_id")]
         row["attributes"] = json.loads(row.pop("attributes_json"))
         converted.append(row)
@@ -1887,37 +1887,38 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
 def _meta_section(baseline: dict, candidate: dict | None) -> str:
     sides = _sides(baseline, candidate)
     header = ["field", *(name for name, _ in sides)]
-    rows = []
-    for key in (
-        "tag",
-        "started_at",
-        "finished_at",
-        "git_commit",
-        *LOCKED_META_FIELDS,
-        "prefix_tokens",
-    ):
-        rows.append([key, *(_cell(document["meta"].get(key)) for _, document in sides)])
-    for key in ENV_FLAG_KEYS:
-        rows.append(
-            [
-                f"env_flags.{key}",
-                *(_cell(document["meta"]["env_flags"].get(key)) for _, document in sides),
-            ]
+    rows = [
+        [key, *(_cell(document["meta"].get(key)) for _, document in sides)]
+        for key in (
+            "tag",
+            "started_at",
+            "finished_at",
+            "git_commit",
+            *LOCKED_META_FIELDS,
+            "prefix_tokens",
         )
-    for key in (
-        "basis",
-        "model",
-        "input_usd_per_mtok",
-        "output_usd_per_mtok",
-        "cached_input_usd_per_mtok",
-        "fetched_at",
-    ):
-        rows.append(
-            [
-                f"pricing.{key}",
-                *(_cell((document["meta"].get("pricing") or {}).get(key)) for _, document in sides),
-            ]
+    ]
+    rows.extend(
+        [
+            f"env_flags.{key}",
+            *(_cell(document["meta"]["env_flags"].get(key)) for _, document in sides),
+        ]
+        for key in ENV_FLAG_KEYS
+    )
+    rows.extend(
+        [
+            f"pricing.{key}",
+            *(_cell((document["meta"].get("pricing") or {}).get(key)) for _, document in sides),
+        ]
+        for key in (
+            "basis",
+            "model",
+            "input_usd_per_mtok",
+            "output_usd_per_mtok",
+            "cached_input_usd_per_mtok",
+            "fetched_at",
         )
+    )
     return "## Meta\n\n" + _table(header, rows)
 
 
@@ -1973,37 +1974,34 @@ def _totals_section(baseline: dict, candidate: dict | None) -> str:
     header = ["metric", *(name for name, _ in _sides(baseline, candidate))]
     if candidate is not None:
         header += ["Δ", "Δ%"]
-    rows = []
-    for key in TOTALS_KEYS:
-        rows.append(
-            _metric_row(
-                key,
-                baseline,
-                candidate,
-                lambda document, key=key: document["summary"]["totals"][key],
-            )
+    rows = [
+        _metric_row(
+            key,
+            baseline,
+            candidate,
+            lambda document, key=key: document["summary"]["totals"][key],
         )
-    for key in (
-        "success_rate",
-        "cost_per_success",
-        "tokens_per_success",
-        "resent_share",
-        "cache_hit_rate",
-    ):
-        rows.append(
-            _metric_row(
-                key, baseline, candidate, lambda document, key=key: document["summary"][key]
-            )
+        for key in TOTALS_KEYS
+    ]
+    rows.extend(
+        _metric_row(key, baseline, candidate, lambda document, key=key: document["summary"][key])
+        for key in (
+            "success_rate",
+            "cost_per_success",
+            "tokens_per_success",
+            "resent_share",
+            "cache_hit_rate",
         )
-    for key in AVG_KEYS:
-        rows.append(
-            _metric_row(
-                f"avg_per_task.{key}",
-                baseline,
-                candidate,
-                lambda document, key=key: document["summary"]["avg_per_task"][key],
-            )
+    )
+    rows.extend(
+        _metric_row(
+            f"avg_per_task.{key}",
+            baseline,
+            candidate,
+            lambda document, key=key: document["summary"]["avg_per_task"][key],
         )
+        for key in AVG_KEYS
+    )
     rows.append(_metric_row("prefix_share", baseline, candidate, metrics.prefix_share))
     return "## Totals\n\n" + _table(header, rows)
 
@@ -2019,19 +2017,18 @@ def _metric_row(label: str, baseline: dict, candidate: dict | None, pick) -> lis
 
 def _purpose_section(baseline: dict, candidate: dict | None) -> str:
     header = ["purpose", "metric", *(name for name, _ in _sides(baseline, candidate))]
-    rows = []
-    for purpose in ("agent", "summary"):
-        for metric in ("calls", "prompt_tokens", "completion_tokens"):
-            rows.append(
-                [
-                    purpose,
-                    metric,
-                    *(
-                        _cell(_purpose_value(document, purpose, metric))
-                        for _, document in _sides(baseline, candidate)
-                    ),
-                ]
-            )
+    rows = [
+        [
+            purpose,
+            metric,
+            *(
+                _cell(_purpose_value(document, purpose, metric))
+                for _, document in _sides(baseline, candidate)
+            ),
+        ]
+        for purpose in ("agent", "summary")
+        for metric in ("calls", "prompt_tokens", "completion_tokens")
+    ]
     return "## Totals by purpose\n\n" + _table(header, rows)
 
 
@@ -2156,16 +2153,16 @@ def _latency_section(baseline: dict, candidate: dict | None) -> str:
             *(_cell(_median_latency(document, None)) for _, document in sides),
         ]
     ]
-    for purpose in ("agent", "summary"):
-        rows.append(
-            [
-                f"median latency_ms ({purpose})",
-                *(
-                    _cell(_median_latency(document, purpose))
-                    for _, document in _sides(baseline, candidate)
-                ),
-            ]
-        )
+    rows.extend(
+        [
+            f"median latency_ms ({purpose})",
+            *(
+                _cell(_median_latency(document, purpose))
+                for _, document in _sides(baseline, candidate)
+            ),
+        ]
+        for purpose in ("agent", "summary")
+    )
     return "## Latency\n\n" + _table(header, rows)
 
 
@@ -2250,9 +2247,11 @@ def console_summary(document: dict, out_path: Path) -> list[str]:
     summary = document["summary"]
     price = meta.get("pricing") or {}
     lines = [
-        f"bench {meta['tag']}  provider={meta['provider']}  model={meta['model']}  "
-        f"repeats={meta['repeats']}  prefix_tokens={meta.get('prefix_tokens')}  "
-        f"pricing={price.get('basis', 'none')}"
+        (
+            f"bench {meta['tag']}  provider={meta['provider']}  model={meta['model']}  "
+            f"repeats={meta['repeats']}  prefix_tokens={meta.get('prefix_tokens')}  "
+            f"pricing={price.get('basis', 'none')}"
+        )
     ]
     for scenario_id in sorted(summary["per_scenario"]):
         entry = summary["per_scenario"][scenario_id]
@@ -2264,16 +2263,22 @@ def console_summary(document: dict, out_path: Path) -> list[str]:
         )
     totals = summary["totals"]
     lines += [
-        f"totals: calls {totals['calls']} (failed {totals['failed_calls']})  "
-        f"prompt {_k(totals['prompt_tokens'])}  completion {_k(totals['completion_tokens'])}  "
-        f"tools {totals['tool_calls']}  cost {_usd(totals['cost_usd'])}  "
-        f"wall {_secs(totals['wall_ms'])}",
-        f"success rate: {summary['successes']}/{summary['runs']} "
-        f"({summary['success_rate'] * 100:.1f}%)",
-        f"cost/success {_usd(summary['cost_per_success'])}  "
-        f"tokens/success {_num(summary['tokens_per_success'])}  "
-        f"re-sent share {summary['resent_share'] * 100:.1f}%  "
-        f"cache hit {_pct(summary['cache_hit_rate'])}",
+        (
+            f"totals: calls {totals['calls']} (failed {totals['failed_calls']})  "
+            f"prompt {_k(totals['prompt_tokens'])}  completion {_k(totals['completion_tokens'])}  "
+            f"tools {totals['tool_calls']}  cost {_usd(totals['cost_usd'])}  "
+            f"wall {_secs(totals['wall_ms'])}"
+        ),
+        (
+            f"success rate: {summary['successes']}/{summary['runs']} "
+            f"({summary['success_rate'] * 100:.1f}%)"
+        ),
+        (
+            f"cost/success {_usd(summary['cost_per_success'])}  "
+            f"tokens/success {_num(summary['tokens_per_success'])}  "
+            f"re-sent share {summary['resent_share'] * 100:.1f}%  "
+            f"cache hit {_pct(summary['cache_hit_rate'])}"
+        ),
         f"skipped: {', '.join(meta['skipped_scenarios']) or 'none'}",
     ]
     if meta.get("aborted"):

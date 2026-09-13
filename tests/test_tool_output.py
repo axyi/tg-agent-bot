@@ -103,7 +103,7 @@ def test_too_04_head_tail_window_of_a_5000_line_numeric_output():
     assert sum(len(line) + 1 for line in head) == 578
     assert sum(len(line) + 1 for line in tail) == 870
     omitted = lines[172:4826]
-    assert result == "\n".join(head + [marker_for(omitted)] + tail)
+    assert result == "\n".join([*head, marker_for(omitted), *tail])
     assert len(result) <= 1500
 
 
@@ -144,7 +144,7 @@ def test_too_04_error_context_keeps_the_traceback_whole():
     head_count = (budget - tail_cost) // 10
 
     result = tools.compact_output(stderr, max_chars=1500, error_context=True)
-    expected = "\n".join(lines[:head_count] + [marker_for(lines[head_count:start])] + lines[start:])
+    expected = "\n".join([*lines[:head_count], marker_for(lines[head_count:start]), *lines[start:]])
     assert result == expected
     assert len(result) <= 1500
     assert "ZeroDivisionError: division by zero" in result
@@ -211,7 +211,7 @@ def test_too_01_boundary_contract_a_head_cut_never_ends_in_a_secret_prefix(only_
     filler = [f"filler line {i:02d} " + "F" * 30 for i in range(10)]
     for line in filler:
         assert len(line) == 45  # cost 46
-    lines = [first_line] + filler
+    lines = [first_line, *filler]
     text = "\n".join(lines)
     assert CANARY not in text
 
@@ -222,7 +222,7 @@ def test_too_01_boundary_contract_a_head_cut_never_ends_in_a_secret_prefix(only_
     assert len(first_line) + 1 == 17
     head_part, tail_part = ["token="], filler[-1:]
     omitted = lines[1 : len(lines) - 1]
-    assert result == "\n".join(head_part + [marker_for(omitted)] + tail_part)
+    assert result == "\n".join([*head_part, marker_for(omitted), *tail_part])
     assert result.split("\n")[0] == "token="
     for length in range(config.SECRET_FRAGMENT_MIN, len(CANARY)):
         assert CANARY[:length] not in result, length

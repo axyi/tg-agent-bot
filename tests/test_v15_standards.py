@@ -1033,6 +1033,7 @@ def test_v15_scan_11_gitleaks_tree_committed_vs_gitignored(tmp_path: Path):
         ],
         capture_output=True,
         timeout=30,
+        check=False,
     )
     assert result.returncode == 1
     findings = json.loads(report_path.read_text())
@@ -1113,6 +1114,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
         env=_isolated_git_env(repo),
         capture_output=True,
         timeout=30,
+        check=False,
     )
     assert control_result.returncode == 1, "control: canary must be detected without the allowlist"
 
@@ -1136,6 +1138,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
         env=_isolated_git_env(repo),
         capture_output=True,
         timeout=30,
+        check=False,
     )
     assert suppress_result.returncode == 0, "suppression: same value, same path, must be suppressed"
     assert json.loads(suppress_report.read_text()) == []
@@ -1162,6 +1165,7 @@ def test_n4_gitleaks_allowlist_control_suppression_escape(tmp_path: Path):
         env=_isolated_git_env(repo),
         capture_output=True,
         timeout=30,
+        check=False,
     )
     assert escape_result.returncode == 1, "escape: sentinel outside tests/ and docs/ must be caught"
     escape_findings = json.loads(escape_report.read_text())
@@ -1206,6 +1210,7 @@ def test_n5_semgrep_offline_with_vendored_ruleset_and_empty_cache(tmp_path: Path
         capture_output=True,
         env=env,
         timeout=60,
+        check=False,
     )
     assert result.returncode == 1, result.stderr.decode(errors="replace")
     findings = json.loads(out_path.read_text())
@@ -1857,6 +1862,7 @@ def test_v15_gate_05_select_unmatched_prefix_fails_loud():
         cwd=checks.REPO_ROOT,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert "nope-" in result.stderr
@@ -1875,6 +1881,7 @@ def test_v15_gate_05_select_and_only_are_mutually_exclusive():
         cwd=checks.REPO_ROOT,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert "mutually exclusive" in result.stderr

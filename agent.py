@@ -421,7 +421,7 @@ def _run_agent_turn(
             request_messages = messages
             request_tools = tool_specs()
         else:
-            request_messages = messages + [{"role": "system", "content": FINAL_INSTRUCTION}]
+            request_messages = [*messages, {"role": "system", "content": FINAL_INSTRUCTION}]
             request_tools = None
 
         ts = storage.utc_now_iso()
@@ -1286,7 +1286,7 @@ def summarize_conversation(
     with no exception, exactly as REQ-V160-TQ-01 item 3 already specifies.
     """
     base = storage.load_context_messages(conn, conv_id, CONTEXT_WINDOW_MESSAGES)
-    messages = base + [{"role": "user", "content": SUMMARY_PROMPT}]
+    messages = [*base, {"role": "user", "content": SUMMARY_PROMPT}]
 
     capture_content = cfg is not None and cfg.obs_capture_content
     record = (conn, conv_id, resolve_cost, capture_content)
@@ -1345,12 +1345,13 @@ def summarize_conversation(
                 timeout_s=timeout_s,
             )
         else:
-            repair = messages + [
+            repair = [
+                *messages,
                 {
                     "role": "user",
                     "content": f"Your reply was not valid JSON ({reason}). "
                     "Return only the JSON object.",
-                }
+                },
             ]
             parsed, _, _ = _ask_for_summary(
                 llm,

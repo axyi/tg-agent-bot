@@ -217,6 +217,7 @@ def _run_cli(*args):
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
 

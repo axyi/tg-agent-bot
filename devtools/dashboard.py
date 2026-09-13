@@ -88,8 +88,14 @@ def load_document(path: Path) -> dict:
         document = json.loads(raw)
     except ValueError as exc:
         raise ValueError(f"{path}: not valid JSON ({exc})") from exc
+    # v1.9.3 T3: the three type-check raises below keep ValueError, not
+    # TypeError (noqa: TRY004 on each) -- this function's own docstring
+    # and REQ-V160-DSH-05 pin its contract ("the benchmark file, or
+    # ValueError with a one-line reason"), and main() below catches
+    # `except ValueError` specifically to print a clean CLI error instead
+    # of a traceback.
     if not isinstance(document, dict):
-        raise ValueError(f"{path}: the document is not an object")
+        raise ValueError(f"{path}: the document is not an object")  # noqa: TRY004
     if document.get("bench_schema") not in ACCEPTED_BENCH_SCHEMAS:
         expected = sorted(ACCEPTED_BENCH_SCHEMAS)
         raise ValueError(
@@ -97,9 +103,9 @@ def load_document(path: Path) -> dict:
         )
     for key in ("meta", "summary"):
         if not isinstance(document.get(key), dict):
-            raise ValueError(f"{path}: {key} is missing or not an object")
+            raise ValueError(f"{path}: {key} is missing or not an object")  # noqa: TRY004
     if not isinstance(document.get("runs"), list):
-        raise ValueError(f"{path}: runs is missing or not an array")
+        raise ValueError(f"{path}: runs is missing or not an array")  # noqa: TRY004
     return document
 
 

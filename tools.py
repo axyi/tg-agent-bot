@@ -9,6 +9,7 @@ serving path uses to spawn the `docker` client itself and which the offline
 selftest binds directly.
 """
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -233,17 +234,13 @@ def _drain(stream, sink: _Capture) -> None:
     except (OSError, ValueError):
         return
     finally:
-        try:
+        with contextlib.suppress(Exception):
             stream.close()
-        except Exception:
-            pass
 
 
 def _killpg(pgid: int, sig: int) -> None:
-    try:
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
         os.killpg(pgid, sig)
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
 
 
 def _run_process(
@@ -397,7 +394,7 @@ def compact_output(text: str, *, max_chars: int, error_context: bool = False) ->
     marker = f"[… {len(chr(10).join(omitted))} chars / {len(omitted)} lines omitted …]"
     if head or tail:
         pieces = [config.strip_secret_fragment("\n".join(head))] if head else []
-        return config.strip_secret_fragment("\n".join(pieces + [marker] + tail))
+        return config.strip_secret_fragment("\n".join([*pieces, marker, *tail]))
     # One line longer than both windows: the cut lands mid-line, so the marker
     # goes inline and the head part is stripped on its own.
     head_part = config.strip_secret_fragment(text[:head_budget])
@@ -567,6 +564,7 @@ def docker_probe() -> str | None:
             timeout=DOCKER_PROBE_TIMEOUT_S,
             capture_output=True,
             env=_probe_env(),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -583,6 +581,7 @@ def docker_image_present(image: str) -> bool:
             timeout=DOCKER_PROBE_TIMEOUT_S,
             capture_output=True,
             env=_probe_env(),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -630,6 +629,7 @@ def image_has_timeout(image: str) -> bool:
             timeout=IMAGE_PROBE_TIMEOUT_S,
             capture_output=True,
             env=_probe_env(),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -878,6 +878,7 @@ def _docker_kill(container_name: str) -> None:
             timeout=DOCKER_KILL_TIMEOUT_S,
             capture_output=True,
             env=_probe_env(),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("docker kill failed: %s", config.redact(str(exc)))
@@ -1138,10 +1139,8 @@ def _save_fetch_text(
     root_fd = fetch_fd = fd = None
     try:
         root_fd = os.open(workdir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
+        with contextlib.suppress(FileExistsError):
             os.mkdir(FETCH_DIR_NAME, 0o700, dir_fd=root_fd)
-        except FileExistsError:
-            pass
         fetch_fd = os.open(
             FETCH_DIR_NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
         )
@@ -1150,10 +1149,8 @@ def _save_fetch_text(
             return None, SAVE_REFUSED
         # Remove the directory entry (never the data it may link to), then
         # create a fresh inode: an inherited hard link cannot be written into.
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(name, dir_fd=fetch_fd)
-        except FileNotFoundError:
-            pass
         fd = os.open(
             name,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -1173,20 +1170,16 @@ def _save_fetch_text(
     finally:
         for handle in (fd, fetch_fd, root_fd):
             if handle is not None:
-                try:
+                with contextlib.suppress(OSError):
                     os.close(handle)
-                except OSError:
-                    pass
     return f"{FETCH_DIR_NAME}/{name}", None
 
 
 def _discard_fetch_file(name: str, fetch_fd: int) -> None:
     """The file this process just created with `O_EXCL` failed a check: leave
     nothing behind."""
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(name, dir_fd=fetch_fd)
-    except OSError:
-        pass
 
 
 def _validate_url(url: object, allowed_domains: frozenset[str]) -> dict | None:
@@ -1246,7 +1239,10 @@ def append_audit(path: Path, record: dict) -> None:
         if not existed:
             os.chmod(path, 0o600)
     except OSError as exc:
-        log.error("audit log write failed: %s", config.redact(str(exc)))
+        # TRY400: an audit-log write failure is never fatal (this sink is
+        # best-effort, like `_docker_kill`); a traceback on a potentially
+        # hot path (every exec call) would be noise, not diagnosis.
+        log.error("audit log write failed: %s", config.redact(str(exc)))  # noqa: TRY400
 
 
 @dataclass(frozen=True)
@@ -1483,7 +1479,7 @@ def _audit(audit: AuditHook | None, record: dict) -> None:
         record = json.loads(config.redact(json.dumps(record, ensure_ascii=False)))
         audit(record)
     except Exception as exc:  # an audit failure is never fatal
-        log.error("audit hook failed: %s", config.redact(str(exc)))
+        log.error("audit hook failed: %s", config.redact(str(exc)))  # noqa: TRY400
 
 
 def _run_exec(arguments: dict, runner: CommandRunner) -> tuple[dict, dict, OutputSize | None]:

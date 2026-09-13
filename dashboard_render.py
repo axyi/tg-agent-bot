@@ -1105,8 +1105,10 @@ def gantt_svg(spans: Sequence[ServedSpan], *, width: int) -> str:
     parts = [
         f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img">',
         "<title>Trace gantt</title>",
-        f"<desc>Gantt of {len(ordered)} span(s), scaled from start_ns offsets against a "
-        f"{reference.duration_ms} ms root.</desc>",
+        (
+            f"<desc>Gantt of {len(ordered)} span(s), scaled from start_ns offsets against a "
+            f"{reference.duration_ms} ms root.</desc>"
+        ),
     ]
     for index, span in enumerate(ordered):
         if root_duration_ns <= 0:
@@ -1387,20 +1389,30 @@ def _cache(document: dict) -> str:
         else "cached ÷ prompt tokens"
     )
     rows = [
-        f"<tr><th>cache hit rate</th>"
-        f"{_cell(summary['cache_hit_rate'], 'share', cell_id='m-cache_hit_rate')}"
-        f"<td>{cache_note}</td></tr>",
-        f"<tr><th>re-sent share</th>"
-        f"{_cell(summary['resent_share'], 'share', cell_id='m-resent_share')}"
-        "<td>prompt tokens already sent in an earlier call of the same conversation</td></tr>",
-        f"<tr><th>prefix share</th>{_cell(share, 'share', cell_id='m-prefix_share')}"
-        "<td>prefix tokens × calls ÷ prompt tokens</td></tr>",
-        f"<tr><th>re-sent tokens</th>"
-        f"{_cell(summary['totals']['resent_tokens'], 'int', cell_id='m-cache-resent_tokens')}"
-        "<td>absolute</td></tr>",
-        f"<tr><th>new tokens</th>"
-        f"{_cell(summary['totals']['new_tokens'], 'int', cell_id='m-cache-new_tokens')}"
-        "<td>absolute</td></tr>",
+        (
+            f"<tr><th>cache hit rate</th>"
+            f"{_cell(summary['cache_hit_rate'], 'share', cell_id='m-cache_hit_rate')}"
+            f"<td>{cache_note}</td></tr>"
+        ),
+        (
+            f"<tr><th>re-sent share</th>"
+            f"{_cell(summary['resent_share'], 'share', cell_id='m-resent_share')}"
+            "<td>prompt tokens already sent in an earlier call of the same conversation</td></tr>"
+        ),
+        (
+            f"<tr><th>prefix share</th>{_cell(share, 'share', cell_id='m-prefix_share')}"
+            "<td>prefix tokens × calls ÷ prompt tokens</td></tr>"
+        ),
+        (
+            f"<tr><th>re-sent tokens</th>"
+            f"{_cell(summary['totals']['resent_tokens'], 'int', cell_id='m-cache-resent_tokens')}"
+            "<td>absolute</td></tr>"
+        ),
+        (
+            f"<tr><th>new tokens</th>"
+            f"{_cell(summary['totals']['new_tokens'], 'int', cell_id='m-cache-new_tokens')}"
+            "<td>absolute</td></tr>"
+        ),
     ]
     return (
         '<section id="cache">\n<h2>Cache and re-sent context</h2>\n'

@@ -656,6 +656,7 @@ def _reap_orphaned_containers() -> None:
             timeout=REAP_TIMEOUT_S,
             capture_output=True,
             env=tools._probe_env(),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("orphan container reap failed: %s", redact(str(exc)))
@@ -682,6 +683,7 @@ def _reap_orphaned_containers() -> None:
             timeout=REAP_TIMEOUT_S,
             capture_output=True,
             env=tools._probe_env(),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("orphan container reap failed: %s", redact(str(exc)))
@@ -1125,16 +1127,24 @@ def _render_stats(conn, from_id: int) -> str:
     return _fit(
         [
             "Stats (this conversation | all time)",
-            f"LLM calls: {here.calls} | {everywhere.calls} "
-            f"(errors {here.errors} | {everywhere.errors})",
-            f"Tokens in: {_pair(here.tokens_in, everywhere.tokens_in)} "
-            f"(cached: {_pair(here.cached_tokens, everywhere.cached_tokens)}, "
-            f"reasoning: {_pair(here.reasoning_tokens, everywhere.reasoning_tokens)})",
+            (
+                f"LLM calls: {here.calls} | {everywhere.calls} "
+                f"(errors {here.errors} | {everywhere.errors})"
+            ),
+            (
+                f"Tokens in: {_pair(here.tokens_in, everywhere.tokens_in)} "
+                f"(cached: {_pair(here.cached_tokens, everywhere.cached_tokens)}, "
+                f"reasoning: {_pair(here.reasoning_tokens, everywhere.reasoning_tokens)})"
+            ),
             f"Tokens out: {_pair(here.tokens_out, everywhere.tokens_out)}",
-            f"Est. cost: {_render_cost(here.cost_usd)} | {_render_cost(everywhere.cost_usd)} "
-            f"(basis: {_pair(here.cost_basis, everywhere.cost_basis)})",
-            f"Avg prompt/call: {_pair(here.avg_prompt, everywhere.avg_prompt)}; "
-            f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}",
+            (
+                f"Est. cost: {_render_cost(here.cost_usd)} | {_render_cost(everywhere.cost_usd)} "
+                f"(basis: {_pair(here.cost_basis, everywhere.cost_basis)})"
+            ),
+            (
+                f"Avg prompt/call: {_pair(here.avg_prompt, everywhere.avg_prompt)}; "
+                f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}"
+            ),
             f"Top tools by output tokens (all time): {_render_top_tools(conn)}",
             f"Last turn: {_render_last_turn(conn, conv_id)}",
             _render_errors_line(conn),
@@ -1236,8 +1246,10 @@ def _handle_model(conn, tg, cfg: Config, llm, chat_id: int, argument: str, set_p
             tg,
             chat_id,
             [
-                f"Provider: {_active_provider(cfg, llm, override)} "
-                f"(override: {override or 'none'}, failures: {_render_failures(llm)})"
+                (
+                    f"Provider: {_active_provider(cfg, llm, override)} "
+                    f"(override: {override or 'none'}, failures: {_render_failures(llm)})"
+                )
             ],
         )
         return
@@ -1432,7 +1444,7 @@ def _handle_document(
         _document_error_ending(tg, chat_id, status, typing, DOC_EMBEDDING_ERROR_REPLY)
         return
     except sqlite3.Error as exc:
-        log.error("document failed: sqlite: %s", exc.__class__.__name__)
+        log.exception("document failed: sqlite: %s", exc.__class__.__name__)
         _document_error_ending(tg, chat_id, status, typing, DOC_STORAGE_ERROR_REPLY)
         return
     except Exception:
@@ -1480,7 +1492,10 @@ def _send(tg, chat_id: int, parts: list[str]) -> bool:
         try:
             tg.send_message(chat_id, redact(part))
         except TelegramError as exc:
-            log.error("sending the reply failed: %s", redact(str(exc)))
+            # TRY400: TelegramError is an already-classified failure
+            # (retryable/fatal are known from the exception itself); a
+            # traceback here is noise, not diagnosis.
+            log.error("sending the reply failed: %s", redact(str(exc)))  # noqa: TRY400
             return False
     return True
 
@@ -1516,7 +1531,9 @@ def poll_loop(
                 updates = tg.get_updates(offset)
             except TelegramError as exc:
                 if exc.fatal:
-                    log.error("polling stopped: %s", redact(str(exc)))
+                    # TRY400: same classified-failure reasoning as
+                    # `_send`'s own TelegramError handler above.
+                    log.error("polling stopped: %s", redact(str(exc)))  # noqa: TRY400
                     return 2
                 backoff_attempt += 1
                 if exc.retry_after is not None:
@@ -1973,7 +1990,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config()
     except ConfigError as exc:
-        log.error("configuration error: %s", redact(str(exc)))
+        # TRY400: REQ-V12-ERR-01: a configuration refusal must look like
+        # one, not an unhandled traceback (test_v12_patch.py asserts no
+        # "Traceback" text reaches the log for this REQ's own seam below).
+        log.error("configuration error: %s", redact(str(exc)))  # noqa: TRY400
         return 2
 
     _started_at = time.monotonic()
@@ -1985,7 +2005,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         bot_username = tg.get_me()["username"]
     except (TelegramError, KeyError, TypeError) as exc:
-        log.error("cannot identify the bot: %s", redact(str(exc)))
+        log.exception("cannot identify the bot: %s", redact(str(exc)))
         client.close()
         conn.close()
         return 2
@@ -1997,7 +2017,7 @@ def main(argv: list[str] | None = None) -> int:
         # REQ-V12-ERR-01: a configuration refusal must look like one, not an
         # unhandled traceback — whether it comes from `load_config` above or
         # from this seam (REQ-V12-INF-01, REQ-V12-SSR-02).
-        log.error("configuration error: %s", redact(str(exc)))
+        log.error("configuration error: %s", redact(str(exc)))  # noqa: TRY400
         client.close()
         conn.close()
         return 2
@@ -2058,7 +2078,7 @@ def main(argv: list[str] | None = None) -> int:
                 db_path=cfg.db_path, port=cfg.dashboard_port
             )
         except Exception as exc:  # REQ-V160-SRV-07's broad startup guard
-            log.error(
+            log.exception(
                 "dashboard: failed to start on port %d: %s",
                 cfg.dashboard_port,
                 redact(f"{type(exc).__name__}: {exc}"),

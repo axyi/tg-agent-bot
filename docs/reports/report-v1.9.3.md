@@ -534,6 +534,196 @@ CLI flag, not the ruff rule set -- nothing there names the actual `select`
 list, so nothing needed changing (the same "grepped, nothing to change"
 outcome T1 recorded for its own grep).
 
+### Commit B -- prompt 178, `fix: ruff bug-class tier`
+
+Rules: `PLW1510 TRY400 ISC004 RUF005 RUF007 PERF401 SIM105 SIM117 TRY004
+PLW2901`, each hit read by hand as the brief requires.
+
+**Commit message deviation:** the brief's own commit-B title (`fix: ruff
+bug-class tier (PLW1510, TRY400, ISC004, RUF005/007, PERF401, SIM105/117,
+TRY004, PLW2901)`, 100 characters) exceeds `AGENTS.md`'s hard 72-character
+header limit, enforced by the `commit-msg` hook -- the first commit attempt
+was rejected by it. Landed as `fix: ruff bug-class tier (subprocess,
+exceptions, concat)` (57 characters) instead, with the full rule list
+moved into the body's first line. Commit A's brief-specified title (63
+characters) fit and was used verbatim.
+
+**`RUF005`/`RUF007`** (13/10 hits, re-measured on this tree): all 23
+mechanical via `ruff --unsafe-fixes` (`list + [x]` -> `[*list, x]`,
+`zip(x, x[1:], strict=False)` -> `itertools.pairwise(x)`); every diff hunk
+read, none changes iteration order or count.
+
+**`PERF401`** (19 hits, re-measured -- up from the brief's 5e62a4a-era
+count of the T3 select list, since none of these 19 sites existed there
+either; the rule has no autofix at all, all 19 hand-rewritten): 8 in
+`devtools/bench.py` (report-table row builders: `rows = []` + `for key in
+(...): rows.append(...)` -> a list comprehension for the first loop
+populating an empty list, `.extend(genexpr)` for subsequent loops over the
+same accumulator), 5 in `devtools/checks.py` (the four scanner-JSON
+adapters: `gitleaks_json` unchanged shape kept as a comprehension it
+already had is untouched; `trivy_json`'s two nested loops ->
+`findings.extend(genexpr)` each; `semgrep_json`/`skylos_json`'s
+single/nested loops -> a direct list comprehension), 2 in
+`dashboard_server.py` (`body.append(...)` in a `for hist in ...:` loop ->
+`body.extend(genexpr)`, twice), 2 in `tests/test_v170_bench.py` and 1 in
+`tests/test_v180_dashboard.py` (conditional-append loops -> `.extend(genexpr
+... if cond)`), 1 in `documents.py` (`rows.append((page_number, chunk))` in
+a `for chunk in chunk_text(...):` loop -> `rows.extend(genexpr)`). One
+orphan surfaced by the `devtools/checks.py` rewrites: `findings = [...]`
+immediately followed by `return findings` is itself `RET504` (now
+selected, from commit A) -- collapsed to a direct `return [...]` in both
+`semgrep_json` and `skylos_json`.
+
+**`SIM105`** (13 hits, re-measured; brief's 5e62a4a-era count was 9 --
+T1/T2's new SIGTERM/SIGKILL and rerank-routing code added 4 more): 11 via
+`ruff --unsafe-fixes` (`try: X except E: pass` -> `with
+contextlib.suppress(E): X`, one exception type per site, read in full --
+`_killpg`'s three-exception tuple, `checks.py`/`mutation_check.py`'s
+process-group SIGTERM/SIGKILL pair, `tools.py`'s five fetch/probe
+sites, `storage.py`'s chmod site); 2 in `rag.py` not auto-fixed (a
+trailing `# a failing logger must not escape` comment on the `except
+Exception:` line) -- hand-rewritten identically, comment preserved on the
+new `with contextlib.suppress(Exception):` line.
+
+**`SIM117`** (9 hits, all in `tests/test_v160_observability.py`): 3 via
+`ruff --unsafe-fixes`, 6 hand-merged (a two-`as`-binding pattern and a
+`caplog.at_level` + `start_span` pattern ruff's own fixer declined to
+merge automatically). Every merge read for enter/exit order: a
+comma-joined `with A as x, B as y:` statement is Python's own defined
+equivalent of `with A as x: with B as y:` -- same enter order (A then B),
+same exit order (B then A) -- which is exactly ruff's own precondition for
+firing this rule (the outer `with`'s body must be solely the inner
+`with`), so no site could have changed which exception is swallowed or
+which context exits first; confirmed by re-running the full file green
+after each merge.
+
+**`TRY004`** (5 hits: 4 fixed, 1 excluded). `tracing.py:101`
+(`_validate_attribute_value`'s scalar-type check) -> `TypeError`: no test
+or caller catches `ValueError` here specifically (`set_attribute`'s own
+"unknown key" `ValueError` is a separate, unrelated raise). `devtools/
+dashboard.py:91,99,101` (`load_document`'s three type-check raises) kept
+as `ValueError` with `# noqa: TRY004` each: the function's own docstring
+("the benchmark file, or `ValueError` with a one-line reason",
+REQ-V160-DSH-05) and `main()`'s `except ValueError as exc:` (prints a
+clean CLI error, `EXIT_ERROR`) both depend on this exact type.
+`devtools/bench_scenarios.py:137` excluded (see Constraints).
+
+**`PLW2901`** (6 hits, all mechanical loop-variable renames, semantics
+unchanged): `devtools/bench.py` (`convert()`'s `row`/`selected`'s `row` ->
+`raw_row`, rebound as `row = dict(raw_row)`), `devtools/checks.py`
+(`parse_pre_push_stdin`'s `line` -> `raw_line`; `_partition_findings`'s
+`finding` -> `raw_finding`), `llm/base.py` (`_parse_tool_calls`'s `entry`
+-> `raw_entry`), `tests/test_v170_bench.py` (`chunk` -> `raw_chunk`).
+
+**`PLW1510`** (16 hits, re-measured -- one less than the brief's 17
+because T1's own `Popen`-based `run_argv` rewrite already removed one
+`subprocess.run` site the brief's inventory counted): every site read for
+whether the caller checks `.returncode` afterward. All 16 got explicit
+`check=False`: `bot.py:646,680` (`_reap_orphaned_containers`, both
+docker-ps/docker-rm calls, `.returncode` read immediately after);
+`tools.py:562,578,601` (`docker_probe`, `docker_image_present`,
+`image_has_timeout`, all read `.returncode`); `tools.py:876` (`_docker_kill`
+-- no `.returncode` read at all, but its own docstring says "best effort:
+the client is already dead, the container may not be", matching the same
+non-fatal-by-design class); `devtools/mutation_check.py:1565`
+(`_shrink_counts`'s own docstring: "Returns `(count, returncode)` -- the
+caller must check the returncode itself"); `tests/test_bench.py:1889`,
+`tests/test_v13_carryover.py:214`, and all 7 `tests/test_v15_standards.py`
+sites (gitleaks/semgrep/mutation-CLI subprocess assertions, every one
+reads `.returncode` on the next line). **Zero `check=True` sites** -- no
+non-zero exit anywhere in this list was ever treated as a bug; the
+brief's other branch never fired.
+
+**`TRY400`** (16 hits, unchanged from the brief's count): 7 adopted
+`log.exception` (`bot.py:1437` document-handler `sqlite3.Error` -- an
+unexpected DB failure, unlike its sibling classified branches which already
+`log.warning`; `bot.py:1998` `(TelegramError, KeyError, TypeError)` at
+startup -- the latter two are real bugs, not classified failures, and this
+runs once at boot, not in a hot loop; `bot.py:2071`
+`dashboard_server.build_server`'s broad `except Exception` startup guard;
+`dashboard_server.py:518,535` the request handler's DB-error and
+unhandled-exception guards; `devtools/bench.py:933,1097,1108,1155,1161` --
+a scenario-prep failure and two DB-open/DB-read pairs, both devtools
+harness paths where a full traceback aids debugging and there is no
+hot-loop noise concern). 9 kept `log.error` with `# noqa: TRY400` plus an
+inline reason comment: `bot.py:1485,1521` (both `TelegramError` --
+already-classified, retryable/fatal known from the exception itself);
+`bot.py:1983,2007` (both `ConfigError` -- the second already carried a
+`REQ-V12-ERR-01` comment this task cites verbatim: "a configuration
+refusal must look like one, not an unhandled traceback",
+`tests/test_v12_patch.py:759` asserts no `"Traceback"` text reaches the
+log for this exact seam); `tools.py:1242,1479` (both audit-log
+best-effort sites, "an audit failure is never fatal", a potentially hot
+path on every exec call). No caplog test pinned a level/message this task
+needed to repoint.
+
+**`ISC004`** (32 hits total, 11 in `devtools/bench_scenarios.py` excluded
+-- see Constraints; 21 reviewed). All 21 read as `intentional`: `bot.py`
+(5, `_render_stats`/`_handle_model`'s wrapped f-string message lines),
+`dashboard_render.py` (6, one SVG `<desc>` line, five HTML `<tr>` row
+builders), `devtools/bench.py` (4, the console-summary line builders),
+`storage.py` (1, one SQL statement in `_MIGRATION_5_TO_6`),
+`tests/test_v14_patch.py` (5, recorded literal benchmark canary answers).
+Zero bugs: every site's implicit concatenation forms exactly one logical
+string as a single collection element, correctly comma-terminated before
+the next element (verified by reading `ruff --unsafe-fixes --diff` in
+full against this determination -- the tool's own parenthesisation matches
+exactly, changing no string content). All 21 parenthesised explicit via
+`ruff --unsafe-fixes --fix`, then `ruff format` reflowed the new
+parenthesised multi-line strings to its canonical shape.
+
+**One line manually rewrapped**, not itself an ISC004 hit (nested inside a
+dict value inside a list, one level too deep for the rule to fire) but
+made too long (>100 chars, `E501`) by commit A's own `RUF005` collapse:
+`agent.py`'s JSON-repair message (`repair = [*messages, {...}]`) restored
+to a multi-line list/dict literal, the implicit string concatenation kept
+intact.
+
+Then all 10 rules added to `pyproject.toml`'s `[tool.ruff.lint].select`,
+rule-level.
+
+### The `devtools/bench_scenarios.py` exclusion (beyond-brief generalisation)
+
+The brief's own Stop condition names only `PERF401`/`SIM117` rewrites
+touching this byte-hash-frozen file (`REQ-V13-BEN-12`,
+`scenarios_sha256()` pinned inside every committed benchmark artefact).
+Neither of those two rules has any hit inside it. `TRY004` (1 hit,
+`:137`) and `ISC004` (11 hits, recorded canary-turn strings across five
+scenario definitions) both do. Since the underlying reason -- any byte
+change here invalidates every already-committed `docs/assets/bench/
+*.json`'s pinned hash -- applies identically regardless of which rule
+triggers the rewrite, the same treatment (exclude, disclose) is applied to
+these two instead: a `[tool.ruff.lint.per-file-ignores]` table added for
+`"devtools/bench_scenarios.py" = ["TRY004", "ISC004"]`, the file's bytes
+untouched by this commit. Flagged here explicitly since it goes beyond the
+brief's literal wording, for the operator to confirm or override.
+
+### Mutation drift and re-derivation
+
+Drift script (114 entries) run after this commit's fixes landed, before
+committing: **113/114 matched, 1 drifted** --
+`v13-fetch-save-reuses-inode` (`tools.py`), whose `find` string was the
+pre-`SIM105`-fix `try:/except FileNotFoundError:/pass` block this commit's
+own rewrite replaced with `with contextlib.suppress(FileNotFoundError):`.
+Re-derived with identical mutation semantics (same two effects: the
+`unlink` attempt dropped entirely, `os.O_EXCL` -> `os.O_TRUNC` in the
+following `os.open` call) against the new `with`-statement shape; `--only
+v13-fetch-save-reuses-inode` run on the committed tree (the T1 dirty-tree
+check requires it -- run after this commit, not before, matching the
+brief's own "after each commit" framing of its acceptance list): killed.
+Drift script re-run after the re-derivation: **114/114 matched, 0
+drifted**.
+
+### Acceptance (this commit)
+
+`ruff check .` 0; `ruff format --check .` 0; `pytest` 0, 1609 collected
+(1608 passed, 1 skipped, unchanged -- one transient failure between
+landing the lint fixes and re-deriving the drifted mutation entry, not
+present in the final committed tree); `bot.py --selftest` 0; `checks.py
+lint-docs` 0; drift script 114/114 (0 drifted, after re-derivation);
+`mutation_check.py --only v13-fetch-save-reuses-inode` killed, run on the
+committed tree per T1's own dirty-tree requirement.
+
 ## Delegation record
 
 - T1 -- delegated, brief `docs/spec/task-briefs/v193-T1.md`.
@@ -547,6 +737,11 @@ outcome T1 recorded for its own grep).
   `docs/spec/task-briefs/v193-T12-review.md`; a clean-context (opus)
   review of the three landed commits, closed in one follow-up commit
   without rewriting any of them.
+- T3 -- delegated, brief `docs/spec/task-briefs/v193-T3.md`; two sequential
+  commits (prompts 177, 178), a mutation-drift re-derivation between them,
+  and one beyond-brief generalisation (the `devtools/bench_scenarios.py`
+  exclusion extended from `PERF401`/`SIM117` to the two rules that
+  actually hit it, `TRY004`/`ISC004`) flagged for operator review.
 
 ## Ledger row (paste into `economics.md`)
 

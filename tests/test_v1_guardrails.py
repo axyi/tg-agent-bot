@@ -1436,7 +1436,7 @@ def live_handler(
             # REQ-V190-RET-08 erratum: `embedding_model` is appended
             # unconditionally so a test overriding `lmstudio_models` to force
             # a lmstudio FAIL does not also fail the embeddings check.
-            names = list(lmstudio_models) + [embedding_model]
+            names = [*list(lmstudio_models), embedding_model]
             return httpx.Response(200, json={"data": [{"id": name} for name in names]})
         raise AssertionError(f"unexpected request: {request.url}")
 

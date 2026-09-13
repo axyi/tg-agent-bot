@@ -515,7 +515,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except _FixedResponse as fixed:
             self._respond(fixed.status, fixed.body, fixed.content_type, send_body=send_body)
         except (sqlite3.Error, OSError) as exc:
-            log.error(
+            log.exception(
                 "dashboard: database error on %s: %s",
                 config.redact(self._matched_route),
                 config.redact(f"{type(exc).__name__}: {exc}"),
@@ -532,7 +532,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             self._respond(503, body, ctype, send_body=send_body)
         except Exception:  # the fixed, content-free 500 REQ-V160-SRV-07 wants
-            log.error("dashboard: unhandled error on %s", config.redact(self._matched_route))
+            log.exception("dashboard: unhandled error on %s", config.redact(self._matched_route))
             is_api = self._matched_route.startswith("/api/")
             body = (
                 json.dumps({"error": "internal error"}, ensure_ascii=False).encode("utf-8")
@@ -643,12 +643,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             error_rate=(totals["errors"] / totals["calls"]) if totals["calls"] else 0.0,
         )
         body = [reading_strip, dashboard_render.usage_section(rows, group=group, totals=totals)]
-        for hist in latency:
-            body.append(
-                dashboard_render.histogram_svg(hist, width=640, height=160, title="Latency")
-            )
-        for hist in tokens_in + tokens_out:
-            body.append(dashboard_render.histogram_svg(hist, width=640, height=160, title="Tokens"))
+        body.extend(
+            dashboard_render.histogram_svg(hist, width=640, height=160, title="Latency")
+            for hist in latency
+        )
+        body.extend(
+            dashboard_render.histogram_svg(hist, width=640, height=160, title="Tokens")
+            for hist in tokens_in + tokens_out
+        )
         body.append(dashboard_render.error_breakdown_section(breakdown))
         footer = f"db: {Path(self.server.db_path).name} · schema v{schema}"
         html = dashboard_render.page(

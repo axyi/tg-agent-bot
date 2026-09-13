@@ -4,6 +4,7 @@ All SQL lives here. Transactions are explicit because the connection is opened
 in autocommit mode.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -391,8 +392,10 @@ _LLM_CALLS_COLUMN_LIST = ", ".join(LLM_CALL_COLUMNS)
 _MIGRATION_5_TO_6 = (
     *[statement.strip() for statement in _DOCUMENTS_DDL.strip().split(";") if statement.strip()],
     _LLM_CALLS_V6_DDL.strip(),
-    f"INSERT INTO llm_calls_v6 ({_LLM_CALLS_COLUMN_LIST}) "
-    f"SELECT {_LLM_CALLS_COLUMN_LIST} FROM llm_calls",
+    (
+        f"INSERT INTO llm_calls_v6 ({_LLM_CALLS_COLUMN_LIST}) "
+        f"SELECT {_LLM_CALLS_COLUMN_LIST} FROM llm_calls"
+    ),
     "DROP TABLE llm_calls",
     "ALTER TABLE llm_calls_v6 RENAME TO llm_calls",
     "CREATE INDEX IF NOT EXISTS idx_llm_calls_conv ON llm_calls (conv_id, id)",
@@ -476,10 +479,8 @@ def _restrict_permissions(db_path: Path) -> None:
     """REQ-V1-SEC-04: the conversation store is readable by its owner only."""
     os.chmod(db_path, 0o600)
     for suffix in ("-wal", "-shm"):
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.chmod(str(db_path) + suffix, 0o600)
-        except FileNotFoundError:
-            pass
     # `config.PROJECT_ROOT` is read at call time so that a monkeypatched root is
     # honoured; the project root itself is never chmod-ed.
     parent = Path(os.path.normpath(db_path.parent))

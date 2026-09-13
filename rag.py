@@ -11,6 +11,7 @@ bookkeeping helper, the same one the summary path uses); `agent.py` never
 imports this module, so there is no cycle. It does not import `bot`.
 """
 
+import contextlib
 import itertools
 import json
 import logging
@@ -419,10 +420,8 @@ class Searcher:
                 reason = _failure_reason(exc)
             if not rerank_succeeded:
                 rerank_failure = reason
-                try:
+                with contextlib.suppress(Exception):  # a failing logger must not escape
                     log.warning("rerank fell back to rrf order: %s", rerank_failure)
-                except Exception:  # a failing logger must not escape
-                    pass
 
         # Step 5: slice to the first cfg.rag_top_k.
         result = SearchResult(
@@ -526,10 +525,8 @@ def _strip_source_lines(reply: str, *, keep: set[str]) -> tuple[str, bool]:
         else:
             kept_lines.append(line)
     if removed_any:
-        try:
+        with contextlib.suppress(Exception):  # a failing logger must not escape
             log.warning(_STRIPPED_SOURCE_WARNING)
-        except Exception:  # a failing logger must not escape
-            pass
     return "\n".join(kept_lines), kept_valid
 
 

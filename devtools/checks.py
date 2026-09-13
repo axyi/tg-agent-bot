@@ -8,6 +8,7 @@ only the standard library: a small explicit reader for the YAML subset
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -763,8 +764,8 @@ def materialize_tracked_tree(
 
 def parse_pre_push_stdin(text: str) -> list[tuple[str, str, str, str]]:
     records = []
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         parts = line.split()
@@ -948,9 +949,11 @@ def _replay_one_commit(sha: str, config: dict[str, Any], repo_root: Path) -> lis
         else:
             blocking_severities = set(gitleaks_gate["severity"])
             findings = PARSERS[gitleaks_gate["parser"]](artefact.read_bytes())
-            for finding in findings:
-                if finding["severity"] in blocking_severities:
-                    problems.append(f"gitleaks: {finding['path']}: {finding['severity']}")
+            problems.extend(
+                f"gitleaks: {finding['path']}: {finding['severity']}"
+                for finding in findings
+                if finding["severity"] in blocking_severities
+            )
     elif result.returncode not in gitleaks_gate["success_exit_codes"]:
         problems.append(f"gitleaks: unexpected exit code {result.returncode}")
 
@@ -998,40 +1001,38 @@ def trivy_json(raw: bytes) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for result in data.get("Results") or []:
         target = result.get("Target", "")
-        for vuln in result.get("Vulnerabilities") or []:
-            findings.append(
-                {
-                    "path": target,
-                    "severity": str(vuln.get("Severity", "")).upper(),
-                    "rule_id": vuln.get("VulnerabilityID", ""),
-                    "message": vuln.get("Title", ""),
-                }
-            )
-        for mis in result.get("Misconfigurations") or []:
-            findings.append(
-                {
-                    "path": target,
-                    "severity": str(mis.get("Severity", "")).upper(),
-                    "rule_id": mis.get("ID", ""),
-                    "message": mis.get("Title", ""),
-                }
-            )
+        findings.extend(
+            {
+                "path": target,
+                "severity": str(vuln.get("Severity", "")).upper(),
+                "rule_id": vuln.get("VulnerabilityID", ""),
+                "message": vuln.get("Title", ""),
+            }
+            for vuln in result.get("Vulnerabilities") or []
+        )
+        findings.extend(
+            {
+                "path": target,
+                "severity": str(mis.get("Severity", "")).upper(),
+                "rule_id": mis.get("ID", ""),
+                "message": mis.get("Title", ""),
+            }
+            for mis in result.get("Misconfigurations") or []
+        )
     return findings
 
 
 def semgrep_json(raw: bytes) -> list[dict[str, Any]]:
     data = json.loads(raw)
-    findings = []
-    for item in data.get("results") or []:
-        findings.append(
-            {
-                "path": item.get("path", ""),
-                "severity": str(item.get("extra", {}).get("severity", "")).upper(),
-                "rule_id": item.get("check_id", ""),
-                "message": item.get("extra", {}).get("message", ""),
-            }
-        )
-    return findings
+    return [
+        {
+            "path": item.get("path", ""),
+            "severity": str(item.get("extra", {}).get("severity", "")).upper(),
+            "rule_id": item.get("check_id", ""),
+            "message": item.get("extra", {}).get("message", ""),
+        }
+        for item in data.get("results") or []
+    ]
 
 
 _SKYLOS_CATEGORIES = (
@@ -1046,18 +1047,16 @@ _SKYLOS_CATEGORIES = (
 
 def skylos_json(raw: bytes) -> list[dict[str, Any]]:
     data = json.loads(raw)
-    findings = []
-    for category in _SKYLOS_CATEGORIES:
-        for item in data.get(category) or []:
-            findings.append(
-                {
-                    "path": item.get("file", ""),
-                    "severity": "LOW",
-                    "rule_id": category,
-                    "message": item.get("full_name") or item.get("name", ""),
-                }
-            )
-    return findings
+    return [
+        {
+            "path": item.get("file", ""),
+            "severity": "LOW",
+            "rule_id": category,
+            "message": item.get("full_name") or item.get("name", ""),
+        }
+        for category in _SKYLOS_CATEGORIES
+        for item in data.get(category) or []
+    ]
 
 
 PARSERS = {
@@ -1111,19 +1110,15 @@ def _terminate_process_group(proc: subprocess.Popen) -> None:
     `_TERMINATE_GRACE_S` to exit on its own (its handler, if any, runs);
     SIGKILL the group only if it is still alive after the grace. Reaps
     the process either way so no zombie is left behind."""
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
     try:
         proc.communicate(timeout=_TERMINATE_GRACE_S)
         return
     except subprocess.TimeoutExpired:
         pass
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
     proc.communicate()
 
 
@@ -1211,11 +1206,11 @@ def _partition_findings(
     diff_scoped: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
     in_scope, out_of_scope = [], []
-    for finding in raw_findings:
-        norm = normalise_finding_path(finding["path"], repo_root)
+    for raw_finding in raw_findings:
+        norm = normalise_finding_path(raw_finding["path"], repo_root)
         if norm is None:
-            return [], [], finding["path"]
-        finding = {**finding, "path": norm}
+            return [], [], raw_finding["path"]
+        finding = {**raw_finding, "path": norm}
         if not diff_scoped or scope_files is None or norm in scope_files:
             in_scope.append(finding)
         else:

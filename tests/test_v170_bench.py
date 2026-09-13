@@ -388,7 +388,7 @@ def test_t_v170_acc_03_find_matching_candidates_synthetic():
     assert _acc03_find_matching_candidates(docs, ("off", [])) == ["cand-v170-off"]
     assert _acc03_find_matching_candidates(docs, ("model-default", ["tool-round"])) == []
     extra = {"meta": {"reasoning": {"policy": "off", "on_purposes": []}}}
-    dup = docs + [("cand-v170-off-2", extra)]
+    dup = [*docs, ("cand-v170-off-2", extra)]
     assert _acc03_find_matching_candidates(dup, ("off", [])) == ["cand-v170-off", "cand-v170-off-2"]
 
 
@@ -458,8 +458,8 @@ def _acc03_find_selection_commit(root: Path = _REAL_PROJECT_ROOT) -> str | None:
     if result.returncode != 0:
         return None
     matches = []
-    for chunk in result.stdout.split("\x03"):
-        chunk = chunk.strip("\n")
+    for raw_chunk in result.stdout.split("\x03"):
+        chunk = raw_chunk.strip("\n")
         if not chunk:
             continue
         sha, _, body = chunk.partition("\x00")
@@ -507,13 +507,17 @@ def _acc03_validate_selection_commit_hunks(per_file: dict[str, list[str]]) -> li
             problems.append(f"disallowed path in the selection commit: {path}")
             continue
         if path == "config.py":
-            for line in lines:
-                if "llm_reasoning_policy" not in line and "llm_reasoning_on_purposes" not in line:
-                    problems.append(f"config.py hunk names neither variable: {line!r}")
+            problems.extend(
+                f"config.py hunk names neither variable: {line!r}"
+                for line in lines
+                if "llm_reasoning_policy" not in line and "llm_reasoning_on_purposes" not in line
+            )
         elif path == "pyproject.toml":
-            for line in lines:
-                if "version" not in line:
-                    problems.append(f"pyproject.toml hunk outside the version line: {line!r}")
+            problems.extend(
+                f"pyproject.toml hunk outside the version line: {line!r}"
+                for line in lines
+                if "version" not in line
+            )
         else:  # .env.example, README.md, AGENTS.md
             for line in lines:
                 names_variable = (

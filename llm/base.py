@@ -356,8 +356,8 @@ def parse_response(data: object) -> LLMResponse:
         raise _malformed("'choices[0].message' is not an object")
 
     tool_calls = []
-    for entry in message.get("tool_calls") or []:
-        entry = entry if isinstance(entry, dict) else {}
+    for raw_entry in message.get("tool_calls") or []:
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
         function = entry.get("function")
         function = function if isinstance(function, dict) else {}
         raw_arguments = function.get("arguments")

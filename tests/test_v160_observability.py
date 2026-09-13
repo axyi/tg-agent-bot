@@ -214,20 +214,24 @@ def test_t_v160_trc_02_ids_are_fixed_width_hex_and_unique():
 
 
 def test_t_v160_trc_02_nested_span_inherits_trace_and_records_parent():
-    with tracing.start_span("outer", tracing.KIND_INTERNAL) as outer:
-        with tracing.start_span("inner", tracing.KIND_CLIENT) as inner:
-            assert inner.trace_id == outer.trace_id
-            assert inner.parent_span_id == outer.span_id
-            assert inner.span_id != outer.span_id
+    with (
+        tracing.start_span("outer", tracing.KIND_INTERNAL) as outer,
+        tracing.start_span("inner", tracing.KIND_CLIENT) as inner,
+    ):
+        assert inner.trace_id == outer.trace_id
+        assert inner.parent_span_id == outer.span_id
+        assert inner.span_id != outer.span_id
 
 
 # --- T-V160-TRC-09 ---------------------------------------------------------
 
 
 def test_t_v160_trc_09_set_attribute_rejects_unlisted_key():
-    with tracing.start_span("s", tracing.KIND_INTERNAL) as span:
-        with pytest.raises(ValueError, match="bogus.key"):
-            span.set_attribute("bogus.key", "x")
+    with (
+        tracing.start_span("s", tracing.KIND_INTERNAL) as span,
+        pytest.raises(ValueError, match="bogus.key"),
+    ):
+        span.set_attribute("bogus.key", "x")
 
 
 def test_t_v160_trc_09_content_attributes_absent_when_capture_is_false():
@@ -253,9 +257,8 @@ def test_t_v160_trc_11_status_message_is_redacted_then_truncated(monkeypatch):
     monkeypatch.setattr(
         tracing.NullSink, "write", lambda self, span: captured.__setitem__("span", span)
     )
-    with pytest.raises(RuntimeError):
-        with tracing.start_span("s", tracing.KIND_INTERNAL):
-            raise RuntimeError("boom: " + CANARY)
+    with pytest.raises(RuntimeError), tracing.start_span("s", tracing.KIND_INTERNAL):
+        raise RuntimeError("boom: " + CANARY)
     message = captured["span"].status_message
     assert CANARY not in message
     assert config.REDACTION in message
@@ -273,9 +276,8 @@ def test_t_v160_trc_11_secret_straddling_the_boundary_does_not_survive(monkeypat
         tracing.NullSink, "write", lambda self, span: captured.__setitem__("span", span)
     )
     padding = "x" * 180
-    with pytest.raises(RuntimeError):
-        with tracing.start_span("s", tracing.KIND_INTERNAL):
-            raise RuntimeError(padding + CANARY)
+    with pytest.raises(RuntimeError), tracing.start_span("s", tracing.KIND_INTERNAL):
+        raise RuntimeError(padding + CANARY)
     message = captured["span"].status_message
     assert CANARY not in message
     assert CANARY[:16] not in message
@@ -286,9 +288,8 @@ def test_t_v160_trc_11_secret_straddling_the_boundary_does_not_survive(monkeypat
 
 
 def test_t_v160_trc_12_exception_sets_error_and_reraises():
-    with pytest.raises(ValueError):
-        with tracing.start_span("s", tracing.KIND_INTERNAL) as span:
-            raise ValueError("boom")
+    with pytest.raises(ValueError), tracing.start_span("s", tracing.KIND_INTERNAL) as span:
+        raise ValueError("boom")
     assert span.status == tracing.STATUS_ERROR
     assert span.status_message is not None
 
@@ -307,9 +308,11 @@ def test_t_v160_trc_12_non_sqlite_sink_failure_is_swallowed_and_counted(caplog):
             raise RuntimeError("sink is down")
 
     before = tracing.dropped_spans()
-    with caplog.at_level(logging.WARNING, logger="tracing"):
-        with tracing.start_span("s", tracing.KIND_INTERNAL, sink=FlakySink()):
-            pass
+    with (
+        caplog.at_level(logging.WARNING, logger="tracing"),
+        tracing.start_span("s", tracing.KIND_INTERNAL, sink=FlakySink()),
+    ):
+        pass
     assert tracing.dropped_spans() == before + 1
     assert any("sink is down" in r.message or "RuntimeError" in r.message for r in caplog.records)
 
@@ -319,9 +322,11 @@ def test_t_v160_trc_12_non_sqlite_sink_failure_does_not_mask_body_exception():
         def write(self, span):
             raise RuntimeError("sink is down")
 
-    with pytest.raises(ValueError, match="body raised this"):
-        with tracing.start_span("s", tracing.KIND_INTERNAL, sink=FlakySink()):
-            raise ValueError("body raised this")
+    with (
+        pytest.raises(ValueError, match="body raised this"),
+        tracing.start_span("s", tracing.KIND_INTERNAL, sink=FlakySink()),
+    ):
+        raise ValueError("body raised this")
 
 
 def test_t_v160_trc_12_sqlite_sink_failure_propagates(monkeypatch):
@@ -330,9 +335,11 @@ def test_t_v160_trc_12_sqlite_sink_failure_propagates(monkeypatch):
 
     monkeypatch.setattr(tracing.storage, "add_span", failing_add_span, raising=False)
     sink = tracing.SqliteSpanSink(conn=object())
-    with pytest.raises(RuntimeError, match="insert failed"):
-        with tracing.start_span("s", tracing.KIND_CLIENT, sink=sink):
-            pass
+    with (
+        pytest.raises(RuntimeError, match="insert failed"),
+        tracing.start_span("s", tracing.KIND_CLIENT, sink=sink),
+    ):
+        pass
 
 
 def test_t_v160_trc_12_second_finish_raises():
@@ -1359,9 +1366,11 @@ def test_t_v160_tq_03_closed_outcome_vocabulary(conn):
     row = health[0]
     assert (row.ok, row.error, row.budget, row.rejected, row.refused_repeat) == (1, 1, 1, 1, 1)
 
-    with tracing.start_span("execute_tool", tracing.KIND_INTERNAL, sink=tracing.NullSink()) as span:
-        with pytest.raises(ValueError):
-            agent._record_tool_call(conn, conv, 1, call, "{}", "bogus", 0, None, span=span)
+    with (
+        tracing.start_span("execute_tool", tracing.KIND_INTERNAL, sink=tracing.NullSink()) as span,
+        pytest.raises(ValueError),
+    ):
+        agent._record_tool_call(conn, conv, 1, call, "{}", "bogus", 0, None, span=span)
     assert len(tool_rows(conn)) == len(agent.TOOL_OUTCOMES)  # the bogus row never landed
 
 

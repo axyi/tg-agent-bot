@@ -172,9 +172,11 @@ def _all_sentinel_chrome() -> str:
 
 def _rejected_defaults(chrome: str) -> list[str]:
     found = [needle for needle in _FORBIDDEN_SUBSTRINGS if needle in chrome]
-    for radius in re.findall(r"border-radius:\s*(\d+)px", chrome):
-        if int(radius) > 2:
-            found.append(f"border-radius:{radius}px")
+    found.extend(
+        f"border-radius:{radius}px"
+        for radius in re.findall(r"border-radius:\s*(\d+)px", chrome)
+        if int(radius) > 2
+    )
     if re.search(r"(?<!sans-)serif", chrome):
         found.append("a serif font-family")
     if "monospace" in chrome:

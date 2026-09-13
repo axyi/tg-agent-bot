@@ -446,8 +446,7 @@ def _document_chunks(extracted: Extracted) -> list[tuple[int | None, Chunk]]:
     rows: list[tuple[int | None, Chunk]] = []
     for extracted_page in extracted.pages:
         page_number = extracted_page.page if extracted.page_numbered else None
-        for chunk in chunk_text(extracted_page.text):
-            rows.append((page_number, chunk))
+        rows.extend((page_number, chunk) for chunk in chunk_text(extracted_page.text))
     return rows
 
 

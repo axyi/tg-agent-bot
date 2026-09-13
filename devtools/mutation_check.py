@@ -14,6 +14,7 @@ no third-party mutation framework (REQ-V12-NG-05).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import signal
@@ -640,10 +641,8 @@ MUTATIONS = [
         "id": "v13-fetch-save-reuses-inode",
         "path": "tools.py",
         "find": (
-            "        try:\n"
+            "        with contextlib.suppress(FileNotFoundError):\n"
             "            os.unlink(name, dir_fd=fetch_fd)\n"
-            "        except FileNotFoundError:\n"
-            "            pass\n"
             "        fd = os.open(\n"
             "            name,\n"
             "            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,\n"
@@ -1561,7 +1560,7 @@ def _collect_count(root: Path, files: list[Path] | None = None) -> tuple[int, in
     argv = ["uv", "run", "--locked", "pytest", "--collect-only", "-qq"]
     if files is not None:
         argv += [str(p.relative_to(root)) for p in files]
-    completed = subprocess.run(argv, cwd=root, capture_output=True, text=True)
+    completed = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
     count = sum(
         int(match.group(1))
         for line in completed.stdout.splitlines()
@@ -1643,19 +1642,15 @@ def _terminate_current_child() -> None:
     proc = _CURRENT_CHILD
     if proc is None or proc.poll() is not None:
         return
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
     try:
         proc.wait(timeout=_TERMINATE_GRACE_S)
         return
     except subprocess.TimeoutExpired:
         pass
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
     proc.wait()
 
 

@@ -99,7 +99,7 @@ def _validate_attribute_value(key: str, value: object) -> None:
             raise ValueError(f"attribute {key!r} must be a list of str")
         return
     if not isinstance(value, _SCALAR_ATTRIBUTE_TYPES):
-        raise ValueError(f"attribute {key!r} has a non-serialisable value: {type(value).__name__}")
+        raise TypeError(f"attribute {key!r} has a non-serialisable value: {type(value).__name__}")
 
 
 @dataclass(frozen=True)

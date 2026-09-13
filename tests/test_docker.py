@@ -4,6 +4,7 @@ Every test here drives a **stub** `docker` executable placed on `PATH`; no real
 container is ever started, so the suite stays offline and fast.
 """
 
+import itertools
 import json
 import logging
 import os
@@ -165,7 +166,7 @@ def test_t_v1_dk_02_isolation_flags_and_only_one_mount():
         container_name="tgexec-00000000",
         empty_resolv=resolv,
     )
-    pairs = list(zip(built, built[1:], strict=False))
+    pairs = list(itertools.pairwise(built))
     assert ("--network", "none") in pairs
     assert "--read-only" in built
     assert ("--cap-drop", "ALL") in pairs
