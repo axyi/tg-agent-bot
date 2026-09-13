@@ -43,6 +43,8 @@ def build_llm_client(
     wants one client per purpose must not build the summary one blindly: with
     no routing that would be a second, needlessly independent main client.
     `purpose="rerank"` (v1.9.1 T1) mirrors this exactly, on `LLM_RERANK_MODEL`.
+    `purpose="eval-chat"` (v1.9.4 T2) mirrors it again, on
+    `LLM_EVAL_CHAT_MODEL` -- gate 7's smoke-turn chat completions only.
     """
     if purpose == "summary":
         routed = parse_summary_model(cfg.llm_summary_model)
@@ -51,6 +53,11 @@ def build_llm_client(
             return _client_for(cfg, provider, client, model=model)
     if purpose == "rerank":
         routed = parse_routed_model(cfg.llm_rerank_model, "LLM_RERANK_MODEL")
+        if routed is not None:
+            provider, model = routed
+            return _client_for(cfg, provider, client, model=model)
+    if purpose == "eval-chat":
+        routed = parse_routed_model(cfg.llm_eval_chat_model, "LLM_EVAL_CHAT_MODEL")
         if routed is not None:
             provider, model = routed
             return _client_for(cfg, provider, client, model=model)

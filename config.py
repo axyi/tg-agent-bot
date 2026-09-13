@@ -147,6 +147,12 @@ class Config:
     # schema-capable model instead. Empty is the default -- the rerank then
     # runs on the main client, as it always has.
     llm_rerank_model: str = ""
+    # v1.9.4 T2 addition (docs/spec/task-briefs/v194-T2.md): exactly
+    # `llm_rerank_model`'s shape, for gate 7's smoke-turn chat completions --
+    # an opt-in alternate route measured against the production route (the
+    # default, unset, keeps the smoke on whatever client `rag_eval.py`
+    # already builds).
+    llm_eval_chat_model: str = ""
     # v1.6.0 addition (REQ-V160-TRC-09): gates the four opt-in content
     # attributes on spans. Off by default -- content never leaves the
     # process unless an operator turns this on explicitly.
@@ -386,6 +392,27 @@ def load_config(
             )
         rerank_model = f"{routed_provider}:{routed_name}"
 
+    # v1.9.4 T2 (docs/spec/task-briefs/v194-T2.md): the eval-chat purpose
+    # routes the same way, one env var later -- gate 7's smoke turns only,
+    # opt-in, never affecting the agent's own client.
+    eval_chat_model = ""
+    routed_eval_chat = parse_routed_model(
+        _value(source, "LLM_EVAL_CHAT_MODEL"), "LLM_EVAL_CHAT_MODEL"
+    )
+    if routed_eval_chat is not None:
+        routed_provider, routed_name = routed_eval_chat
+        configured = (
+            bool(lmstudio_base_url and lmstudio_model)
+            if routed_provider == "lmstudio"
+            else bool(openrouter_api_key and openrouter_model)
+        )
+        if not configured:
+            raise ConfigError(
+                f"LLM_EVAL_CHAT_MODEL routes the eval chat to {routed_provider}, "
+                f"which is not configured"
+            )
+        eval_chat_model = f"{routed_provider}:{routed_name}"
+
     manual_input_price, manual_output_price = _parse_manual_prices(source)
 
     # Paths are resolved before anything is created on disk: REQ-V1-CFG-03 must be
@@ -489,6 +516,7 @@ def load_config(
         llm_price_output_usd_per_mtok=manual_output_price,
         llm_summary_model=summary_model,
         llm_rerank_model=rerank_model,
+        llm_eval_chat_model=eval_chat_model,
         obs_capture_content=_parse_bool(source, "OBS_CAPTURE_CONTENT", False),
         dashboard_enabled=_parse_bool(source, "DASHBOARD_ENABLED", True),
         dashboard_port=_parse_int(source, "DASHBOARD_PORT", 8765, 1024, 65535),

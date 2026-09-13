@@ -1428,6 +1428,26 @@ MUTATIONS = [
         "process's own log lines (and any traceback) would otherwise reach "
         "the benchmark log file unredacted",
     },
+    # -- v1.9.4 T2 (docs/spec/task-briefs/v194-T2.md): the smoke's turn 3
+    # context-proof verdict must require the gold source
+    # (vacation_policy.md) among a search call's returned passages, not
+    # merely that some search_documents call was made -- this mutation
+    # drops the gold-source condition so any call passes regardless of
+    # hits. Killed by tests/test_v190_eval.py's
+    # test_t_v194_t2_conversation_smoke_turn3_calls_search_and_misses_gold
+    # (a search call that returns no gold-source passage must still
+    # verdict fail). ---------------------------------------------------
+    {
+        "id": "v194-smoke-turn3-gold-unchecked",
+        "path": "devtools/rag_eval.py",
+        "find": "    if searcher3.queries and turn3_hit:\n",
+        "replace": "    if searcher3.queries:  # v194-smoke-turn3-gold-unchecked\n",
+        "why": "v1.9.4 T2: turn 3's context-proof verdict must pass only "
+        "when a search call's returned passages actually carry the gold "
+        "source, never merely because a search_documents call was made -- "
+        "dropping the gold-source condition would let a wrong-source hit "
+        "pass silently as a real REQ-V190-TOOL-06-adjacent regression",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]

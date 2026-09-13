@@ -985,7 +985,7 @@ uv run --locked python devtools/rag_eval.py
 
 Gates 1–4 and 6 are offline and unconditional; gates 5 and 7 need the live
 environment (gate 7 is spec-v1.9.0 T8's retrieval evaluation — it also
-spends real inference tokens on the reranker and an advisory
+spends real inference tokens on the reranker and an advisory three-turn
 conversation-aware smoke test; see `evals/rag/`). **Gate 7 passes as of
 v1.9.1** (`docs/reports/report-v1.9.1.md`): retrieval quality is solid
 (recall@5 = 1.000, page hit-rate = 1.000 on every mode — see

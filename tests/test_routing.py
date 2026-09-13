@@ -433,3 +433,98 @@ def test_t_v191_main_builds_no_rerank_client_when_the_variable_is_unset(tmp_path
     assert bot.main([]) == 0
     assert built == ["agent"]
     assert captured["rerank_llm"] is None
+
+
+# --------------------------------------------------------------------------
+# v1.9.4 T2 -- LLM_EVAL_CHAT_MODEL, exactly LLM_RERANK_MODEL's shape
+# (config.py). gate 7's smoke-turn chat completions only -- never bot.py's
+# own startup wiring, since devtools/rag_eval.py is the sole builder.
+# --------------------------------------------------------------------------
+
+
+def test_t_v194_eval_chat_default_is_no_routing():
+    cfg = load_config(env=base_env(), load_env_file=False)
+    assert cfg.llm_eval_chat_model == ""
+    assert config.parse_routed_model("", "LLM_EVAL_CHAT_MODEL") is None
+
+
+def test_t_v194_eval_chat_a_configured_provider_and_model_are_accepted():
+    cfg = load_config(
+        env=base_env(LLM_EVAL_CHAT_MODEL=" OpenRouter:fast/model "), load_env_file=False
+    )
+    assert cfg.llm_eval_chat_model == "openrouter:fast/model"
+    assert config.parse_routed_model(cfg.llm_eval_chat_model, "LLM_EVAL_CHAT_MODEL") == (
+        "openrouter",
+        "fast/model",
+    )
+
+
+@pytest.mark.parametrize("value", ["anthropic:some/model", "cheap/model", ":cheap/model"])
+def test_t_v194_eval_chat_an_unknown_provider_is_refused(value):
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(LLM_EVAL_CHAT_MODEL=value), load_env_file=False)
+    assert "LLM_EVAL_CHAT_MODEL" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["openrouter:", "lmstudio:   "])
+def test_t_v194_eval_chat_an_empty_model_is_refused(value):
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=base_env(LLM_EVAL_CHAT_MODEL=value), load_env_file=False)
+    assert "LLM_EVAL_CHAT_MODEL" in str(exc.value)
+
+
+def test_t_v194_eval_chat_an_unconfigured_openrouter_is_refused():
+    env = base_env(
+        OPENROUTER_API_KEY=None,
+        OPENROUTER_MODEL=None,
+        LLM_EVAL_CHAT_MODEL="openrouter:fast/model",
+    )
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=env, load_env_file=False)
+    assert "LLM_EVAL_CHAT_MODEL" in str(exc.value)
+    assert "openrouter" in str(exc.value)
+
+
+def test_t_v194_eval_chat_an_unconfigured_lmstudio_is_refused():
+    env = base_env(
+        LLM_PROVIDER="openrouter",
+        LMSTUDIO_MODEL=None,
+        LLM_EVAL_CHAT_MODEL="lmstudio:small",
+    )
+    with pytest.raises(ConfigError) as exc:
+        load_config(env=env, load_env_file=False)
+    assert "LLM_EVAL_CHAT_MODEL" in str(exc.value)
+    assert "lmstudio" in str(exc.value)
+
+
+# --------------------------------------------------------------------------
+# v1.9.4 T2 -- the eval-chat purpose (llm/__init__.py)
+# --------------------------------------------------------------------------
+
+
+def test_t_v194_eval_chat_purpose_gets_the_routed_client_and_no_failover(tmp_path):
+    cfg = make_cfg(tmp_path, llm_eval_chat_model="openrouter:fast/model")
+    with httpx.Client() as http:
+        main = build_llm_client(cfg, client=http)
+        routed = build_llm_client(cfg, client=http, purpose="eval-chat")
+        assert isinstance(main, FailoverLLMClient)
+        assert isinstance(routed, OpenRouterClient)
+        assert routed.describe() == ("openrouter", "fast/model")
+        assert routed._client is http
+
+
+def test_t_v194_eval_chat_purpose_can_route_to_lmstudio(tmp_path):
+    cfg = make_cfg(tmp_path, llm_eval_chat_model="lmstudio:small-local")
+    with httpx.Client() as http:
+        routed = build_llm_client(cfg, client=http, purpose="eval-chat")
+    assert isinstance(routed, LMStudioClient)
+    assert routed.describe() == ("lmstudio", "small-local")
+
+
+def test_t_v194_an_unset_variable_leaves_the_eval_chat_purpose_on_the_main_client(tmp_path):
+    cfg = make_cfg(tmp_path)
+    with httpx.Client() as http:
+        main = build_llm_client(cfg, client=http)
+        eval_chat = build_llm_client(cfg, client=http, purpose="eval-chat")
+    assert isinstance(main, FailoverLLMClient)
+    assert isinstance(eval_chat, FailoverLLMClient)

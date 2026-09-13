@@ -224,6 +224,19 @@ gates:
   # that explains why these walls run longer than v1.9.2's 186.998s).
   # 580s kept as-is: it already carries more margin than the 2x rule alone
   # would require.
+  #
+  # v1.9.4 T2 (docs/spec/task-briefs/v194-T2.md): the smoke gained a third
+  # turn (a context-proof verdict alongside the existing TOOL-06 pin), which
+  # moves the wall this timeout must cover -- re-derived from this run's own
+  # slowest measured production-route wall, not v1.9.3's now-stale anchor.
+  # Two fixed-tree runs (`505bbf7`), production route (LM Studio primary,
+  # LLM_EVAL_CHAT_MODEL unset): A1 557.692s, A2 549.801s, slowest 557.692s
+  # -> 2x ~1115.4s, rounded up to 1120s, the same rule as every prior
+  # derivation here. 580s was already only 22s of margin above A1's own
+  # wall -- effectively no longer safe -- so this is a real fix, not
+  # padding. See docs/reports/report-v1.9.4.md's T2 section for the
+  # per-turn timing and the opt-in `LLM_EVAL_CHAT_MODEL` alternate-route
+  # measurement that was considered and left unset by default.
   rag-eval:
     kind: command
     result_mode: exit_status
@@ -232,7 +245,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 580
+    timeout_seconds: 1120
 
   # Confirmed against trivy fs --help at 0.74.0 (T4): --scanners, --severity,
   # --exit-code, --ignore-unfixed, --format json, --output all unchanged.

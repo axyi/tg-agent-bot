@@ -180,8 +180,15 @@ def _write_synth_questions(tmp_path, questions=None, *, name="questions.json"):
     return path
 
 
-def _smoke_script(turn2_query):
-    return [
+def _smoke_script(turn2_query, turn3_query="wombat colony carryover", *, turn3_calls_search=True):
+    """v1.9.4 T2: extended to script a third agent turn. `turn3_calls_search`
+    scripts turn 3 as a bare `stop` (no tool call at all) for the "no call"
+    case; otherwise turn 3 calls `search_documents` with `turn3_query` --
+    whether that call's returned passages carry the gold source
+    (`vacation_policy.md`) is a property of the corpus the caller indexed,
+    never of this query text (the pigeonhole corpus in `_write_synth_corpus`
+    always returns every indexed chunk regardless of query)."""
+    script = [
         LLMResponse(
             "", [ToolCall("c0", "search_documents", json.dumps({"query": "wombat"}))], "tool_calls"
         ),
@@ -193,6 +200,18 @@ def _smoke_script(turn2_query):
         ),
         LLMResponse("In weeks: about six.", [], "stop"),
     ]
+    if turn3_calls_search:
+        script += [
+            LLMResponse(
+                "",
+                [ToolCall("c2", "search_documents", json.dumps({"query": turn3_query}))],
+                "tool_calls",
+            ),
+            LLMResponse("Some of it carries over.", [], "stop"),
+        ]
+    else:
+        script.append(LLMResponse("No lookup needed for that.", [], "stop"))
+    return script
 
 
 def _parse_table(lines):
@@ -332,7 +351,12 @@ def test_t_v190_eval_02_run_offline_exits_zero_with_correct_metrics(tmp_path):
         assert "page_hit_rate=1.000" in summary[mode]
 
     assert any("passages returned" in line for line in lines if "How many tigers" in line)
-    assert any(line.strip().startswith("conversation-aware smoke: pass") for line in lines)
+    assert any(
+        line.strip().startswith("conversation-aware smoke (TOOL-06 pin): pass") for line in lines
+    )
+    assert any(
+        line.strip().startswith("conversation-aware smoke (context-proof): pass") for line in lines
+    )
 
 
 def test_t_v190_eval_02_run_offline_below_floor_exits_one(tmp_path):
@@ -486,7 +510,7 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     rag_eval.index_corpus(conn, embedder=embedder, documents_to_index=documents_to_index)
     cfg = _cfg(tmp_path)
     llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks"))
-    ok, detail = rag_eval.conversation_smoke(
+    ok, detail, ctx_ok, ctx_detail = rag_eval.conversation_smoke(
         conn,
         question="How many wombat specimens are in the colony?",
         embedder=embedder,
@@ -495,11 +519,13 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     )
     assert ok is True
     assert "wombat colony in weeks" in detail
+    assert ctx_ok is True
+    assert "vacation_policy.md" in ctx_detail
 
     conn2 = _conn(tmp_path, name="fail.db")
     rag_eval.index_corpus(conn2, embedder=embedder, documents_to_index=documents_to_index)
     llm2 = _DynamicRerankLLM(_smoke_script("giraffe herd size"))
-    ok2, detail2 = rag_eval.conversation_smoke(
+    ok2, detail2, ctx_ok2, _ctx_detail2 = rag_eval.conversation_smoke(
         conn2,
         question="How many wombat specimens are in the colony?",
         embedder=embedder,
@@ -508,6 +534,86 @@ def test_t_v190_eval_03_conversation_smoke_pass_and_fail(tmp_path):
     )
     assert ok2 is False
     assert "no search_documents call sharing a token" in detail2
+    # Turn 2's TOOL-06 pin failing (advisory, token-overlap) is independent
+    # of turn 3's context-proof verdict -- the corpus still carries the gold
+    # source, so turn 3 still passes here.
+    assert ctx_ok2 is True
+
+
+# ---------------------------------------------------------------------------
+# v1.9.4 T2 -- turn 3, context-proof (docs/spec/task-briefs/v194-T2.md)
+# ---------------------------------------------------------------------------
+
+
+def test_t_v194_t2_conversation_smoke_turn3_calls_search_and_hits_gold(tmp_path):
+    corpus_dir = _write_synth_corpus(tmp_path)
+    documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
+    conn = _conn(tmp_path, name="turn3-hit.db")
+    embedder = FakeEmbedder(dim=DIM)
+    rag_eval.index_corpus(conn, embedder=embedder, documents_to_index=documents_to_index)
+    cfg = _cfg(tmp_path)
+    llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks"))
+
+    _tool06_ok, _tool06_detail, ctx_ok, ctx_detail = rag_eval.conversation_smoke(
+        conn,
+        question="How many wombat specimens are in the colony?",
+        embedder=embedder,
+        llm=llm,
+        cfg=cfg,
+    )
+    assert ctx_ok is True
+    assert "vacation_policy.md" in ctx_detail
+
+
+def test_t_v194_t2_conversation_smoke_turn3_calls_search_and_misses_gold(tmp_path):
+    corpus_dir = _write_synth_corpus(tmp_path)
+    # The gold source is never indexed at all -- with this pigeonhole corpus
+    # every search call returns every indexed chunk, so dropping
+    # vacation_policy.md from the index is what guarantees a miss here,
+    # independent of the query text turn 3 actually issues.
+    documents_to_index = [
+        (filename, data)
+        for filename, data in rag_eval.load_corpus_documents(corpus_dir)
+        if filename != "vacation_policy.md"
+    ]
+    conn = _conn(tmp_path, name="turn3-miss.db")
+    embedder = FakeEmbedder(dim=DIM)
+    rag_eval.index_corpus(conn, embedder=embedder, documents_to_index=documents_to_index)
+    cfg = _cfg(tmp_path)
+    llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks"))
+
+    _tool06_ok, _tool06_detail, ctx_ok, ctx_detail = rag_eval.conversation_smoke(
+        conn,
+        question="How many wombat specimens are in the colony?",
+        embedder=embedder,
+        llm=llm,
+        cfg=cfg,
+    )
+    assert ctx_ok is False
+    assert "vacation_policy.md" in ctx_detail
+    assert "wombat colony carryover" in ctx_detail  # _smoke_script's default turn3_query
+    # The failure detail names the top sources actually returned instead.
+    assert "onboarding.txt" in ctx_detail or "expenses.docx" in ctx_detail
+
+
+def test_t_v194_t2_conversation_smoke_turn3_makes_no_call(tmp_path):
+    corpus_dir = _write_synth_corpus(tmp_path)
+    documents_to_index = rag_eval.load_corpus_documents(corpus_dir)
+    conn = _conn(tmp_path, name="turn3-no-call.db")
+    embedder = FakeEmbedder(dim=DIM)
+    rag_eval.index_corpus(conn, embedder=embedder, documents_to_index=documents_to_index)
+    cfg = _cfg(tmp_path)
+    llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks", turn3_calls_search=False))
+
+    _tool06_ok, _tool06_detail, ctx_ok, ctx_detail = rag_eval.conversation_smoke(
+        conn,
+        question="How many wombat specimens are in the colony?",
+        embedder=embedder,
+        llm=llm,
+        cfg=cfg,
+    )
+    assert ctx_ok is False
+    assert "no search_documents call" in ctx_detail
 
 
 def test_t_v193_t2_conversation_smoke_reranks_via_rerank_llm_not_chat_llm(tmp_path):
@@ -529,7 +635,7 @@ def test_t_v193_t2_conversation_smoke_reranks_via_rerank_llm_not_chat_llm(tmp_pa
     chat_llm = _DynamicRerankLLM(_smoke_script("wombat colony in weeks"))
     rerank_llm = _DynamicRerankLLM()
 
-    ok, detail = rag_eval.conversation_smoke(
+    ok, detail, ctx_ok, _ctx_detail = rag_eval.conversation_smoke(
         conn,
         question="How many wombat specimens are in the colony?",
         embedder=embedder,
@@ -540,9 +646,10 @@ def test_t_v193_t2_conversation_smoke_reranks_via_rerank_llm_not_chat_llm(tmp_pa
 
     assert ok is True
     assert "wombat colony in weeks" in detail
-    # Both turns' Searchers must reach rerank_llm -- one call each -- so
-    # reverting either searcher1 or searcher2 alone still fails this.
-    assert rerank_llm._rerank_calls == 2, "not every turn's rerank call reached rerank_llm"
+    assert ctx_ok is True
+    # All three turns' Searchers must reach rerank_llm -- one call each --
+    # so reverting any single searcher alone still fails this.
+    assert rerank_llm._rerank_calls == 3, "not every turn's rerank call reached rerank_llm"
     assert all(tool_definitions is not None for _messages, tool_definitions in chat_llm.calls), (
         "the chat client received a rerank-shaped call (tool_definitions=None)"
     )
