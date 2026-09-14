@@ -218,6 +218,28 @@ def test_t_v1100_out_01_secret_straddling_the_boundary_is_gone_before_split():
     assert "".join(parts).count(config.REDACTION) == 1
 
 
+def test_t_v1100_out_01_send_still_redacts_a_part_reply_parts_never_saw():
+    """`_send`'s own per-part `redact` call (defence in depth, `bot.py:1500-1511`)
+    stays load-bearing on its own, independent of `reply_parts` -- v11's
+    `v11-send-redacts` mutation entry defends exactly this line. Before
+    REQ-V1100-OUT-01, every text reaching `_send` was hand-split and
+    already unredacted, so that mutation's kill came from a caller reaching
+    `_send` directly; since every production call site now routes through
+    `reply_parts` first (which already redacts), a part built by hand and
+    passed straight to `_send` -- bypassing `reply_parts` entirely, the
+    way `_send`'s own signature (`parts: list[str]`) allows any caller to
+    -- is this codebase's only remaining path that exercises `_send`'s
+    redaction independently of `reply_parts`'s. Removing `_send`'s own
+    `redact(part)` call must still leak this canary."""
+    canary = "CANARY-" + "S" * 17  # 24 chars
+    config.register_secret(canary)
+    tg = FakeTelegram()
+    ok = bot._send(tg, 1, [f"before {canary} after"])
+    assert ok is True
+    assert canary not in tg.sent[0][1]
+    assert config.REDACTION in tg.sent[0][1]
+
+
 # --------------------------------------------------------------------------
 # T-V1100-OUT-02: negative, end to end -- a secret straddling the 4,096-unit
 # boundary never survives intact in the sent parts.
