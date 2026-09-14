@@ -314,7 +314,74 @@ Not touched, by design: `mutation-all`'s comment (no standing "N entries"
 total exists to bump, only historical per-measurement notes — brief said
 skip); `AGENTS.md`'s count-bearing lines (T10's job).
 
-## T8 — not reached yet
+## T8 — clean-context review (REV-01)
+
+Review prompt: `docs/prompts/200-v1100-t8-review.md`. Executor
+`claude-sonnet-5` (`code-reviewer` subagent, clean context, no memory of
+having written T0–T7). Fix commit `35501ab`.
+
+**Verdict: approve, two should-fix findings, zero blockers.** All nine of
+REV-01's checklist items were explicitly confirmed to **hold**, each with
+a concrete citation (not just an absence of complaints):
+
+1. the three checkers are pure (no I/O/LLM/randomness); `check_injection`
+   normalises and skips ≤30-char prompt lines; `check_hallucination` never
+   passes on a marker alone; `check_memory_reset` reads the first post-reset
+   request and requires exactly `["system", "user"]`
+2. the runner never retries (one call per step, one per judge question;
+   `LLMError` → exit 2) — the reviewer noted the test proof is indirect for
+   `run_agent_outcome` (no direct call-count assertion, only the scripted
+   queue's own exhaustion behaviour) though the judge side has a direct
+   `len(judge.calls) == 5` assertion; left as a forward-looking note, not a
+   finding, since the current tests would still catch a hidden retry
+3. the judge protocol is byte-identical to the spec (the reviewer
+   independently diffed the two files themselves, separately from the
+   orchestrator's own T5 check)
+4. `exec`/`fetch`/`search_documents` unreachable; no file access beyond
+   the tempdir database and the two dataset files
+5. `reply_parts` at exactly five `bot.py` sites, `split_message` nowhere
+   else
+6. `SYSTEM_PROMPT`/`tool_specs()`/`REQUEST_DEFAULTS`/gate 5/gate 7/the
+   summary path byte-unchanged (confirmed negatively: `agent.py`,
+   `tools.py`, `llm/base.py`, `rag.py`, `devtools/rag_eval.py`,
+   `tests/test_prefix.py` do not appear in `git diff c84d739..HEAD --stat`
+   at all)
+7. all seven mutation `find`s match exactly once, each names a real,
+   existing killing test; the two spec-vs-empirical discrepancies (T7's
+   own finding) are honestly disclosed in both the mutation-table comments
+   and this report, "not swept under the rug"
+8. zero new dependencies (`pyproject.toml`'s `[project.dependencies]` and
+   dev group untouched; `uv.lock` has zero diff)
+9. every runner print is `config.redact`+bounded, and the datasets carry
+   `ENV_KEY_NAMES` as literal strings, never a secret value — **except**
+   finding 1 below, closed in this task
+
+**Should-fix findings, both closed in commit `35501ab`:**
+
+1. `devtools/agent_eval.py`'s judge-reply-unusable print line was the one
+   failure message in the module that didn't pass its exception text
+   through `config.redact` — currently safe (`parse_judge_reply` only
+   raises fixed-label `ValueError`s) but a latent hazard against a future
+   edit. Fixed: wrapped with `config.redact(str(exc))`.
+2. `check_injection` duplicated `_injection_clauses`' four RT-02 clause
+   bodies instead of calling it, risking future drift between what
+   `validate_datasets()` cross-checks and what gate 8 actually runs. Fixed:
+   `check_injection` now computes its pass/fail booleans through
+   `_injection_clauses` and only recomputes the human-readable detail text.
+   All 1858 tests and all seven `v1100-*` mutations re-verified green after
+   the refactor.
+
+**Forward-looking notes (not findings, not acted on):** gate 8's
+8200s timeout budget is sized from a single short one-word-reply turn
+(24.90s) rather than a heavier tool-round-trip turn — plausible given the
+eval's no-RAG, mostly-tool-free shape, but T9's live run should sanity-check
+the real elapsed time against the budget; `pyproject.toml`'s new ruff
+exclusions (T5) do not violate REV-01 item 8's "differs from the tag blob
+only by the version line" clause, which is scoped to T9→T10's dependency-
+identity mechanism, not to a diff against the old release tag — flagged so
+it isn't re-litigated at T10/T11.
+
+## T9 — not reached yet
 
 ## T9 — not reached yet
 
