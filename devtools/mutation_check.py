@@ -1510,6 +1510,157 @@ MUTATIONS = [
         "error. The document was not saved.' because vec_chunks is never "
         "created)",
     },
+    # -- v1.10.0 T7 (docs/spec/task-briefs/v1100-T7.md, REQ-V1100-GATE-02):
+    # seven entries defending gate 8's own machinery (devtools/agent_eval.py)
+    # and the two bot.py mechanisms the red-team/sanitisation suites pin.
+    # -- check_injection must evaluate all four RT-02 clauses before ever
+    # passing a reply -- this mutation makes it return (True, "") before any
+    # clause runs. Spec names T-V1100-RT-02/-05/-08 as killers; empirically
+    # (mutate -> run -> revert, this task) the first to fail under the
+    # gate's own -x ordered run is T-V1100-RT-05's
+    # test_t_v1100_rt_05_validate_datasets_on_real_files (INJ-01's
+    # negative_reply case now verdicts True instead of the required False)
+    # -- one of the three named tests, no discrepancy. ---------------------
+    {
+        "id": "v1100-injection-checker-always-passes",
+        "path": "devtools/agent_eval.py",
+        "find": "    leaked = _leaked_prompt_line(reply, system_prompt)\n",
+        "replace": (
+            '    return True, ""  # v1100-injection-checker-always-passes\n'
+            "    leaked = _leaked_prompt_line(reply, system_prompt)\n"
+        ),
+        "why": "REQ-V1100-RT-02: check_injection must run all four clauses, "
+        "never short-circuit to an unconditional pass -- an always-True "
+        "checker would let every injection attempt through undetected",
+    },
+    # -- check_hallucination's any_of branch must not be vacuously true --
+    # this mutation collapses the first branch's condition to True, so any
+    # reply is accepted as a correct any_of match regardless of content.
+    # Spec names T-V1100-RT-03/-05/-09/-10; empirically (mutate -> run ->
+    # revert, this task) the actual killer under the gate's own -x ordered
+    # run is T-V1100-RT-03's
+    # test_t_v1100_rt_03_worked_examples_against_the_invented_law_case (a
+    # bare uncertainty marker with no entity reference now wrongly passes)
+    # -- one of the four named tests, no discrepancy. -----------------------
+    {
+        "id": "v1100-hallucination-any-of-vacuous",
+        "path": "devtools/agent_eval.py",
+        "find": '    if _matches_any(reply, any_of):\n        return True, "ok"\n',
+        "replace": (
+            '    if True:  # v1100-hallucination-any-of-vacuous\n        return True, "ok"\n'
+        ),
+        "why": "REQ-V1100-RT-03: check_hallucination's any_of match must be "
+        "a real containment test, not a constant True -- otherwise the "
+        "HAL_MARKERS-and-entity fallback (the only real defence for a reply "
+        "with no any_of phrase) is never reached",
+    },
+    # -- check_memory_reset's structural half (the role-sequence and
+    # post-reset-question checks) must actually run when request_messages is
+    # given -- this mutation disables the whole guard by forcing its `is not
+    # None` condition to False, so a runner that replays a stale
+    # conversation or drops the reset boundary would never be caught
+    # structurally. Spec names T-V1100-RT-04/RUN-05; empirically (mutate ->
+    # run -> revert, this task) the killer under the gate's own -x ordered
+    # run is T-V1100-RT-04's
+    # test_t_v1100_rt_04_pre_reset_assistant_message_fails_structurally --
+    # one of the two named tests, no discrepancy. --------------------------
+    {
+        "id": "v1100-memory-structural-check-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": "    if request_messages is not None:\n",
+        "replace": "    if False:  # v1100-memory-structural-check-dropped\n",
+        "why": "REQ-V1100-RT-04: check_memory_reset's structural half must "
+        "run whenever request_messages is supplied -- dropping it would let "
+        "a runner that leaks pre-reset messages or replays a stale question "
+        "pass silently",
+    },
+    # -- JUDGE_FLOOR is JDG-04's blocking floor on the judge mean (0.8) --
+    # zeroing it makes every judge score pass regardless of quality. Spec
+    # names T-V1100-JDG-05 (the 0.79-mean-exits-1 case) as the killer;
+    # empirically (mutate -> run -> revert, this task) the gate's own -x
+    # ordered run stops earlier, at tests/test_v1100_runner.py's
+    # test_judge_runtime_constants (`assert ae.JUDGE_FLOOR == 0.8`, a plain
+    # constant pin that sits well before JDG-05's own tests in file order)
+    # -- a discrepancy from the spec's stated killer, same shape as T1's
+    # OUT-01/OUT-02 finding below: JDG-05's tests would also fail this
+    # mutation if reached, but the earlier constant-pin test wins the race
+    # under -x. -------------------------------------------------------------
+    {
+        "id": "v1100-judge-floor-zeroed",
+        "path": "devtools/agent_eval.py",
+        "find": "JUDGE_FLOOR = 0.8\n",
+        "replace": "JUDGE_FLOOR = 0.0  # v1100-judge-floor-zeroed\n",
+        "why": "REQ-V1100-JDG-04: JUDGE_FLOOR must stay 0.8 -- a zeroed "
+        "floor would make the judge mean check vacuous, passing gate 8 "
+        "regardless of reply quality. Spec names T-V1100-JDG-05 as the "
+        "killer; the actual, empirically observed killer (under the gate's "
+        "own -x ordered run) is test_judge_runtime_constants's direct "
+        "JUDGE_FLOOR pin, which fails first and stops the run before "
+        "JDG-05's own tests ever execute",
+    },
+    # -- the judge != chat-model guard (ERR-01 row 4 / JDG-02) must actually
+    # compare the two describe() pairs before any live call -- forcing the
+    # comparison to False lets a misconfigured run judge itself with the
+    # same model under test. Spec names T-V1100-JDG-02 as the killer;
+    # empirically (mutate -> run -> revert, this task) confirmed as
+    # test_run_judge_equal_to_chat_model_exits_2 -- matches, no discrepancy
+    # (the test still goes red, though via an unhandled IndexError inside
+    # _run's now-unreachable-guard code path rather than the clean FAIL
+    # line it asserts on a healthy tree). ------------------------------
+    {
+        "id": "v1100-judge-guard-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": "    if judge_id == chat_id:\n",
+        "replace": "    if False:  # v1100-judge-guard-dropped\n",
+        "why": "REQ-V1100-JDG-02: the judge-equals-chat-model guard must "
+        "fire before any live call -- disabling it would let gate 8 judge "
+        "its own chat model's replies, defeating the independence the gate "
+        "exists for",
+    },
+    # -- reply_parts must redact before it splits (`split_message(redact(
+    # text))`) so a secret straddling the 4,096-unit part boundary is gone
+    # entirely before any boundary is drawn -- this mutation drops the
+    # redact() call, sending the raw text through split_message unredacted.
+    # Spec (docs/spec/spec-v1.10.0.md sec.13) states T-V1100-OUT-02 as the
+    # killer; T1's delegate already found empirically that OUT-02 is not the
+    # actual killer under the gate's own -x ordered run. Confirmed again
+    # here by the same mutate -> run -> revert cycle: the run stops at
+    # tests/test_v1100_sanitization.py's T-V1100-OUT-01 case
+    # test_t_v1100_out_01_redacts_a_registered_secret_before_splitting (a
+    # plain unredacted-secret check, the first OUT-01 case in file order --
+    # not the boundary-straddling OUT-01 case specifically), which fails
+    # before OUT-02's own case ever executes. -------------------------------
+    {
+        "id": "v1100-reply-parts-split-before-redact",
+        "path": "bot.py",
+        "find": "    return split_message(redact(text))\n",
+        "replace": ("    return split_message(text)  # v1100-reply-parts-split-before-redact\n"),
+        "why": "REQ-V1100-OUT-01: reply_parts must redact before it splits "
+        "so a secret can never straddle a part boundary -- spec names "
+        "T-V1100-OUT-02 as the killer, but the actual, empirically observed "
+        "killer (under the gate's own -x ordered run) is "
+        "test_t_v1100_out_01_redacts_a_registered_secret_before_splitting "
+        "(T-V1100-OUT-01), which fails first and stops the run before "
+        "OUT-02 ever executes",
+    },
+    # -- the inbound length cap (SAN-02) must count UTF-16 code units
+    # (utf16_length), exactly what Telegram and split_message count, not
+    # Python code points (len) -- an astral character (2 UTF-16 units, 1 code
+    # point) would then need twice as many characters to trip the cap. Spec
+    # names T-V1100-SAN-02 as the killer; empirically (mutate -> run ->
+    # revert, this task) confirmed as
+    # test_t_v1100_san_02_astral_boundary_rejected -- matches, no
+    # discrepancy. ------------------------------------------------------
+    {
+        "id": "v1100-inbound-cap-code-points",
+        "path": "bot.py",
+        "find": "    if utf16_length(text) > MAX_MESSAGE_CHARS:\n",
+        "replace": "    if len(text) > MAX_MESSAGE_CHARS:  # v1100-inbound-cap-code-points\n",
+        "why": "REQ-V1100-SAN-02: the inbound cap must count UTF-16 code "
+        "units like split_message does, not Python code points -- a "
+        "code-point-based cap would let astral-plane text through at twice "
+        "Telegram's real limit",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
@@ -1539,9 +1690,19 @@ class _Restorer:
             self.restore_one(path)
 
 
-_SELF_CHECK_NODE_ID = (
-    "tests/test_mutation_check.py"
-    "::test_t_v12_mut_04_every_find_string_occurs_exactly_once_in_the_real_repo"
+_SELF_CHECK_NODE_IDS = (
+    (
+        "tests/test_mutation_check.py"
+        "::test_t_v12_mut_04_every_find_string_occurs_exactly_once_in_the_real_repo"
+    ),
+    # v1.10.0 T7: T-V1100-GATE-01's own subset version of the same bookkeeping
+    # check (find strings present exactly once), scoped to the v1100-* rows --
+    # same false-kill hazard, same reason it must never run inside a mutated
+    # tree, so it joins the deselect list below.
+    (
+        "tests/test_v1100_gates.py"
+        "::test_v1100_mutation_find_strings_occur_exactly_once_in_their_file"
+    ),
 )
 
 
@@ -1802,11 +1963,13 @@ def default_runner(mutation: dict) -> int:
     process: xdist and this reordering do not compose, worker start-up cost
     would dominate the smallest kills (~2-3s cases measured at section 2).
 
-    Deselects the mutation table's own real-repo find-string check: that test
-    asserts each `find` string is present in the untouched repo, so while a
-    mutation is applied it fails on its own bookkeeping regardless of whether
-    any functional test catches the mutation, which would make every mutation
-    look "killed" for the wrong reason.
+    Deselects every mutation-table real-repo find-string check named in
+    `_SELF_CHECK_NODE_IDS` (the whole-table one and, from v1.10.0 T7, its
+    v1100-* subset counterpart): each asserts every `find` string is present
+    in the untouched repo, so while a mutation is applied it fails on its own
+    bookkeeping regardless of whether any functional test catches the
+    mutation, which would make every mutation look "killed" for the wrong
+    reason.
 
     Runs the child in its own process group (`start_new_session=True`) and
     tracks it in `_CURRENT_CHILD` for the run's duration (v1.9.3 T1 commit B,
@@ -1826,18 +1989,21 @@ def default_runner(mutation: dict) -> int:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     files = ordered_test_files(mutation, REPO_ROOT)
-    argv = [
-        "uv",
-        "run",
-        "--locked",
-        "pytest",
-        "-x",
-        "-q",
-        "-n",
-        "0",
-        "--deselect",
-        _SELF_CHECK_NODE_ID,
-    ] + [str(p.relative_to(REPO_ROOT)) for p in files]
+    deselect_flags = [flag for node_id in _SELF_CHECK_NODE_IDS for flag in ("--deselect", node_id)]
+    argv = (
+        [
+            "uv",
+            "run",
+            "--locked",
+            "pytest",
+            "-x",
+            "-q",
+            "-n",
+            "0",
+        ]
+        + deselect_flags
+        + [str(p.relative_to(REPO_ROOT)) for p in files]
+    )
     proc = subprocess.Popen(argv, cwd=REPO_ROOT, env=env, start_new_session=True)
     _CURRENT_CHILD = proc
     started = time.monotonic()

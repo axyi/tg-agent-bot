@@ -273,7 +273,48 @@ the `test_v170_bench.py` test the brief did name) — renamed to
 `test_t_v1100_ec_01_...` and repointed at `report-v1.10.0.md`, disclosed
 here rather than silently expanded in scope.
 
-## T7-T8 — not reached yet
+## T7 — mutation entries for gate 8's machinery
+
+Contract: `docs/spec/task-briefs/v1100-T7.md`, prompt 199. Delegated —
+executor `claude-sonnet-5` (general-purpose subagent). Commit `f0ff228`
+(squashed by the orchestrator from two local, unpushed commits into one,
+per "one prompt → one commit" — the delegate's second commit was a
+legitimate follow-up fix discovered during its own verification, not
+scope creep, so folding it in loses nothing).
+
+Seven `v1100-*` entries added to `devtools/mutation_check.py`'s
+`MUTATIONS`, each verified to kill **empirically** rather than by trusting
+the spec's stated test id:
+
+| id | actual killer | vs. spec |
+|---|---|---|
+| `v1100-injection-checker-always-passes` | `test_t_v1100_rt_05_validate_datasets_on_real_files` | matches (RT-05) |
+| `v1100-hallucination-any-of-vacuous` | `test_t_v1100_rt_03_worked_examples_against_the_invented_law_case` | matches (RT-03) |
+| `v1100-memory-structural-check-dropped` | `test_t_v1100_rt_04_pre_reset_assistant_message_fails_structurally` | matches (RT-04) |
+| `v1100-judge-floor-zeroed` | `test_judge_runtime_constants` | **discrepancy** — spec said JDG-05 |
+| `v1100-judge-guard-dropped` | `test_run_judge_equal_to_chat_model_exits_2` | matches (JDG-02) |
+| `v1100-reply-parts-split-before-redact` | `test_t_v1100_out_01_redacts_a_registered_secret_before_splitting` | **discrepancy** — spec said OUT-02; confirms and refines T1's earlier finding on this same mutation |
+| `v1100-inbound-cap-code-points` | `test_t_v1100_san_02_astral_boundary_rejected` | matches (SAN-02) |
+
+`mutation-v1100` registered in `config/quality_gates.yaml` —
+`timeout_seconds: 110`, measured from a clean `--select "v1100-"` run
+(19.759s real → 2×19.759+70 = 109.5s → 110s) — and added to
+`mutation-subsets`. `T-V1100-GATE-01` added to `tests/test_v1100_gates.py`.
+
+**Shared-machinery fix, disclosed (not scope creep):** the delegate found
+`default_runner`'s single `_SELF_CHECK_NODE_ID` exclusion needed widening
+to a `_SELF_CHECK_NODE_IDS` tuple — `T-V1100-GATE-01`'s own find-string
+bookkeeping test could otherwise false-kill an entry on its own assertion
+instead of the real functional regression, the same hazard the existing
+mechanism already guards every other `MUTATIONS` entry against. This
+touches shared gate-6 machinery used by all 127 entries, flagged for T9's
+full-table run to watch.
+
+Not touched, by design: `mutation-all`'s comment (no standing "N entries"
+total exists to bump, only historical per-measurement notes — brief said
+skip); `AGENTS.md`'s count-bearing lines (T10's job).
+
+## T8 — not reached yet
 
 ## T9 — not reached yet
 

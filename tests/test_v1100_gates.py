@@ -18,6 +18,7 @@ from pathlib import Path
 
 import agent
 import devtools.agent_eval as ae
+import devtools.mutation_check as mc
 from devtools.checks import DEFAULT_CONFIG_PATH, load_gate_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -72,18 +73,44 @@ def test_agent_eval_gate_is_in_full_profile_and_no_other():
             assert "agent-eval" not in members
 
 
-def test_mutation_v1100_membership_is_t7s_job_not_yet_landed():
-    # spec-v1.10.0 sec.13 (REQ-V1100-GATE-02, ~:1178-1184): the
-    # `mutation-v1100` gate entry and its `mutation-subsets` membership are
-    # one requirement, both landing at T7 together -- membership alone would
-    # make `_validate_profiles` (devtools/checks.py:541-554) reject the
-    # config (an unknown gate name), breaking every test that calls
-    # `load_gate_config()`. T6 (REQ-V1100-EVAL-01) only registers
-    # `agent-eval`; it does not touch `mutation-subsets`.
+def test_mutation_v1100_gate_registered_with_the_v190_shape():
+    # spec-v1.10.0 sec.13 (REQ-V1100-GATE-02, ~:1178-1184): T7 registers
+    # `mutation-v1100` with the exact key set and order of `mutation-v190`
+    # (config/quality_gates.yaml), only the `--select` prefix and
+    # `timeout_seconds` differing.
     config = _raw_config()
-    for members in config["profiles"].values():
-        assert "mutation-v1100" not in members
-    assert "mutation-v1100" not in config["gates"]
+    gate = config["gates"]["mutation-v1100"]
+    assert gate == {
+        "kind": "command",
+        "result_mode": "exit_status",
+        "argv": [
+            "uv",
+            "run",
+            "--locked",
+            "python",
+            "devtools/mutation_check.py",
+            "--select",
+            "v1100-",
+        ],
+        "placeholders": {},
+        "success_exit_codes": [0],
+        "blocking": True,
+        "diff_scoped": False,
+        "timeout_seconds": gate["timeout_seconds"],
+    }
+    assert gate["timeout_seconds"] > 0
+
+
+def test_mutation_v1100_is_in_mutation_subsets_and_no_hook_profile():
+    # `mutation-subsets` is the inert bookkeeping profile that satisfies
+    # `_validate_profiles`'s "every gate must be named by some profile"
+    # invariant (devtools/checks.py:540-552) now that no hook profile
+    # references the per-range mutation-v* gates directly.
+    config = _raw_config()
+    assert "mutation-v1100" in config["profiles"]["mutation-subsets"]
+    for profile_name, members in config["profiles"].items():
+        if profile_name != "mutation-subsets":
+            assert "mutation-v1100" not in members
 
 
 def test_agent_eval_timeout_is_a_multiple_of_100_and_at_least_1800():
@@ -185,3 +212,45 @@ def test_gate8_timeout_seconds_always_a_multiple_of_100_and_at_least_the_raw_cei
         timeout = ae.gate8_timeout_seconds(max_calls, t_turn)
         assert timeout % 100 == 0
         assert timeout >= math.ceil(1.5 * max_calls * t_turn)
+
+
+# ---------------------------------------------------------------------------
+# T-V1100-GATE-01: the seven v1100-* mutation table entries
+# ---------------------------------------------------------------------------
+
+_EXPECTED_MUTATION_KEYS = {"id", "path", "find", "replace", "why"}
+
+
+def _v1100_mutations() -> list[dict]:
+    return [m for m in mc.MUTATIONS if m["id"].startswith("v1100-")]
+
+
+def test_exactly_seven_v1100_mutations_after_the_last_v195_entry():
+    ids = [m["id"] for m in mc.MUTATIONS]
+    last_v195_index = max(i for i, mid in enumerate(ids) if mid.startswith("v195-"))
+    tail = ids[last_v195_index + 1 :]
+    assert tail == [
+        "v1100-injection-checker-always-passes",
+        "v1100-hallucination-any-of-vacuous",
+        "v1100-memory-structural-check-dropped",
+        "v1100-judge-floor-zeroed",
+        "v1100-judge-guard-dropped",
+        "v1100-reply-parts-split-before-redact",
+        "v1100-inbound-cap-code-points",
+    ]
+
+
+def test_v1100_mutations_have_exactly_the_five_keys():
+    for mutation in _v1100_mutations():
+        assert set(mutation) == _EXPECTED_MUTATION_KEYS
+
+
+def test_v1100_mutation_paths_exist_in_the_repo():
+    for mutation in _v1100_mutations():
+        assert (REPO_ROOT / mutation["path"]).exists(), mutation["id"]
+
+
+def test_v1100_mutation_find_strings_occur_exactly_once_in_their_file():
+    for mutation in _v1100_mutations():
+        text = (REPO_ROOT / mutation["path"]).read_text(encoding="utf-8")
+        assert text.count(mutation["find"]) == 1, mutation["id"]
