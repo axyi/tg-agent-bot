@@ -255,7 +255,71 @@ existing `692-694` entry mutates the `SYSTEM_PROMPT.format(...)` call
 site, not the literal text or its length — unaffected, no T0-inventory
 gap.
 
-## T2 — not reached
+## T2 — full clause reporting, `CASE`/`TOOLS` lines, marker widening
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/
+v1102-T2.md`. Commits `e8bbe38` (main implementation) and `1ad650c`
+(self-review fixes, no production-code change — three test-coverage gaps
+found by the subagent's own advisor call, closed same task).
+
+**RT-01.** `check_injection` now collects every violated clause's
+message, (a)→(e), joined by `"; "`; a single-clause violation still
+yields exactly the old v1.10.1 string (verified independently).
+
+**RT-02/RT-03.** `_safe_field(text, limit)` (`devtools/agent_eval.py:60`)
+is the one sanitization path: `config.redact` first, then every `Cc`/
+`Cf`/`Zl`/`Zp`/whitespace character → space, collapse, strip, truncate.
+`_record_tool` fills a parallel `tool_call_log` (`name(<JSON string>)`
+per call, `other` for a name outside `_TOOL_CALL_NAMES`). `_tools_line`
+caps at `TOOLS_LINE_CAP = 2300` (the JSON-escaping-aware derivation,
+verified independently). `CASE`/`TOOLS` lines print immediately, per
+checked step, via a step-start cursor so a later step never shows an
+earlier step's calls; the legacy `FAIL` line keeps its field
+order/wording, `preview` now via `_safe_field`.
+
+**RT-04/RT-05.** `INJ_MARKERS` now 16, `HAL_MARKERS` now 17 — verified
+independently: `INJ_MARKERS[15]` and `HAL_MARKERS[15:17]` byte-match the
+spec's regexes exactly. INJ-05's and HAL-03's `any_of` widened to match;
+`git diff ccab5d7 -- evals/agent/red_team.json` touches only those two
+arrays.
+
+**Dataset `sha256`s (recorded at T2):**
+- `evals/agent/red_team.json`:
+  `b51bad709280bb2e3e563a584d989dc21e9a82208a9a3f0ffe0d81ecdc2bdd7c`
+- `evals/agent/judge_questions.json`:
+  `71143395a92002bd063b8fdf6be36b44c80fb5a1863cf3ff4b18ca4d501cdf9c`
+  (unchanged this task)
+
+**Two flags the subagent raised, both ratified by the orchestrator:**
+
+1. *Renaming four pre-existing "fifteen"-pinned tests*
+   (`tests/test_v1100_red_team.py`'s two exact-list tests,
+   `tests/test_v1101_red_team.py`'s two length-assertion tests) — the
+   subagent flagged this as outside the brief's named file list. On
+   review this is **not** a scope violation: all four sites are exactly
+   the ones the spec's own `EC-02` amendment table already names (rows
+   for `tests/test_v1100_red_team.py:318-338`, `:371-388` and
+   `tests/test_v1101_red_team.py:406-411`, all read at T0's inventory);
+   the brief simply didn't quote their current function names. Ratified,
+   no revert.
+2. *A `_safe_field` worked example in the brief that didn't match the
+   mandated algorithm's actual output* (`"\x1b[31mA\x1b[0m"` → the brief
+   guessed `"[31mA[0m"`; the code, run as written, correctly produces
+   `"[31mA [0m"` — two non-adjacent ESC bytes each flatten to their own
+   space, and only a *run* of 2+ spaces collapses to one, not two
+   singleton spaces either side of "A"). The subagent trusted the
+   mandated code over the orchestrator's flawed illustrative example, per
+   its own instructions — correct call, ratified; the orchestrator's
+   brief-writing error, not a code defect.
+
+Independently re-verified by the orchestrator: `len(INJ_MARKERS) == 16`,
+`len(HAL_MARKERS) == 17`, both new entries byte-exact; full suite **2154
+collected, 2153 passed / 1 skipped** (floor 2039 after T1 + 115 new);
+`ruff check .` clean.
+
+Delegation record: T2 — delegated (general-purpose subagent), brief
+`v1102-T2.md`. Map vs actual: matches, plus one self-initiated
+review-and-fix pass (advisor-driven) before hand-back, disclosed above.
 
 ## T3 — not reached
 
