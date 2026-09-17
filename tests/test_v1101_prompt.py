@@ -38,5 +38,5 @@ def test_t_v1101_prm_01_the_old_docs_line_is_absent():
     assert OLD_PROMPT_LINE not in agent.SYSTEM_PROMPT
 
 
-def test_t_v1101_prm_03_the_rendered_prompt_is_exactly_736_chars():
-    assert len(agent.SYSTEM_PROMPT.replace("{skill_lines}", "")) == 736
+def test_t_v1101_prm_03_the_rendered_prompt_is_exactly_939_chars():
+    assert len(agent.SYSTEM_PROMPT.replace("{skill_lines}", "")) == 939

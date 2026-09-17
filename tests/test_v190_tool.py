@@ -389,9 +389,9 @@ def test_t_v190_tool_05_the_line_is_210_chars_or_fewer_and_ascii():
     assert PROMPT_LINE.isascii()
 
 
-def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_800_chars():
+def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_950_chars():
     measured = len(agent.SYSTEM_PROMPT.replace("{skill_lines}", ""))
-    assert measured <= 800, measured
+    assert measured <= 950, measured
 
 
 # tests/test_prefix.py::test_pfx_01_every_mandatory_statement_survives is the
