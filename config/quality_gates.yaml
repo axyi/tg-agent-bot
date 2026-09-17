@@ -546,7 +546,9 @@ gates:
   # 22.277s + 70s (survivor-safe rule) = 114.554s, rounded up to 120s.
   # Re-confirmed after commit with the literal CLI invocation (`time uv
   # run --locked python devtools/mutation_check.py --select "v1101-"`,
-  # tree clean), 6/6 killed, consistent with the pre-commit measurement.
+  # tree clean), 6/6 killed, 0 survived, 0 errored, 0 drifted: real=23.341s
+  # -- consistent with (and within the 120s timeout's margin over) the
+  # pre-commit measurement above.
   mutation-v1101:
     kind: command
     result_mode: exit_status
