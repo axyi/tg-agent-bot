@@ -135,21 +135,60 @@ exactly.
 - **Stage 0 check-6 fallback used:** no
 - **REV-04 embedder switch (Stage B″):** not used (not reached)
 
-## T1 — not reached: T0
+## T1 — embeddings over OpenRouter, gate 5's route rules
 
-## T2 — not reached: T0
+`embedding_api_key` resolved from `OPENROUTER_API_KEY` through one
+`is_openrouter_url(url)` helper in `config.py` (imported by
+`llm/embeddings.py`, preserving the existing `llm → config` direction —
+`T-V1101-CFG-05`'s fresh-interpreter smoke proves no import cycle).
+`EmbeddingsClient` sends `Authorization: Bearer` only with a non-empty key
+(`llm/embeddings.py:_post`); `describe()` is provider-aware over the same
+helper, and the `gen_ai.provider.name` span attribute now reads
+`self.describe()[0]`. The three T1 constructor sites
+(`bot.py:_live_embeddings`, `bot.py:main()`, `devtools/rag_eval.py:main()`)
+pass `api_key=cfg.embedding_api_key`; the fourth (gate 8's runner) is T3's
+job. `_live_lmstudio` gained the route-rule SKIP; `_live_embeddings`
+dropped the unauthenticated `/models` listing step, keeping only the
+authenticated round-trip.
 
-## T3 — not reached: T0
+27 new tests: `tests/test_v1101_config.py` (9 — `is_openrouter_url`,
+`embedding_api_key` resolution, `T-V1101-EC-02`'s offline storage-preflight
+expression including the `ConfigError`-on-mismatched-pair case), `tests/
+test_v1101_embeddings.py` (18 — the fresh-interpreter import smoke, the
+header/describe()/error-message pins, the AST source pin on the three
+constructor sites, `T-V1101-G5-01…03`). Two renames inside `tests/
+test_v190_embeddings.py` (`:381-389`, `:404-409`) per EC-02's exhaustive
+amendment list — nothing else in that file touched. `tests/
+test_v1_guardrails.py:1425-1445` re-checked, green, unamended.
 
-## T4 — not reached: T0
+Gates 1-4 green offline (pytest: 1895 collected). Gate 5 and gate 7 live,
+in sequence, nothing else concurrent:
 
-## T5 — not reached: T0
+| # | Gate | Exit | Wall | Detail |
+| --- | --- | --- | --- | --- |
+| 5 | `bot.py --selftest-live` | 0 | — | `OK config`, `OK db`, `OK docker (29.8.0)`, `OK telegram`, `SKIP lmstudio (no route uses it)`, `OK embeddings`, `OK openrouter` — capable-of-green rule (G5-02) now holds from this tree on |
+| 7 | `rag_eval.py` | 0 | 35.4s | hybrid recall@5=1.000, mrr=1.000, page_hit_rate=1.000 (vector and hybrid+rerank likewise 1.000); advisory conversation-aware smoke — TOOL-06 pin **fail**, context-proof **fail** (no `search_documents` call on turns 2/3) — non-blocking (NG-07); PRM-01/02 (T4) targets exactly this pattern |
 
-## T6 — not reached: T0
+Not reused as PRM-02's "before" measurement (T4 runs its own pair). No
+Stage B″ needed (`recall@5` green on the first live attempt with the new
+embedder).
 
-## T7 — not reached: T0
+Delegated (general-purpose subagent, brief `docs/spec/task-briefs/v1101-T1.md`).
+Commit `4b18804`. Map vs actual: matches §16.1 exactly.
 
-## T8 — not reached: T0
+## T2 — not reached: T1
+
+## T3 — not reached: T1
+
+## T4 — not reached: T1
+
+## T5 — not reached: T1
+
+## T6 — not reached: T1
+
+## T7 — not reached: T1
+
+## T8 — not reached: T1
 
 ## Ledger row (paste into `economics.md`)
 
