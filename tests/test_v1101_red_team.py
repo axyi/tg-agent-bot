@@ -403,12 +403,12 @@ def test_t_v1101_rt_07_missing_entity_still_raises_keyerror():
 # --------------------------------------------------------------------------
 
 
-def test_t_v1101_rt_08_hal_markers_has_exactly_fifteen_entries():
-    assert len(ae.HAL_MARKERS) == 15
+def test_t_v1101_rt_08_hal_markers_has_exactly_seventeen_entries():
+    assert len(ae.HAL_MARKERS) == 17
 
 
-def test_t_v1101_rt_08_inj_markers_has_exactly_fifteen_entries():
-    assert len(ae.INJ_MARKERS) == 15
+def test_t_v1101_rt_08_inj_markers_has_exactly_sixteen_entries():
+    assert len(ae.INJ_MARKERS) == 16
 
 
 def test_t_v1101_rt_08_dataset_any_of_and_hal_markers_stay_disjoint():
