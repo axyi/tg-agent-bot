@@ -224,14 +224,19 @@ def _embeddings_client_calls(path):
 
 
 def test_t_v1101_emb_05a_three_constructor_sites_pass_the_configured_key():
+    # T-V1101-EMB-05B: T3 adds the fourth and last EmbeddingsClient
+    # constructor site (devtools/agent_eval.py's main()) -- this pins the
+    # total count at four across the whole tree, extending T1's own
+    # three-site assertion rather than adding a disconnected new test.
     bot_calls = _embeddings_client_calls(REPO_ROOT / "bot.py")
     rag_eval_calls = _embeddings_client_calls(REPO_ROOT / "devtools" / "rag_eval.py")
-    # bot.py carries exactly two constructor sites at T1 (`_live_embeddings`,
-    # `main()`); the fourth site in the whole tree (the gate-8 runner) is
-    # T3's job, not this file's.
+    agent_eval_calls = _embeddings_client_calls(REPO_ROOT / "devtools" / "agent_eval.py")
+    # bot.py carries exactly two constructor sites (`_live_embeddings`,
+    # `main()`); rag_eval.py and agent_eval.py one each.
     assert len(bot_calls) == 2
     assert len(rag_eval_calls) == 1
-    for call in [*bot_calls, *rag_eval_calls]:
+    assert len(agent_eval_calls) == 1
+    for call in [*bot_calls, *rag_eval_calls, *agent_eval_calls]:
         keys = {kw.arg: kw.value for kw in call.keywords}
         assert "api_key" in keys, f"line {call.lineno} is missing api_key="
         assert ast.unparse(keys["api_key"]) == "cfg.embedding_api_key"
