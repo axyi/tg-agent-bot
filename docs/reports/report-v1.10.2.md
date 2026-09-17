@@ -321,7 +321,68 @@ Delegation record: T2 — delegated (general-purpose subagent), brief
 `v1102-T2.md`. Map vs actual: matches, plus one self-initiated
 review-and-fix pass (advisor-driven) before hand-back, disclosed above.
 
-## T3 — not reached
+## T3 — repoints and paperwork (LM Studio no longer default)
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/
+v1102-T3.md`. Commit `e2dabd2`.
+
+`config/quality_gates.yaml`'s `lint-docs.report_path` → `docs/reports/
+report-v1.10.2.md`; `tests/test_v15_standards.py`'s gate-matrix test
+repointed at `docs/spec/spec-v1.10.2.md`, `_GATE_MATRIX_LABEL_TO_NAME`
+gains the `mutation-v1102` label. `.env.example`'s routing defaults
+flipped: `LLM_PROVIDER`/the embeddings route now default to OpenRouter,
+LM Studio the opt-in alternative (key names only, no new key, no real
+value). README's `## Configure` names `OPENROUTER_API_KEY`; `## Switch
+provider` reordered (OpenRouter default, LM Studio alternative) with an
+embeddings-route mention; the `## Documents (RAG)` embeddings paragraph
+reworded to distinguish the new OpenRouter default from this deployment's
+own confirmed local LM Studio pair (`tests/test_v190_agents.py:177`'s
+pin kept intact); the two stopped-run release rows (`v1.10.0`,
+`v1.10.1`, both "not tagged") landed. `AGENTS.md`: "All seven" → "All
+eight"; the gate-5 sentence now names "every provider the configuration
+routes to" instead of hard-requiring LM Studio; the benchmark paragraph
+gains the carried-forward v1.10.1+v1.10.2 waiver text (v1.10.1's own T7
+never ran, so this text did not exist before this task); the brief-path
+token → `v1102-T<N>`. `docs/reports/report-v1.10.0.md`'s T6 line and
+`docs/llm-usage.md` row 108 corrected to "not delegated" (a disclosed
+`standards/workflow.md` §5.1 deviation). `AGENTS.md`'s two count lines
+and README's `pending (T9)`/`v1.10.2` release row **not** touched — T6's
+job, as instructed.
+
+**Two EC-02 gaps closed, both disclosed (one found at T0, one found by
+this task's own subagent, beyond the brief):**
+1. `tests/test_v1101_gates.py:254-256` (found at T0) — renamed, re-pinned
+   to `docs/reports/report-v1.10.2.md`.
+2. `tests/test_v190_agents.py:69-81`
+   (`test_t_v190_ec_01_agents_md_seven_gate_block_present`, found by the
+   subagent) — hardcoded "All seven MUST exit 0" and a 7-command list
+   missing `agent_eval.py`; broke the moment AGENTS.md's edit landed.
+   Renamed `test_t_v1102_ec_01_agents_md_eight_gate_block_present`,
+   literal and command list updated, following the repo's own precedent
+   for this class of amendment (v1.10.1 T3 commit `526e19d`).
+
+**README "LM Studio is the default" sweep — every site touched or
+considered-and-left**, per the subagent's handback: touched
+`README.md:47-52`, `:238-249`, `:427-433`; considered and left `:27`,
+`:189-190`/`:200-203`, `:275-279`, `:397`, `:928`/`:944`, `:965`,
+`:1070-1076` (each with a stated reason — factual/historical/already-
+conditional text, not a default-provider claim).
+
+**Incidental fix:** the pre-commit `gitleaks` hook flagged a test
+sentinel shaped like a real OpenRouter key (`sk-or-sentinel-...`);
+renamed to the repo's own allowlisted `SYNTHETIC-...-CANARY-...` shape,
+no logic change — matches [[feedback_gitleaks_synthetic_secret_naming]]
+memory guidance (use CANARY-named wordy sentinels, not SECRET/TOKEN-
+shaped ones).
+
+Re-verified by the orchestrator: `AGENTS.md:148` reads "All eight MUST
+exit 0"; both release rows present verbatim; `report_path` repointed;
+full suite **2160 collected, 2159 passed / 1 skipped**.
+
+Delegation record: T3 — delegated (general-purpose subagent), brief
+`v1102-T3.md`. Map vs actual: matches, plus one disclosed EC-02 gap
+found beyond the brief (item 2 above), closed the same task per EC-02's
+mid-run convention.
 
 ## T4 — not reached
 
