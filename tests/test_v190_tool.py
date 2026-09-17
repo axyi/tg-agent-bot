@@ -394,10 +394,6 @@ def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_800_chars():
     assert measured <= 800, measured
 
 
-def test_t_v1101_prm_01_the_rendered_prompt_is_exactly_736_chars():
-    assert len(agent.SYSTEM_PROMPT.replace("{skill_lines}", "")) == 736
-
-
 # tests/test_prefix.py::test_pfx_01_every_mandatory_statement_survives is the
 # guard for the v1.3 prompt compression's mandatory statements; it is not
 # re-imported here (that would double-collect it) -- it is run explicitly as

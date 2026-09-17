@@ -443,12 +443,15 @@ def test_t_v1101_run_04_main_wires_a_dedicated_rerank_client_when_configured(mon
 
 
 # --------------------------------------------------------------------------
-# T-V1101-ERR-01 rows 7-8: the pre-existing abort paths still work with the
-# new embedder/record_tool_calls wiring active
+# REV-01 review fix: these two are not T-V1101-ERR-01 rows 7-8 (that
+# coverage is tests/test_v1101_red_team.py's, near the clause (e) and
+# _validate_expect_schema tests) -- they re-verify the pre-existing
+# v1.10.0 abort paths still work with the new embedder/record_tool_calls
+# wiring active.
 # --------------------------------------------------------------------------
 
 
-def test_t_v1101_err_01_row7_llm_error_raised_directly_still_aborts(tmp_path):
+def test_t_v1101_llm_error_raised_directly_still_aborts(tmp_path):
     cfg = _cfg(tmp_path, embedding_model="fake-embed-model", embedding_dim=2)
     conn = _conn_with_rag(tmp_path, dim=2, model="fake-embed-model")
     embedder = _FakeEmbedder(dim=2)
@@ -478,7 +481,7 @@ def test_t_v1101_err_01_row7_llm_error_raised_directly_still_aborts(tmp_path):
     assert excinfo.value.exit_code == 2
 
 
-def test_t_v1101_err_01_row8_internal_llm_error_outcome_still_aborts(tmp_path):
+def test_t_v1101_internal_llm_error_outcome_still_aborts(tmp_path):
     cfg = _cfg(tmp_path)
     conn = _conn(tmp_path)
     llm = FakeLLM([LLMError("boom", retryable=False)])

@@ -170,7 +170,7 @@ def test_env_empty_string_key_is_rejected():
         checks._validate_command_gate("g", gate, set())
 
 
-@pytest.mark.parametrize("bad_key", ["A=B", "1FOO"])
+@pytest.mark.parametrize("bad_key", ["A=B", "1FOO", "A\0B"])
 def test_env_key_failing_identifier_pattern_is_rejected(bad_key):
     gate = _base_command_gate(env={bad_key: "x"})
     with pytest.raises(
