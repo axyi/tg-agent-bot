@@ -354,13 +354,67 @@ run, both green.
 Delegated (general-purpose subagent, brief `docs/spec/task-briefs/v1101-T4.md`).
 Commit `ac39435`. Map vs actual: the two extra test re-pins above (disclosed).
 
-## T5 — not reached: T4
+## T5 — clean-context review (REV-01) and its fixes
 
-## T6 — not reached: T4
+Review by the `code-reviewer` subagent, its own clean context, commits
+`1d96ca0..HEAD` (T0-T4), against the standard checklist plus REV-01's
+nine spec-specific items. Prompt logged at `docs/prompts/208-v1101-t5-review.md`.
 
-## T7 — not reached: T4
+**Verdict: request changes.** One 🔴 must-fix, five 🟡 should-fix, one 🟢
+note; the nine spec-specific items otherwise checked out cleanly
+(quoted findings below, abridged):
 
-## T8 — not reached: T4
+- 🔴 **`INJ02_ANY_OF` never gained `refuse`** (RT-02's literal "becomes
+  exactly" seven-alternative regex) — T3's commit disclosed keeping the
+  existing six-alternative string as a choice, but the spec's instruction
+  wasn't ambiguous; the gap was invisible to the test suite (a new test
+  exercised the *correct future* marker set against a locally-scoped
+  fixture, never against the production constant). Concrete gate-8
+  false-miss risk on INJ-02 identified. **Fixed**: `devtools/agent_eval.py:133`
+  and `evals/agent/red_team.json`'s INJ-02 `any_of` both gain `|refuse`;
+  `tests/test_v1100_red_team.py`'s stale pin updated; a new direct test
+  (`tests/test_v1101_red_team.py`) pins the constant against the spec's
+  literal so this class of gap can't recur silently. Dataset re-frozen:
+  `02b53feba5592327f8e36012ceb5b1baea5da544e9fa1e4c664a2ea6cff2652d`
+  (supersedes T3's hash — the one authorized post-freeze edit, a
+  pre-live-gate compliance fix, not the RT-05/NG-04-forbidden
+  fix-a-red-gate-8-by-editing-a-case pattern).
+- 🟡 PRM-01/02/03 tests relocated into a new `tests/test_v1101_prompt.py`
+  (TST-01 names a module; T4's subagent had added one test inline at
+  `tests/test_v190_tool.py` outside EC-02's site list, mislabeled PRM-01
+  when it proved PRM-03). **Fixed**, plus the two PRM-01 assertions
+  (exact-once, old-line-absent) that were missing entirely are now
+  present.
+- 🟡 Two `tests/test_v1101_runner.py` tests claimed to be
+  `T-V1101-ERR-01` rows 7/8 but actually re-verified pre-existing
+  v1.10.0 `LLMError`-abort paths; the real row-7/row-8 coverage already
+  existed under RT-05/RT-09 names. **Fixed**: renamed away from the false
+  claim, pointer comments added at the real coverage sites.
+- 🟡 `T-V1101-GC-06`'s NUL-in-key case (`{"A\0B": "x"}`) was untested.
+  **Fixed**, verified empirically against the real raw-NUL error message.
+- 🟡 `tests/test_v190_agents.py:279-291` (T2's disclosed amendment,
+  outside EC-02's site list, forced by the yaml repoint) — reviewer's
+  concern is procedural (the spec's "exhaustive" table should have been
+  amended as a delta) rather than a code defect; **not fixed** (no code
+  change needed), but flagged again here for T7/T8's awareness since the
+  same pattern may recur.
+- 🟢 A dedicated `T-V1101-GATE-03` "27 rows" count test doesn't exist yet
+  — informational, likely T6's natural home once the mutation entries
+  land; no action this task.
+
+Gates 1-4 green (pytest 2029 passed / 1 skipped). Orchestrator
+independently re-verified the dataset hash and a fresh full `pytest -q`
+run, both green.
+
+Delegated: review by `code-reviewer` (clean context); fixes by a
+general-purpose subagent, brief `docs/spec/task-briefs/v1101-T5.md`.
+Fix commit `5433f3b`.
+
+## T6 — not reached: T5
+
+## T7 — not reached: T5
+
+## T8 — not reached: T5
 
 ## Ledger row (paste into `economics.md`)
 
