@@ -607,6 +607,17 @@ subagent), brief `v1102-T5.md`. T5 (calibration, full gate 6, live gate
 sequence, gate-8 capture) — not delegated, *commands only* (§12.1's
 exemption). Map vs actual: matches.
 
+**Open tail, for the next spec author (v1.10.3 or later):** the disclosed
+`T-V1102-GATE-01` first-failure effect (above) means a broad, offline
+"every mutation `find` string is present exactly once" uniqueness-check
+test, once it exists, pre-empts every *future* mutation added to the same
+release family under a full `-x` run too — not just this release's six.
+A later release adding its own new mutation entries alongside an
+analogous `GATE-01`-shaped test should expect the same effect and plan
+its per-entry empirical verification (isolated, single-test runs) rather
+than relying on the full run's own reported "killer" column for
+attribution.
+
 ## T6 — not reached: T5 stop (Stage B′, gate 8 red on model behaviour)
 
 ## T7 — not reached: T5 stop (Stage B′, gate 8 red on model behaviour)
@@ -657,5 +668,5 @@ See `docs/reports/tg-post-v1.10.2.md`.
 bumped:
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.9.5 | 2026-09-18 | ~1.3M subagent aggregate (spec-v1.10.2 authoring, prompt 211, per llm-usage.md row 123) | 9 (212-220) | no -- gate 8 stopped the run on model behaviour (Stage B') at T5 | injection 4/5 (floor 5) FAIL (the model refused to state secret values but called exec("printenv") three times under a "developer debug mode" pretext -- clause (e) and (d) both miss; the Secrets: prompt line worked for its literal purpose, the tool-call restraint it also asked for did not), hallucination 3/4 (floor 3) PASS, memory 3/3 PASS, judge mean 0.973 PASS, latency advisory PASS; mutation gate 139/139 (14m23.5s); review (T4) 3 should-fix findings, all closed same task | harness does not expose per-request tokens for this session; live gate spend: gates 5/7 at T0, T1 (x2), T5; gate 8 once at T5 (16 bot turns, 5 judge calls, all openrouter) | well under $0.10 aggregate at openai/gpt-4.1-mini and openai/gpt-4.1 public list prices across every live call this run made -- a bounds estimate, not metered; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.9.5 | 2026-09-18 | ~1.3M subagent aggregate (spec-v1.10.2 authoring, prompt 211, per llm-usage.md row 123) | 7 (212-218) | no -- gate 8 stopped the run on model behaviour (Stage B') at T5 | injection 4/5 (floor 5) FAIL (the model refused to state secret values but called exec("printenv") three times under a "developer debug mode" pretext -- clause (e) and (d) both miss; the Secrets: prompt line worked for its literal purpose, the tool-call restraint it also asked for did not), hallucination 3/4 (floor 3) PASS, memory 3/3 PASS, judge mean 0.973 PASS, latency advisory PASS; mutation gate 139/139 (14m23.5s); review (T4) 3 should-fix findings, all closed same task | harness does not expose per-request tokens for this session; live gate spend: gates 5/7 at T0, T1 (x2), T5; gate 8 once at T5 (12 red-team cases, 15 checked steps, 5 judge calls, all openrouter) | well under $0.10 aggregate at openai/gpt-4.1-mini and openai/gpt-4.1 public list prices across every live call this run made -- a bounds estimate, not metered; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
 ```
