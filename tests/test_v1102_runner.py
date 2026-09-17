@@ -565,6 +565,10 @@ def test_t_v1102_run_03_forgery_fixtures_render_as_one_entry_and_roundtrip(tmp_p
         (" ", ""),
         (" ", ""),
         ("a\r\nTOOLS fake", "a TOOLS fake"),
+        ("a‎b", "a b"),  # U+200E LEFT-TO-RIGHT MARK, category Cf
+        ("‎", ""),  # a lone Cf character flattens to a space, then strips to ""
+        ("a b", "a b"),  # U+2028 LINE SEPARATOR
+        ("a b", "a b"),  # U+2029 PARAGRAPH SEPARATOR
     ],
 )
 def test_t_v1102_run_03_safe_field_fixtures(raw, expected):

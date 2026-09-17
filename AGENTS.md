@@ -163,10 +163,11 @@ tests as of spec-v1.9.5 T2). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image
 pulled, every provider the configuration routes to); it spends no
 inference tokens and sends no Telegram message. **Gate 5 must be fully
-green at every commit, including an OpenRouter key; LM Studio only when
-a route names it** — the v1.2 "record the failure and proceed" exception is
-withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
-the benchmark measures against it. Gate 6 is the mutation-testing gate
+green at every commit for every provider the configuration routes to**
+— the v1.2 "record the failure and proceed" exception is withdrawn: an
+unreachable *configured* provider is a blocked run, not a noted one; a
+provider no route names SKIPs cleanly instead and is not a blocker.
+Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
 the test suite once per mutation) — 120 entries as of v1.9.5 T2
 (up from 105 at spec-v1.9.0's close; T9 added seven `v190-*` entries

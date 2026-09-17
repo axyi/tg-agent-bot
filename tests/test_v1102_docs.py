@@ -133,6 +133,18 @@ def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1102():
 
 
 # ---------------------------------------------------------------------------
+# T-V1102-REV-01 (T4): regression guard -- REV-01's gate-5 contradiction
+# (the bolded clause named "every provider the configuration routes to"
+# while the tail sentence still hard-required LM Studio) must not come back.
+# ---------------------------------------------------------------------------
+
+
+def test_t_v1102_rev_01_agents_md_gate5_tail_no_longer_hard_requires_lm_studio():
+    text = _read_agents_md()
+    assert "an unreachable LM Studio is a blocked run" not in text
+
+
+# ---------------------------------------------------------------------------
 # T-V1102-RPT-04: the report-v1.10.0.md T6 clause and the llm-usage.md row
 # 108 correction, both disclosing the same 2026-09-17 §5.1 deviation.
 # ---------------------------------------------------------------------------

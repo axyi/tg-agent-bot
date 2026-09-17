@@ -340,7 +340,9 @@ own confirmed local LM Studio pair (`tests/test_v190_agents.py:177`'s
 pin kept intact); the two stopped-run release rows (`v1.10.0`,
 `v1.10.1`, both "not tagged") landed. `AGENTS.md`: "All seven" → "All
 eight"; the gate-5 sentence now names "every provider the configuration
-routes to" instead of hard-requiring LM Studio; the benchmark paragraph
+routes to" in the bolded clause, but left the tail sentence asserting an
+unreachable LM Studio is unconditionally a blocked run -- a contradiction
+T4 reconciled; the benchmark paragraph
 gains the carried-forward v1.10.1+v1.10.2 waiver text (v1.10.1's own T7
 never ran, so this text did not exist before this task); the brief-path
 token → `v1102-T<N>`. `docs/reports/report-v1.10.0.md`'s T6 line and
