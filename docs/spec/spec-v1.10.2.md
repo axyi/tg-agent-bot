@@ -157,7 +157,10 @@ assert `fail_lines`, never the `p` output).
 Nothing else in `tests/` is edited. **T0 records an inventory**
 (commands only, before any live call): `grep -rn` over `tests/` for the
 literals `800`, `736`, `fifteen`, `== 15`, `1.9.5`, `len(MUTATIONS)`,
-`v1101-` (the tail pins) and `report_path`; the spec and report pins in
+`v1101-` (the tail pins), `report_path`, and — because this release
+changes the runner's stdout shape — the output-format literals `FAIL `,
+`reply: `, `CASE ` and `TOOLS ` (any test pinning a `FAIL` line's preview
+or parsing runner output); the spec and report pins in
 **both plain and escaped forms** — `rg -n
 'spec-v1(?:\\)?\.10(?:\\)?\.1|report-v1(?:\\)?\.10(?:\\)?\.1' tests`
 (matching `spec-v1.10.1` and `spec-v1\.10\.1` alike); and additionally
@@ -1011,8 +1014,9 @@ attempt log** — one row per invocation: task, attempt, exit, the three
 predicate facts (i)–(iii) of GATE-01 each quoted from the capture (or
 `n/a` on exit 0/1), whether GATE-01's transient rule or a repair cycle
 applied; (18) **EC-02 amendments** — the EC-02 amendment table recorded
-at T0 from the inventory (plain and escaped pins, the five symbols; the
-hit list itself is in the report's T0 section), closed before T1, or,
+at T0 from the inventory (plain and escaped pins, the stdout-format
+literals, the five symbols; the hit list itself is in the report's T0
+section), closed before T1, or,
 for line movement of an already-listed site only, found mid-run — file,
 line, literal, why the list missed it — or "none"; (19) **the gate-6
 calibration and tree record** — T5's `--select v1102-`
@@ -1246,7 +1250,7 @@ Work in this order (EC-02, EC-03); one prompt and one commit per task
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preconditions and preflight: hooks installed, `doctor` green, **test count re-measured** (2035 at authoring; the floor), `len(MUTATIONS)` 133, last prompt 211, last usage row 122, `<base>` and the spec's `sha256` recorded, **EC-02's inventory** (the `grep -rn` hit list over `tests/`, the `rg` plain-and-escaped pin search, the five-symbol reference inventory, reconciled against EC-02's table; any hit outside it recorded now as the EC-02 amendment table, closed before T1), the **seven Stage 0 checks** in order (check 1 asserting `data/run-v1102.db`; check 2 printing `db_empty=True`; check 7 recording `git diff --stat ccab5d7 -- pyproject.toml uv.lock`, empty), gates 1–5 and 7 on the unchanged tree (all expected green; 6 and 8 not run), `docs/prompts/212-go-spec-v1.10.2.md`, the report skeleton with `## Operator inputs`, the gate-7 attempt log and a ledger-row block | every item recorded; the inventory hit list in the report's T0 section, every hit on EC-02's table or in the T0 amendment table; the empty dependency diff from `ccab5d7` recorded; no key value anywhere; `git diff --exit-code` clean after check 7 |
+| **T0** | Preconditions and preflight: hooks installed, `doctor` green, **test count re-measured** (2035 at authoring; the floor), `len(MUTATIONS)` 133, last prompt 211, last usage row 122, `<base>` and the spec's `sha256` recorded, **EC-02's inventory** (the `grep -rn` hit list over `tests/` incl. the stdout-format literals, the `rg` plain-and-escaped pin search, the five-symbol reference inventory, reconciled against EC-02's table; any hit outside it recorded now as the EC-02 amendment table, closed before T1), the **seven Stage 0 checks** in order (check 1 asserting `data/run-v1102.db`; check 2 printing `db_empty=True`; check 7 recording `git diff --stat ccab5d7 -- pyproject.toml uv.lock`, empty), gates 1–5 and 7 on the unchanged tree (all expected green; 6 and 8 not run), `docs/prompts/212-go-spec-v1.10.2.md`, the report skeleton with `## Operator inputs`, the gate-7 attempt log and a ledger-row block | every item recorded; the inventory hit list in the report's T0 section, every hit on EC-02's table or in the T0 amendment table; the empty dependency diff from `ccab5d7` recorded; no key value anywhere; `git diff --exit-code` clean after check 7 |
 | **T1** | §3 PRM-01, PRM-02: **gate 7 once, immediately before the edit**; the `Secrets:` line inserted verbatim; the rendered length measured and pinned; `PROMPT_LIMIT` 950; EC-02 rows 1–3; gates 1–4 green on the edited tree; **gate 7 once, immediately after** — exactly two gate-7 executions at T1. Tests `T-V1102-PRM-01…04` | green; the measured length recorded and within 5 of 939; both `recall@5` green; the four-cell verdict table and both walls recorded; `tests/test_v1_guardrails.py:829-864` and `tests/test_prefix.py:220-249` green unamended |
 | **T2** | §4 RT-01…RT-03 and §5 RT-04…RT-06: the joined detail, `tool_call_log` rendered through `_safe_field` and the step cursor, the `CASE` and `TOOLS` lines (`_tools_line`, `TOOLS_LINE_CAP`), the new markers with the token class, INJ-05's and HAL-03's `any_of`, the fixture tests; EC-02 rows 4–6; **the two dataset `sha256`s recorded**. **Offline only.** Tests `T-V1102-RT-01…12`, `T-V1102-RUN-01…07`, `T-V1102-SEC-01`, `T-V1102-ERR-01` | green offline; `validate_datasets()` green on the committed files; the twelve negatives red and the v1.10.1 red replies green by test; `tests/test_v1100_runner.py` and `tests/test_v1101_runner.py` green unamended; the `sha256`s in the report |
 | **T3** | §10 RPT-01's repoints and RPT-03's paperwork minus the numbers: `lint-docs.report_path`, EC-02 rows 9–13; `.env.example`, README (`## Switch provider`, `## Configure`, the `--selftest-live` paragraph, **the two stopped-run release rows** `v1.10.0`/`v1.10.1`), `AGENTS.md` (`All eight`, the gate-5 sentence, the waiver, the token), `report-v1.10.0.md:232-233`, `llm-usage.md:258`. Tests `T-V1102-GATE-03`, `T-V1102-RPT-01`, `T-V1102-CFG-01`, `T-V1102-RPT-02`'s T3 function (`…stopped_release_rows_landed_at_t3`) and `T-V1102-RPT-03`'s T3 function (the T6 functions are written at T6), `T-V1102-RPT-04` | green; `doctor` and `lint-docs` green; the matrix test green against **this** file; the two v1.10.0 diff hunks exactly as RPT-03 words them; no `v1.10.2` row in README yet |
