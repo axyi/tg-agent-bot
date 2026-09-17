@@ -27,7 +27,7 @@ profiles:
   # `mutation_check.py --select <prefix>` directly, kept for this
   # release's T2/T3 re-measurements and any future per-range work.
   mutation-subsets: [mutation-v15, mutation-v160, mutation-v170, mutation-v180,
-                     mutation-v190, mutation-v1100]
+                     mutation-v190, mutation-v1100, mutation-v1101]
 
 # T1 writes each pin at its currently-installed version (REQ-V15-DEP-04);
 # trivy and skylos are not installed yet and stay absent from this block
@@ -248,10 +248,13 @@ gates:
     diff_scoped: false
     timeout_seconds: 1120
 
-  # spec-v1.10.0 T0 (REQ-V1100-EVAL-01): measured t_turn = 24.90s (one plain
-  # chat turn, production route) -> gate8_timeout_seconds(219, 24.90) =
-  # ceil_to_100(1.5 * 219 * 24.90) = 8200, where max_calls = 219 =
-  # worst_case_calls(HTTP_ATTEMPT_LIMIT=9) = 23*9+12.
+  # spec-v1.10.1 T0 (REQ-V1101-RUN-02, docs/reports/report-v1.10.1.md's T0
+  # section, 2026-09-17): measured t_turn = 2.976s (one plain chat turn,
+  # production route) -> gate8_timeout_seconds(219, 2.976) =
+  # ceil_to_100(1.5 * 219 * 2.976) = 1000, where max_calls = 219 =
+  # worst_case_calls(HTTP_ATTEMPT_LIMIT=9) = 23*9+12 -- below the 1800s
+  # floor, so the floor applies: timeout_seconds: 1800. Supersedes
+  # v1.10.0 T0's 24.90s/8200s measurement above.
   agent-eval:
     kind: command
     result_mode: exit_status
@@ -260,7 +263,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 8200
+    timeout_seconds: 1800
 
   # Confirmed against trivy fs --help at 0.74.0 (T4): --scanners, --severity,
   # --exit-code, --ignore-unfixed, --format json, --output all unchanged.
@@ -528,6 +531,32 @@ gates:
     diff_scoped: false
     timeout_seconds: 110
 
+  # spec-v1.10.1 T6a (docs/spec/task-briefs/v1101-T6a.md, REQ-V1101-GATE-02,
+  # 2026-09-17): six v1101-* entries added (133 total in MUTATIONS -- see
+  # mutation-all's own dated comment below). Same bootstrapping constraint
+  # as mutation-v1100's comment above and docs/reports/report-v1.9.4.md's
+  # T3 section: `devtools/mutation_check.py` is itself one of the paths
+  # named by other MUTATIONS entries, so the CLI's own dirty-tree guard
+  # refuses to start while this task's own edit to that file is
+  # uncommitted -- measured pre-commit via
+  # `devtools.mutation_check.run_all()` called directly on the six
+  # v1101-* entries (the same mutate -> run -> revert machinery the CLI
+  # itself invokes, only bypassing `main()`'s argparse/dirty-tree wrapper),
+  # 6/6 killed, 0 survived, 0 errored, 0 drifted: real=22.277s -> 2x
+  # 22.277s + 70s (survivor-safe rule) = 114.554s, rounded up to 120s.
+  # Re-confirmed after commit with the literal CLI invocation (`time uv
+  # run --locked python devtools/mutation_check.py --select "v1101-"`,
+  # tree clean), 6/6 killed, consistent with the pre-commit measurement.
+  mutation-v1101:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, "v1101-"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 120
+
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
   # directly on 2026-09-05 (`time uv run --locked python
@@ -631,6 +660,15 @@ gates:
   # -- five more entries plus this box's own documented shared/contended
   # variance (noted at every earlier re-measurement above) account for the
   # jump; the fresh measurement is used as-is.
+  #
+  # spec-v1.10.1 T6a (docs/spec/task-briefs/v1101-T6a.md, REQ-V1101-RUN-02,
+  # 2026-09-17): six v1101-* entries added -- `len(devtools.mutation_check.
+  # MUTATIONS)` is now 133 (up from 127 at `1d96ca0`). RUN-02 keeps this
+  # gate's own `argv` and `timeout_seconds` unchanged this task --
+  # `mutation-all` is not re-measured here despite the count moving; the
+  # orchestrator's own authoritative all-133 run immediately after this
+  # task's commit is what will confirm (or refute) 1640s still covers the
+  # larger table.
   mutation-all:
     kind: command
     result_mode: exit_status

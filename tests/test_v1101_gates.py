@@ -8,14 +8,21 @@ running -- `subprocess.Popen` is monkeypatched wherever a gate's own
 subprocess call is under test.
 
 `T-V1101-GC-01`..`T-V1101-GC-06`.
+
+T6a (docs/spec/task-briefs/v1101-T6a.md, REQ-V1101-GATE-02) adds
+`T-V1101-GATE-01`/`T-V1101-GATE-02`: the six `v1101-*` mutation table
+entries and the `mutation-v1101`/`mutation-subsets`/`mutation-all`
+registration below.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
+import devtools.mutation_check as mc
 from devtools import checks
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -247,3 +254,103 @@ def test_no_other_gate_in_the_real_config_carries_env():
 def test_lint_docs_report_path_repointed_to_v1101():
     config = checks.load_gate_config()
     assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.1.md"
+
+
+# ---------------------------------------------------------------------------
+# T-V1101-GATE-01 (docs/spec/task-briefs/v1101-T6a.md, REQ-V1101-GATE-02):
+# the six v1101-* mutation table entries -- devtools/agent_eval.py's
+# clause-(c)/(e) rewrite and RT-01's leak-shape regex, llm/embeddings.py's
+# optional bearer header, devtools/checks.py's env passthrough.
+# ---------------------------------------------------------------------------
+
+_V1101_MUTATION_IDS = [
+    "v1101-clause-c-negation-guard-dropped",
+    "v1101-clause-e-dropped",
+    "v1101-leak-shape-bare-name",
+    "v1101-hal-none-of-dropped",
+    "v1101-embeddings-auth-header-dropped",
+    "v1101-gate-env-passthrough-dropped",
+]
+
+
+def _v1101_mutations() -> list[dict]:
+    return [m for m in mc.MUTATIONS if m["id"].startswith("v1101-")]
+
+
+def test_v1101_gate01_six_mutation_ids_present_with_non_empty_why():
+    ids = [m["id"] for m in _v1101_mutations()]
+    assert ids == _V1101_MUTATION_IDS
+    for mutation in _v1101_mutations():
+        assert mutation["why"].strip() != ""
+
+
+def test_v1101_gate01_select_prefix_matches_the_registered_gate_argv():
+    config = checks.load_gate_config()
+    gate = config["gates"]["mutation-v1101"]
+    assert gate["argv"] == [
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "devtools/mutation_check.py",
+        "--select",
+        "v1101-",
+    ]
+    # every v1101-* mutation id actually starts with the gate's own
+    # --select prefix, so the registered gate really does run all six.
+    select_prefix = gate["argv"][gate["argv"].index("--select") + 1]
+    assert select_prefix == "v1101-"
+    for mutation in _v1101_mutations():
+        assert mutation["id"].startswith(select_prefix)
+
+
+# ---------------------------------------------------------------------------
+# T-V1101-GATE-02 (docs/spec/task-briefs/v1101-T6a.md, REQ-V1101-GATE-02):
+# mutation-v1101 registered in the loaded gate config, a member of
+# mutation-subsets, and mutation-all's dated count comment kept in sync
+# with the real len(MUTATIONS) -- never a hardcoded number.
+# ---------------------------------------------------------------------------
+
+
+def test_v1101_gate02_mutation_v1101_registered_with_the_v1100_shape():
+    config = checks.load_gate_config()
+    gate = config["gates"]["mutation-v1101"]
+    assert gate["kind"] == "command"
+    assert gate["result_mode"] == "exit_status"
+    assert gate["success_exit_codes"] == [0]
+    assert gate["blocking"] is True
+    assert gate["diff_scoped"] is False
+    assert gate["timeout_seconds"] > 0
+    assert gate["argv"] == [
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "devtools/mutation_check.py",
+        "--select",
+        "v1101-",
+    ]
+
+
+def test_v1101_gate02_is_in_mutation_subsets_and_no_hook_profile():
+    config = checks.load_gate_config()
+    assert "mutation-v1101" in config["profiles"]["mutation-subsets"]
+    for profile_name, members in config["profiles"].items():
+        if profile_name != "mutation-subsets":
+            assert "mutation-v1101" not in members
+
+
+def test_v1101_gate02_mutation_all_comment_count_matches_len_mutations():
+    # Parses the count out of `mutation-all`'s newest dated comment
+    # paragraph (the one this task appended, naming this task's own
+    # source) rather than hardcoding 133 -- a future release that adds an
+    # entry and forgets to update the comment must fail this test.
+    text = checks.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+    match = re.search(
+        r"spec-v1\.10\.1 T6a.*?MUTATIONS\)`\s*is now (\d+)",
+        text,
+        re.DOTALL,
+    )
+    assert match, "mutation-all's v1.10.1 T6a dated comment paragraph not found"
+    documented_count = int(match.group(1))
+    assert documented_count == len(mc.MUTATIONS)

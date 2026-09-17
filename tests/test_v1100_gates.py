@@ -33,7 +33,7 @@ _EXPECTED_AGENT_EVAL_GATE = {
     "success_exit_codes": [0],
     "blocking": True,
     "diff_scoped": False,
-    "timeout_seconds": 8200,
+    "timeout_seconds": 1800,
 }
 
 _EIGHT_GATE_BLOCK = [
@@ -225,11 +225,18 @@ def _v1100_mutations() -> list[dict]:
     return [m for m in mc.MUTATIONS if m["id"].startswith("v1100-")]
 
 
-def test_exactly_seven_v1100_mutations_after_the_last_v195_entry():
+def test_exactly_seven_v1100_mutations_immediately_after_the_last_v195_entry():
+    # spec-v1.10.1 T6a: this test used to pin the seven v1100-* entries as
+    # the literal tail of MUTATIONS -- true only until a later release
+    # appends more entries after them (v1101-* now does). Repointed to
+    # check contiguity right after the last v195-* entry (still exactly
+    # seven, still immediately adjacent, no longer coupled to whichever
+    # release happens to close the table) rather than requiring them to be
+    # the last entries in the whole list.
     ids = [m["id"] for m in mc.MUTATIONS]
     last_v195_index = max(i for i, mid in enumerate(ids) if mid.startswith("v195-"))
-    tail = ids[last_v195_index + 1 :]
-    assert tail == [
+    immediately_after = ids[last_v195_index + 1 : last_v195_index + 8]
+    assert immediately_after == [
         "v1100-injection-checker-always-passes",
         "v1100-hallucination-any-of-vacuous",
         "v1100-memory-structural-check-dropped",
@@ -238,6 +245,10 @@ def test_exactly_seven_v1100_mutations_after_the_last_v195_entry():
         "v1100-reply-parts-split-before-redact",
         "v1100-inbound-cap-code-points",
     ]
+    # ...and every v1100-* id in MUTATIONS is exactly this set of seven,
+    # in this order -- the original test's other guarantee, preserved.
+    assert _v1100_mutations() == [m for m in mc.MUTATIONS if m["id"] in immediately_after]
+    assert [m["id"] for m in _v1100_mutations()] == immediately_after
 
 
 def test_v1100_mutations_have_exactly_the_five_keys():

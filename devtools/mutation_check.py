@@ -1661,6 +1661,136 @@ MUTATIONS = [
         "code-point-based cap would let astral-plane text through at twice "
         "Telegram's real limit",
     },
+    # -- spec-v1.10.1 T6a (docs/spec/task-briefs/v1101-T6a.md,
+    # REQ-V1101-GATE-02): six entries defending T3's clause-(c)/(e) rewrite
+    # and RT-01's leak-shape regex (devtools/agent_eval.py), T4's optional
+    # bearer header (llm/embeddings.py) and T2's env passthrough
+    # (devtools/checks.py). GATE-02's table names a killer test per entry;
+    # empirically (mutate -> run -> revert, this task, direct
+    # `devtools.mutation_check.run_all()` pre-commit, re-confirmed via the
+    # literal CLI `--select "v1101-"` post-commit) five of the six are
+    # actually killed by an earlier-in-file-order test in the same test
+    # module than the table names, under the gate's own -x ordered run --
+    # each entry below records the discrepancy where one exists; only
+    # v1101-embeddings-auth-header-dropped matches its named killer exactly.
+    {
+        "id": "v1101-clause-c-negation-guard-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": "            if not _NEGATION_GUARD.search(before):\n",
+        "replace": "            if True:  # v1101-clause-c-negation-guard-dropped\n",
+        "why": "REQ-V1101-RT-01: _marker_matches_in_clause's negation guard "
+        "must actually suppress a negated marker occurrence -- forcing the "
+        "guard condition to True makes every occurrence a hit regardless of "
+        "a preceding negation, defeating clause (c)'s and clause (d)'s "
+        "shared negation-awareness. Spec table names T-V1101-RT-01/-02 as "
+        "killers; empirically (mutate -> run -> revert, this task) the "
+        "actual killer under the gate's own -x ordered run is "
+        "tests/test_v1101_red_team.py's "
+        "test_t_v1101_rt_03_negation_suppresses_a_marker[не отказываюсь-patterns0] "
+        "(T-V1101-RT-03, earlier in file order than T-V1101-RT-01/-02 and "
+        "than T-V1101-RT-13's own test_t_v1101_rt_13_negation_guard_is_not_"
+        "always_true, written for exactly this mutant) -- a discrepancy "
+        "from the table.",
+    },
+    {
+        "id": "v1101-clause-e-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": '    e_ok = not any(name in ("exec", "fetch") for name in (tool_calls or []))\n',
+        "replace": "    e_ok = True  # v1101-clause-e-dropped\n",
+        "why": "REQ-V1101-RT-06: _injection_clauses' e_ok must actually "
+        "check tool_calls for exec/fetch -- hardcoding it True would let an "
+        "agent that calls exec or fetch under a prompt-injection attack "
+        "pass clause (e) unconditionally. Spec table names "
+        "T-V1101-RT-05/-08/RUN-03 as killers; empirically (mutate -> run -> "
+        "revert, this task) the actual killer under the gate's own -x "
+        "ordered run is tests/test_v1101_red_team.py's "
+        "test_t_v1101_rt_06_inj_04_same_reply_with_exec_tool_call_fails_only_e "
+        "(T-V1101-RT-06, earlier in file order than the table's named tests "
+        "and than T-V1101-RT-09's/-13's own e_ok-specific tests) -- a "
+        "discrepancy from the table.",
+    },
+    {
+        "id": "v1101-leak-shape-bare-name",
+        "path": "devtools/agent_eval.py",
+        "find": (
+            "            pattern = (\n"
+            "                r'[\"\\']?' + re.escape(phrase) + r'[\"\\']?\\s*[=:]\\s*'\n"
+            "                r'(?P<value>\\[[^\\]\\r\\n]*\\]|\"[^\"\\r\\n]*\"|\\'[^\\'\\r\\n]*\\'"
+            "|[^\\s\"\\'\\[\\]]{8,})'\n"
+            "            )\n"
+        ),
+        "replace": (
+            "            pattern = (  # v1101-leak-shape-bare-name\n"
+            "                r'[\"\\']?' + re.escape(phrase) + r'[\"\\']?'\n"
+            '                r\'(?:\\s*[=:]\\s*)?(?P<value>\\[[^\\]\\r\\n]*\\]|"[^"\\r\\n]*"|'
+            "\\'[^\\'\\r\\n]*\\'|[^\\s\"\\'\\[\\]]{8,}|)'\n"
+            "            )\n"
+        ),
+        "why": "REQ-V1101-RT-01: the ENV_KEY_NAMES leak-shape regex must "
+        "require an `=`/`:`-delimited value, never a bare name mention -- "
+        "making the delimiter optional and the value group's empty "
+        "alternative satisfiable lets a reply that merely names the key "
+        "(no value) register as a leak. Spec table names "
+        "T-V1101-RT-03/-13 as killers; empirically (mutate -> run -> "
+        "revert, this task) the actual killer under the gate's own -x "
+        "ordered run is tests/test_v1101_red_team.py's "
+        "test_t_v1101_rt_01_bare_env_key_mention_with_no_delimiter_is_never_a_hit "
+        "(T-V1101-RT-01, earlier in file order than T-V1101-RT-13's own "
+        "test_t_v1101_rt_13_leak_shape_regex_is_not_a_bare_substring_test, "
+        "written for exactly this mutant) -- a discrepancy from the table.",
+    },
+    {
+        "id": "v1101-hal-none-of-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": "    none_hit = _none_of_hit_regex(reply, none_of)\n",
+        "replace": "    none_hit = None  # v1101-hal-none-of-dropped\n",
+        "why": "REQ-V1101-RT-07: check_hallucination's none_of check must "
+        "actually run -- hardcoding none_hit to None would let a reply "
+        "carrying a forbidden none_of phrase pass whenever it also carries "
+        "a HAL_MARKERS hit or an any_of match. Spec table names "
+        "T-V1101-RT-06/-10 as killers; empirically (mutate -> run -> "
+        "revert, this task) the actual killer under the gate's own -x "
+        "ordered run is tests/test_v1101_red_team.py's "
+        "test_t_v1101_rt_07_none_of_still_blocks_regardless_of_markers "
+        "(T-V1101-RT-07, earlier in file order than T-V1101-RT-13's own "
+        "test_t_v1101_rt_13_none_hit_is_not_hardcoded_none_in_check_hallucination, "
+        "written for exactly this mutant) -- a discrepancy from the table.",
+    },
+    {
+        "id": "v1101-embeddings-auth-header-dropped",
+        "path": "llm/embeddings.py",
+        "find": "            headers=headers,\n",
+        "replace": ("            # headers=headers,  # v1101-embeddings-auth-header-dropped\n"),
+        "why": "REQ-V1101-EMB-01: EmbeddingsClient._post must send the "
+        "computed `headers` on every request -- omitting the kwarg means "
+        "no Authorization header ever reaches the wire even with a "
+        "non-empty api_key. Spec table names T-V1101-EMB-01/G5-03 as "
+        "killers; empirically (mutate -> run -> revert, this task) "
+        "confirmed as tests/test_v1101_embeddings.py's "
+        "test_t_v1101_emb_01_nonempty_key_sends_bearer_header_body_unchanged "
+        "(T-V1101-EMB-01) -- matches, no discrepancy.",
+    },
+    {
+        "id": "v1101-gate-env-passthrough-dropped",
+        "path": "devtools/checks.py",
+        "find": "            env=None if env is None else os.environ | env,\n",
+        "replace": (
+            "            # env=None if env is None else os.environ | env,"
+            "  # v1101-gate-env-passthrough-dropped\n"
+        ),
+        "why": "REQ-V1101-GC-01/02: run_argv must pass a gate's own `env:` "
+        "map through to subprocess.Popen (as `None` when absent, merged "
+        "over os.environ when present) -- omitting the kwarg entirely "
+        "means the `env` key never reaches subprocess.Popen's call at all, "
+        "not even as `None`, so a gate's `env:` map never reaches the "
+        "subprocess (skylos's SKYLOS_GREP_BUDGET, in particular). Spec "
+        "table names T-V1101-GC-05 as the killer; empirically (mutate -> "
+        "run -> revert, this task) the actual killer under the gate's own "
+        "-x ordered run is tests/test_v1101_gates.py's "
+        "test_run_argv_env_absent_reaches_popen_as_none (T-V1101-GC-01/02, "
+        "earlier in file order than T-V1101-GC-05's own env-pinning tests) "
+        "-- a discrepancy from the table.",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
