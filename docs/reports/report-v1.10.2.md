@@ -386,7 +386,51 @@ Delegation record: T3 — delegated (general-purpose subagent), brief
 found beyond the brief (item 2 above), closed the same task per EC-02's
 mid-run convention.
 
-## T4 — not reached
+## T4 — clean-context review (REV-01) and its fix pass
+
+Review: `code-reviewer` subagent, clean context, commits `ccab5d7..79f8304`
+(T0-T3), against the nine spec-specific items plus the standard/test-
+independence checklists. Verdict: **request changes** — three should-fix
+findings, no critical/security issue, all nine spec-specific items
+independently re-verified clean except item 8. Full findings and the
+nine-item verification are logged in the review prompt
+(`docs/prompts/217-...md`'s predecessor context); summary:
+
+1. 🟡 `AGENTS.md`'s gate-5 sentence still hard-required LM Studio in its
+   tail clause after T3's bolded-clause reword, contradicting both that
+   clause and the benchmark-waiver paragraph — fixed.
+2. 🟡 `T-V1102-RT-08`'s "sentence-boundary negatives" parametrize list
+   looked duplicated (four entries, apparently two distinct strings) —
+   **on closer, codepoint-level inspection this was a false positive**:
+   U+2028 (LINE SEPARATOR) renders identically to a plain space in
+   plain-text tool output, so the reviewer (and the orchestrator's own
+   brief, copying the reviewer's finding) misread an already-correct
+   fixture as a duplicate. Verified independently by the orchestrator
+   (`repr()` on the raw file bytes) — the file was never broken; no
+   code change made. Noted for future REV-01-style reviews: diffing text
+   containing U+2028/U+2029/other invisible separators needs a
+   codepoint-aware read, not a plain-text view.
+3. 🟡 `_safe_field`'s `Cf` category and direct U+2028/U+2029 handling had
+   no test coverage of their own (only indirectly, and — per finding 2 —
+   not even reliably, via the red-team dataset) — four new fixtures
+   added to `tests/test_v1102_runner.py`, each empirically verified
+   before being committed (no algorithm surprise this time).
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/
+v1102-T4.md`; fix commit `aa2dd3b`. Also corrected this report's own T3
+section, which had overstated what T3's `AGENTS.md` edit actually
+accomplished (the bolded clause landed, the tail sentence didn't — now
+both have).
+
+Independently re-verified by the orchestrator: `AGENTS.md`'s gate-5
+sentence no longer contains "an unreachable LM Studio is a blocked run";
+`tests/test_v1102_red_team.py:355-356` genuinely contain `U+2028` (not a
+duplicate) via direct byte inspection; full suite **2165 collected, 2164
+passed / 1 skipped**; `ruff check .` clean.
+
+Delegation record: T4 — review delegated (`code-reviewer` subagent, clean
+context); fixes delegated (general-purpose subagent, brief `v1102-T4.md`,
+since they wrote test/doc source). Map vs actual: matches.
 
 ## T5 — not reached
 
