@@ -72,8 +72,9 @@ SEARCH_SPEC = {
     "function": {
         "name": "search_documents",
         "description": (
-            "Search the users uploaded documents; returns the best passages with "
-            "filename and page. Use it before answering about their files."
+            "Search the user's uploaded documents; returns the best passages with "
+            "filename and page. Call it before answering any question their files "
+            "could answer -- never answer such questions from memory."
         ),
         "parameters": {
             "type": "object",
@@ -96,9 +97,12 @@ def test_t_v190_tool_01_the_fourth_entry_is_appended_last_and_exact():
     assert specs[3] == SEARCH_SPEC
 
 
-def test_t_v190_tool_01_the_entry_fits_350_chars():
+# REQ-V190-TOOL-01's per-entry budget, raised by REQ-V1101-PRM-01 (EC-02):
+# the mandated `search_documents` description grew from 129 to 194 chars to
+# compel a document search, taking the serialized entry from ~350 to 408.
+def test_t_v190_tool_01_the_entry_fits_420_chars():
     entry_chars = len(json.dumps(SEARCH_SPEC))
-    assert entry_chars <= 350, entry_chars
+    assert entry_chars <= 420, entry_chars
 
 
 def test_t_v190_tool_01_the_whole_catalog_fits_1800_chars():
@@ -370,8 +374,9 @@ def test_t_v190_tool_04_status_line_stays_under_the_char_cap():
 # --------------------------------------------------------------------------
 
 PROMPT_LINE = (
-    "Docs: search_documents finds user files; answer from returned passages only, "
-    "cite Source: <filename> (page N); else say the docs lack it."
+    "Docs: when the user has uploaded files, call search_documents BEFORE answering "
+    "anything they could answer; answer from returned passages only, cite Source: "
+    "<filename> (page N); else say the docs lack it."
 )
 
 
@@ -379,14 +384,18 @@ def test_t_v190_tool_05_the_prompt_gains_exactly_this_line():
     assert PROMPT_LINE in agent.SYSTEM_PROMPT
 
 
-def test_t_v190_tool_05_the_line_is_140_chars_or_fewer_and_ascii():
-    assert len(PROMPT_LINE) <= 140, len(PROMPT_LINE)
+def test_t_v190_tool_05_the_line_is_210_chars_or_fewer_and_ascii():
+    assert len(PROMPT_LINE) <= 210, len(PROMPT_LINE)
     assert PROMPT_LINE.isascii()
 
 
-def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_700_chars():
+def test_t_v190_tool_05_the_whole_prompt_stays_at_or_under_800_chars():
     measured = len(agent.SYSTEM_PROMPT.replace("{skill_lines}", ""))
-    assert measured <= 700, measured
+    assert measured <= 800, measured
+
+
+def test_t_v1101_prm_01_the_rendered_prompt_is_exactly_736_chars():
+    assert len(agent.SYSTEM_PROMPT.replace("{skill_lines}", "")) == 736
 
 
 # tests/test_prefix.py::test_pfx_01_every_mandatory_statement_survives is the

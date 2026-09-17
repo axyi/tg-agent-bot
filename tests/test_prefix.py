@@ -26,7 +26,9 @@ USER_ID = 424242
 NOW_A = "2026-09-02T10:00:00Z"
 NOW_B = "2026-09-02T18:45:31Z"
 
-PROMPT_LIMIT = 700  # REQ-V13-PFX-01, raised by REQ-V190-TOOL-04 (EC-03)
+# REQ-V13-PFX-01, raised by REQ-V190-TOOL-04 (EC-03), raised by
+# REQ-V1101-PRM-01 (EC-02)
+PROMPT_LIMIT = 800
 SCHEMA_LIMIT = 1800  # REQ-V13-PFX-02, raised by REQ-V190-TOOL-01 (EC-03)
 
 # REQ-V13-PFX-02: the schema of spec-v1.2 (commit f0572c8, `tool_specs()` with

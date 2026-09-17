@@ -1370,8 +1370,9 @@ def tool_specs() -> list[dict]:
             "function": {
                 "name": "search_documents",
                 "description": (
-                    "Search the users uploaded documents; returns the best passages with "
-                    "filename and page. Use it before answering about their files."
+                    "Search the user's uploaded documents; returns the best passages with "
+                    "filename and page. Call it before answering any question their files "
+                    "could answer -- never answer such questions from memory."
                 ),
                 "parameters": {
                     "type": "object",
