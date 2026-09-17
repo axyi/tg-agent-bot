@@ -350,6 +350,7 @@ _COMMAND_BASE_KEYS = {
     "blocking",
     "diff_scoped",
     "timeout_seconds",
+    "env",
 }
 _FINDINGS_EXTRA_KEYS = {"output_format", "parser", "findings_exit_codes", "artefact", "severity"}
 _EXIT_STATUS_FORBIDDEN = {"parser", "output_format", "findings_exit_codes", "severity", "artefact"}
@@ -363,6 +364,12 @@ _BUILTIN_FORBIDDEN = {
     "success_exit_codes",
     "findings_exit_codes",
 }
+
+# REQ-V1101-GC-01: a command gate's `env:` may never name one of the
+# repository's own registered secrets (config.py's register_secret call
+# sites -- TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY); compared casefolded so
+# any casing of either name is refused.
+_SECRET_ENV_KEYS_CASEFOLDED = {"openrouter_api_key", "telegram_bot_token"}
 
 _PLACEHOLDER_RE = re.compile(r"\{([^{}]*)\}")
 
@@ -488,6 +495,22 @@ def _validate_command_gate(name: str, gate: dict[str, Any], extra_allowed: set[s
     if not isinstance(codes, list) or not all(_is_int(c) for c in codes):
         raise GateConfigError(f"gates.{name}.success_exit_codes must be a list of integers")
     _validate_placeholders_used(name, argv)
+
+    if "env" in gate:
+        env = gate["env"]
+        if not isinstance(env, dict) or not all(
+            isinstance(k, str) and k and isinstance(v, str) for k, v in env.items()
+        ):
+            raise GateConfigError(
+                f"gates.{name}.env must map non-empty string keys to string values"
+            )
+        for key, value in env.items():
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                raise GateConfigError(f"gates.{name}.env key is not an identifier: {key}")
+            if "\0" in value:
+                raise GateConfigError(f"gates.{name}.env value contains NUL: {key}")
+            if key.casefold() in _SECRET_ENV_KEYS_CASEFOLDED:
+                raise GateConfigError(f"gates.{name}.env must not name a secret: {key}")
 
     if result_mode == "findings":
         missing = _FINDINGS_EXTRA_KEYS - set(gate)
@@ -1123,7 +1146,12 @@ def _terminate_process_group(proc: subprocess.Popen) -> None:
 
 
 def run_argv(
-    argv: list[str], cwd: Path, timeout_seconds: int, *, input_bytes: bytes | None = None
+    argv: list[str],
+    cwd: Path,
+    timeout_seconds: int,
+    *,
+    input_bytes: bytes | None = None,
+    env: dict[str, str] | None = None,
 ) -> CommandResult:
     try:
         proc = subprocess.Popen(
@@ -1133,6 +1161,7 @@ def run_argv(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
+            env=None if env is None else os.environ | env,
         )
     except FileNotFoundError as exc:
         return CommandResult(False, None, b"", b"", f"binary not found: {exc}")
@@ -1291,7 +1320,7 @@ def execute_command_gate(
         values["artefact"] = str(artefact_path)
 
     argv = render_argv(gate["argv"], values)
-    cmd = run_argv(argv, repo_root, timeout)
+    cmd = run_argv(argv, repo_root, timeout, env=gate.get("env"))
     if not cmd.ok:
         return GateResult(
             name, ran=False, blocked=True, message=f"gate {name} could not run: {cmd.error}"

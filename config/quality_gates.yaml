@@ -308,6 +308,8 @@ gates:
   # regardless of findings, so --gate --strict is added for exit-code
   # semantics ("0 if clean" / "1 if any finding") consistent with every
   # other findings gate; measured empirically on this repository.
+  # REQ-V1101-GC-01: SKYLOS_GREP_BUDGET pinned after the v1.10.0-authoring
+  # push failed SKY-ANALYSIS-INCOMPLETE (2026-09-13) without it.
   skylos:
     kind: command
     result_mode: findings
@@ -323,6 +325,7 @@ gates:
     diff_scoped: true
     severity: [CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
     timeout_seconds: 120
+    env: { SKYLOS_GREP_BUDGET: "180" }
 
   # D2 (v1.5.1): timeout_seconds for every mutation-* gate follows one rule
   # -- timeout = 2x a measured direct run -- so a spurious timeout never
@@ -681,7 +684,7 @@ gates:
                    38-v14-t8-default-selection.md, 39-v14-t9-mutations.md,
                    40-v14-t9-review.md, 41-v14-t10-report.md,
                    42-v14-t10-advisor-followup.md, 43-v14-verify-run-fixes.md]
-    report_path: docs/reports/report-v1.10.0.md
+    report_path: docs/reports/report-v1.10.1.md
     ledger_header: "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |"
     blocking: true
     diff_scoped: false

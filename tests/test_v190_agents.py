@@ -276,14 +276,19 @@ def test_t_v190_ec_01_readme_ec_13_partial_lift_sentence():
 
 
 def test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path():
-    # REQ-V190-RPT-01 / REQ-V1100-RPT-01: lint-docs' report_path tracks the
-    # current release and is repointed again at each one (T10 did 1.8.0 ->
-    # 1.9.0; v1.9.1 T2 did 1.9.0 -> 1.9.1; v1.9.2 T3 did 1.9.1 -> 1.9.2;
-    # v1.9.3 T4 did 1.9.2 -> 1.9.3; v1.9.4 T5 did 1.9.3 -> 1.9.4; v1.9.5 T2
-    # did 1.9.4 -> 1.9.5; this task, v1.10.0 T6, does 1.9.5 -> 1.10.0).
+    # REQ-V190-RPT-01 / REQ-V1100-RPT-01 / REQ-V1101-RPT-01: lint-docs'
+    # report_path tracks the current release and is repointed again at
+    # each one (T10 did 1.8.0 -> 1.9.0; v1.9.1 T2 did 1.9.0 -> 1.9.1;
+    # v1.9.2 T3 did 1.9.1 -> 1.9.2; v1.9.3 T4 did 1.9.2 -> 1.9.3; v1.9.4 T5
+    # did 1.9.3 -> 1.9.4; v1.9.5 T2 did 1.9.4 -> 1.9.5; v1.10.0 T6 did
+    # 1.9.5 -> 1.10.0; this task's literal repoint, v1.10.1 T2, does
+    # 1.10.0 -> 1.10.1 -- not in spec-v1.10.1.md's own §14 file list for
+    # this test, bumped here only because T2's yaml edit would otherwise
+    # leave this assertion stale and pytest red; the function name is left
+    # for whichever task owns this file's renames next).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.10.0.md" in text
-    assert "report_path: docs/reports/report-v1.9.5.md" not in text
+    assert "report_path: docs/reports/report-v1.10.1.md" in text
+    assert "report_path: docs/reports/report-v1.10.0.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:
