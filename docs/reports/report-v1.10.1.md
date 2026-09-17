@@ -176,24 +176,61 @@ embedder).
 Delegated (general-purpose subagent, brief `docs/spec/task-briefs/v1101-T1.md`).
 Commit `4b18804`. Map vs actual: matches §16.1 exactly.
 
-## T2 — not reached: T1
+## T2 — gate `env:` passthrough, matrix and `lint-docs` repoint
 
-## T3 — not reached: T1
+`devtools/checks.py`: `_COMMAND_BASE_KEYS` gains `"env"`;
+`_validate_command_gate` validates it before the unknown-key check
+(non-empty string keys matching `^[A-Za-z_][A-Za-z0-9_]*$`, no NUL in a
+value, no key naming a registered secret in any case); builtin gates
+still reject it via the pre-existing unknown-key error. `run_argv` gains
+keyword-only `env:`, merged over `os.environ` for `Popen`;
+`execute_command_gate` is the only caller that passes it
+(`gate.get("env")`). `config/quality_gates.yaml`'s `skylos` entry pinned
+`env: { SKYLOS_GREP_BUDGET: "180" }`; `lint-docs.report_path` →
+`report-v1.10.1.md`. Gate-matrix test repointed at `spec-v1.10.1.md` with
+the `mutation-v1101` label added.
 
-## T4 — not reached: T1
+19 new tests in `tests/test_v1101_gates.py`, written first (confirmed red
+for the expected reason pre-implementation). Exact `GateConfigError`
+messages: `gates.g.env must map non-empty string keys to string values`;
+`gates.g.env key is not an identifier: <key>`; `gates.g.env value contains
+NUL: <key>`; `gates.g.env must not name a secret: <key>` (original casing
+preserved); a builtin gate carrying `env:` still hits the pre-existing
+`gates.g: unknown key(s) ['env']`.
 
-## T5 — not reached: T1
+Two disclosed deviations, both in the commit body: (1)
+`tests/test_v190_agents.py:278-286` (a duplicate `report_path` pin
+outside the brief's file list) needed its two literals bumped to stay
+green after the yaml repoint — the function name is left for whichever
+task next renames this file's tests; (2) this report's own `## Ledger
+row` placeholder was a bare `not reached: T0` string, which `lint-docs`
+correctly flagged (`ledger-row fenced block contains no table row`) —
+fixed by the orchestrator to the 11-column `| TBD | ... |` shape
+precedent (v1.10.0 T6 commit `761359a`) immediately after this task
+landed; `lint-docs` now green.
 
-## T6 — not reached: T1
+Gates 1-4 green; `doctor` green; `lint-docs` green (after the ledger-row
+fix above). Delegated (general-purpose subagent, brief
+`docs/spec/task-briefs/v1101-T2.md`). Commit `832e4e6`. Map vs actual:
+matches §16.1, plus the one disclosed out-of-brief test-literal fix.
 
-## T7 — not reached: T1
+## T3 — not reached: T2
 
-## T8 — not reached: T1
+## T4 — not reached: T2
+
+## T5 — not reached: T2
+
+## T6 — not reached: T2
+
+## T7 — not reached: T2
+
+## T8 — not reached: T2
 
 ## Ledger row (paste into `economics.md`)
 
-Provisional — filled finally at T7/T8:
+Provisional — filled finally at T7/T8 (placeholder shape matches
+`ledger_header`'s 11 columns, precedent v1.10.0 T6 commit `761359a`):
 
 ```
-not reached: T0
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 ```
