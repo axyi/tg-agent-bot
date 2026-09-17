@@ -92,7 +92,7 @@ Delegate to a subagent when **any one** of the following holds — inside a
 
 **Brief by file, never by retyping.** Load-bearing content the orchestrator
 already resolved goes into a task-brief file at
-`docs/spec/task-briefs/v190-T<N>.md`, and the subagent gets its path — never
+`docs/spec/task-briefs/v1102-T<N>.md`, and the subagent gets its path — never
 a retyped copy. The brief is ~5 lines, carries no history, and names files
 and line ranges. The subagent returns a summary — findings, counts,
 `file:line` — never raw content.
@@ -145,7 +145,7 @@ shell.
 
 ## Gates — run before reporting success
 
-All seven MUST exit 0, run in this order:
+All eight MUST exit 0, run in this order:
 
 ```bash
 uv sync --locked
@@ -160,10 +160,11 @@ uv run --locked python devtools/agent_eval.py
 
 Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1638
 tests as of spec-v1.9.5 T2). Gate 5 needs the live environment
-(a provisioned `.env`, a reachable Docker daemon with the sandbox image pulled,
-LM Studio and an OpenRouter key); it spends no inference tokens and sends no
-Telegram message. **Gate 5 must be fully green at every commit, including its
-`lmstudio` check** — the v1.2 "record the failure and proceed" exception is
+(a provisioned `.env`, a reachable Docker daemon with the sandbox image
+pulled, every provider the configuration routes to); it spends no
+inference tokens and sends no Telegram message. **Gate 5 must be fully
+green at every commit, including an OpenRouter key; LM Studio only when
+a route names it** — the v1.2 "record the failure and proceed" exception is
 withdrawn: an unreachable LM Studio is a blocked run, not a noted one, because
 the benchmark measures against it. Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
@@ -268,6 +269,12 @@ model and context length; `report --gate` machine-checks that (exit 2 when the
 pinned meta fields differ) so "same configuration" is never merely asserted.
 Scenarios are frozen once a baseline exists — changing `bench_scenarios.py`
 invalidates every file measured against it.
+
+v1.10.1 waived this rule by operator decision — the provider, the model
+and `prompt_tools_sha256` all changed, so no run was comparable to the LM
+Studio baseline; **v1.10.2 carries the waiver: its prompt change moves the
+hash again**; a fresh OpenRouter baseline is a candidate for a later
+release.
 
 ## go protocol
 

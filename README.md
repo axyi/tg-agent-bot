@@ -50,7 +50,8 @@ the chat id.
 cp .env.example .env
 ```
 
-Fill in `TELEGRAM_BOT_TOKEN` and `ALLOWED_TG_IDS` (comma-separated ids).
+Fill in `TELEGRAM_BOT_TOKEN`, `ALLOWED_TG_IDS` (comma-separated ids) and
+`OPENROUTER_API_KEY` — the production route now defaults to OpenRouter.
 `.env` is git-ignored and is the only place secrets live.
 
 `EXEC_WORKDIR` is bind-mounted read-write into the exec container, so the bot
@@ -235,12 +236,18 @@ state on its own line.
 
 ## Switch provider
 
-`LLM_PROVIDER=lmstudio` (the default) needs `LMSTUDIO_BASE_URL` and
+`LLM_PROVIDER=openrouter` (the default) needs `OPENROUTER_API_KEY` and
+`OPENROUTER_MODEL`.
+
+`LLM_PROVIDER=lmstudio` (the alternative) needs `LMSTUDIO_BASE_URL` and
 `LMSTUDIO_MODEL`. The loaded LM Studio model **must support native tool
 calling** — a model without tool-calling support will never invoke a tool and
 the agent will only ever chat.
 
-`LLM_PROVIDER=openrouter` needs `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`.
+The embeddings route (`EMBEDDING_BASE_URL`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`,
+used for RAG over user documents) now defaults to OpenRouter too; point it at
+a local LM Studio embeddings server instead by setting `EMBEDDING_BASE_URL`
+explicitly — see [Documents (RAG)](#documents-rag).
 
 **Failover.** With `LLM_FAILOVER=auto` (the default) and both providers fully
 configured, the bot wraps them: after 3 consecutive failures on the active
@@ -417,10 +424,14 @@ tool output.
 
 ### Embeddings
 
-The operator's confirmed pair for this deployment: `EMBEDDING_MODEL=
+`.env.example` now defaults the embeddings route to OpenRouter
+(`EMBEDDING_MODEL=openai/text-embedding-3-small`, `EMBEDDING_DIM=1536` — see
+[Switch provider](#switch-provider)). The operator's confirmed pair for
+*this* deployment stays local instead: `EMBEDDING_MODEL=
 text-embedding-nomic-embed-text-v1.5`, `EMBEDDING_DIM=768` — served locally
-by LM Studio, so retrieval adds no new external dependency and no API cost.
-Texts are embedded in batches of `llm.embeddings.BATCH_SIZE` = 32. The
+by LM Studio, so retrieval adds no new external dependency and no API cost
+for this instance. Texts are embedded in batches of
+`llm.embeddings.BATCH_SIZE` = 32. The
 active `model:dim` pair is recorded once in `bot_state` under the key
 `rag.embedding` (e.g. `text-embedding-nomic-embed-text-v1.5:768`) — see
 Storage below for what happens when it changes.
@@ -896,6 +907,8 @@ exactly as they are:
 | v1.9.3 | 1.9.3 | pre-push runs `mutation-all` (one authoritative run, not five subsets); gate-timeout SIGTERM-before-SIGKILL fix (no more orphaned, unrestored mutated tree); gate-7 rerank third-attempt tail fixed; ruff rule-family proposal adopted (`select` + `never`) |
 | v1.9.4 | 1.9.4 | secrets redacted at the logging layer (`RedactingFormatter`, every entry point); gate-7 smoke gains a context-proof third turn, measurable via the opt-in `LLM_EVAL_CHAT_MODEL`; a hung mutation is terminated and reported by id after 180s instead of tripping only the gate's own timeout; `PTH*`/`RUF043` ruff rows adopted |
 | v1.9.5 | 1.9.5 | `bot.py`'s three `storage.init_schema` call sites (`main()`, `run_selftest()`, `_live_db()`) now route through one shared `_init_startup_schema(conn, cfg)` helper that always passes the configured embedding pair (GitHub issue #3: `vec_chunks`/`rag.embedding` were never bound at startup on a RAG-configured deployment, so every document upload failed); `main()` gains a `ConfigError` catch matching its sibling startup guards; this release |
+| v1.10.0 | — | run stopped at T9 by the stop route, gate 8 red on model behaviour (injection 2/5, hallucination 2/4 on lmstudio:qwen/qwen3.8-27b), not tagged; the implemented suite ships with v1.10.2 |
+| v1.10.1 | — | run stopped at T6 by the stop route, gate 8 red on model behaviour (injection 1/5 on openai/gpt-4.1-mini — three clause-(e) misses, the prompt gap v1.10.2 closes), not tagged; every live gate moved onto OpenRouter; ships with v1.10.2 |
 
 ## Token economy
 

@@ -230,7 +230,9 @@ corrupt) — reviewed and judged in-scope, not drift.
 ## T6 — gate 8 registration and documentation
 
 Contract: `docs/spec/task-briefs/v1100-T6.md`, prompt 198. Executor
-`claude-sonnet-5`, this commit.
+`claude-sonnet-5`, this commit. — **not delegated: a deviation from
+`standards/workflow.md` §5.1, recorded on 2026-09-17 by v1.10.2 T3;
+`docs/llm-usage.md` row 108 corrected to match**
 
 Registered `agent-eval` (gate 8) in `config/quality_gates.yaml` immediately
 after `rag-eval`, with T0's measured `timeout_seconds: 8200` (see T0's

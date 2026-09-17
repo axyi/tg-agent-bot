@@ -66,9 +66,16 @@ def test_t_v190_ec_01_agents_md_sqlite_vec_named_as_the_vector_store():
     assert "`sqlite-vec` (the vector store)" in text
 
 
-def test_t_v190_ec_01_agents_md_seven_gate_block_present():
+# v1.10.2 T3 amendment (an EC-02-shaped gap found beyond the task brief's
+# own named one, docs/spec/task-briefs/v1102-T3.md sec.3): this test's
+# literal and its own name went stale the moment AGENTS.md's count sentence
+# became "All eight MUST exit 0" (gate 8, `agent_eval.py`, was already in
+# the command list) -- bumped here only so this assertion stays live and
+# pytest stays green, the same precedent as test_t_v1100_ec_01_quality_
+# gates_yaml_repoints_report_path's own disclosed bump below.
+def test_t_v1102_ec_01_agents_md_eight_gate_block_present():
     text = _read_agents_md()
-    assert "All seven MUST exit 0" in text
+    assert "All eight MUST exit 0" in text
     for gate_cmd in [
         "uv sync --locked",
         "uv run --locked ruff check .",
@@ -77,14 +84,15 @@ def test_t_v190_ec_01_agents_md_seven_gate_block_present():
         "uv run --locked python bot.py --selftest-live",
         "uv run --locked python devtools/mutation_check.py",
         "uv run --locked python devtools/rag_eval.py",
+        "uv run --locked python devtools/agent_eval.py",
     ]:
         assert gate_cmd in text, f"missing gate command: {gate_cmd!r}"
 
 
-def test_t_v190_ec_01_agents_md_brief_path_token_is_v190():
+def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1102():
     text = _read_agents_md()
-    assert "docs/spec/task-briefs/v190-T<N>.md" in text
-    assert "docs/spec/task-briefs/v180-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1102-T<N>.md" in text
+    assert "docs/spec/task-briefs/v190-T<N>.md" not in text
 
 
 def test_t_v190_ec_01_agents_md_brief_path_sentence_unchanged_besides_token():
@@ -287,8 +295,8 @@ def test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path():
     # leave this assertion stale and pytest red; the function name is left
     # for whichever task owns this file's renames next).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.10.1.md" in text
-    assert "report_path: docs/reports/report-v1.10.0.md" not in text
+    assert "report_path: docs/reports/report-v1.10.2.md" in text
+    assert "report_path: docs/reports/report-v1.10.1.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:
