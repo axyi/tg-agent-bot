@@ -31,7 +31,7 @@ at T0. Gate 7 may exit 2 on a live rerank failure — the spec's GATE-01
 predicate says exactly when a re-invocation is allowed (up to two, never
 counted as a repair cycle) and when it is not.
 
-**No push in this run.** The operator pushes `main` (now 39 commits ahead:
+**No push in this run.** The operator pushes `main` (now 40 commits ahead:
 v1.10.0 run, spec-v1.10.1 + its run, spec-v1.10.2, this run) and the tag
 `v1.10.2` together afterwards. The pre-push hook reads the working tree's
 `config/quality_gates.yaml`, which already carries `SKYLOS_GREP_BUDGET=180`
@@ -128,11 +128,11 @@ outside the list become the T0 amendment table before any live call.
 
 ## State
 
-- Spec: `docs/spec/spec-v1.10.2.md`, 143,851 bytes (the brief's 90 KB cap
+- Spec: `docs/spec/spec-v1.10.2.md`, 144,113 bytes (the brief's 90 KB cap
   was overshot by the three rounds; the growth is normative content).
 - Commits: `79f557d` (draft, citations audited ~340/19, three audit
   contradictions applied), `1a805bc` (round 1), `b651e7e` (round 2),
-  `0d0a46b` (round 3). Authoring prompt:
+  `0d0a46b` (round 3), `d651b0d` (T0 inventory follow-up). Authoring prompt:
   `docs/prompts/211-v1102-spec-authoring.md`. The run's own prompts start
   at **212**; `docs/llm-usage.md` continues at row 124.
 - `[[VERIFY: …]]` markers: **2**, each with its decision rule (the rendered
