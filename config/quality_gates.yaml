@@ -570,11 +570,13 @@ gates:
   # targeted test -> revert, never the CLI's mutate -> run -> revert
   # machinery over the whole list or under --select "v1102-") confirmed
   # each of the six entries killed by its expected test, but did not time
-  # the six as a group under the real runner. `timeout_seconds` below is a
-  # PLACEHOLDER -- orchestrator fills this from the calibration run
-  # (`time uv run --locked python devtools/mutation_check.py --select
-  # "v1102-"`, once, tree clean, immediately after this task's commit)
-  # before this gate is first relied on.
+  # the six as a group under the real runner. spec-v1.10.2 T5 (orchestrator,
+  # commands only, on the committed tree, immediately after commit
+  # `bc96361`): the `--select v1102-` calibration run measured 6/6 killed,
+  # real=18.11s -> 2x 18.11s + 70s (survivor-safe rule) = 106.22s, rounded
+  # up to 110s. This is the calibration run, not a gate-6 acceptance run --
+  # the six entries' proof is the full `mutation-all` run that includes
+  # them.
   mutation-v1102:
     kind: command
     result_mode: exit_status
@@ -583,7 +585,7 @@ gates:
     success_exit_codes: [0]
     blocking: true
     diff_scoped: false
-    timeout_seconds: 60  # PLACEHOLDER -- orchestrator fills this from the calibration run
+    timeout_seconds: 110
 
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
