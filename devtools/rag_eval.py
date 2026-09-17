@@ -753,6 +753,7 @@ def main() -> int:
             cfg.embedding_dim,
             cfg.embedding_timeout_s,
             client,
+            api_key=cfg.embedding_api_key,
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "rag_eval.db"

@@ -378,15 +378,24 @@ def test_t_v190_ret_09_configured_and_healthy_succeeds(capsys):
     assert out == "live: OK embeddings\n"
 
 
-def test_t_v190_ret_09_model_not_loaded_fails(capsys):
-    cfg = minimal_cfg(embedding_base_url=BASE_URL, embedding_model="missing-model", embedding_dim=3)
-    code = bot_module._live_embeddings(
-        cfg, client_for(embeddings_handler(models=("other-model",), dim=3))
+def test_t_v1101_g5_02_no_models_listing_is_issued(capsys):
+    # v1.10.1 T1 (REQ-V1101-G5-02): the `/models` listing step is dropped
+    # from `_live_embeddings` entirely -- OpenRouter's embedding catalogue
+    # lives at `/embeddings/models`, not `/models`. A `/models` endpoint
+    # answering 500 no longer matters: the probe never reaches it, and the
+    # authenticated `/embeddings` round-trip alone still succeeds.
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(500, text="boom")
+        return embeddings_handler()(request)
+
+    cfg = minimal_cfg(
+        embedding_base_url=BASE_URL, embedding_model="text-embedding-x", embedding_dim=3
     )
+    code = bot_module._live_embeddings(cfg, client_for(handler))
     out = capsys.readouterr().out
-    assert code == 1
-    assert "live: FAIL embeddings" in out
-    assert "missing-model" in out
+    assert code == 0
+    assert out == "live: OK embeddings\n"
 
 
 def test_t_v190_ret_09_dimension_mismatch_fails(capsys):
@@ -401,7 +410,11 @@ def test_t_v190_ret_09_dimension_mismatch_fails(capsys):
     assert "live: FAIL embeddings" in out
 
 
-def test_t_v190_ret_09_models_endpoint_http_error_fails(capsys):
+def test_t_v1101_g5_02_embeddings_endpoint_http_error_fails(capsys):
+    # v1.10.1 T1: the only remaining request is the authenticated POST
+    # `/embeddings` round-trip -- an unconditional 500 (whatever path it
+    # would have landed on before the `/models` step was dropped) still
+    # fails the probe, now for the right reason.
     cfg = minimal_cfg(embedding_base_url=BASE_URL, embedding_model="m", embedding_dim=3)
     code = bot_module._live_embeddings(cfg, client_for(lambda r: httpx.Response(500, text="boom")))
     out = capsys.readouterr().out

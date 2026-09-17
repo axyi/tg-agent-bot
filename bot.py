@@ -1860,6 +1860,22 @@ def _live_telegram(cfg: Config, client: httpx.Client) -> int:
 
 
 def _live_lmstudio(cfg: Config, client: httpx.Client) -> int:
+    # v1.10.1 T1 (REQ-V1101-G5-01): a run that never routes anything to LM
+    # Studio -- neither the main provider nor any of the four purpose
+    # routes -- has nothing to probe here; a deployment that does route to
+    # it (the provider itself, or any `lmstudio:`-prefixed purpose) still
+    # fails hard on an unreachable box, exactly as before this rule.
+    routed_purposes = (
+        cfg.llm_summary_model,
+        cfg.llm_rerank_model,
+        cfg.llm_eval_chat_model,
+        cfg.llm_judge_model,
+    )
+    if cfg.llm_provider != "lmstudio" and not any(
+        purpose.startswith("lmstudio:") for purpose in routed_purposes
+    ):
+        print("live: SKIP lmstudio (no route uses it)")
+        return 0
     if not (cfg.lmstudio_base_url and cfg.lmstudio_model):
         print("live: SKIP lmstudio (not configured)")
         return 0
@@ -1898,22 +1914,17 @@ def _live_embeddings(cfg: Config, client: httpx.Client) -> int:
         # gets one fixed, exact message.
         print("live: FAIL embeddings (EMBEDDING_MODEL and EMBEDDING_DIM are not set)")
         return 1
-    try:
-        response = client.get(f"{cfg.embedding_base_url}/models", timeout=LIVE_READ_TIMEOUT_S)
-        if response.status_code != 200:
-            return _live_fail("embeddings", f"http {response.status_code}: {response.text[:200]}")
-        body = response.json()
-    except Exception as exc:
-        return _live_fail("embeddings", exc)
-    models = [entry.get("id") for entry in (body.get("data") or [])]
-    if cfg.embedding_model not in models:
-        return _live_fail("embeddings", f"model {cfg.embedding_model} is not loaded")
+    # v1.10.1 T1 (REQ-V1101-G5-02): the unauthenticated `GET .../models`
+    # listing is dropped -- OpenRouter's embedding catalogue lives at
+    # `/embeddings/models`, not `/models` -- so the one authenticated
+    # `/embeddings` round-trip below is the whole check.
     embedder = EmbeddingsClient(
         cfg.embedding_base_url,
         cfg.embedding_model,
         cfg.embedding_dim,
         LIVE_READ_TIMEOUT_S,
         client,
+        api_key=cfg.embedding_api_key,
     )
     try:
         vectors = embedder.embed(["selftest"])
@@ -2096,6 +2107,7 @@ def main(argv: list[str] | None = None) -> int:
             cfg.embedding_dim,
             cfg.embedding_timeout_s,
             client,
+            api_key=cfg.embedding_api_key,
         )
         if cfg.rag_enabled
         else None

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 import httpx
 
 import tracing
+from config import is_openrouter_url
 
 BATCH_SIZE = 32
 
@@ -35,14 +36,19 @@ class EmbeddingsClient:
         dim: int,
         timeout_s: float,
         client: httpx.Client,
+        *,
+        api_key: str = "",
     ) -> None:
         self.base_url = base_url
         self.model = model
         self.dim = dim
         self.timeout_s = timeout_s
         self._client = client
+        self.api_key = api_key
 
     def describe(self) -> tuple[str, str]:
+        if is_openrouter_url(self.base_url):
+            return ("openrouter", self.model)
         return ("lmstudio", self.model)
 
     def embed(self, texts: Sequence[str], *, conv_id: int | None = None) -> list[list[float]]:
@@ -68,7 +74,7 @@ class EmbeddingsClient:
             conv_id=conv_id,
         ) as span:
             span.set_attribute("gen_ai.operation.name", "embeddings")
-            span.set_attribute("gen_ai.provider.name", "lmstudio")
+            span.set_attribute("gen_ai.provider.name", self.describe()[0])
             span.set_attribute("gen_ai.request.model", self.model)
             span.set_attribute("tg_agent.embeddings.batch_size", len(batch))
             span.set_attribute("tg_agent.embeddings.dim", self.dim)
@@ -93,10 +99,12 @@ class EmbeddingsClient:
             raise EmbeddingError(f"embeddings transport error: {exc.__class__.__name__}") from exc
 
     def _post(self, batch: list[str]) -> list[list[float]]:
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
         response = self._client.post(
             f"{self.base_url}/embeddings",
             json={"model": self.model, "input": batch},
             timeout=self.timeout_s,
+            headers=headers,
         )
         if response.status_code != 200:
             raise EmbeddingError(f"embeddings http {response.status_code}")

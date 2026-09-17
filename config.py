@@ -12,6 +12,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import dotenv
 
@@ -191,6 +192,13 @@ class Config:
     embedding_timeout_s: float = 60.0
     rag_top_k: int = 5
     rag_rerank: str = "on"
+    # v1.10.1 T1 addition (REQ-V1101-CFG-02): the bearer key sent to the
+    # embeddings endpoint, resolved from the already-registered
+    # OPENROUTER_API_KEY secret whenever `embedding_base_url` is an
+    # OpenRouter host -- never a new environment variable. Empty everywhere
+    # else, including an LM Studio embeddings URL, so the client sends no
+    # `Authorization` header (EC-05's "unset stays harmless" pattern).
+    embedding_api_key: str = ""
 
     @property
     def rag_enabled(self) -> bool:
@@ -315,6 +323,16 @@ def parse_summary_model(raw: str) -> tuple[str, str] | None:
     (and its error text byte-identical) because it predates the general
     parser and existing call sites/tests name it directly."""
     return parse_routed_model(raw, "LLM_SUMMARY_MODEL")
+
+
+def is_openrouter_url(url: str) -> bool:
+    """REQ-V1101-CFG-02: `True` only for an exact `https://openrouter.ai`
+    host -- a scheme downgrade (`http://`) or a host that merely contains
+    `openrouter.ai` as a prefix/suffix (`openrouter.ai.evil`,
+    `notopenrouter.ai`) is `False`. Imported by `llm/embeddings.py`
+    (`llm -> config`, the existing dependency direction; no cycle)."""
+    parts = urlsplit(url)
+    return parts.scheme == "https" and (parts.hostname or "").casefold() == "openrouter.ai"
 
 
 def load_config(
@@ -490,6 +508,12 @@ def load_config(
     else:
         embedding_base_url = lmstudio_base_url
 
+    # v1.10.1 T1 (REQ-V1101-CFG-02): the same already-registered
+    # OPENROUTER_API_KEY secret (`:361`), under a second attribute -- no new
+    # environment variable, resolved once here from the final
+    # `embedding_base_url`.
+    embedding_api_key = openrouter_api_key if is_openrouter_url(embedding_base_url) else ""
+
     embedding_model = _value(source, "EMBEDDING_MODEL")
     embedding_dim_raw = _value(source, "EMBEDDING_DIM")
     embedding_dim = _parse_int(source, "EMBEDDING_DIM", 0, 1, 4096) if embedding_dim_raw else None
@@ -567,6 +591,7 @@ def load_config(
         embedding_model=embedding_model,
         embedding_dim=embedding_dim,
         embedding_timeout_s=embedding_timeout_s,
+        embedding_api_key=embedding_api_key,
         rag_top_k=rag_top_k,
         rag_rerank=rag_rerank,
     )
