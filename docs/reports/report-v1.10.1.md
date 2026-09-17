@@ -297,15 +297,70 @@ Delegated (general-purpose subagent, brief `docs/spec/task-briefs/v1101-T3.md`).
 Commit `526e19d`. Map vs actual: matches §16.1, plus the disclosed
 `record_tool_calls` design resolution.
 
-## T4 — not reached: T3
+## T4 — prompt/tool literals compel a document search; PRM-02's before/after
 
-## T5 — not reached: T3
+Two exact-text changes: `agent.py`'s `SYSTEM_PROMPT` docs line (137 →
+203 chars) and `tools.py`'s `search_documents` description; rendered
+prompt 670 → **736** chars (independently re-verified by the
+orchestrator, ASCII confirmed). `PROMPT_LIMIT` 700 → 800
+(`tests/test_prefix.py:29`); `tests/test_v190_tool.py:372-390`'s
+`PROMPT_LINE`, 140→210 and 700→800 caps, both tests renamed; the stale
+"kept under 550 characters" comment corrected to name `PROMPT_LIMIT`.
+`tests/test_v1_guardrails.py:829-864` confirmed green, unamended.
 
-## T6 — not reached: T3
+**Disclosed EC-02 exhaustive-list gap** (not a scope-widening judgment
+call — a mechanical, unavoidable consequence of the already-authorized
+text change, surfaced only once the string length was actually measured):
+the longer `search_documents` description (129 → ~194 chars) also broke
+two **pre-existing** `tests/test_v190_tool.py` tests that EC-02's
+amendment table does not list — `test_t_v190_tool_01_the_fourth_entry_is_appended_last_and_exact`
+(a frozen exact-match pin of the old description string, ~line 74-77) and
+`test_t_v190_tool_01_the_entry_fits_350_chars` (~line 100-104, renamed to
+`_420_chars_`, cap raised). Both are narrow re-pins of the same literal
+PRM-01 already authorized — no test weakened in intent, none deleted —
+but strictly they sit outside EC-02's enumerated site list. The subagent
+consulted its own advisor before making this call; the orchestrator
+judges the fix correct and proportionate (halting the run over a two-line
+budget-comment re-pin would be disproportionate), but flags it here as a
+gap in the spec's own EC-02 table for the record, per this project's
+"spec drift" rule — future spec authors covering a prompt-literal change
+should grep the whole file for every string-length-dependent test, not
+just the ones a first pass finds. Also fixed for free by the same
+ASCII-substitution decision (em dash `—` → repo-convention `--`, since a
+pre-existing ASCII-purity test on tool descriptions would otherwise fail
+regardless of EC-02): `test_pfx_02_the_descriptions_stay_ascii_and_quote_free`
+and the two 1800-char catalog-budget tests, neither of which needed a
+limit change once the substitution was made.
 
-## T7 — not reached: T3
+PRM-02, gate 7 live exactly twice, in sequence (T1's earlier run is not
+reused):
 
-## T8 — not reached: T3
+| | wall | `hybrid` recall@5 | TOOL-06 pin | context-proof |
+|---|---|---|---|---|
+| Before (unchanged tree) | 31.58s | 1.000 | fail — "turn 2 recorded no search_documents call sharing a token with turn 1's question (turn 2 queries: [])" | fail — "turn 3 recorded no search_documents call" |
+| After (edited tree) | 32.16s | 1.000 | fail — identical message | fail — identical message |
+
+No regression (`recall@5` well above its 0.8 floor both times); the
+advisory smoke verdicts are **unchanged** — the literal change did not
+move this particular smoke's outcome. Recorded verbatim per NG-07, not
+repaired, not a defect — the carried tail (report-v1.9.4.md:680-690,
+report-v1.10.0.md:441) stays open as a "recorded, not fixed" item for a
+future release to revisit with a different lever than prompt wording.
+
+Gates 1-4 green both before and after (pytest full suite). Orchestrator
+independently re-verified the 736-char count and a fresh full `pytest -q`
+run, both green.
+
+Delegated (general-purpose subagent, brief `docs/spec/task-briefs/v1101-T4.md`).
+Commit `ac39435`. Map vs actual: the two extra test re-pins above (disclosed).
+
+## T5 — not reached: T4
+
+## T6 — not reached: T4
+
+## T7 — not reached: T4
+
+## T8 — not reached: T4
 
 ## Ledger row (paste into `economics.md`)
 
