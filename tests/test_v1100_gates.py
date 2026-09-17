@@ -225,11 +225,12 @@ def _v1100_mutations() -> list[dict]:
     return [m for m in mc.MUTATIONS if m["id"].startswith("v1100-")]
 
 
-def test_exactly_seven_v1100_then_six_v1101_mutations_after_the_last_v195_entry():
-    # spec-v1.10.1 T6a (REQ-V1101-GATE-02, the EC-02 amendment table's
-    # tests/test_v1100_gates.py:228-240 row): the whole tail after the last
+def test_exactly_seven_v1100_then_six_v1101_then_six_v1102_mutations_after_the_last_v195_entry():
+    # spec-v1.10.2 T5 (REQ-V1102-GATE-02, the EC-02 amendment table's
+    # tests/test_v1100_gates.py:228-249 row): the whole tail after the last
     # v195-* entry is now seven v1100-* entries followed by six v1101-*
-    # entries, in order -- thirteen total, pinned exactly.
+    # entries followed by six v1102-* entries, in order -- nineteen total,
+    # pinned exactly.
     ids = [m["id"] for m in mc.MUTATIONS]
     last_v195_index = max(i for i, mid in enumerate(ids) if mid.startswith("v195-"))
     tail = ids[last_v195_index + 1 :]
@@ -247,6 +248,12 @@ def test_exactly_seven_v1100_then_six_v1101_mutations_after_the_last_v195_entry(
         "v1101-hal-none-of-dropped",
         "v1101-embeddings-auth-header-dropped",
         "v1101-gate-env-passthrough-dropped",
+        "v1102-secrets-line-dropped",
+        "v1102-first-clause-only",
+        "v1102-tool-log-not-filled",
+        "v1102-tool-log-unredacted",
+        "v1102-inj-gap-marker-dropped",
+        "v1102-hal-gap-marker-dropped",
     ]
     # ...and every v1100-* id in MUTATIONS is exactly the seven above, in
     # this order -- the original test's other guarantee, preserved.

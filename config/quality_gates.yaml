@@ -27,7 +27,7 @@ profiles:
   # `mutation_check.py --select <prefix>` directly, kept for this
   # release's T2/T3 re-measurements and any future per-range work.
   mutation-subsets: [mutation-v15, mutation-v160, mutation-v170, mutation-v180,
-                     mutation-v190, mutation-v1100, mutation-v1101]
+                     mutation-v190, mutation-v1100, mutation-v1101, mutation-v1102]
 
 # T1 writes each pin at its currently-installed version (REQ-V15-DEP-04);
 # trivy and skylos are not installed yet and stay absent from this block
@@ -559,6 +559,32 @@ gates:
     diff_scoped: false
     timeout_seconds: 120
 
+  # spec-v1.10.2 T5 (docs/spec/task-briefs/v1102-T5.md, REQ-V1102-GATE-02,
+  # 2026-09-18): six v1102-* entries added (139 total in MUTATIONS -- see
+  # mutation-all's own dated comment below). Same bootstrapping constraint
+  # as mutation-v1100's and mutation-v1101's comments above:
+  # `devtools/mutation_check.py` is itself one of the paths named by other
+  # MUTATIONS entries, so the CLI's own dirty-tree guard refuses to start
+  # while this task's own edit to that file is uncommitted -- this task's
+  # own quick, direct per-mutation sanity checks (mutate -> run the one
+  # targeted test -> revert, never the CLI's mutate -> run -> revert
+  # machinery over the whole list or under --select "v1102-") confirmed
+  # each of the six entries killed by its expected test, but did not time
+  # the six as a group under the real runner. `timeout_seconds` below is a
+  # PLACEHOLDER -- orchestrator fills this from the calibration run
+  # (`time uv run --locked python devtools/mutation_check.py --select
+  # "v1102-"`, once, tree clean, immediately after this task's commit)
+  # before this gate is first relied on.
+  mutation-v1102:
+    kind: command
+    result_mode: exit_status
+    argv: [uv, run, --locked, python, devtools/mutation_check.py, --select, "v1102-"]
+    placeholders: {}
+    success_exit_codes: [0]
+    blocking: true
+    diff_scoped: false
+    timeout_seconds: 60  # PLACEHOLDER -- orchestrator fills this from the calibration run
+
   # mutation-all: T13 measured 1908.041s at 82 entries (2026-09-05); T14
   # added an eleventh v160-* entry (83 total). Orchestrator re-measured
   # directly on 2026-09-05 (`time uv run --locked python
@@ -665,12 +691,18 @@ gates:
   #
   # spec-v1.10.1 T6a (docs/spec/task-briefs/v1101-T6a.md, REQ-V1101-RUN-02,
   # 2026-09-17): six v1101-* entries added -- `len(devtools.mutation_check.
-  # MUTATIONS)` is now 133 (up from 127 at `1d96ca0`). RUN-02 keeps this
+  # MUTATIONS)` closed at 133 (up from 127 at `1d96ca0`). RUN-02 keeps this
   # gate's own `argv` and `timeout_seconds` unchanged this task --
   # `mutation-all` is not re-measured here despite the count moving; the
   # orchestrator's own authoritative all-133 run immediately after this
   # task's commit is what will confirm (or refute) 1640s still covers the
   # larger table.
+  #
+  # spec-v1.10.2 T5 appended 6 `v1102-*` entries; `len(devtools.
+  # mutation_check.MUTATIONS)` is now 139. This task does not touch this
+  # gate's own `argv` or `timeout_seconds` either -- the orchestrator's
+  # authoritative all-139 run immediately after this task's commit is what
+  # will confirm (or refute) 1640s still covers the larger table.
   mutation-all:
     kind: command
     result_mode: exit_status

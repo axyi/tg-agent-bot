@@ -342,15 +342,17 @@ def test_v1101_gate02_is_in_mutation_subsets_and_no_hook_profile():
 
 def test_v1101_gate02_mutation_all_comment_count_matches_len_mutations():
     # Parses the count out of `mutation-all`'s newest dated comment
-    # paragraph (the one this task appended, naming this task's own
-    # source) rather than hardcoding 133 -- a future release that adds an
-    # entry and forgets to update the comment must fail this test.
+    # paragraph -- re-anchored at spec-v1.10.2 T5's own dated sentence
+    # (the only one in the block still carrying "is now") since T5
+    # reworded v1.10.1 T6a's sentence to drop that phrase -- rather than
+    # hardcoding a count -- a future release that adds an entry and
+    # forgets to update the comment must fail this test.
     text = checks.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
     match = re.search(
-        r"spec-v1\.10\.1 T6a.*?MUTATIONS\)`\s*is now (\d+)",
+        r"spec-v1\.10\.2 T5.*?MUTATIONS\)`\s*is now (\d+)",
         text,
         re.DOTALL,
     )
-    assert match, "mutation-all's v1.10.1 T6a dated comment paragraph not found"
+    assert match, "mutation-all's v1.10.2 T5 dated comment paragraph not found"
     documented_count = int(match.group(1))
     assert documented_count == len(mc.MUTATIONS)
