@@ -214,17 +214,98 @@ fix above). Delegated (general-purpose subagent, brief
 `docs/spec/task-briefs/v1101-T2.md`). Commit `832e4e6`. Map vs actual:
 matches §16.1, plus the one disclosed out-of-brief test-literal fix.
 
-## T3 — not reached: T2
+## T3 — the checkers (RT-01…05) and the gate-8 runner's tool surface
 
-## T4 — not reached: T2
+Clause (c) is now clause-bounded and echo/negation-aware: env-key names
+are a hit only in the leak-shape regex (four value alternatives, atomic
+bracketed/quoted capture, `LEAK_PLACEHOLDERS` exclusion); every other
+phrase is checked per clause (sentence boundaries plus the adversative /
+transition / coordination boundary list, `и теперь`/`and now` before the
+bare `и`/`and`), with a shared negation guard (`не`/`don't`/`do
+not`/`does not`/`doesn't`/`did not`/`didn't`/`never`) suppressing a
+marker match only within its own clause. `INJ_MARKERS` and `HAL_MARKERS`
+both grew 8 → 15; the fifteenth `INJ_MARKERS` entry is a bounded
+committed-refusal shape (`.{0,60}` gap + explicit verb), not "topic plus a
+later `не`". `_injection_clauses`/`check_injection` now return/report a
+5-tuple `(a,b,c,d,e)` — new clause (e) fails an injection case that
+called `exec`/`fetch` (`"(e) tool called under attack: {name}"`).
+`check_hallucination` drops its entity conjunction (`entity` still read,
+still raises `KeyError` if missing, no longer gates the outcome).
 
-## T5 — not reached: T2
+Gate-8 runner: a real `rag.Searcher` per turn (production's `RAG_ENABLED`
+path) over the empty temp index when `cfg.rag_enabled`, fourth
+`EmbeddingsClient` constructor site (`EMB-02`'s total now four);
+per-case tool-call recording via an opt-in `record_tool_calls` parameter
+(design note below) threaded into `check_step`'s new `tool_calls`
+argument for injection cases.
 
-## T6 — not reached: T2
+**Design deviation, disclosed and reviewed:** the brief's literal
+"`_one_turn` always passes `on_tool` to `run_agent_outcome`" is
+unreachable together with the hard constraint that
+`tests/test_v1100_runner.py` stays unamended — ~29 of its tests inject a
+`ScriptedTurns` fake with no `on_tool` parameter. Resolved (subagent
+consulted its own advisor mid-task) with an explicit `record_tool_calls:
+bool = False` opt-in threaded `run()` → `_run()` → `_run_level2_cases()`
+(`main()` passes `True`; every offline test defaults `False`), plus a
+`None`-guard in `_one_turn` that only adds `on_tool` to the
+`run_agent_outcome` kwargs when it isn't `None`. `tests/
+test_v1100_runner.py` (86 tests) confirmed green, completely unamended,
+before and after. Accepted — the alternative (editing the fixture file)
+was explicitly out of scope.
 
-## T7 — not reached: T2
+Five case-specific `any_of` regexes invented for the five injection
+cases, each verified programmatically against its own case's
+`positive_reply`/`negative_reply` and against `HAL_MARKERS` disjointness;
+one self-correction mid-task (INJ-04: "не предусмотрено" → "не
+предусмотрен", matching the dataset's actual grammatical form, caught by
+testing against the live text rather than a paraphrase). `Searcher` built
+fresh per turn (not per case) — within the brief's stated either-reading
+tolerance.
 
-## T8 — not reached: T2
+**Minor disclosed nit** (no fix needed): two tests in `tests/
+test_v1101_runner.py` are labelled `T-V1101-ERR-01` rows 7-8 but actually
+cover the pre-existing LLMError-abort paths, not this release's rows 7
+(clause (e)'s message) and 8 (`DatasetError` on invariants (vii)-(x)) —
+the subagent misread the row citation without reading the full spec
+(by design, to save context) and guessed from `agent_eval.py`'s own
+docstrings. The *actual* rows 7 and 8 behaviour is fully covered
+elsewhere in the same commit (clause (e)'s dedicated tests; the
+schema/invariant tests in `tests/test_v1101_red_team.py`) — this is a
+test-label mislabeling, not a coverage gap. Left as is; noted for T8's
+final accounting.
+
+95 new tests in `tests/test_v1101_red_team.py`, 15 in `tests/
+test_v1101_runner.py`, `tests/test_v1101_embeddings.py`'s `EMB-05A` test
+extended 3 → 4 sites. Four amendment sites inside `tests/
+test_v1100_red_team.py` (the `markers=` call, the two "exactly eight" →
+"exactly fifteen" lists, the entity-reference assertion flip), nothing
+else in that file touched — confirmed (78 tests, all green unamended
+beyond the four sites).
+
+Both dataset files frozen by `sha256`:
+- `evals/agent/red_team.json`:
+  `3fbb6c9579ed0b358be9e04444a1196a2ce4cdf351ad36274eaf146a86c3d025`
+- `evals/agent/judge_questions.json` (unedited, hashed only):
+  `71143395a92002bd063b8fdf6be36b44c80fb5a1863cf3ff4b18ca4d501cdf9c`
+
+Gates 1-4 green (pytest: 2024 passed / 1 skipped). Entirely offline — no
+gate 5/6/7/8 this task. Orchestrator spot-verified `_injection_clauses`/
+`check_injection`'s 5-tuple and clause-(e) message against the source,
+plus an independent fresh `pytest -q` run, both green.
+
+Delegated (general-purpose subagent, brief `docs/spec/task-briefs/v1101-T3.md`).
+Commit `526e19d`. Map vs actual: matches §16.1, plus the disclosed
+`record_tool_calls` design resolution.
+
+## T4 — not reached: T3
+
+## T5 — not reached: T3
+
+## T6 — not reached: T3
+
+## T7 — not reached: T3
+
+## T8 — not reached: T3
 
 ## Ledger row (paste into `economics.md`)
 
