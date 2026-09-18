@@ -1,4 +1,4 @@
-# tg-agent-bot v1.10.4 — report skeleton (T0)
+# tg-agent-bot v1.10.4 — the five `v1103-*` mutation entries landed, every frozen-list test pin rewritten, gate 8 green on this run
 
 The five `v1103-*` mutation entries the v1.10.3 run authored and verified
 but stopped before committing, landed; every frozen-list test pin
@@ -861,6 +861,59 @@ next.
 ### Delegation record (T5)
 
 - T5 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T5.md | map vs actual: matches — the version bump, `uv lock`, the two new version-identity tests (red-before/green-after recorded), `tests/test_v195_version.py`'s repoint, README's release/gate-8 tables plus `T-V1104-DOC-02` (red-before/green-after), AGENTS.md's count lines plus the renamed `T-V1104-DOC-04` (red-before/green-after), the provisional tg-post/ledger-row/llm-usage artefacts and gates 1-4, no drift disclosed; the second (evidence-only) commit's bullet is the orchestrator's own, appended here after it lands
+- T5 | delegated: no | to: — (commands only) | brief: — | map vs actual: matches §10.1 — gates 1-7, the identity check, the collection check, `replay`, E1-E7, the evidence commit, `E8` and the local tag are all commands-only orchestrator work
+
+### T5, continued — gates 1-7, the gate-8 identity check, `replay`, E1-E7 (orchestrator, commands only, on `c13a7f0`)
+
+**Disclosed, zero-budget artefact fix**: `docs/prompts/233-v1104-t5-version-bump.md`, as written by the orchestrator before delegation, failed `lint-docs` on two counts once the report's `report_path` made it live-checked: the `**Owner of (first commit only):**` header cell broke `_PRM_BULLET_RE`'s exact `**<field>:**` match, and `## Acceptance` carried no backtick command/`test_`-id/path token. Both are prompt-template formatting defects, not delegation-record or content problems (the subagent's own delegation bullet, content and commit were all unaffected — `lint-docs`'s prompt checks and its report-ledger/delegation checks are independent). Fixed directly (single edit under every threshold — the §5.1 *a single edit under every threshold* exemption): the header field reworded to `**Owner of:** (first commit only) ...`, and `## Acceptance` now names the actual test id and `uv run --locked pytest -q` command. `uv run --locked python devtools/checks.py lint-docs` — PASS after the fix. This fix rides into the evidence commit below (`docs/prompts/233-*.md` is one of that commit's four authorized paths, so no extra path is needed).
+
+**Gates 1-7 on `c13a7f0`** (T5's first commit):
+
+| # | Gate | Exit | Wall / detail |
+| --- | --- | --- | --- |
+| 1 | `uv sync --locked` | 0 | fast — 25 packages resolved, 23 checked |
+| 2 | `ruff check .` | 0 | all checks passed |
+| 3 | `pytest` | 0 | full suite green |
+| 4 | `bot.py --selftest` | 0 | `selftest: OK` |
+| 5 | `bot.py --selftest-live` | 0 | all `OK`, `SKIP lmstudio (no route uses it)` |
+| 6 | `mutation_check.py` | 0 | **144/144 killed, 0 survived/errored/drifted**, real **940s** (well under the 1640s cap) |
+| 7 | `rag_eval.py` | 0 | `hybrid: recall@5=1.000 mrr=1.000`; clean on attempt 1, no transient re-invocation; advisory conversation-aware smoke both fail (unchanged, non-blocking) |
+
+**Gate-8 identity check** (`REQ-V1100-GATE-01`/`GATE-01`'s reuse rule):
+`git diff 216412bb99431fd61d3cc83133986c4776740681 c13a7f0 --
+$(uv run --locked python devtools/agent_eval.py --print-dependencies)`
+touches only `pyproject.toml` and `uv.lock`, both hunks the
+`version = "1.9.5"` → `"1.10.4"` line inside the `tg-agent-bot` package
+— `dependency_diff_is_version_only(diff_text) == True`. **Gate 8 is
+reused from T4's single execution**: injection 5/5 (floor 5),
+hallucination 4/4 (floor 3), memory 3/3 (floor 3), judge mean 0.907
+(floor 0.8) — not re-run (`REQ-V1104-GATE-01`: gate 8 exactly once in
+the entire run, already spent at T4).
+
+**Collection check** (`TST-01`): `uv run --locked pytest --collect-only
+-q -o addopts="" | grep -c '::'` = **2311** ≥ floor (2285) + 22 = 2307.
+PASS.
+
+**`replay --range f3ce1a5..c13a7f0`**: all 13 commits in the run's own
+range read `[PASS] <sha>: clean` — `5b17454`, `e7690f1`, `8c9a2e1`,
+`2939aa2`, `2d09cd0` (the authoring/handoff commits, pre-`go`), then
+`b689195` (T0), `0b10097` (T1), `09cca94` (T2), `2caa595` (T3),
+`92151f6`/`216412b`/`244b9a4` (T4), `c13a7f0` (T5's first commit).
+
+**Appendix B, E1-E7** (`spec-v1.10.4.md:985-1014`), run explicitly:
+`uv run --locked pytest -q tests/test_v1104_gates.py
+tests/test_v1104_docs.py tests/test_v1104_version.py` — **26 passed**,
+covering every scenario: E1 (the five landed entries, the pre-apply
+record — `T-V1104-MUT-01/02/05`, verified at T2), E2 (the tail is open
+— `T-V1104-PIN-01/02`, T1), E3 (the release-agnostic anchor —
+`T-V1104-PIN-03/04`, T1), E4 (the repoints and derived prefix —
+`T-V1104-PIN-07`, `RPT-01`, T1), E5 (a drifted find never mutates —
+`T-V1104-ERR-01`, T2), E6 (the release rows assert presence, never
+absence — `T-V1104-DOC-01/02`, `PIN-06`, T1/T5), E7 (the version and
+dependencies — `T-V1104-VER-01/02`, T5, red-before/green-after already
+recorded above). E8 (the freeze and the local tag) runs against the
+evidence commit below, after it lands — reported in the closing
+message per REV-02.
 
 ## Operator inputs
 
@@ -898,13 +951,10 @@ again before the evidence commit if anything changes.
 
 ## Ledger row (paste into `economics.md`)
 
-Provisional — `Ver` = `1.10.4` filled at T5's first commit; every other
-cell depends on the orchestrator's still-to-run gates 1-7, the gate-8
-identity-check reuse and the replay, so it stays `TBD` (placeholder shape
-matches `ledger_header`'s 11 columns, precedent v1.10.1 T2 commit `d04fd53`,
-itself precedented by v1.10.0 T6 commit `761359a`) until the evidence
-commit finalizes it:
+**Final** — gates 1-7 green on `c13a7f0`, gate 8 reused from T4's single
+green execution via the identity check, `replay` clean over all 13
+commits, count 2311 ≥ floor + 22:
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.10.4 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.10.4 | 2026-09-19 | ~1.31M subagent aggregate (spec-v1.10.4 authoring, prompt 227, per docs/llm-usage.md row 138) | 6 (228-233) | yes -- all eight gates green on this run, gate 8 exactly once (T4, reused at T5 via the identity check), no stop route triggered, zero repair cycles spent (four EC-02 amendment-table line-drifts disclosed across T1/T2/T4, none a cycle, per EC-01's supersession rule) | T3 clean-context review: 0 must-fix findings, 2 disclosed non-blocking notes (a report-rigor citation fix, a scope note on two pre-existing marker pins for a future release) -- both waived, no source-writing fix delegated | harness does not expose per-request tokens for this session; subagent aggregates per docs/llm-usage.md rows 139-144 (T1 250,927 + T2 234,138 + T3 145,194 + T4 89,987 + T5 201,197 = 921,443 aggregate as reported by the harness) | live gate spend: Stage 0's checks 4-7 at T0, gates 5/7 at T0/T4/T5, one gate-8 execution at T4 (5 red-team model calls + 5 judge calls) -- well under $1 aggregate at public list price for `openai/gpt-4.1` / `anthropic/claude-sonnet-5` / `openai/text-embedding-3-small`; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
 ```

@@ -9,7 +9,7 @@
 - **Harness:** Claude Code (background session, delegated subagent for
   commit one; orchestrator for the rest of T5)
 - **Stage:** T5
-- **Owner of (first commit only):** `pyproject.toml`, `uv.lock`,
+- **Owner of:** (first commit only) `pyproject.toml`, `uv.lock`,
   `tests/test_v195_version.py`, `tests/test_v1104_version.py` (new, or
   the version tests added to `tests/test_v1104_gates.py`), `README.md`
   (release table + gate-8 results table), `AGENTS.md` (count lines),
@@ -40,10 +40,12 @@ only — never `bot.py --selftest-live`, `devtools/rag_eval.py`,
 
 ## Acceptance
 
-The three named tests red-before/green-after with both runs recorded;
-`uv.lock`'s diff is version-only; full pytest green, collection count
-recorded; gates 1-4 green; report and tg-post written (provisional is
-fine, but complete, no placeholder text).
+The three named tests (`test_t_v1104_ver_02_pyproject_and_uv_lock_diff_from_f3ce1a5_is_version_only`
+and its siblings) red-before/green-after with both runs recorded;
+`uv.lock`'s diff is version-only; full `uv run --locked pytest -q`
+green, collection count recorded; gates 1-4 green; `docs/reports/report-v1.10.4.md`
+and `docs/reports/tg-post-v1.10.4.md` written (provisional is fine, but
+complete, no placeholder text).
 
 ## Stop
 
