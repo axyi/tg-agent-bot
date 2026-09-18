@@ -552,9 +552,155 @@ a semantic pin") rather than taken on trust — neither T3 fix touched a
 Delegation record:
 - T5 | delegated: no | to: — (the task is itself the clean-context review) | brief: — | map vs actual: matches §13.1; the two disclosed fixes above were made by the orchestrator directly, single edits under every threshold, not re-delegated
 
-## T6 — not reached: T6
+## T6 — mutations part done and verified, live-gate part STOPPED (Stage B at T6, EC-01 budget exhausted)
 
-## T7 — not reached: T7
+**Mutations part**: delegated (general-purpose subagent), brief
+`docs/spec/task-briefs/v1103-T6.md`, prompt
+`docs/prompts/226-v1103-t6-mutations.md`. **Not committed** — see below.
+
+All five `v1103-*` mutation entries were authored and independently
+verified killed in isolation (mutate the real source file, prove
+import exit 0, prove the named assertion red via a targeted `pytest
+-k`, revert cleanly, only then add the real `MUTATIONS` entry):
+
+| id | file:line | verified killer | matches spec table? |
+|---|---|---|---|
+| `v1103-exec-guard-dropped` | `tools.py:1596` | `T-V1103-EXEC-01` (4 parametrized cases red) | yes |
+| `v1103-exec-guard-env-file-dropped` | `tools.py:1599` (inner predicate of the multi-line `if any(...):`, replaced with `False` — the only syntax-preserving option) | `T-V1103-EXEC-02` (5 cases red) | yes |
+| `v1103-exec-guard-proc-environ-dropped` | `tools.py:1603` | `T-V1103-EXEC-03` (3 cases red) | yes |
+| `v1103-delegation-lint-dropped` | `devtools/checks.py:1723` | **discrepancy**: the spec's suggested `T-V1103-LINT-06`/`-07` still pass under this mutant (they call `_validate_one_gate`/`_lint_report_delegation` directly, never `_run_lint_docs`); the actual killer is `T-V1103-LINT-09` (`assert result.blocked` on a direct `_run_lint_docs` call with `delegation_record: True`) | no — disclosed per GATE-02's own rule |
+| `v1103-hal-noun-first-marker-dropped` | `devtools/agent_eval.py:155` | `T-V1103-RT-01`/`-08` (length assertion + an `IndexError` on `HAL_MARKERS[17]`) | yes |
+
+`config/quality_gates.yaml` gained `mutation-v1103` (placeholder
+`timeout_seconds: 110`, calibration deferred — never reached, see
+below), added to `mutation-subsets`, and `mutation-all`'s comment was
+reworded to exactly one "is now" sentence (144). The three EC-02 test
+edits (`tests/test_v1100_gates.py`, `tests/test_v1101_gates.py`,
+`tests/test_v1102_gates.py`'s "is now" anchor) were made per the
+19-row table.
+
+### The stop finding
+
+Before committing, the subagent ran gate 3 (`pytest -q`) as required
+and found it **red** on a site the 19-row EC-02 table never names:
+`tests/test_v1102_gates.py:80-87`,
+`test_t_v1102_gate_01_six_v1102_mutations_follow_the_last_v1101_entry`.
+Its assertion `tail == _V1102_IDS` (`_V1102_IDS` a hardcoded 6-element
+list) pins that **nothing follows** the six `v1102-*` entries — true
+only because no later release had yet appended anything after them.
+`GATE-02` requires the five new `v1103-*` entries appended immediately
+after `v1102-hal-gap-marker-dropped`, which is exactly what makes
+`tail` 11 elements instead of 6. This is the **identical defect class**
+T4 already fixed two tests above in this same file
+(`test_t_v1102_gate_03_gate_matrix_label_dict_matches_spec_v1102_table`,
+`:49-77`: a precondition that held only by accident until a later
+release's growth broke it) — `spec-v1.10.3.md:125`'s "verified
+unaffected" claim is disproved a second time. The subagent confirmed
+this is isolated (not a recurring pattern): `tests/test_v1100_gates.py`'s
+own analogous tail-shape test was already correctly EC-02-amended to
+include the five new ids; `test_v1101_gates.py` has no such test at
+all.
+
+**This is a fourth, distinct unlisted semantic pin (ERR-01 row 9).**
+The repair-cycle budget was already at 0 of 3 (T1, T2 and T4 each spent
+one, on three separate, never-before-touched sites). ERR-01 row 9's own
+text is per-pin, singular ("*the* pin is amended... a repair cycle"),
+not per defect-class — EC-01's "3 total cycles" is a hard, mechanical
+cap counted by site, not by root cause, precisely so that "this is the
+same kind of thing as an earlier fix" cannot silently stretch the
+budget. That two sites sharing a root cause were discovered one task
+apart, rather than both caught by T4's narrower brief, does not change
+what each site costs. **This reading is stated explicitly, as the
+budget-defining decision of the run, rather than resolved by silent
+omission**, matching how cycle 2 (T2) and the T3 classification
+dissent were both settled on the spec's literal text rather than
+convenience.
+
+With zero budget and a fourth unlisted pin, **EC-01 requires the stop
+route (§12)**: `tests/test_v1102_gates.py:80-87` is **not** fixed —
+doing so now would spend an unaccounted fourth cycle, exactly what
+"never a silent edit" forbids. The mutations-authoring diff (149
+insertions across 5 files, all five entries independently verified as
+described above) is preserved, uncommitted, via `git stash` (message:
+"v1103-T6 mutations part: uncommitted at stop route
+(tests/test_v1102_gates.py:80-87 unlisted pin, 0/3 budget)") — not
+discarded, since it is real, expensive, verified work a future run can
+reuse once the site above gets its own authorized amendment.
+
+Delegation record (mutations part):
+- T6 | delegated: yes | to: general-purpose subagent (mutations part) | brief: docs/spec/task-briefs/v1103-T6.md | map vs actual: read beyond the map — the full EC-02 table and GATE-02 text, tests/test_v1103_exec.py/test_v1103_lint.py/test_v1103_gates.py/test_v1103_red_team.py to locate real killer tests, and tests/test_v1102_gates.py:1-100 (not in the map) where the out-of-table failure was discovered; task stopped before commit, per instruction
+
+Delegation record (live-gate part, this section, stop-route closing):
+- T6 | delegated: no | to: — (commands only) | brief: — | map vs actual: the stop procedure's gate readings below (spec-v1.10.1.md:1208-1228, this release's names) run directly by the orchestrator, no delegation
+
+## T7 — not reached: T6 stop (Stage B at T6, EC-01 budget exhausted)
+
+## The stop route (REQ-V1103-REV-04, Stage B at T6 — EC-01 budget exhausted, ERR-01 row 9)
+
+**Not Stage B′, not Stage B″**: gate 8 never ran (N/A, never reached);
+gate 7's `recall@5` never fell under its floor (it read 1.000 on every
+invocation this run, including the stop-procedure's closing run below
+— the one exit-2 was a transient rerank-provider issue, not a recall
+miss). The stop is EC-01's own budget rule: a fourth unlisted semantic
+pin (ERR-01 row 9) discovered mid-T6 with zero of the three repair
+cycles remaining (T1, T2, T4 each spent one). Source and test files
+have been committed throughout this run (T1-T4), so this is a Stage B
+shape, named explicitly since none of the specifically-defined late
+stages (B′, B″, B-at-T7) fit a budget-exhaustion stop at T6.
+
+The procedure, from wherever the run stands (`spec-v1.10.1.md:1208-1228`,
+this release's names):
+
+1. **This report finalised** — the stage (Stage B at T6, budget
+   exhausted), every reached section filled (T0-T6), T7 marked "not
+   reached: T6 stop"; the red condition (`tests/test_v1102_gates.py:
+   80-87`, an unlisted ERR-01 row 9 pin) with full evidence in T6's
+   section above; all three repair cycles spent this run disclosed in
+   T1/T2/T4's own sections, none available for this fourth pin.
+2. **`docs/reports/tg-post-v1.10.3.md`** — written below, Russian,
+   under 1500 characters.
+3. **Usage rows and the ledger row** — appended (`docs/llm-usage.md`),
+   `Ver` = `1.9.5` (whatever `pyproject.toml` reads — never bumped this
+   run, T7 never running).
+4. **The gates that could run, ran, on the clean tree** (T6's
+   mutations-part diff stashed, not committed, before any gate below —
+   none of these readings include the never-committed `v1103-*`
+   mutation entries):
+
+   | # | gate | exit | detail |
+   |---|---|---|---|
+   | 1 | `uv sync --locked` | 0 | 25 packages resolved, 23 checked |
+   | 2 | `ruff check .` | 0 | all checks passed |
+   | 3 | `pytest` | 0 | 2285 collected, 2282 passed / 3 skipped (1 real + 2 strict-xfail), matches T5's tree exactly — **this confirms the red gate 3 T6 hit was caused solely by the uncommitted mutation-count-tail edits, not by anything already committed** |
+   | 4 | `bot.py --selftest` | 0 | `selftest: OK` |
+   | 5 | `bot.py --selftest-live` | 0 | `OK config/db/docker(29.8.0)/telegram/embeddings/openrouter`, `SKIP lmstudio` (no route uses it) — the stop procedure's one permitted invocation (EC-01: "may invoke gates 5 and 7 once each, never gate 8") |
+   | 6 | `mutation_check.py` (full, no `--select`) | 0 | **139 mutations, 139 killed, 0 survived, 0 errored, 0 drifted** — the pre-existing suite is fully intact; the five `v1103-*` entries are not included (never committed); wall time not captured precisely (the `time` builtin's report did not land in the redirected log under `run_in_background`), consistent with row 129's prior 139-entry measurement (14m23.5s), well under the 1640s configured timeout |
+   | 7 | `rag_eval.py` | 2 | `hybrid: recall@5=1.000 mrr=1.000`; `hybrid+rerank: recall@5=1.000 mrr=0.850`; the permitted-capture transient shape (4 items `rerank_attempted=True rerank_succeeded=False rerank_failure='rerank returned no usable order'`, one `gate-7: FAIL rerank did not run...` block, no other error marker) — the stop procedure's one permitted invocation, **not re-invoked** a second time (the "once each" rule, distinct from a scheduled task's own ≤2-re-invocation transient allowance) |
+   | 8 | `agent_eval.py` | n/a | **N/A — never reached.** Not invoked at the stop (EC-01 forbids it: "never gate 8"). No live red-team or judge call was ever made against `openai/gpt-4.1` this run. |
+
+   `mutation-v1103`: **N/A** — authored and isolation-verified (T6's
+   section above) but never committed, so it was never registered in
+   `config/quality_gates.yaml` on any committed tree. `lint-docs`: T3
+   already repointed it; no repoint-and-restore needed.
+5. **Commit the permitted evidence and nothing else** — this report,
+   the tg-post, the usage rows, `docs/prompts/226-v1103-t6-mutations.md`
+   and `docs/spec/task-briefs/v1103-T6.md` (both restored from the
+   stash's untracked-files parent — `git stash -u` swept them in as
+   untracked files before they could be committed on their own; the
+   mutations-authoring code/config/test diff they accompanied stays in
+   the stash); no `--no-verify`. The stashed code diff is **not** part
+   of this commit (uncommitted work, preserved for a future run, not
+   evidence of this run's own acceptance).
+6. **Prove the negative and terminate** — see below.
+
+### Negative proofs (step 6)
+
+- `pyproject.toml` reads its pre-stop version: **`1.9.5`** (never
+  touched this run).
+- `git tag -l v1.10.3` shows no tag.
+- `git status -sb` shows `main` ahead of `origin/main` (71 commits
+  pending, none pushed, per EC-01).
+- No later task runs: T7 does not execute.
 
 ## Operator inputs
 
@@ -580,21 +726,18 @@ Delegation record:
 | --- | --- | --- | --- | --- |
 | T0 | 1 | 2 | (i) capture ends with `gate-7: FAIL rerank did not run for every answerable item:` followed by exactly one item line `'Какие суточные положены за командировку по России?': rerank_attempted=True rerank_succeeded=False rerank_failure='rerank returned no usable order'`; (ii) same-attempt metrics block `hybrid: recall@5=1.000` at/above the floor; (iii) no `Traceback`/`ConfigError`/other `gate-7: FAIL …` line outside the item line, exactly one `rerank did not run` line | transient, permitted capture — re-invoked (1 of ≤2 allowed) |
 | T0 | 2 | 0 | n/a (exit 0) | PASS, no further re-invoke needed |
+| T6 stop | 1 | 2 | (i) capture ends with `gate-7: FAIL rerank did not run for every answerable item:` followed by four item lines, each `rerank_attempted=True rerank_succeeded=False rerank_failure='rerank returned no usable order'`; (ii) same-attempt metrics block `hybrid: recall@5=1.000` at/above the floor; (iii) no `Traceback`/`ConfigError`/other `gate-7: FAIL …` line outside the item lines, exactly one `rerank did not run` line | transient, permitted capture — **not re-invoked**: this is the stop procedure's one permitted gate-7 invocation (EC-01: "may invoke gates 5 and 7 once each, never gate 8"), distinct from a scheduled task's own ≤2-re-invocation allowance |
 
 ## `docs/reports/tg-post-v1.10.3.md`
 
-Not reached: written at T7.
+Written at the stop route (T7 never reached). See
+`docs/reports/tg-post-v1.10.3.md` (1386 chars by `wc -m`).
 
 ## Ledger row (paste into `economics.md`)
 
-Provisional placeholder — every cell fills at close (T7 on green, or
-the stop route's stage if the run halts earlier); `_lint_report_ledger`
-needs a fenced row with the header's cell count present at every commit
-from T3 on, so this placeholder exists from T3 rather than only at T7
-(a gap the spec's own "green at every commit from T3 on" text did not
-anticipate — `pyproject.toml` has not bumped yet, `Ver` stays `1.9.5`
-until T7 actually bumps it):
+**Final** — the run stops at T6 (Stage B at T6, EC-01 budget
+exhausted); `pyproject.toml` was never bumped:
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.9.5 | 2026-09-18 | ~1.27M subagent aggregate (spec-v1.10.3 authoring, prompt 219, per llm-usage.md row 130) | 7 (220-226) | no -- EC-01's repair-cycle budget exhausted (Stage B at T6) at T6, a fourth unlisted semantic pin (tests/test_v1102_gates.py:80-87) found before any commit | mutation gate 139/139 (pre-existing suite, wall not precisely captured, ~14m consistent with row 129's prior measurement); 3 repair cycles spent (T1: tests/test_v1_guardrails.py; T2: tests/test_v1102_red_team.py; T4: tests/test_v1102_gates.py:49-77) all independently re-verified correct by T5's clean-context review; T6's own five v1103-* mutations fully authored and isolation-verified but never committed (preserved in git stash); gate 8 never reached | harness does not expose per-request tokens for this session; subagent totals: T1 190,299 + T2 279,332 + T3 217,747 + T4 158,416 + T5 199,205 + T6 187,636 (stopped, uncommitted) = 1,232,635 aggregate as reported by the harness | live gate spend: gates 5/7 at T0 and at the T6 stop close (2 invocations each, one T0 gate-7 transient re-invocation); one judge probe at T0; zero gate-8 spend (never reached) -- well under $0.10 aggregate at public list price; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
 ```
