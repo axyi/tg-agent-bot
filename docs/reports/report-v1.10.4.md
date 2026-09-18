@@ -291,7 +291,155 @@ and `devtools/mutation_check.py` NOT run this task, per `REQ-V1104-EC-01`
 
 - T1 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T1.md | map vs actual: matches the reading map, plus one disclosed EC-02 line-drift amendment (row 12b's cell cites tests/test_v1103_gates.py:73-81; the actual rewritten function starts at :62, same test, same end line, 3-line offset)
 
-## T2 — not reached: T2
+## T2 — the five `v1103-*` mutation entries landed
+
+Test-first, strict order (`docs/spec/task-briefs/v1104-T2.md`): six new
+tests appended to `tests/test_v1104_gates.py`
+(`T-V1104-MUT-01`..`-05`, `T-V1104-ERR-01`) and run against the **post-T1,
+pre-apply** tree before any patch touched the working tree.
+
+**Pre-apply record** (matches spec-v1.10.4.md:306-317 exactly, never
+claimed red when structurally green):
+
+| test | pre-apply | reason |
+| --- | --- | --- |
+| `T-V1104-MUT-01` | red | `ids[anchor:anchor+5] == []` — no `v1103-*` block after the last `v1102-*` entry |
+| `T-V1104-MUT-02` | red | `KeyError` — the five ids are not yet registered in `mc.MUTATIONS` |
+| `T-V1104-MUT-03` | red | `gates["mutation-v1103"]` raises `KeyError` — the gate does not exist yet |
+| `T-V1104-MUT-04` | green (structural) | the block already holds exactly one "is now" sentence (139), parsing to `len(mc.MUTATIONS)` |
+| `T-V1104-MUT-05` | green (structural) | reads only the pinned `find`/`replace` pairs against the live sources, never the registry |
+| `T-V1104-ERR-01` | green (structural) | exercises `run_one` directly on a `tmp_path` root, never depends on the five entries being registered |
+
+**Stash identity and apply route.** `git rev-parse stash@{0}` still equals
+`e3c6e3ff3bee60bff183ae056621d4dc984cd5a3` (T0/T1 do not touch the stash).
+The exact two-path check re-run on the post-T1 tree:
+
+```bash
+git stash show -p stash@{0} | git apply --check --include='devtools/mutation_check.py' --include='config/quality_gates.yaml' -
+```
+
+exited **0** — **id-match route** (ERR-01 row 1b never triggered; no
+Appendix D fallback, no repair cycle spent). Applied for real with the
+second command (`git apply`, same `--include`s); `git status` afterward
+showed exactly the two intended paths modified
+(`config/quality_gates.yaml`, `devtools/mutation_check.py`) — the
+stash's three test hunks were never applied (NG-03; `--include` scoped
+to the two non-test paths only).
+
+**Post-image verification.** `git hash-object devtools/mutation_check.py`
+== `d09909ddebc34eb2a76d619d215f3605436c627f` — matches Appendix D's
+stated post-image exactly. The yaml's `mutation-subsets` line gained
+`mutation-v1103` immediately after `mutation-v1102`; the `mutation-v1103`
+gate block landed with its placeholder `timeout_seconds: 110` and
+placeholder-calibration comment (T4's job, `GATE-02`) — both byte-equal
+to Appendix D's post-image.
+
+**A second disclosed finding: the stash's own content never passed this
+repo's `ruff-format-all` pre-commit gate.** The five entries were
+authored at v1.10.3 T6 and stopped before commit, so they were never run
+through the pinned `ruff format --check` gate this repo's `pre-commit`
+hook enforces (blocking, whole-tree, no bypass permitted — AGENTS.md).
+Entries 1/3/4's `find`/`replace` literals (and entry 1's parenthesized
+single-line string) used single quotes where the pinned `ruff` version
+normalizes to double (entries 2 and 5 were already conformant — their
+strings contain literal `"` characters, so `ruff format` leaves them on
+single quotes to avoid escaping). Applying the byte-exact patch therefore
+produced a tree that could not be committed without a hook bypass, which
+is forbidden. Resolved by running `ruff format` over only the two
+touched paths (`devtools/mutation_check.py`, `tests/test_v1104_gates.py`)
+**after** the `d09909d…` post-image proof above was taken and recorded —
+a pure quote-style/whitespace transformation (`'x'` and `"x"` are the
+same runtime string) that changes no `find`/`replace` value: proved by
+`T-V1104-MUT-02`'s byte-equality assertion against §3's pinned literals
+staying green after the reformat (rerun: 39 passed). Final
+`git hash-object devtools/mutation_check.py` = `a4653a9d75583fec84f40c655675fd1400804ec0`
+(post-reformat; differs from `d09909d…` only in quote-style bytes, not in
+any `find`/`replace`/`why`/`id`/`path` value — `len(mc.MUTATIONS) == 144`
+unchanged). **Not a repair cycle**: ERR-01's cycle-spending rows are 1b
+(apply failed), 2 (`DRIFTED` find count) and 3 (isolation collection
+miss/extra node) — none fired here (`--check` exited 0, all five `find`
+counts were exactly 1, all five isolation proofs hit their exact
+node-id counts); this is a hook-conformance fix on already-verified
+content, the same class as T1's `## Ledger row` placeholder fix.
+
+Separately, a `gitleaks-staged` false positive was hit and fixed in this
+section's own prose (not a code change): the pre-apply table's original
+wording paired the Python builtin exception name (which happens to
+contain the substring "key") with a quoted gate-name value, matching the
+`generic-api-key` rule — reworded to the `gates["mutation-v1103"]`
+subscript-raises-the-exception phrasing shown in the pre-apply table
+above, confirmed clean by a direct `gitleaks git --staged` re-run.
+
+**The `mutation-all` sentence (MUT-02(c)) — a disclosed brief-vs-spec
+discrepancy.** The brief's step 4 parenthetical reads "it should [already
+match] — the fallback diff already carries the target text per its own
+comment", but Appendix D's applied hunk actually inserts the *stash's
+own* sentence (`` spec-v1.10.3 T6 appended 5 `v1103-*` entries; `len(...)`
+is now 144 ``), not `REQ-V1104-MUT-02(c)`'s release-anchored sentence
+(`` spec-v1.10.4 T2 appended the five `v1103-*` entries authored by the
+v1.10.3 run; `len(...)` is now 144 ``) — the two differ in attribution
+and wrap point. Spec lines 384/392 are explicit that the stash's
+paragraph "is rewritten to this release's sentence" and that "the
+v1.10.3 sentence is not written", so this is corrected per the spec text
+(not the brief's inaccurate parenthetical) — the brief's own escape
+hatch ("fix it to match exactly") authorizes exactly this. Rewritten by
+hand to the release-anchored sentence; the preceding v1102 sentence
+(`` `len(devtools.mutation_check.MUTATIONS)` closed at 139 ``, Appendix
+D's own `-`/`+` pair) is unchanged. Verified: the block holds exactly one
+"is now" (144), parsing to `len(mc.MUTATIONS)`.
+
+**EC-02 row 2b.** `tests/test_v1100_gates.py` gained `_V1103_IDS` (the
+five ids of §3, in order) and the release-groups test's tuple extended to
+`(_V1100_IDS, _V1101_IDS, _V1102_IDS, _V1103_IDS)` — append-only, T1's
+three existing group assertions and the `tail`/`v1100_ids` block below
+them untouched.
+
+**Six T2 tests rerun green** against the post-apply tree (`pytest -q
+tests/test_v1104_gates.py tests/test_v1100_gates.py` — 39 passed, 0
+failed). `len(devtools.mutation_check.MUTATIONS) == 144` confirmed.
+
+**Five per-entry isolation proofs** (`REQ-V1103-GATE-02`'s two-proof
+rule, exact node ids, never `-k`; each entry mutated on the real tree,
+one at a time, then restored via `git checkout HEAD -- <path>` —
+`f3ce1a5`-equivalent files, safe and exact — and confirmed clean with
+`git diff --exit-code <path>` before the next entry):
+
+| # | id | path | import proof | collection cmd (node ids) | selected | pytest result | failing assertion |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | `v1103-exec-guard-dropped` | `tools.py` | `python -c "import tools"` exit 0 | `pytest --collect-only -q -o addopts="" tests/test_v1103_exec.py::test_t_v1103_exec_01_rule1_denies_env_programs` → `[argv0]`..`[argv3]` | 4 | `pytest -q -o addopts="" <4 node ids>` → 4 failed | `AssertionError: assert {...} == {'error': tools.EXEC_ENV_REFUSAL_TEXT}` (guard-1-shaped argv ran through unrefused), all 4 cases |
+| 2 | `v1103-exec-guard-env-file-dropped` | `tools.py` | exit 0 | `test_t_v1103_exec_02_rule2_denies_env_files` → `[argv0]`..`[argv4]` | 5 | 5 failed | same assertion shape, all 5 cases |
+| 3 | `v1103-exec-guard-proc-environ-dropped` | `tools.py` | exit 0 | `test_t_v1103_exec_03_rule3_denies_procfs_environ` → `[argv0]`..`[argv2]` | 3 | 3 failed | same assertion shape, all 3 cases |
+| 4 | `v1103-delegation-lint-dropped` | `devtools/checks.py` | `python -c "import devtools.checks"` exit 0 | `tests/test_v1103_lint.py::test_t_v1103_lint_09_true_key_runs_the_check_and_blocks` (unparametrized) | 1 | 1 failed | `AssertionError: assert False` — `result.blocked` False (`GateResult(..., blocked=False, ...)`), the delegation check never ran |
+| 5 | `v1103-hal-noun-first-marker-dropped` | `devtools/agent_eval.py` | `python -c "import devtools.agent_eval"` exit 0 | `tests/test_v1103_red_team.py::test_t_v1103_rt_01_hal_markers_has_exactly_eighteen_entries`, `::test_t_v1103_rt_08_inj_markers_and_hal_markers_pins` | 2 | 2 failed | `AssertionError: assert 17 == 18` (RT-01); `IndexError: list index out of range` on `HAL_MARKERS[17]` (RT-08) |
+
+No collection miss, no extra selected node — every count matches §3's
+table exactly (ERR-01 row 3 never triggered, no repair cycle spent).
+Entry 4's real killer is `T-V1103-LINT-09`, not `-06`/`-07` (the spec's
+own correction, confirmed empirically here again); its `why` string's
+literal `pytest -k "..."` text is the stash's own historical note about
+that earlier empirical check, not this task running `-k` (NG-03's exact
+node ids rule was followed throughout — every isolation-proof run above
+used explicit node ids only).
+
+After each proof, `git diff --exit-code <path>` exited 0 before the next
+entry began; `git status` before staging showed no source-file
+modification beyond `config/quality_gates.yaml` and
+`devtools/mutation_check.py`.
+
+Gates 1-4 green: `uv sync --locked` (23 packages checked), `ruff check .`
+clean (one line-length fix applied to the new `T-V1104-MUT-05` test
+during authoring, `tests/test_v1104_gates.py`), `pytest -q` full suite
+green (2308 collected — floor 2302 + this task's 6 new tests, exit 0),
+`bot.py --selftest` → `selftest: OK`. `doctor` green
+(`[PASS] doctor: all tools at pin, hooks installed`). `bot.py
+--selftest-live`, `devtools/rag_eval.py`, `devtools/agent_eval.py` and
+`devtools/mutation_check.py` (the CLI itself) NOT run this task — gate 6
+is T4's calibration/run, never this task's (`REQ-V1104-EC-01`).
+
+`git rev-parse stash@{0}` re-confirmed == `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3`
+after this task — never dropped, never popped, never bare-applied.
+
+- T2 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T2.md | map vs actual: matches the reading map and the strict order, plus two disclosed discrepancies, neither a repair cycle — (1) the brief's step 4 parenthetical ("it should [match]") was wrong about Appendix D's inserted `mutation-all` sentence text; corrected per the spec's own MUT-02(c) text and the brief's own "fix it to match exactly" escape hatch; (2) the stash's own content never passed this repo's mandatory `ruff-format-all` pre-commit gate (never run through it before being stashed at v1.10.3 T6); resolved by reformatting only the two touched paths after the `d09909d…` post-image proof was recorded, a quote-style-only change with `T-V1104-MUT-02`'s byte-equality assertion as the semantic-equivalence proof
 
 ## T3 — not reached: T3
 

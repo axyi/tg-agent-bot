@@ -245,6 +245,13 @@ _V1102_IDS = [
     "v1102-inj-gap-marker-dropped",
     "v1102-hal-gap-marker-dropped",
 ]
+_V1103_IDS = [
+    "v1103-exec-guard-dropped",
+    "v1103-exec-guard-env-file-dropped",
+    "v1103-exec-guard-proc-environ-dropped",
+    "v1103-delegation-lint-dropped",
+    "v1103-hal-noun-first-marker-dropped",
+]
 
 
 def _v1100_mutations() -> list[dict]:
@@ -261,7 +268,7 @@ def test_release_groups_after_the_last_v195_entry_are_contiguous_blocks_in_order
     ids = [m["id"] for m in mc.MUTATIONS]
     last_v195_index = max(i for i, mid in enumerate(ids) if mid.startswith("v195-"))
     start = last_v195_index + 1
-    for group in (_V1100_IDS, _V1101_IDS, _V1102_IDS):
+    for group in (_V1100_IDS, _V1101_IDS, _V1102_IDS, _V1103_IDS):
         assert ids[start : start + len(group)] == group
         start += len(group)
 

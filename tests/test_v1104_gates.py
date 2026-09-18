@@ -17,6 +17,8 @@ own committed files (and `tmp_path` fixtures this module writes itself).
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -209,3 +211,194 @@ def test_t_v1104_rpt_01_lint_docs_config_and_own_report_are_green():
 
     report = _REPO_ROOT / "docs" / "reports" / "report-v1.10.4.md"
     assert checks._lint_report_delegation(report) == []
+
+
+# ---------------------------------------------------------------------------
+# v1.10.4 T2 (docs/spec/task-briefs/v1104-T2.md, REQ-V1104-MUT-01,
+# REQ-V1104-MUT-02): the five `v1103-*` entries, pinned verbatim from
+# spec-v1.10.4.md Sec.3 (lines 277-293) -- byte-exact, not re-derived, not
+# read back from `mc.MUTATIONS` (that lookup is what the tests below
+# exercise). `_V1103_ENTRIES` carries only the four keys these tests pin;
+# `why` is the stash's own prose and is not re-asserted verbatim here.
+# ---------------------------------------------------------------------------
+
+_EXPECTED_MUTATION_KEYS_V1103 = {"id", "path", "find", "replace", "why"}
+
+_V1103_ENTRIES = [
+    {
+        "id": "v1103-exec-guard-dropped",
+        "path": "tools.py",
+        "find": ("    if os.path.basename(argv[0]) in EXEC_DENY_PROGRAMS:  # noqa: PTH119\n"),
+        "replace": "    if False:  # v1103-exec-guard-dropped  # noqa: PTH119\n",
+    },
+    {
+        "id": "v1103-exec-guard-env-file-dropped",
+        "path": "tools.py",
+        "find": (
+            '        os.path.basename(e) == ".env" or os.path.basename(e).startswith('
+            '".env.")  # noqa: PTH119\n'
+        ),
+        "replace": "        False  # v1103-exec-guard-env-file-dropped\n",
+    },
+    {
+        "id": "v1103-exec-guard-proc-environ-dropped",
+        "path": "tools.py",
+        "find": "    if any(_PROCFS_ENVIRON_RE.fullmatch(e) for e in argv):\n",
+        "replace": "    if False:  # v1103-exec-guard-proc-environ-dropped\n",
+    },
+    {
+        "id": "v1103-delegation-lint-dropped",
+        "path": "devtools/checks.py",
+        "find": '    if gate.get("delegation_record") is True:\n',
+        "replace": "    if False:  # v1103-delegation-lint-dropped\n",
+    },
+    {
+        "id": "v1103-hal-noun-first-marker-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": (
+            '    r"(?:информации|данных|сведений)\\b(?:(?!\\b(?:но|а|однако|зато)\\b)'
+            '[^.?!;…]){0,120}\\bнет\\b",\n'
+        ),
+        "replace": "",
+    },
+]
+
+
+def test_t_v1104_mut_01_five_v1103_entries_form_one_contiguous_block_in_order():
+    # T-V1104-MUT-01: pre-apply this is red -- `ids[anchor:anchor+5]` is
+    # `[]` (139 entries total, nothing after the v1102 tail) != the five
+    # expected ids.
+    ids = [m["id"] for m in mc.MUTATIONS]
+    anchor = ids.index("v1102-hal-gap-marker-dropped") + 1
+    expected_ids = [entry["id"] for entry in _V1103_ENTRIES]
+    assert ids[anchor : anchor + len(expected_ids)] == expected_ids
+
+    by_id = {m["id"]: m for m in mc.MUTATIONS}
+    for entry in _V1103_ENTRIES:
+        assert set(by_id[entry["id"]]) == _EXPECTED_MUTATION_KEYS_V1103
+
+    # NG-10: never `==` here -- a frozen `== 144` is exactly the "ends
+    # here" defect class this release retires.
+    assert len(mc.MUTATIONS) >= 144
+
+
+def test_t_v1104_mut_02_finds_match_once_and_registry_is_byte_exact():
+    # T-V1104-MUT-02: pre-apply this is red -- `by_id[entry["id"]]` raises
+    # KeyError, since none of the five ids are registered yet.
+    by_id = {m["id"]: m for m in mc.MUTATIONS}
+    for entry in _V1103_ENTRIES:
+        path = _REPO_ROOT / entry["path"]
+        text = path.read_text(encoding="utf-8")
+        assert text.count(entry["find"]) == 1
+
+        registered = by_id[entry["id"]]
+        assert registered["find"] == entry["find"]
+        assert registered["replace"] == entry["replace"]
+
+    # Negative: a `find` with one character changed counts 0 (the pre-image
+    # is byte-pinned, so a one-byte drift must not silently still match).
+    first = _V1103_ENTRIES[0]
+    drifted_find = first["find"][:-2] + "Z\n"
+    assert drifted_find != first["find"]
+    drifted_text = (_REPO_ROOT / first["path"]).read_text(encoding="utf-8")
+    assert drifted_text.count(drifted_find) == 0
+
+
+def test_t_v1104_mut_03_mutation_v1103_gate_shape_and_subset_membership():
+    # T-V1104-MUT-03: pre-apply this is red -- `gates["mutation-v1103"]`
+    # raises KeyError, the gate does not exist yet.
+    config = checks.load_gate_config()
+    gates = config["gates"]
+    v1103_gate = gates["mutation-v1103"]
+    v1102_gate = gates["mutation-v1102"]
+
+    assert set(v1103_gate) == set(v1102_gate)
+    assert v1103_gate["argv"] == [
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "devtools/mutation_check.py",
+        "--select",
+        "v1103-",
+    ]
+    assert v1103_gate["blocking"] is True
+    assert v1103_gate["diff_scoped"] is False
+
+    subsets = config["profiles"]["mutation-subsets"]
+    assert subsets.index("mutation-v1103") == subsets.index("mutation-v1102") + 1
+    for profile_name, members in config["profiles"].items():
+        if profile_name != "mutation-subsets":
+            assert "mutation-v1103" not in members
+
+    assert gates["mutation-all"]["argv"] == [
+        "uv",
+        "run",
+        "--locked",
+        "python",
+        "devtools/mutation_check.py",
+    ]
+
+
+def test_t_v1104_mut_04_mutation_all_comment_block_has_exactly_one_is_now():
+    # T-V1104-MUT-04: green structurally already, pre- and post-apply --
+    # the block holds exactly one "is now" sentence (139 pre-apply, 144
+    # post-apply) and it always parses to `len(mc.MUTATIONS)`.
+    text = checks.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+    block = _mutation_all_comment_block(text)
+    assert block.count("is now") == 1
+    match = re.search(r"MUTATIONS\)`\s*is now (\d+)", block, re.DOTALL)
+    assert match, "mutation-all's dated comment paragraph not found in the block"
+    assert int(match.group(1)) == len(mc.MUTATIONS)
+
+
+def test_t_v1104_mut_05_five_mutants_parse_and_row_five_hal_markers_has_17():
+    # T-V1104-MUT-05: green structurally already, pre- and post-apply --
+    # this reads only the pinned `find`/`replace` pairs against the live
+    # `f3ce1a5`-equivalent sources, never the registry.
+    for entry in _V1103_ENTRIES:
+        source = (_REPO_ROOT / entry["path"]).read_text(encoding="utf-8")
+        mutated = source.replace(entry["find"], entry["replace"], 1)
+        ast.parse(mutated)
+
+    hal_entry = _V1103_ENTRIES[4]
+    source = (_REPO_ROOT / hal_entry["path"]).read_text(encoding="utf-8")
+    mutated = source.replace(hal_entry["find"], hal_entry["replace"], 1)
+    tree = ast.parse(mutated)
+
+    def _targets_hal_markers(node: ast.AST) -> bool:
+        return isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "HAL_MARKERS" for target in node.targets
+        )
+
+    hal_markers_assign = next(node for node in ast.walk(tree) if _targets_hal_markers(node))
+    assert len(hal_markers_assign.value.elts) == 17
+
+
+def test_t_v1104_err_01_run_one_drifted_on_double_match_else_killed_and_restored(tmp_path):
+    # T-V1104-ERR-01: green structurally already -- exercises `run_one`
+    # directly, never depends on the five entries being registered.
+    entry = dict(_V1103_ENTRIES[0])
+    target = tmp_path / entry["path"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    calls = []
+
+    def spy(mutation):
+        calls.append(mutation)
+        return 1
+
+    doubled = entry["find"] * 2
+    target.write_text(doubled, encoding="utf-8")
+    outcome, exit_code = mc.run_one(entry, runner=spy, root=tmp_path, restorer=mc._Restorer())
+    assert (outcome, exit_code) == (mc.DRIFTED, None)
+    assert calls == []
+    assert target.read_text(encoding="utf-8") == doubled
+
+    single = entry["find"]
+    target.write_text(single, encoding="utf-8")
+    outcome2, exit_code2 = mc.run_one(entry, runner=spy, root=tmp_path, restorer=mc._Restorer())
+    assert outcome2 == mc.KILLED
+    assert exit_code2 == 1
+    assert len(calls) == 1
+    assert target.read_text(encoding="utf-8") == single

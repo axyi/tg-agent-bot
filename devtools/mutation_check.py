@@ -1920,6 +1920,106 @@ MUTATIONS = [
         "regex_positives/negatives cases, and test_t_v1102_rt_09_exact_"
         "lengths_and_last_entries -- matches, no discrepancy.",
     },
+    # -- spec-v1.10.3 T6 (docs/spec/task-briefs/v1103-T6.md,
+    # REQ-V1103-GATE-02): five entries defending T1's three exec-guard
+    # rules (tools.py), T3's delegation-record lint gate
+    # (devtools/checks.py) and T2's noun-before-«нет» HAL_MARKERS entry
+    # (devtools/agent_eval.py). GATE-02's table names a killer test per
+    # entry; empirically (mutate -> run -> revert, this task, each entry
+    # verified in isolation before being added) four of the five match
+    # the table exactly -- the delegation-lint entry is killed by a
+    # different test than the table names; the discrepancy is recorded
+    # on that entry below.
+    {
+        "id": "v1103-exec-guard-dropped",
+        "path": "tools.py",
+        "find": ("    if os.path.basename(argv[0]) in EXEC_DENY_PROGRAMS:  # noqa: PTH119\n"),
+        "replace": "    if False:  # v1103-exec-guard-dropped  # noqa: PTH119\n",
+        "why": "REQ-V1103-GATE-02: rule 1 of _validate_exec_arguments must "
+        "refuse env/printenv by basename -- forcing the predicate to False "
+        "lets every guard-1-shaped argv run unrefused through the sandbox, "
+        "body retained, syntax-preserving. Spec table names "
+        "T-V1103-EXEC-01/-05 as killers; empirically (mutate -> run -> "
+        "revert, this task) confirmed as tests/test_v1103_exec.py's "
+        "test_t_v1103_exec_01_rule1_denies_env_programs (T-V1103-EXEC-01, "
+        "parametrised, all four cases red on the refusal-shape assertion) "
+        "-- matches, no discrepancy.",
+    },
+    {
+        "id": "v1103-exec-guard-env-file-dropped",
+        "path": "tools.py",
+        "find": (
+            '        os.path.basename(e) == ".env" or os.path.basename(e).startswith('
+            '".env.")  # noqa: PTH119\n'
+        ),
+        "replace": "        False  # v1103-exec-guard-env-file-dropped\n",
+        "why": "REQ-V1103-GATE-02: rule 2's predicate must catch a "
+        ".env-basename file anywhere in argv -- forcing the inner "
+        "any(...) generator's predicate to False collapses the guard to "
+        "any(False for e in argv), always False regardless of argv's "
+        "contents; the outer `if any(...):` line and its body are "
+        "untouched, so the mutant is syntax-preserving. Spec table names "
+        "T-V1103-EXEC-02 as the killer; empirically (mutate -> run -> "
+        "revert, this task) confirmed as tests/test_v1103_exec.py's "
+        "test_t_v1103_exec_02_rule2_denies_env_files (T-V1103-EXEC-02, "
+        "parametrised, all five cases red) -- matches, no discrepancy.",
+    },
+    {
+        "id": "v1103-exec-guard-proc-environ-dropped",
+        "path": "tools.py",
+        "find": "    if any(_PROCFS_ENVIRON_RE.fullmatch(e) for e in argv):\n",
+        "replace": "    if False:  # v1103-exec-guard-proc-environ-dropped\n",
+        "why": "REQ-V1103-GATE-02: rule 3 must refuse a full-match "
+        "/proc/<pid-or-self>/environ path -- forcing the predicate to "
+        "False lets every such path run unrefused, body retained. Spec "
+        "table names T-V1103-EXEC-03 as the killer; empirically (mutate "
+        "-> run -> revert, this task) confirmed as "
+        "tests/test_v1103_exec.py's "
+        "test_t_v1103_exec_03_rule3_denies_procfs_environ (T-V1103-EXEC-03, "
+        "parametrised, all three cases red) -- matches, no discrepancy.",
+    },
+    {
+        "id": "v1103-delegation-lint-dropped",
+        "path": "devtools/checks.py",
+        "find": '    if gate.get("delegation_record") is True:\n',
+        "replace": "    if False:  # v1103-delegation-lint-dropped\n",
+        "why": "REQ-V1103-GATE-02: _run_lint_docs must run "
+        "_lint_report_delegation whenever the gate's delegation_record key "
+        "is exactly True -- forcing the guard to False means the "
+        "delegation check never runs regardless of the key's value, so a "
+        "report with zero delegation-record bullets never blocks. Spec "
+        "table names T-V1103-LINT-06/-07 as killers; empirically (mutate "
+        "-> run -> revert, this task) those two tests exercise "
+        "_validate_one_gate/_lint_report_delegation directly and stay "
+        "green under this mutant (confirmed: pytest -k "
+        '"test_t_v1103_lint_06 or test_t_v1103_lint_07" all pass '
+        "unmutated). The actual killer is tests/test_v1103_lint.py's "
+        "test_t_v1103_lint_09_true_key_runs_the_check_and_blocks "
+        "(T-V1103-LINT-09, the one test that calls _run_lint_docs itself "
+        "with delegation_record: True) -- a discrepancy from the table.",
+    },
+    {
+        "id": "v1103-hal-noun-first-marker-dropped",
+        "path": "devtools/agent_eval.py",
+        "find": (
+            '    r"(?:информации|данных|сведений)\\b(?:(?!\\b(?:но|а|однако|зато)\\b)'
+            '[^.?!;…]){0,120}\\bнет\\b",\n'
+        ),
+        "replace": "",
+        "why": "REQ-V1103-RT-01: HAL_MARKERS must carry exactly eighteen "
+        "entries, the eighteenth being the noun-before-«нет» gap-token-"
+        "class regex covering HAL-02's red-reply phrasing (the noun "
+        "precedes «нет», which none of the first seventeen markers catch) "
+        "-- removing it drops both the list length and check_"
+        "hallucination's coverage of that phrasing. Spec table names "
+        "T-V1103-RT-01/-08 as killers; empirically (mutate -> run -> "
+        "revert, this task) confirmed as tests/test_v1103_red_team.py's "
+        "test_t_v1103_rt_01_hal_markers_has_exactly_eighteen_entries "
+        "(T-V1103-RT-01, AssertionError: assert 17 == 18) and "
+        "test_t_v1103_rt_08_inj_markers_and_hal_markers_pins "
+        "(T-V1103-RT-08, IndexError on the pinned HAL_MARKERS[17] index, "
+        "the list's own last-index pin) -- matches, no discrepancy.",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
