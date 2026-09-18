@@ -131,25 +131,29 @@ def test_t_v190_ec_01_agents_md_layout_bullets_present():
         assert entry in text, f"missing layout bullet: {entry!r}"
 
 
-def test_t_v195_rpt_05_agents_md_count_lines_landed_at_t2():
-    # RPT-05: AGENTS.md's gate-3 test count and gate-6 mutation count lines
-    # were written for v1.9.0 at T12 (1560 tests, 105 entries), then for
-    # v1.9.1 at T2 (1593 tests, 108 entries), then for v1.9.2 at T3 (1601
-    # tests, 110 entries), then for v1.9.3 at T4 (1610 tests, 114 entries),
-    # then for v1.9.4 at T5 (1634 tests, 119 entries) -- this test's own
-    # v1.9.4-era predecessor pinned those figures and named T5 as their
-    # landing point. v1.9.5 T1 (bind the embedding pair at every
-    # init_schema call site, one new `v195-*` mutation entry, two new
-    # tests) and its review closure (exc_info assertion fix, one more new
-    # test, no new mutation entry) added tests and one mutation entry
-    # without updating either line (T1's own scope was the fix, not the
-    # paperwork); T2 (this task) lands the real, final post-run figures:
-    # 1638 tests (measured via `pytest` on the tree after every other T2
-    # edit, including this task's own new tests/test_v195_version.py) and
-    # 120 mutation entries.
+def test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5():
+    # RPT-03 (T-V1104-DOC-04): AGENTS.md's gate-3 test count and gate-6
+    # mutation count lines were written for v1.9.0 at T12 (1560 tests, 105
+    # entries), then for v1.9.1 at T2 (1593 tests, 108 entries), then for
+    # v1.9.2 at T3 (1601 tests, 110 entries), then for v1.9.3 at T4 (1610
+    # tests, 114 entries), then for v1.9.4 at T5 (1634 tests, 119 entries),
+    # then for v1.9.5 at T2 (1638 tests, 120 entries) -- this test's own
+    # v1.9.5-era predecessor (test_t_v195_rpt_05_agents_md_count_lines_
+    # landed_at_t2) pinned those figures and named T2 as their landing
+    # point. v1.10.0-v1.10.3 were stopped runs that never bumped
+    # pyproject.toml or landed this paperwork (Stage B'/Stage B, no T5
+    # equivalent reached). spec-v1.10.4 T5 (this task) lands the real,
+    # final post-run figures: 2311 tests (measured via `pytest
+    # --collect-only -q -o addopts="" | grep -c '::'` on the tree after
+    # every other T5 edit, including this task's own new
+    # tests/test_v1104_version.py and the T-V1104-DOC-02 gate-8/release-row
+    # test) and 144 mutation entries, dated "as of spec-v1.10.4 T5".
     text = _read_agents_md()
-    assert "1638" in text
-    assert "120 entries" in text
+    assert "2311" in text
+    assert "144 entries" in text
+    assert "as of spec-v1.10.4 T5" in text
+    assert "1638 tests as of spec-v1.9.5 T2" not in text
+    assert "120 entries as of v1.9.5 T2" not in text
 
 
 def test_t_v190_ec_01_readme_documents_rag_heading_present():

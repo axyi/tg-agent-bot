@@ -764,7 +764,103 @@ judge mean met — the run proceeds to T5.
 - T4 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T4.md | map vs actual: matches — the calibration comment hunk, exactly one hunk, no drift disclosed
 - T4 | delegated: no | to: — (commands only) | brief: — | map vs actual: matches §10.1 — the calibration run, gate 6, the write-tree proof, and the live gate sequence including gate 8
 
-## T5 — not reached: T5
+## T5 — version bump, `uv lock`, version tests, paperwork (first commit)
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/v1104-T5.md`,
+prompt `docs/prompts/233-v1104-t5-version-bump.md` (row 144). This section
+covers **T5's first commit only** — the version bump and paperwork. The
+second (evidence) commit, the live gate sequence (gates 1-7), the gate-8
+identity-check reuse, the replay and E1-E7 are the orchestrator's own,
+appended below this subsection after that work runs.
+
+**`pyproject.toml`**: `project.version` `1.9.5` → `1.10.4`, the only key
+touched in the file.
+
+**`uv lock` (online)**: regenerated `uv.lock` for the version literal only —
+`git diff 244b9a4 -- uv.lock` shows exactly one changed line (`tg-agent-bot`'s
+own `[[package]]` `version` field), no dependency added, removed or upgraded.
+
+**`tests/test_v195_version.py`** repointed from the live-tree read to
+`git show v1.9.5:pyproject.toml`, the exact shape
+`tests/test_v194_version.py:25-34` already established — never deleted
+(REQ-V190-EC-03).
+
+**New `tests/test_v1104_version.py`** (`T-V1104-VER-01`, `T-V1104-VER-02`),
+written test-first, both runs recorded:
+
+- Red before the bump (command `uv run --locked pytest tests/test_v1104_version.py
+  -q -o addopts=""` against the pre-bump tree): 2 failed —
+  `test_t_v1104_ver_01_...` on `assert '1.9.5' == '1.10.4'`;
+  `test_t_v1104_ver_02_...` on `assert baseline_version != live_version`
+  ('no project-version delta from f3ce1a5 yet', both sides `'1.9.5'`).
+- After `pyproject.toml`'s bump and the online `uv lock` regeneration, same
+  command: 2 passed.
+
+**README's release table**: appended the `v1.10.4` row verbatim from
+`docs/spec/spec-v1.10.4.md:679`, `<effective judge>` resolved to
+`anthropic/claude-sonnet-5 (another vendor)` (Stage 0 check 7 above and T4's
+gate 8 both confirm the primary judge passed, no fallback used, so
+`REQ-V1103-VER-01`'s `used: no` branch applies). The `v1.9.5` row lost its
+trailing `; this release` clause in the same edit.
+
+**README's gate-8 results table** (`:594-600`) filled with T4's own numbers
+("on this run"): injection 5/5 (floor 5), hallucination 4/4 (floor 3),
+memory 3/3 (floor 3), judge mean 0.907 (floor 0.8), latency max 3.58s vs
+4.0s (advisory, non-blocking).
+
+**`T-V1104-DOC-02`** (`tests/test_v1104_docs.py`), test-first, both runs
+recorded:
+
+- Red before the gate-8 table edit (command `uv run --locked pytest
+  tests/test_v1104_docs.py::test_t_v1104_doc_02_v1104_release_and_gate8_rows_landed_at_t5
+  -q -o addopts=""`): 1 failed — `assert "pending" not in gate8_table`,
+  all five `pending (T9)` rows still present (the release-table half of the
+  assertion already passed, having been edited first in the same commit).
+- After the gate-8 table edit, same command: 1 passed (4 passed with the
+  rest of the file).
+
+**AGENTS.md's two count-line citations** (`:161-162`, `:172`) moved to this
+run's own measured figures: `uv run --locked pytest --collect-only -q
+-o addopts="" | grep -c '::'` on the finished tree (after every other T5
+edit, including this task's own three new tests) reads **2311**; the
+mutation count moves to **144 entries**, both dated "as of spec-v1.10.4 T5".
+
+**`T-V1104-DOC-04`** — the existing count-line test
+(`tests/test_v190_agents.py`, was
+`test_t_v195_rpt_05_agents_md_count_lines_landed_at_t2`) renamed to
+`test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5` and repointed to
+`2311`/`144 entries`/`as of spec-v1.10.4 T5`, test-first, both runs
+recorded:
+
+- Red before the AGENTS.md edit (command `uv run --locked pytest
+  tests/test_v190_agents.py::test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5
+  -q -o addopts=""`): 1 failed — `assert "2311" in text`, AGENTS.md still
+  reading the v1.9.5-era figures.
+- After the AGENTS.md edit, same command: 1 passed (21 passed with the
+  rest of the file).
+
+**Provisional artefacts**: `docs/reports/tg-post-v1.10.4.md` written
+(Russian, 1420 characters by `wc -m`, naming `claude-sonnet-5`, linking
+`https://github.com/axyi/tg-agent-bot`, the five `v1103-*` mutations and the
+frozen-list rewrite as the subject, T4's gate-8 numbers "on this run"); the
+`## Ledger row` section below updated to the provisional `Ver = 1.10.4` row
+(cells this task cannot source yet left `TBD`); `docs/llm-usage.md` row 144
+added.
+
+**Final measured pytest collection count for this commit: 2311**
+(floor 2285 + 22 was already comfortably true at `244b9a4`'s 2308; this
+task's own three new tests push it to 2311).
+
+Gates run this task: 1-4 only (`uv sync --locked`, `ruff check .`, `pytest`,
+`bot.py --selftest`) — per the brief, `bot.py --selftest-live`,
+`devtools/rag_eval.py`, `devtools/agent_eval.py` and
+`devtools/mutation_check.py` intentionally **not** run; the orchestrator
+runs gates 1-7 plus the gate-8 identity-check reuse against this commit
+next.
+
+### Delegation record (T5)
+
+- T5 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T5.md | map vs actual: matches — the version bump, `uv lock`, the two new version-identity tests (red-before/green-after recorded), `tests/test_v195_version.py`'s repoint, README's release/gate-8 tables plus `T-V1104-DOC-02` (red-before/green-after), AGENTS.md's count lines plus the renamed `T-V1104-DOC-04` (red-before/green-after), the provisional tg-post/ledger-row/llm-usage artefacts and gates 1-4, no drift disclosed; the second (evidence-only) commit's bullet is the orchestrator's own, appended here after it lands
 
 ## Operator inputs
 
@@ -795,15 +891,20 @@ judge mean met — the run proceeds to T5.
 
 ## `docs/reports/tg-post-v1.10.4.md`
 
-Not reached: written at T5.
+Provisional — written at T5's first commit (Russian, 1420 characters by
+`wc -m`, naming `claude-sonnet-5`, linking
+`https://github.com/axyi/tg-agent-bot`); the orchestrator may touch it
+again before the evidence commit if anything changes.
 
 ## Ledger row (paste into `economics.md`)
 
-Provisional — filled finally at T5, or at the stop route's stage if the
-run halts earlier (placeholder shape matches `ledger_header`'s 11
-columns, precedent v1.10.1 T2 commit `d04fd53`, itself precedented by
-v1.10.0 T6 commit `761359a`):
+Provisional — `Ver` = `1.10.4` filled at T5's first commit; every other
+cell depends on the orchestrator's still-to-run gates 1-7, the gate-8
+identity-check reuse and the replay, so it stays `TBD` (placeholder shape
+matches `ledger_header`'s 11 columns, precedent v1.10.1 T2 commit `d04fd53`,
+itself precedented by v1.10.0 T6 commit `761359a`) until the evidence
+commit finalizes it:
 
 ```
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.10.4 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 ```

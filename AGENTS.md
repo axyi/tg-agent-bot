@@ -158,8 +158,8 @@ uv run --locked python devtools/rag_eval.py
 uv run --locked python devtools/agent_eval.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 1638
-tests as of spec-v1.9.5 T2). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 2311
+tests as of spec-v1.10.4 T5). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image
 pulled, every provider the configuration routes to); it spends no
 inference tokens and sends no Telegram message. **Gate 5 must be fully
@@ -169,7 +169,7 @@ unreachable *configured* provider is a blocked run, not a noted one; a
 provider no route names SKIPs cleanly instead and is not a blocker.
 Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 120 entries as of v1.9.5 T2
+the test suite once per mutation) — 144 entries as of spec-v1.10.4 T5
 (up from 105 at spec-v1.9.0's close; T9 added seven `v190-*` entries
 covering RAG per-user isolation (the vector KNN and BM25 queries,
 `list_documents`/`document_id_for`'s owner predicates), the delete path's

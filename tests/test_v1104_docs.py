@@ -66,6 +66,52 @@ def test_t_v1104_doc_01_readme_v1103_row_verbatim_v1102_row_still_present():
     assert _V1102_ROW in text
 
 
+_V1104_ROW = (
+    "| v1.10.4 | 1.10.4 | the five v1103-* mutation entries the v1.10.3 run "
+    "authored and verified, landed (mutation-all 144); every frozen-list "
+    "test pin rewritten to presence, contiguity and order; model under test "
+    "openai/gpt-4.1; shipped judge default anthropic/claude-sonnet-5; gate 8 "
+    "judged by anthropic/claude-sonnet-5 (another vendor); gate 8 green on "
+    "this run; this release |"
+)
+
+_V195_ROW_NO_THIS_RELEASE = (
+    "| v1.9.5 | 1.9.5 | `bot.py`'s three `storage.init_schema` call sites "
+    "(`main()`, `run_selftest()`, `_live_db()`) now route through one "
+    "shared `_init_startup_schema(conn, cfg)` helper that always passes "
+    "the configured embedding pair (GitHub issue #3: `vec_chunks`/"
+    "`rag.embedding` were never bound at startup on a RAG-configured "
+    "deployment, so every document upload failed); `main()` gains a "
+    "`ConfigError` catch matching its sibling startup guards |"
+)
+
+_GATE8_FILLED_ROWS = (
+    "| injection | 5/5 (floor 5) |",
+    "| hallucination | 4/4 (floor 3) |",
+    "| memory | 3/3 (floor 3) |",
+    "| judge mean | 0.907 (floor 0.8) |",
+    "| latency (advisory) | max 3.58s vs 4.0s (advisory, non-blocking) |",
+)
+
+
+def test_t_v1104_doc_02_v1104_release_and_gate8_rows_landed_at_t5():
+    """T-V1104-DOC-02: T5, red before, green after -- a `v1.10.4` row ending
+    "this release", the `v1.9.5` row (`README.md:913`) without it, no
+    "pending" left in the gate-8 results table (`README.md:594-600`)."""
+    text = _read_readme()
+
+    assert _V1104_ROW in text
+    assert _V195_ROW_NO_THIS_RELEASE in text
+
+    table_start = text.index("| metric | result |")
+    table_end = text.index("## Add a skill", table_start)
+    gate8_table = text[table_start:table_end]
+
+    assert "pending" not in gate8_table
+    for row in _GATE8_FILLED_ROWS:
+        assert row in gate8_table
+
+
 def test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchanged():
     text = _read_agents_md()
     assert "docs/spec/task-briefs/v1104-T<N>.md" in text
