@@ -441,7 +441,163 @@ after this task — never dropped, never popped, never bare-applied.
 
 - T2 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T2.md | map vs actual: matches the reading map and the strict order, plus two disclosed discrepancies, neither a repair cycle — (1) the brief's step 4 parenthetical ("it should [match]") was wrong about Appendix D's inserted `mutation-all` sentence text; corrected per the spec's own MUT-02(c) text and the brief's own "fix it to match exactly" escape hatch; (2) the stash's own content never passed this repo's mandatory `ruff-format-all` pre-commit gate (never run through it before being stashed at v1.10.3 T6); resolved by reformatting only the two touched paths after the `d09909d…` post-image proof was recorded, a quote-style-only change with `T-V1104-MUT-02`'s byte-equality assertion as the semantic-equivalence proof
 
-## T3 — not reached: T3
+## T3 — the clean-context review (REV-01)
+
+Independent review, clean context (this session never touched T1/T2's
+writing context). Reading map: `docs/spec/spec-v1.10.4.md` §1 (EC-01/02),
+§2 (NG-01/10), §3 (MUT-01/02, Appendix D's literals), §9 (REV-01);
+`git log b689195..09cca94`; `git diff f3ce1a5 09cca94` (full and
+path-scoped); the amended `tests/` sites by `file:line`;
+`tests/test_v1104_gates.py` (404 new lines, read in full);
+`docs/reports/report-v1.10.4.md`'s T0-T2 sections.
+
+**REQ-V1104-REV-01 item 1 — NG-01 byte-equality, `mutation_check.py`'s and
+`quality_gates.yaml`'s scoped diffs.** PASS.
+`git diff f3ce1a5 09cca94 -- tools.py devtools/checks.py
+devtools/agent_eval.py evals/agent/red_team.json .env.example` — empty.
+README's judge paragraph (`:568-576`) untouched; the only README hunk is
+the new v1.10.3 release row at `:914` (`git diff f3ce1a5 09cca94 --
+README.md`). `git diff f3ce1a5 09cca94 -- devtools/mutation_check.py` is
+one `+100/-0` hunk appending the five `v1103-*` entries after
+`v1102-hal-gap-marker-dropped` plus the stash's rationale comment — the
+139 pre-existing entries are untouched (the diff's own shape is the
+proof: an insertion-only hunk cannot have reformatted lines it does not
+touch). `git diff f3ce1a5 09cca94 -- config/quality_gates.yaml` is
+exactly four hunks: the `mutation-subsets` line gaining `mutation-v1103`,
+the new `mutation-v1103` gate block (MUT-02's (a)/(b)), the `mutation-all`
+comment rewrite (MUT-02(c) — see below), and PIN-02's `report_path`
+repoint; no other line differs. `git diff f3ce1a5 09cca94 -- pyproject.toml
+uv.lock` — empty (no new dependency, T5 not yet landed).
+
+**Item 2 — every rewritten pin presence+contiguity+order, no banned
+shape, no test deleted.** PASS. Read all 16 amendment-table sites
+(rows 1-14, 12b) at their landed `file:line`; each replaced a `tail ==`,
+whole-tail `_IDS = […]` equality, release-anchored regex, absence
+("not any"/"no v1.10.3 row") or frozen-dict-equality pin with a
+presence+contiguity+order assertion (`ids[start:start+len(GROUP)] ==
+GROUP`, `label in matrix` + immediately-after-order, or `_ROW in text`).
+`grep -rn -E 'tail ==|not any\(|endswith\(|\[-1\]|(_IDS|ids|labels) ==
+\[' tests/` shows no surviving hit on any of the 16 rewritten sites (the
+only `tail ==` survivor is `tests/test_v1100_runner.py:576`, spec's own
+"verified unaffected" list, `GATE8_DEPENDENCIES`, unrelated). Test-count
+count check (2308 collected, floor-2285 + T1's net + T2's 6, `pytest
+--collect-only` re-run directly by this review) and an independent
+function-name diff (`git show f3ce1a5:<file> | grep '^def test'` vs
+`git show 09cca94:<file>`) on all nine touched test files confirm zero
+deletions: only two names disappear, both renamed with kept intent —
+`test_exactly_seven_v1100_then_six_v1101_then_six_v1102_mutations_after_the_last_v195_entry`
+→ `test_release_groups_after_the_last_v195_entry_are_contiguous_blocks_in_order`
+(row 2) and `test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1103` →
+`test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104` (rows 13-14, in
+both `tests/test_v1102_docs.py` and `tests/test_v190_agents.py`).
+
+**Item 3 — every T0 inventory hit classified.** PASS. Read the report's
+`### EC-02's T0 inventory` section (`report-v1.10.4.md:115-224`) in full:
+the five-part grep's raw hit counts are reconciled into the 16-row
+amendment table, the spec's own verified-unaffected list, and five
+labelled groups (per-profile membership-exclusion checks,
+`devtools/checks.py` implementation code, module docstring citations,
+`test_v1103_lint.py`'s fixture literals, the generic sprawl catch-all) —
+this reads as a complete classification, not a stub; the reconciliation
+explicitly re-checks the two highest-risk patterns (`tail ==`/`_IDS = [`)
+hit-by-hit and states no unclassified hit survived.
+
+**Item 4 — isolation-proof naming.** PASS. `report-v1.10.4.md:412` names
+`T-V1103-LINT-09` (not `-06`/`-07`) as entry 4's killer, matching
+`devtools/mutation_check.py`'s own landed `why` string for
+`v1103-delegation-lint-dropped`. `report-v1.10.4.md:410` and the landed
+`why` string for `v1103-exec-guard-env-file-dropped` both describe the
+mutant as forcing the inner `any(...)` generator predicate to `False`,
+not `if False:` on the outer `if any(...):` line — matches
+`devtools/mutation_check.py`'s entry 2 (`"replace": "        False  #
+v1103-exec-guard-env-file-dropped\n"`, the inner predicate only).
+
+**Item 5 — no new dependency, no secret, no live test call, stash
+identity.** PASS. `pyproject.toml`/`uv.lock` diff empty (above).
+`git diff f3ce1a5 09cca94 | grep -inE 'api[_-]?key|secret|token|password'`
+shows no leaked value — every hit is either prose about the *mechanism*
+(SEC-01, gate-8 log paths, the `bool(...)` proof rule) or the pre-existing
+`v1102-secrets-line-dropped` mutation id moved in a diff hunk, not a
+secret value. `git diff f3ce1a5 09cca94 -- tests/` has no new
+`httpx.get`/`requests`/`socket`/literal-URL call. `git rev-parse
+stash@{0}` == `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3`, confirmed by
+this review directly (id-match route; T2's report section shows the same
+id before and after its own apply).
+
+**T2's two disclosed findings, sanity-checked.** (a) The `mutation-all`
+comment's landed text (`config/quality_gates.yaml`, `git diff f3ce1a5
+09cca94`) reads `` # spec-v1.10.4 T2 appended the five `v1103-*` entries
+authored by the v1.10.3 run; `len(devtools.mutation_check.MUTATIONS)` is
+now 144. `` — byte-identical to `spec-v1.10.4.md:386-388`'s pinned
+fenced block, carrying the fragment `` MUTATIONS)` is now 144`` and the
+release-anchored (v1.10.4, not v1.10.3) attribution the spec requires;
+confirmed directly against the spec text, not merely against the
+report's quotation of it. (b) The five entries' `id`/`path`/`find`/
+`replace` fields, read directly from `devtools/mutation_check.py` at
+`09cca94`, match `spec-v1.10.4.md:277-293`'s pinned literals in content
+exactly for all five entries (entry 2's `find` is split across an
+implicit two-string concatenation and entry 1 carries a redundant
+wrapping paren, both resolving to the identical string; only quote
+style/line-wrapping differs) — confirmed by direct string comparison
+against the spec, independent of `T-V1104-MUT-02`'s own byte-equality
+assertion (see the should-fix note below on why that assertion alone
+would not have been sufficient proof).
+
+- T3 | delegated: no | to: — (the task is itself the clean-context review) | brief: — | map vs actual: matches §10.1's T3 row and this review's own reading map
+
+## Findings
+
+- 🟡 **should-fix (report rigor only, not a defect):**
+  `docs/reports/report-v1.10.4.md:350-353` cites
+  `T-V1104-MUT-02`'s byte-equality assertion (`registered["find"] ==
+  entry["find"]`) as proof that the post-`ruff-format` reformat of
+  `devtools/mutation_check.py` was semantically inert. `MUT-02` compares
+  the registry against `_V1103_ENTRIES`, a literal hardcoded inside
+  `tests/test_v1104_gates.py:227-264` — and that same file was reformatted
+  by the identical `ruff format` invocation the report names
+  (`report-v1.10.4.md:348-349`, "running `ruff format` over only the two
+  touched paths (`devtools/mutation_check.py`,
+  `tests/test_v1104_gates.py`)"). A deterministic formatter applies the
+  same quote-normalization to structurally identical literals in both
+  files, so `MUT-02` staying green after the reformat demonstrates
+  self-consistency between the two files, not conformance to the spec —
+  a one-byte semantic drift introduced identically in both files by a
+  hypothetical bad reformat would still pass `MUT-02`. This review's own
+  item-5(b) direct comparison against `spec-v1.10.4.md:277-293` is the
+  non-circular proof the report should have cited instead (or in
+  addition); the underlying content is in fact correct (confirmed
+  above), so this is a documentation/rigor gap in the report's evidence
+  chain, not a defect in the landed code. No fix delegated — recommend a
+  one-line addendum to `report-v1.10.4.md`'s T2 section on the next
+  touch, not a repair cycle.
+- 🟢 **note (out of this release's scope, disclose only):**
+  `tests/test_v1102_red_team.py:391-392` and
+  `tests/test_v1103_red_team.py:173,459` each pin `HAL_MARKERS[-1]`/
+  `INJ_MARKERS[-1]` against a specific index (`[17]`/`[15]`) — the same
+  "nothing follows" shape NG-10 retires, on the marker lists rather than
+  the mutation-id/version lists this release's amendment table covers.
+  Pattern (iii)'s `\[-1\]` grep would surface these at T0 (they fall
+  under the report's generic-sprawl catch-all,
+  `report-v1.10.4.md:197-212`, whose stated reason — "none reference a
+  release-id list, a mutation count, a version literal, or a gate-matrix
+  label" — is true but not specifically responsive to a last-index marker
+  pin). These files are pre-existing (part of `devtools/agent_eval.py`'s
+  NG-01-pinned, byte-unchanged `HAL_MARKERS`/`INJ_MARKERS` this release
+  does not touch), so no amendment is due now, and
+  `v1103-hal-noun-first-marker-dropped`'s own killer
+  (`HAL_MARKERS[17]` raising `IndexError`) depends on exactly this pin —
+  "fixing" it now would blunt the mutation entry T2 just landed. Flagged
+  for the next release that grows `HAL_MARKERS`/`INJ_MARKERS` to add
+  these two sites to its own EC-02-shaped amendment table; no fix
+  delegated.
+
+No finding above requires a source-writing fix; `docs/spec/task-briefs/v1104-T3.md`
+is not created (no delegation triggered).
+
+## Verdict: REQ-V1104-REV-01 — all five items PASS, both findings
+disclosed and waived (report-rigor note, out-of-scope note); no
+source-writing fix delegated.
+
 
 ## T4 — not reached: T4
 
