@@ -1,7 +1,7 @@
 # spec-v1.10.4 — the five `v1103-*` mutation entries landed, every frozen-list test pin rewritten to presence-contiguity-order, the single gate 8 the stop route never reached, and the release rows three stopped runs left pending
 
-Status: draft — cross-review rounds 1–2 of at most 3 applied (Appendix C;
-its opening paragraph is a placeholder until the last round closes).
+Status: ready for `go` — cross-review rounds 1–3 of 3 applied (Appendix
+C; termination `round_limit`).
 Base: `main` at `f3ce1a5` (tree clean, **72 commits ahead of
 `origin/main`**, unpushed by the operator's choice); last tag `v1.9.5` =
 `a3e0a93`. spec-v1.10.3 is **implemented through T5**; its T6 mutations
@@ -59,15 +59,19 @@ checks 3–6, `spec-v1.10.1.md:1141-1165`, check 6 with
 never at T5** (GATE-01); `uv lock` (online) at T5; the stop procedure
 may invoke gates 5 and 7 once each, never gate 8 — **once T4's gate 5
 and gate 7 have completed, no stop route may invoke any live gate
-again. Stage B′ reuses T4's already-recorded gate-5, gate-7 and gate-8
-results; finalisation runs only offline checks. The stop-route
-permission to invoke gates 5 and 7 applies only before their scheduled
-T4 execution** (GATE-01, REV-03). No `bench.py`; no LM
+again. Stage B′ reuses the recorded T4 gate-5, gate-7 and gate-8
+results. Stage B″ reuses the recorded gate-5 result and the terminal
+gate-7 result; gate 8 is `N/A` and was never invoked. Finalisation
+runs only offline checks. The stop-route permission to invoke gates 5
+and 7 applies only before their scheduled T4 execution** (GATE-01,
+REV-03). No `bench.py`; no LM
 Studio; no offline test reaches a socket (`tests/conftest.py:10-28`).
 **Zero new dependencies**: `pyproject.toml:6-14`, `:16-21` unchanged;
 `T-V1104-VER-02` pins that **for `pyproject.toml` and `uv.lock` only,
 the diff from the `f3ce1a5` blobs is project-version-only according to
-`dependency_diff_is_version_only` (`devtools/agent_eval.py:1279`); no
+`dependency_diff_is_version_only` (`devtools/agent_eval.py:1279`), and
+that the project-version delta from `f3ce1a5` exists and resolves to
+`1.10.4` — so the test is red before the bump and green after; no
 claim is made that the whole repository diff is version-only**; T0
 records `git diff --stat f3ce1a5 -- pyproject.toml uv.lock` (empty).
 **No push**: the operator pushes the 72 pending commits, this run's and
@@ -213,7 +217,14 @@ did). The judge route resolves as `REQ-V1100-EC-05` says, except
 `REQ-V1103-INS-01`'s one recorded fallback to
 `openrouter:openai/gpt-5.6-sol` (identity assertion, "shipped default
 vs effective judge", by reference). Prompt
-227 is committed with this spec; the run's prompts start at 228; one
+227 and `docs/llm-usage.md` row 138 are committed with this spec —
+T0's precondition (§10 T0): `docs/spec/spec-v1.10.4.md` is committed
+and unmodified (`git diff --exit-code HEAD --
+docs/spec/spec-v1.10.4.md` exits 0) and its header `Status:` reads
+`` ready for `go` `` (line 3; `grep -c '^Status: ready for'
+docs/spec/spec-v1.10.4.md` prints 1); prompt 227 and `docs/llm-usage.md` row 138 exist in
+`HEAD` (no committed spec hash is expected anywhere: the spec cannot
+carry its own final hash); the run's prompts start at 228; one
 prompt → one commit, never mixed (T5's two commits are one prompt,
 REV-02; a stop-route evidence commit at T4 is REV-03's explicit
 exception); `--no-verify` is never used and the report attests it.
@@ -291,8 +302,22 @@ byte-exact, never re-authored. **The stash identity is pinned**: T0
 records `git rev-parse stash@{0}` and asserts it equals
 `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3` (parents `52be07e` base,
 `48b7ee5` index, `043842f` untracked). **Procedure (T2, repository
-root, after T1's commit)** — first the exact two-path check re-run
-**after T1** (T0's check on `f3ce1a5` does not cover T1's tree):
+root, after T1's commit) — test-first, then the check, then the
+apply.** First land and run `T-V1104-MUT-01…05` and `T-V1104-ERR-01`
+against the post-T1 pre-apply tree and record the expected failures
+caused by the five absent entries/gate: `T-V1104-MUT-01`, `-02` and
+`-03` are red for that absence (`-01` finds no block, `-02`'s
+byte-equality half looks the five entries up in `mc.MUTATIONS` by id,
+`-03` finds no gate); **`T-V1104-MUT-04`, `T-V1104-MUT-05` and
+`T-V1104-ERR-01` are green structurally before the apply** — the
+post-T1 block already holds exactly one "is now" parsing to 139 =
+`len(mc.MUTATIONS)`; `-MUT-05` parses §3's pinned `find`/`replace`
+pairs against the `f3ce1a5` sources and never reads the registry;
+`T-V1104-ERR-01` runs `run_one` on a `tmp_path` root with an entry
+built from §3's pinned strings — and are recorded as such, never
+claimed red. Only then the exact two-path
+check re-run **after T1** (T0's check on `f3ce1a5` does not cover
+T1's tree):
 
 ```bash
 git stash show -p stash@{0} | git apply --check --include='devtools/mutation_check.py' --include='config/quality_gates.yaml' -
@@ -302,11 +327,21 @@ git stash show -p stash@{0} | git apply --include='devtools/mutation_check.py' -
 The lab verified this form with `--check` exits 0 on `f3ce1a5` (facts
 §1); T1 does not touch `devtools/mutation_check.py` and touches
 `config/quality_gates.yaml` only at `lint-docs.report_path` (PIN-02).
-**The fallback triggers when the stash is absent, has another id, or
-fails the post-T1 `--check`** (ERR-01 row 1): T2 extracts Appendix D's
-fenced block into a file, asserts its `sha256sum` equals Appendix D's
-stated value, and runs `git apply` on that file — the same two paths,
-the same bytes. **The stash's three test hunks
+**Two routes off the id-match path** (ERR-01 rows 1 and 1b). If the
+stash is absent or has another id, verify (`git apply --check` on the
+extracted Appendix D file) and apply Appendix D: T2 extracts Appendix
+D's fenced block into a file, asserts its `sha256sum` equals Appendix
+D's stated value, runs `git apply --check` on that file (exit 0
+required) and then `git apply` on it — the same two paths, the same
+bytes (row 1). If the pinned stash exists but either the stash patch
+or Appendix D fails `git apply --check` on the post-T1 tree, do not
+attempt the same patch blindly; classify this as a construction
+defect before any mutation execution. Repair only by a delegated,
+byte-exact reconstruction of Appendix D's specified post-image hunks
+(brief `v1104-T2.md`, EC-03), verify the per-hunk/post-image
+assertions, and spend one repair cycle (row 1b). After the apply
+route taken, add EC-02 row 2b and rerun the six T2 tests green.
+**The stash's three test hunks
 are NOT applied**: they carry the frozen shapes this release retires (a
 24-id `tail ==` literal, `spec-v1\.10\.3 T6` anchors) — T1 rewrote those
 sites (PIN-01); T2 only adds the `v1103-` group assertion (EC-02 row
@@ -412,15 +447,16 @@ not exist in this release** (EC-02); these rows are added or rebound:
 
 | # | where | condition | behaviour | exit / verdict |
 |---|---|---|---|---|
-| 1 | T0 / T2, the stash | `stash@{0}` absent, `git rev-parse stash@{0}` ≠ `e3c6e3ff…`, or the post-T1 two-path `git apply --check` exits non-zero | the fallback (§3): Appendix D's diff, its `sha256sum` asserted, applied by `git apply`; the post-image verified either way; recorded | no cycle |
+| 1 | T0 / T2, the stash | `stash@{0}` absent, or `git rev-parse stash@{0}` ≠ `e3c6e3ff…` | the fallback (§3): Appendix D's diff extracted, its `sha256sum` asserted, `git apply --check` on the extracted file exit 0, then applied by `git apply`; the post-image verified; the observed stash state recorded | no cycle |
+| 1b | T2, the stash | the pinned stash exists (id-match) but the stash patch or Appendix D fails `git apply --check` on the post-T1 tree | never the same patch blindly: a construction defect before any mutation execution; repair only by a delegated, byte-exact reconstruction of Appendix D's specified post-image hunks (brief `v1104-T2.md`), the per-hunk/post-image assertions verified (§3); recorded | a repair cycle (one) |
 | 2 | `run_one` | a `find` matching 0 or ≥ 2 times (`:2309-2311`) | `DRIFTED`, the runner never called, gate 6 red | a construction defect → a repair cycle |
 | 3 | T2, isolation | an entry not killed by its named killer's exact node ids alone; a collection miss; an extra selected node | `REQ-V1103-ERR-01` row 7: disclose; rewrite syntax-preserving (or repair the collection) — a construction defect | a repair cycle |
 | 4 | after T0 | a test red on a pin listed neither in EC-02 nor in the T0 hit table | amended with its intent kept, disclosed as an EC-02 amendment | **no cycle, no stop** |
 | 5 | `lint-docs` | a task section without a `^- T\d+ \| ` bullet; a `brief:` naming `v1103-T<n>.md` | the `REQ-V1103-LINT-01` text; blocked | fix the report; never the lint |
 | 6 | Stage 0 check 6 | the judge probe fails as `REQ-V1103-ERR-01` row 6 describes | the single fallback, recorded; the effective judge named (VER-01, RPT-02) | as row 6 |
 | 7 | T4, calibration | `2 × wall + 70 s` rounded up to 10 s differs from 110 | `mutation-v1103.timeout_seconds` set to the computed value inside GATE-02's one hunk (the dated comment lands even when the value stays 110) | recorded |
-| 8 | T4, gate 6 | the direct `mutation-all` wall exceeds 1640 s (gate 6 at T4 runs directly, so no timeout is enforced on that run; `timeout_seconds: 1640` governs only `checks.py`-driven runs — the yaml-configured `mutation-all` gate could not have finished under `checks.py`) | a construction defect: a separate `mutation-all` timeout hunk (`2 × wall + 70 s`, rounded up to 10 s) delegated under T4's brief, a new write-tree recorded, gate 6 once more on that final tree within one repair cycle; only the final green run is the acceptance result (GATE-02's explicit exception to the one-hunk rule); a wall ≤ 1640 s leaves the value unchanged | a repair cycle |
-| 9 | T4, gate 6 | `HEAD^{tree}` ≠ the write-tree recorded for the gate-6 run that is the acceptance result (the final one on row 8's branch) | gate 6 once more on the committed tree (`REQ-V1102-ERR-01` row 13) | recorded |
+| 8 | T4, gate 6 | the direct `mutation-all` wall exceeds 1640 s (gate 6 at T4 runs directly, so no timeout is enforced on that run; `timeout_seconds: 1640` governs only `checks.py`-driven runs — the yaml-configured `mutation-all` gate could not have finished under `checks.py`) | a construction defect: a separate `mutation-all` timeout hunk (`2 × wall + 70 s`, rounded up to 10 s) delegated under T4's brief, a new write-tree recorded as `mutation_tree`, gate 6 once more on that final tree within one repair cycle, the rerun bracketed by GATE-02's before/after checks (`git diff --exit-code` and `test "$(git write-tree)" = "$mutation_tree"`, both exits recorded, before and after); only the final green run is the acceptance result (GATE-02's explicit exception to the one-hunk rule); a wall ≤ 1640 s leaves the value unchanged | a repair cycle |
+| 9 | T4, gate 6 | `HEAD^{tree}` ≠ `mutation_tree` of the gate-6 run that is the acceptance result (the final one on row 8's branch), or a bracketing check of GATE-02 (before or after that run) exited non-zero | gate 6 once more on the committed tree (`REQ-V1102-ERR-01` row 13), bracketed the same way | recorded |
 | 10 | gate 8 at T4 | exit 1 — a category under floor or judge mean under 0.8 | Stage B′ (REV-03); the capture quoted in full | stop, no bump, no tag |
 | 11 | the gate-8 capture | `test -s` non-zero | `REQ-V1102-ERR-01` row 11 — never a re-run | the terminal record, or a blocked run |
 | 12 | gate 7 | `recall@5` red after the transient rule (exit 2 is never this row) | at T4: Stage B″; at T5: Stage B at T5 | stop |
@@ -481,7 +517,7 @@ tests" rows 3–4's, "the two re-pinned README tests" rows 5–6's.
 | `T-V1104-DOC-04` | `docs.py` | `AGENTS.md`'s count lines carry T5's `pytest` count and `144 entries`, dated `as of spec-v1.10.4 T5` (T5, red before, green after) | — |
 | `T-V1104-DOC-05` | `docs.py` | NG-01's six files byte-equal to their `git show f3ce1a5:<path>` blobs (README: the judge paragraph `:568-576`) | — |
 | `T-V1104-VER-01` | `version.py` | `project.version == "1.10.4"` (live tree); `git show v1.9.5:pyproject.toml` reads `1.9.5` | — |
-| `T-V1104-VER-02` | `version.py` | for `pyproject.toml` and `uv.lock` only, the diff from the `f3ce1a5` blobs is project-version-only under `dependency_diff_is_version_only` (no whole-repository claim) | — |
+| `T-V1104-VER-02` | `version.py` | for `pyproject.toml` and `uv.lock` only, the diff from the `f3ce1a5` blobs is project-version-only under `dependency_diff_is_version_only` (no whole-repository claim), **and** the project-version delta from `f3ce1a5` exists and resolves to `1.10.4` (T5, red before the bump, green after) | — |
 | `T-V1104-ERR-01` | `gates.py` | a `tmp_path` root whose `tools.py` copy carries entry 1's `find` twice → `run_one(entry, runner=spy, root=tmp, restorer=…)` returns `(mc.DRIFTED, None)`, the spy never called; with one `find` → the spy called once, the file restored | yes |
 
 ---
@@ -507,8 +543,10 @@ commit, then `REQ-V1100-GATE-01`'s dependency identity check (`git diff
 defect, repaired within the budget, gates 1–7 and the check rerun, not
 restorable → Stage B at T5 (ERR-01 row 13). **Once T4's gate 5 and gate
 7 have completed, no stop route invokes any live gate again** (EC-01):
-Stage B′ and B″ reuse T4's recorded gate-5, gate-7 and gate-8 results
-and finalise offline; gate 8 is T4's last live action in every route. **The reuse record** states
+Stage B′ reuses the recorded T4 gate-5, gate-7 and gate-8 results.
+Stage B″ reuses the recorded gate-5 result and the terminal gate-7
+result; gate 8 is `N/A` and was never invoked. Both finalise offline;
+gate 8, where it ran, is T4's last live action. **The reuse record** states
 facts (a) and (b) of `spec-v1.10.3.md:749-757` with `f3ce1a5` for
 `636a281`. **Every gate-7 execution gets an attempt-log row** (RPT-01).
 **Only the run's own T4 capture counts** (NG-06); **one green run is
@@ -534,9 +572,19 @@ computed value in the brief first; `[[VERIFY: v1102's
 calibration measured 18.11 s → 110 s (`config/quality_gates.yaml:575-577`)
 — decision rule: `timeout_seconds` is always the computed number, 110
 only if the formula yields it]]`;
-(2) the intended T4 files staged and **`git write-tree` recorded**, then
-**gate 6 run directly on the recorded write-tree**, its wall recorded
-(`REQ-V1102-GATE-02`'s procedure by reference). **When the wall is
+(2) the intended T4 files staged and **`mutation_tree="$(git
+write-tree)"` recorded**, then **gate 6 run directly on that tree**,
+its wall recorded (`REQ-V1102-GATE-02`'s procedure by reference).
+**`git write-tree` records the index while the direct gate-6 command
+reads the working tree, so the tree is proved, not inferred:
+immediately before and immediately after every accepted direct gate-6
+run — including ERR-01 row 8's rerun — T4 runs `git diff --exit-code`
+and `test "$(git write-tree)" = "$mutation_tree"`, both exits
+recorded (four exits per run). Only the intended staged T4 changes may
+exist: no unstaged and no untracked source, config or test file (the
+`git status --porcelain` listing recorded alongside shows only the
+staged T4 paths), and the post-run worktree equals the index again.
+A non-zero exit on either side is ERR-01 row 9.** **When the wall is
 ≤ 1640 s, `mutation-all.timeout_seconds` is not changed.** When the wall
 exceeds 1640 s (gate 6 at T4 runs directly — the `AGENTS.md` command —
 so no timeout is enforced on that run; `timeout_seconds: 1640` governs
@@ -544,11 +592,12 @@ only `checks.py`-driven runs, so the yaml-configured `mutation-all`
 gate could not finish under `checks.py`), this is a construction defect
 (ERR-01 row 8): a separate `mutation-all` timeout hunk (`2 × wall +
 70 s`, rounded up to 10 s) is delegated under T4's brief, a new
-write-tree is recorded, and gate 6 runs once more on that final tree
-within one repair cycle; only the final green run is the acceptance
+`mutation_tree` is recorded, and gate 6 runs once more on that final
+tree within one repair cycle, bracketed by the same before/after
+checks; only the final green run is the acceptance
 result. The "exactly one localized YAML hunk" rule applies to the
 normal branch; this repair hunk is the explicit exception. Then commit;
-`git rev-parse HEAD^{tree}` asserted equal to the write-tree of the
+`git rev-parse HEAD^{tree}` asserted equal to `mutation_tree` of the
 acceptance run (ERR-01 row 9); `[[VERIFY: v1.10.2's direct
 `mutation-all` run took 14m23.5s at 139 entries against 1640 s
 (`docs/llm-usage.md` row 129) — decision rule: the direct wall is
@@ -614,8 +663,10 @@ release rows in two tasks, the local tag, no push.** `pyproject.toml:3`
 moves `1.9.5` → `1.10.4` in **T5's first commit and nowhere else** —
 after T4's gates and gate 8 are green — so a stop earlier needs no
 revert; `1.10.0`…`1.10.3` stay stopped, untagged runs. `uv lock`
-(online) regenerates `uv.lock` for the literal only (`T-V1104-VER-02`);
-`T-V1104-VER-01` is written in the same commit, red before, green after;
+(online) regenerates `uv.lock` for the literal only (`T-V1104-VER-02`,
+which also asserts the version delta from `f3ce1a5` resolves to
+`1.10.4` — red before the bump, green after); `T-V1104-VER-01` is
+written in the same commit, red before, green after;
 `tests/test_v195_version.py` is repointed to the `v1.9.5` blob (EC-02
 row 15). README's release table
 (`README.md:913-916`) gains **two rows in two tasks**: the `v1.10.3`
@@ -644,9 +695,15 @@ gate-7 execution, item 23's "shipped judge default
 `anthropic/claude-sonnet-5`; gate 8 judged by `<effective judge>`", "on
 this run") — plus: **the stash application
 record** (`git rev-parse stash@{0}` and its match against MUT-01's id,
-the post-T1 `--check` exit, the apply command and exit, or the fallback
-and its reason with Appendix D's `sha256sum` match, and the post-image
-verification); **the
+the post-T1 `--check` exit, the apply command and exit, or the route
+taken off the id-match path — row 1's fallback with its reason,
+Appendix D's `sha256sum` match and the `--check`/apply exits on the
+extracted file, or row 1b's construction defect with the delegated
+reconstruction record and the cycle spent — and the post-image
+verification; **the pre-apply T2 test record** — the six T2 tests run
+on the post-T1 pre-apply tree, `-MUT-01`, `-02`, `-03` red for the
+absence, `-MUT-04`, `-MUT-05` and `-ERR-01` green structurally, then
+all six green after the apply); **the
 per-entry isolation proofs** (§3 row, import-proof exit, the collection
 command and the exact node ids, the selected count, the pytest command
 run with those node ids — never `-k` — its result, the failing
@@ -656,7 +713,10 @@ every hit of parts (i)–(iii) and (v) classified)
 and any post-T0 amendment (ERR-01 row 4) in its task's section; **the
 calibration line** (wall, result, `timeout_seconds`; on ERR-01 row 8's
 branch also the `mutation-all` wall, its repair hunk and the final
-green run); the push instruction naming the 72 pending commits,
+green run); **the gate-6 tree proof** — `mutation_tree` and, for every
+accepted direct gate-6 run, the four bracketing exits (`git diff
+--exit-code` and `test "$(git write-tree)" = "$mutation_tree"`, before
+and after) with the `git status --porcelain` listing (GATE-02); the push instruction naming the 72 pending commits,
 followed by the stash rule: **if and only if `git rev-parse stash@{0}`
 still equals `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3`, instruct the
 operator to run `git stash drop stash@{0}` after pushing. If the
@@ -799,7 +859,7 @@ four-path set):
 | stage | when | permitted paths (exhaustive; `git show --stat` names a subset, nothing else) | prompt | extra evidence commit | `tg-post-v1.10.4.md` | last-commit and clean-tree assertions |
 |---|---|---|---|---|---|---|
 | **B′** | gate 8 exit 1 at T4 | `docs/reports/report-v1.10.4.md`, `docs/reports/tg-post-v1.10.4.md`, the single `docs/prompts/232-*.md` file, `docs/llm-usage.md` | 232 | **yes — the explicit exception to one-commit-per-task**: T4's calibration/gate-6 commit already exists; the stop-route evidence commit is T4's second and the run's last | required (step 2) | `git log -1 --format=%s` names the evidence commit and "Stage B′"; `git status --porcelain` empty; `pyproject.toml` `1.9.5`; `git tag -l v1.10.4` empty; the gate-8 capture quoted in full; no live gate after gate 8 |
-| **B″** | gate 7 `recall@5` red at T4 after the transient rule | the same four paths as B′ | 232 | **yes — the same explicit exception** (T4's second commit, the run's last) | required (step 2) | as B′ with "Stage B″"; gate 8 `N/A` (never reached); no live gate after T4's gate 7 |
+| **B″** | gate 7 `recall@5` red at T4 after the transient rule | the same four paths as B′ | 232 | **yes — the same explicit exception** (T4's second commit, the run's last) | required (step 2) | as B′ with "Stage B″", except the reuse: the recorded gate-5 result and the terminal gate-7 result are reused; gate 8 `N/A`, never invoked (no capture exists); no live gate after T4's gate 7 |
 | **B at T5** | ERR-01 row 12 or 13 at T5 | REV-02's four paths: `docs/reports/report-v1.10.4.md`, `docs/reports/tg-post-v1.10.4.md`, the single `docs/prompts/233-*.md` file, `docs/llm-usage.md` | 233 | **no** — T5's second commit *is* REV-02's evidence commit; no third commit | required (step 2) | `git log -1 --format=%s` names the evidence commit and "Stage B at T5"; `git status --porcelain` empty; `pyproject.toml` `1.10.4` (no revert); `git tag -l v1.10.4` empty; the reuse record names one gate-8 execution at T4 |
 
 The task-brief files of the tasks that ran are already in those tasks'
@@ -814,8 +874,10 @@ steps of `spec-v1.10.1.md:1208-1228` and the gate rules of
 execution, never re-run** — a stop before T4 has none, `N/A`;
 `mutation-v1103` `N/A` when never landed; **once T4's gate 5 and gate 7
 have completed, no stop route invokes any live gate again** — Stage B′
-and B″ reuse T4's recorded gate-5, gate-7 and gate-8 results and
-finalise with offline checks only; step (4)'s "5, 7 … when the live
+reuses the recorded T4 gate-5, gate-7 and gate-8 results; Stage B″
+reuses the recorded gate-5 result and the terminal gate-7 result,
+gate 8 `N/A` and never invoked; both finalise with offline checks
+only; step (4)'s "5, 7 … when the live
 environment is available" applies only to a stop before their
 scheduled T4 execution, EC-01), `gitleaks` exit 0, the
 permitted evidence committed and nothing else, no `--no-verify`, the
@@ -836,11 +898,11 @@ code they cover, in the same task.
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preflight (*commands only*): hooks, `doctor`, **test count re-measured** (2285 at authoring; the floor), `len(MUTATIONS)` 139, last prompt 227, last usage row 138 (both written by the authoring commit that lands this spec; at `f3ce1a5` they are 226 / 137), `<base>` `f3ce1a5`, the spec's `sha256`; `git stash list` shows `stash@{0}`, `git rev-parse stash@{0}` equals MUT-01's `e3c6e3ff…` and the two-path `git apply --check` exits 0 (or the T2 fallback — Appendix D — is announced now, the observed stash state recorded); EC-02's five-part inventory, every hit classified (ERR-01 row 14); the seven Stage 0 checks; gates 1–5 and 7; `docs/prompts/228-go-spec-v1.10.4.md`; the report skeleton (RPT-01) | every item recorded; the hit table; the fallback record; no key value anywhere; `git diff --exit-code` clean after check 7 |
+| **T0** | Preflight (*commands only*): hooks, `doctor`, **test count re-measured** (2285 at authoring; the floor), `len(MUTATIONS)` 139, last prompt 227, last usage row 138 (both written by the authoring commit that lands this spec; at `f3ce1a5` they are 226 / 137), `<base>` `f3ce1a5`; **the spec precondition (EC-04): `docs/spec/spec-v1.10.4.md` is committed and unmodified (`git diff --exit-code HEAD -- docs/spec/spec-v1.10.4.md` exits 0) and its header `Status:` reads `` ready for `go` ``; prompt 227 and `docs/llm-usage.md` row 138 exist in `HEAD`** — no committed spec hash is expected; `git stash list` shows `stash@{0}`, `git rev-parse stash@{0}` equals MUT-01's `e3c6e3ff…` and the two-path `git apply --check` exits 0 (or the T2 fallback — Appendix D — is announced now, the observed stash state recorded); EC-02's five-part inventory, every hit classified (ERR-01 row 14); the seven Stage 0 checks; gates 1–5 and 7; `docs/prompts/228-go-spec-v1.10.4.md`; the report skeleton (RPT-01) | every item recorded; the hit table; the fallback record; no key value anywhere; `git diff --exit-code` clean after check 7 |
 | **T1** | PIN-01, PIN-02; VER-01's `v1.10.3` row; RPT-03's T1 part; the report's T1 section with its bullet; EC-02 row 12b. `T-V1104-PIN-01…08`, `T-V1104-RPT-01`, `T-V1104-DOC-01`, `-03`, `-05`; gates 1–4 | green; `lint-docs` green against the run's own report; the matrix test green against **this** file; REV-01 item 2 holds |
-| **T2** | MUT-01, MUT-02: the post-T1 two-path `git apply --check`, the two-path `git apply` (or the Appendix D fallback), the post-image verification, the "is now" sentence, each entry re-verified in isolation under exact node ids, EC-02 row 2b. `T-V1104-MUT-01…05`, `T-V1104-ERR-01`; gates 1–4 | 5/5 killed in isolation with the proofs recorded (node ids, selected count per entry); `len(MUTATIONS)` 144; the `--check` and `git apply` exits (or the fallback's `sha256sum` match) and `git hash-object devtools/mutation_check.py` = `d09909d…` recorded; on the id-match route `stash@{0}` still listed with MUT-01's id, otherwise the observed stash state recorded and all stashes untouched; `doctor` green |
+| **T2** | MUT-01, MUT-02, in this order: **first** `T-V1104-MUT-01…05` and `T-V1104-ERR-01` landed and run against the post-T1 pre-apply tree, the expected failures recorded (`-MUT-01`, `-02`, `-03` red for the five absent entries/gate; `-MUT-04`, `-MUT-05` and `-ERR-01` green structurally, recorded as such); **only then** the post-T1 two-path `git apply --check` and the apply route (the two-path `git apply`; the Appendix D fallback on ERR-01 row 1 with `--check` on the extracted file; row 1b's reconstruction never the same patch blindly), the post-image verification, the "is now" sentence, EC-02 row 2b added, the six tests rerun green, each entry re-verified in isolation under exact node ids; gates 1–4 | the pre-apply test record (three red for the absence, three green structurally), then the six green after the apply; 5/5 killed in isolation with the proofs recorded (node ids, selected count per entry); `len(MUTATIONS)` 144; the `--check` and `git apply` exits (or row 1's `sha256sum` match and extracted-file `--check`/apply exits, or row 1b's reconstruction record and the cycle spent) and `git hash-object devtools/mutation_check.py` = `d09909d…` recorded; on the id-match route `stash@{0}` still listed with MUT-01's id, otherwise the observed stash state recorded and all stashes untouched; `doctor` green |
 | **T3** | **Review (REV-01) in a clean context**; its fixes land here (brief `v1104-T3.md` when they write source) | findings closed or waived with reasons; the review prompt logged; `v1104-T3.md` present iff a source-writing fix was delegated |
-| **T4** | GATE-01's T4 sequence and GATE-02's steps (1)–(2), verbatim: the calibration run, gate 6, the write-tree and the live sequence *commands only*; **the one localized `mutation-v1103` yaml hunk (the dated comment and the computed `timeout_seconds`, even at 110) delegated by brief `v1104-T4.md`**; a direct `mutation-all` wall > 1640 s is ERR-01 row 8's exceptional branch (a separate `mutation-all` timeout hunk under the same brief, a new write-tree, gate 6 once more, one repair cycle; only the final green run is the acceptance result); commit between gate 6 and the live sequence; gate 8 last and once; no live gate after it on any route | the calibration line; `mutation-all` 144/144 with its wall (≤ 1640 s, or row 8's branch recorded with its final green run); the write-tree of the acceptance run and `HEAD^{tree}` equal; gates 1–7 green; the attempt-log rows; `gate8_exit` 0 with the floors and judge mean met, the per-case table, every `CASE`/`TOOLS`/`FAIL` line, "on this run"; exit 1 is Stage B′; a missing capture is ERR-01 row 11 |
+| **T4** | GATE-01's T4 sequence and GATE-02's steps (1)–(2), verbatim: the calibration run, gate 6, the write-tree and the live sequence *commands only*; **the one localized `mutation-v1103` yaml hunk (the dated comment and the computed `timeout_seconds`, even at 110) delegated by brief `v1104-T4.md`**; a direct `mutation-all` wall > 1640 s is ERR-01 row 8's exceptional branch (a separate `mutation-all` timeout hunk under the same brief, a new write-tree, gate 6 once more, one repair cycle; only the final green run is the acceptance result); `mutation_tree="$(git write-tree)"` recorded and every accepted direct gate-6 run (row 8's rerun included) bracketed by `git diff --exit-code` and `test "$(git write-tree)" = "$mutation_tree"` immediately before and after, only the intended staged changes present; commit between gate 6 and the live sequence; gate 8 last and once; no live gate after it on any route | the calibration line; `mutation-all` 144/144 with its wall (≤ 1640 s, or row 8's branch recorded with its final green run); the four bracketing exits per accepted run all 0 with the `git status --porcelain` listing; `mutation_tree` of the acceptance run and `HEAD^{tree}` equal; gates 1–7 green; the attempt-log rows; `gate8_exit` 0 with the floors and judge mean met, the per-case table, every `CASE`/`TOOLS`/`FAIL` line, "on this run"; exit 1 is Stage B′; a missing capture is ERR-01 row 11 |
 | **T5** | REV-02 verbatim — one prompt (233), two commits: the first (brief `v1104-T5.md` covering `pyproject.toml`, `uv.lock`, the tests and the documentation) lands VER-01, EC-02 rows 15–16, RPT-03's T5 part, the provisional artefacts; gates 1–7, the identity check, the collection check, `replay`, `E1`–`E7`; the second (*artefacts only*) is the evidence commit; `E8`, `lint-docs`, `gitleaks-tree`; the tag; **no push**. `T-V1104-VER-01`, `-VER-02`, `T-V1104-DOC-02`, `-DOC-04` | the four T5 tests red before, green after; `T-V1104-VER-02`; `git diff <tested_tree> HEAD -- config/quality_gates.yaml` empty; the reuse facts, gate 8 executed once; the count ≥ floor + 22; the evidence commit's `git show --stat` names exactly the four paths; `E8` green before the tag; no push in the command record |
 
 ### 10.1 Per-task reading map
@@ -853,7 +915,7 @@ forces delegation; the report records map versus actual in the bullet.
 |---|---|---|---|
 | **T0** | §1 (EC-02's inventory, EC-04), §4 (rows 1, 14), §7, §9 (Stage 0) | `config/quality_gates.yaml:7-30`, `:258-266`; `docs/spec/spec-v1.10.1.md:1105-1170`; `docs/spec/spec-v1.10.3.md:1105-1120`; `pyproject.toml:1-21`; `docs/prompts/TEMPLATE.md`; `git stash show -p stash@{0}` (read only); `git rev-parse stash@{0}`; `devtools/checks.py` (grep only, EC-02 parts (ii), (iii) and (v)) | no — *commands only* (the skeleton, prompt file and ledger block are prose no gate runs) |
 | **T1** | §3 (PIN-01, PIN-02), §4 (row 5), §8 (VER-01's `v1.10.3` row, RPT-03's T1 part), §1 (EC-02 rows 1–14) | EC-02 rows 1–14's sites (±10 lines); `devtools/checks.py:1672-1714` (`_lint_report_delegation`, read only); `config/quality_gates.yaml:736-764`; `README.md:913-916`; `AGENTS.md:92-97`; `tests/test_v15_standards.py:1772-1836`; `tests/test_v1104_{gates,docs}.py` | **yes** — brief `docs/spec/task-briefs/v1104-T1.md` |
-| **T2** | §3 (MUT-01, MUT-02), §4 (rows 1–3), §1 (row 2b), Appendix D | `devtools/mutation_check.py:40-61`, **tail only** (`:1895-1926`), `:2304-2325`; `config/quality_gates.yaml:26-31`, `:574-590`, `:696-716`; the five `find` lines only (§3); `tests/test_v1100_gates.py` (the group test); `tests/test_v1104_gates.py` | **yes** — brief `v1104-T2.md` (the strings and the apply command in the brief first) |
+| **T2** | §3 (MUT-01, MUT-02), §4 (rows 1, 1b, 2–3), §1 (row 2b), Appendix D | `devtools/mutation_check.py:40-61`, **tail only** (`:1895-1926`), `:2304-2325`; `config/quality_gates.yaml:26-31`, `:574-590`, `:696-716`; the five `find` lines only (§3); `tests/test_v1100_gates.py` (the group test); `tests/test_v1104_gates.py` | **yes** — brief `v1104-T2.md` (the strings and the apply command in the brief first) |
 | **T3** | §9 (REV-01) | the review's own reading map; otherwise only commands run | no — *the task is itself the clean-context review*; a source-writing fix is delegated by brief `v1104-T3.md` |
 | **T4** | §7, §4 (rows 7–12; row 8's exceptional branch), §9 (Stage B′, B″) | `config/quality_gates.yaml` — the `mutation-v1103` block only (`:574-590`), plus the `mutation-all` block (`:708-716`) on ERR-01 row 8's branch only; `docs/spec/spec-v1.10.2.md:449-462`; `docs/spec/spec-v1.10.3.md:730-778` | **yes** for the calibration hunk and for row 8's repair hunk — brief `v1104-T4.md` (the measured wall and the computed `timeout_seconds` in the brief first; on row 8's branch the `mutation-all` wall and its computed value likewise); **no** for the calibration run, gate 6, the write-tree and the live gate sequence — *commands only* |
 | **T5** | §8, §9 (REV-02), §7 (the identity check), §4 (rows 12–13), §1 (rows 15–16, the floor) | first commit: `pyproject.toml` (`project.version` only); `README.md:594-600`, `:913-916`; `AGENTS.md:159-172`; `tests/test_v195_version.py`, `tests/test_v194_version.py:25-34`, `tests/test_v190_agents.py:134-152`; `tests/test_v1104_version.py`, `tests/test_v1104_docs.py`; second commit: this run's artefacts | **yes** for the first commit — brief `v1104-T5.md` (`pyproject.toml`, `uv.lock`, the tests and the documentation); **no** for the evidence commit only (*artefacts only*) |
@@ -872,15 +934,15 @@ id of §6.1 is cited at least once.
 | `REQ-V1104-EC-02` | the T0 count and T5 check; the T0 hit table (parts (i)–(iii) and (v), every hit classified); post-T0 amendments; `T-V1104-PIN-01`, `T-V1104-PIN-06` |
 | `REQ-V1104-EC-03` | §10.1; the briefs `v1104-T1.md`, `-T2`, `-T4`, `-T5`, `-T3` iff a fix; the two T4 bullets; `T-V1104-RPT-01` |
 | `REQ-V1104-EC-04` | T0 check 1's output; `db_empty=True`; the `describe()` pairs; `replay --range`; `gitleaks-tree`; `E7` |
-| `REQ-V1104-MUT-01` | `T-V1104-MUT-01`, `T-V1104-MUT-02`, `T-V1104-MUT-05`; the stash record (identity, post-T1 `--check`, the post-image against Appendix D) and the per-entry proofs (exact node ids, selected count); `E1` |
+| `REQ-V1104-MUT-01` | `T-V1104-MUT-01`, `T-V1104-MUT-02`, `T-V1104-MUT-05`; the pre-apply T2 test record (three red, three green structurally); the stash record (identity, post-T1 `--check`, the route taken — row 1 or 1b — and the post-image against Appendix D) and the per-entry proofs (exact node ids, selected count); `E1` |
 | `REQ-V1104-MUT-02` | `T-V1104-MUT-03`, `T-V1104-MUT-04`; `E1`, `E3` |
 | `REQ-V1104-PIN-01` | `T-V1104-PIN-01`, `T-V1104-PIN-02`, `T-V1104-PIN-03`, `T-V1104-PIN-04`, `T-V1104-PIN-06`, `T-V1104-PIN-08`; REV-01 item 2; `E2`, `E3` |
 | `REQ-V1104-PIN-02` | `T-V1104-RPT-01`, `T-V1104-PIN-05`, `T-V1104-DOC-03`, `T-V1104-PIN-07`; `E4` |
-| `REQ-V1104-ERR-01` | `T-V1104-ERR-01` (row 2); `T-V1103-LINT-02` and `T-V1104-PIN-07` (row 5); the task records (rows 1, 3, 14 in the T0 and T2 records; row 8 in the T4 record when taken); `E5` |
+| `REQ-V1104-ERR-01` | `T-V1104-ERR-01` (row 2); `T-V1103-LINT-02` and `T-V1104-PIN-07` (row 5); the task records (rows 1, 1b, 3, 14 in the T0 and T2 records; rows 8–9 in the T4 record — the bracketing exits; row 8's branch when taken); `E5` |
 | `REQ-V1104-SEC-01` | `gitleaks-tree` at every commit; the command record; `T-V1104-MUT-02`; `E1`, `E8` |
 | `REQ-V1104-TST-01` | the T5 collection check; `tests/test_v1104_*.py` present; Appendix A complete |
 | `REQ-V1104-GATE-01` | the gate tables; `tested_tree` and the clean-tree proof; the reuse facts; the attempt log; `E5`, `E8` |
-| `REQ-V1104-GATE-02` | `T-V1104-PIN-05`, `T-V1104-MUT-03`; the calibration and write-tree records; the brief `v1104-T4.md` and T4's `git show --stat` (one hunk on the normal branch; row 8's repair hunk recorded when taken); `E1` |
+| `REQ-V1104-GATE-02` | `T-V1104-PIN-05`, `T-V1104-MUT-03`; the calibration record; `mutation_tree` and the four bracketing exits per accepted gate-6 run with the `git status --porcelain` listing; the brief `v1104-T4.md` and T4's `git show --stat` (one hunk on the normal branch; row 8's repair hunk recorded when taken); `E1` |
 | `REQ-V1104-VER-01` | `T-V1104-VER-01`, `T-V1104-DOC-01`, `T-V1104-DOC-02`; the fallback record; `E6`, `E7`, `E8` |
 | `REQ-V1104-RPT-01` | the report under `lint-docs` (`T-V1104-RPT-01`); the T0, T2, T4 and T5 records |
 | `REQ-V1104-RPT-02` | `wc -m` quoted; `docs/llm-usage.md` rows; the fenced ledger row under `lint-docs` (`T-V1104-RPT-01`) |
@@ -924,6 +986,8 @@ post-commit/pre-tag check (REV-02), reported in the closing message.
 Feature: E1 — the five v1103-* entries landed as the stash has them
   Scenario: the committed tree (git rev-parse stash@{0} recorded as e3c6e3ff…; devtools/mutation_check.py the post-image of Appendix D)
     Then the five ids of §3 form one contiguous block, in order, after v1102-hal-gap-marker-dropped; each find matches once; each find/replace is byte-equal to §3; each mutant parses; mutation-v1103 sits in mutation-subsets only with mutation-v1102's key set; the mutation-all block holds exactly one "is now" parsing to len(MUTATIONS)
+  Scenario: the post-T1 pre-apply tree, before any apply route (test-first, EC-02)
+    Then T-V1104-MUT-01, -02 and -03 are red for the five absent entries/gate; T-V1104-MUT-04, T-V1104-MUT-05 and T-V1104-ERR-01 are green structurally (one "is now" parsing to 139; the pinned pairs parse against the f3ce1a5 sources; a tmp_path entry from the pinned strings) and are recorded so, not claimed red; on the id-match route with a failed post-T1 --check no patch is retried blindly — a construction defect (ERR-01 row 1b) precedes any mutation execution
 
 Feature: E2 — the tail is open
   Scenario: mc.MUTATIONS monkeypatched to the real list plus {"id": "v9999-probe", ...}
@@ -947,7 +1011,7 @@ Feature: E6 — the release rows assert presence, never absence
 
 Feature: E7 — the version and the dependencies
   Scenario: T5's first commit
-    Then pyproject.toml reads 1.10.4, git show v1.9.5:pyproject.toml reads 1.9.5, for pyproject.toml and uv.lock only the diff from the f3ce1a5 blobs is project-version-only, and NG-01's files equal their f3ce1a5 blobs
+    Then pyproject.toml reads 1.10.4, git show v1.9.5:pyproject.toml reads 1.9.5, for pyproject.toml and uv.lock only the diff from the f3ce1a5 blobs is project-version-only and its project-version delta exists and resolves to 1.10.4 (T-V1104-VER-02 red before the bump), and NG-01's files equal their f3ce1a5 blobs
 
 Feature: E8 — the freeze and the local tag
   Scenario: run before the tag on T5's evidence commit
@@ -960,11 +1024,17 @@ Feature: E8 — the freeze and the local tag
 
 ## Appendix C — cross-review log
 
-Placeholder: filled by the cross-review rounds before `Status:` moves
-to ready for `go`.
-rounds (up to three, against OpenAI Codex through the lab's seam)
-before `Status:` moves to ready for `go`; each finding is ruled on
-before it is applied.
+**Rounds 1–3 of 3, termination: `round_limit`** — the lab's stop
+criterion (a round without Critical or High findings) was not reached
+within the round budget: round 3 returned two Critical and two High
+findings, all applied here; residual findings may exist. Challenger
+**OpenAI Codex `gpt-5.6-sol`**, called through the lab's cross-review
+seam with the plan passed by file (the loop wrapper's argv form cannot
+carry a plan above 128 KB). **20 findings, 19 accepted (4 adapted), 1
+rejected** (round-1 finding 1, a transport artefact of the plan seam:
+the anchor regex's closing backtick was dropped in transit; sub-points
+rejected inside adapted findings: AST tooling in R1-5). Each finding
+was ruled on in the lab's verdicts file before it was applied.
 
 ### Round 1 of at most 3 — against the spec-v1.10.4 draft (`5b17454`); 9 findings, 8 accepted (2 adapted), 1 rejected
 
@@ -995,6 +1065,20 @@ requirements: none (ERR-01 gains row 14; Appendix D added).
 
 **Round 2: 5 findings, 5 accepted (1 adapted), 0 rejected.** New
 requirements: none (`T-V1104-PIN-08`; EC-02 row 12b).
+
+### Round 3 of at most 3 — against the round-2 spec (`8c9a2e1`); 6 findings, 6 accepted (1 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R3-1 | Crit | MUT-01, ERR-01 rows 1 and 1b, RPT-01, §10 T2, E1 | accepted | The routes off the id-match path are split: if the stash is absent or has another id, T2 verifies (`git apply --check` on the extracted Appendix D file) and applies Appendix D (row 1); if the pinned stash exists but either the stash patch or Appendix D fails `git apply --check` on the post-T1 tree, the same patch is never attempted blindly — a construction defect before any mutation execution, repaired only by a delegated, byte-exact reconstruction of Appendix D's specified post-image hunks with the per-hunk/post-image assertions verified, spending one repair cycle (row 1b); the T2 row, RPT-01's stash record and E1 name the route taken. |
+| R3-2 | Crit | GATE-02, ERR-01 rows 8–9, RPT-01, §10 T4 | accepted | `mutation_tree="$(git write-tree)"` is recorded and, immediately before and after every accepted direct gate-6 run — ERR-01 row 8's rerun included — T4 runs `git diff --exit-code` and `test "$(git write-tree)" = "$mutation_tree"`, both exits recorded; only the intended staged changes may exist, no unstaged or untracked source, config or test file, and the post-run worktree equals the index again; a non-zero exit is ERR-01 row 9; RPT-01 carries the four exits per run with the `git status --porcelain` listing. |
+| R3-3 | High | EC-01, GATE-01, REV-03 prose and table | accepted | Every joint reuse statement now reads: Stage B′ reuses the recorded T4 gate-5, gate-7 and gate-8 results; Stage B″ reuses the recorded gate-5 result and the terminal gate-7 result, gate 8 is `N/A` and was never invoked; the B″ table row no longer inherits B′'s reuse claim. |
+| R3-4 | High | EC-02, MUT-01, §10 T2, E1 | accepted | T2's procedure is test-first by order: first `T-V1104-MUT-01…05` and `T-V1104-ERR-01` are landed and run against the post-T1 pre-apply tree and the expected failures recorded — `-MUT-01`, `-02`, `-03` red for the five absent entries/gate (`-02`'s byte-equality half looks the entries up by id), `T-V1104-MUT-04`, `T-V1104-MUT-05` and `T-V1104-ERR-01` green structurally (one "is now" parsing to 139; the pinned pairs parse against the `f3ce1a5` sources; a `tmp_path` entry from the pinned strings) and recorded so, never claimed red; only then the post-T1 patch check, the apply route, row 2b and the green rerun. |
+| R3-5 | Med | EC-01, VER-01, `T-V1104-VER-02`, E7 | accepted | `T-V1104-VER-02` additionally asserts that the project-version delta from `f3ce1a5` exists and resolves to `1.10.4`, so it is red before the bump and green after; the T5 acceptance sentence ("the four T5 tests red before, green after") stands. |
+| R3-6 | Med | Status, Appendix C, EC-04, §10 T0 | accepted, adapted | This closing pass sets `Status:` to ready for `go` and writes Appendix C's opening paragraph; the spec cannot carry its own final hash, so T0's precondition reads: `docs/spec/spec-v1.10.4.md` is committed and unmodified (`git diff --exit-code HEAD -- docs/spec/spec-v1.10.4.md` exits 0) and its header `Status:` reads `` ready for `go` ``; prompt 227 and `docs/llm-usage.md` row 138 exist in `HEAD` — every "committed spec hash" expectation is replaced by that (adapted from the finding's "insert the authoritative spec hash"). |
+
+**Round 3: 6 findings, 6 accepted (1 adapted), 0 rejected.** New
+requirements: none (ERR-01 row 1 split into rows 1 and 1b).
 
 ---
 
