@@ -401,7 +401,77 @@ single edits each:**
 Delegation record:
 - T3 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T3.md | map vs actual: matches the reading map, plus config/quality_gates.yaml:730-766, tests/test_v15_standards.py:1700-1799, and docs/spec/spec-v1.10.3.md:90-124/523-626 (EC-02 table plus the full REQ-V1103-LINT-01/ERR-01 text) — read beyond the map to confirm the exact grammar and to find the two disclosed pre-existing-artefact issues above; both fixes were made by the orchestrator directly (single edits under every threshold), not re-delegated
 
-## T4 — not reached: T4
+## T4 — paperwork
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/
+v1103-T4.md`. Commit `a90341c`.
+
+Four paperwork edits per REQ-V1103-RPT-03's T4 part:
+`.env.example:18`/`:101` (`OPENROUTER_MODEL=openai/gpt-4.1`,
+`LLM_JUDGE_MODEL=openrouter:anthropic/claude-sonnet-5`, key names only);
+README's judge paragraph (the default swapped to
+`openrouter:anthropic/claude-sonnet-5`), `## Switch provider` (a new
+sentence naming `OPENROUTER_MODEL=openai/gpt-4.1` as the shipped
+default plus the revert path to `openai/gpt-4.1-mini`), and the new
+`v1.10.2` stopped-run release-table row (VER-01's pinned text, verbatim,
+after the `v1.10.1` row); `AGENTS.md`'s brief-path token
+(`v1102-T<N>.md` → `v1103-T<N>.md`) and the appended v1.10.3 waiver
+sentence (the v1.10.1/v1.10.2 sentences kept verbatim). **No `v1.10.3`
+release-table row lands yet** — confirmed absent (T7's job, after gate 8
+actually runs).
+
+`tests/test_v15_standards.py`'s gate-matrix test (GATE-03) repoints at
+`docs/spec/spec-v1.10.3.md` and `_GATE_MATRIX_LABEL_TO_NAME` gains the
+`` `mutation_check.py --select v1103-`": "mutation-v1103" `` entry after
+the v1102 one — green, confirmed both via the repointed test itself and
+a new direct `T-V1103-GATE-03` test. EC-02 rows for INS-01/RPT-03/VER-01
+applied: `tests/test_v1100_config.py:148` (the judge-model literal,
+authorized by row 1 though the brief's own summary omitted it — the
+subagent correctly found and applied it by reading the spec table
+directly, per its own instruction to do so), `tests/test_v190_agents.py:
+94-95`, `tests/test_v1102_docs.py:111,131-132`. Test-first throughout
+(`tests/test_v1103_docs.py`, new). Test collection moved 2277 → 2285
+(+8).
+
+**EC-02 repair cycle 3 of 3 — the budget is now exhausted for the rest
+of this run.** Adding the `v1103-` label to the shared
+`_GATE_MATRIX_LABEL_TO_NAME` dict (mandated verbatim by GATE-03) broke
+`tests/test_v1102_gates.py::
+test_t_v1102_gate_03_gate_matrix_label_dict_matches_spec_v1102_table`,
+which looped over **every key** in that live, ever-growing dict and
+demanded each be present in the frozen `spec-v1.10.2.md` table — a
+precondition that held only by accident until the first later release
+added its own label, since a frozen v1.10.2 spec file can structurally
+never contain a v1.10.3 label. `spec-v1.10.3.md:125` lists
+`tests/test_v1102_gates.py:60` under "verified unaffected" — this run
+disproves that empirically; not on the 19-row amendment table either.
+The T4 subagent correctly stopped rather than fix it itself (per its
+brief's explicit instruction), reporting the blocker in full with a
+recommendation. Fixed by the orchestrator: narrowed the test to what
+its own docstring always said its intent was — prove the v1102 label
+specifically is present in both the dict and the v1.10.2 table, never
+every label a future release might add — replacing the generic loop
+with one targeted assertion. `spec-v1.10.2.md` itself was **not**
+edited. Full suite green after the fix (2285 tests, 0 failed, 0 errors,
+3 skipped); gates 1, 2, 4 and `lint-docs` confirmed green; gates 5-8
+not run.
+
+**Budget accounting for the rest of the run**: T1 spent cycle 1
+(`tests/test_v1_guardrails.py`'s incidental `.env` fixture), T4 spent
+cycle 3 (this one) — **T2's finding was independently re-verified
+against `spec-v1.10.3.md:104`'s exact line-scoped wording and confirmed
+as a second, correctly-spent cycle 2, not a reclassifiable line
+movement** (the row names three specific line ranges with specific
+edits; `tests/test_v1102_red_team.py:350-362` is a different site,
+never named). **From here on, T5's review fixes, T6's mutation
+construction defects (ERR-01 row 7) and T7's identity check (ERR-01 row
+10) have zero repair budget remaining — any further unlisted semantic
+pin or construction defect is the stop route, not a fix**, per
+EC-01/EC-02. This is disclosed here so T5 onward treats every finding
+with that constraint in mind.
+
+Delegation record:
+- T4 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T4.md | map vs actual: matches the reading map, plus the full EC-02 table and verified-unaffected list at spec-v1.10.3.md:99-132 (checked the brief's own EC-02 summary against source, found one omission and one genuine spec erratum) and the full tests/test_v1102_gates.py (traced the shared-dict-import mechanism) — both reads produced the findings above; the repair-cycle-3 fix was made by the orchestrator directly (a single edit under every threshold), not re-delegated
 
 ## T5 — not reached: T5
 
