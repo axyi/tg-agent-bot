@@ -1821,7 +1821,7 @@ def _parse_gate_matrix(spec_text: str) -> dict[str, dict[str, bool]]:
 
 
 def test_v15_gate_04_profile_matrix_agrees_with_the_spec_table():
-    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.10.3.md").read_text(encoding="utf-8")
+    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.10.4.md").read_text(encoding="utf-8")
     matrix = _parse_gate_matrix(spec_text)
     config = checks.load_gate_config()
 

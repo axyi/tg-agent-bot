@@ -92,8 +92,19 @@ _V1102_ROW = (
     "v1.10.3 |"
 )
 
+_V1103_ROW = (
+    "| v1.10.3 | — | run stopped at T6 by the stop route — EC-01's repair "
+    "budget spent on four test pins the spec's list missed; gate 8 never "
+    "ran; the exec guard, the marker widening, the delegation lint and the "
+    "paperwork landed; ships with v1.10.4 |"
+)
+
 
 def test_t_v1103_ver_01_readme_gains_the_v1102_stopped_run_row():
     text = _read_readme()
     assert _V1102_ROW in text
-    assert not any(line.strip().startswith("| v1.10.3 |") for line in text.splitlines())
+    # v1.10.4 T1 (EC-02 row 5, REQ-V1104-PIN-01, REQ-V1104-VER-01): the
+    # "no v1.10.3 row yet" absence pin is exactly the shape that stopped
+    # v1.10.3 -- replaced with a presence check for the row this task adds;
+    # nothing is asserted absent.
+    assert _V1103_ROW in text

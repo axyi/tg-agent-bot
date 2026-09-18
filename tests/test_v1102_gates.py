@@ -43,7 +43,7 @@ def _v1102_mutations() -> list[dict]:
 
 def test_t_v1102_rpt_01_lint_docs_repointed_to_this_release():
     config = checks.load_gate_config()
-    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.3.md"
+    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.4.md"
 
 
 def test_t_v1102_gate_03_gate_matrix_label_dict_matches_spec_v1102_table():
@@ -78,12 +78,13 @@ def test_t_v1102_gate_03_gate_matrix_label_dict_matches_spec_v1102_table():
 
 
 def test_t_v1102_gate_01_six_v1102_mutations_follow_the_last_v1101_entry():
-    # T-V1102-GATE-01: exactly six v1102-* entries, in GATE-02's order,
-    # immediately after the last v1101-* entry.
+    # T-V1102-GATE-01: exactly six v1102-* entries, in GATE-02's order, form
+    # a contiguous block immediately after the last v1101-* entry -- never a
+    # "nothing follows" pin (v1.10.4 T1, EC-02 row 1, REQ-V1104-PIN-01).
     ids = [m["id"] for m in mc.MUTATIONS]
     last_v1101_index = max(i for i, mid in enumerate(ids) if mid.startswith("v1101-"))
-    tail = ids[last_v1101_index + 1 :]
-    assert tail == _V1102_IDS
+    start = last_v1101_index + 1
+    assert ids[start : start + len(_V1102_IDS)] == _V1102_IDS
     assert _v1102_mutations() == [m for m in mc.MUTATIONS if m["id"] in _V1102_IDS]
 
 
@@ -127,19 +128,28 @@ def test_t_v1102_gate_02_is_in_mutation_subsets_and_no_hook_profile():
             assert "mutation-v1102" not in members
 
 
+def _mutation_all_comment_block(text: str) -> str:
+    # v1.10.4 T1 (REQ-V1104-PIN-01): the block runs from `mutation-all`'s
+    # first comment line to the `mutation-all:` key itself, so an "is now"
+    # in another gate's own comment can never break the count below.
+    # Module-level, imported by tests/test_v1104_gates.py -- not redefined.
+    return text[text.index("  # mutation-all:") : text.index("\n  mutation-all:\n")]
+
+
 def test_t_v1102_gate_02_mutation_all_comment_count_matches_len_mutations():
     # Redundant, offline-only re-check of tests/test_v1101_gates.py's
     # re-anchored test_v1101_gate02_mutation_all_comment_count_matches_
     # len_mutations (same underlying comment, same assertion) -- also
-    # confirms exactly one "is now" sentence remains in the whole file
-    # (the spec-v1.10.2 T5 one this task adds; v1.10.1 T6a's own sentence
-    # is reworded to drop the phrase in the same commit).
+    # confirms exactly one "is now" sentence remains in the mutation-all
+    # comment block (v1.10.4 T1, EC-02 row 4, REQ-V1104-PIN-01: narrowed
+    # from the whole file to the block, so an "is now" in another gate's
+    # comment cannot trip this).
     text = checks.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
-    assert text.count("is now") == 1
+    assert _mutation_all_comment_block(text).count("is now") == 1
     match = re.search(
-        r"spec-v1\.10\.2 T5.*?MUTATIONS\)`\s*is now (\d+)",
+        r"MUTATIONS\)`\s*is now (\d+)",
         text,
         re.DOTALL,
     )
-    assert match, "mutation-all's v1.10.2 T5 dated comment paragraph not found"
+    assert match, "mutation-all's dated comment paragraph not found"
     assert int(match.group(1)) == len(mc.MUTATIONS)

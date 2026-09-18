@@ -92,7 +92,7 @@ Delegate to a subagent when **any one** of the following holds — inside a
 
 **Brief by file, never by retyping.** Load-bearing content the orchestrator
 already resolved goes into a task-brief file at
-`docs/spec/task-briefs/v1103-T<N>.md`, and the subagent gets its path — never
+`docs/spec/task-briefs/v1104-T<N>.md`, and the subagent gets its path — never
 a retyped copy. The brief is ~5 lines, carries no history, and names files
 and line ranges. The subagent returns a summary — findings, counts,
 `file:line` — never raw content.

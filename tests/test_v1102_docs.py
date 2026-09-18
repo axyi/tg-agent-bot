@@ -112,6 +112,13 @@ _V1102_ROW = (
     "v1.10.3 |"
 )
 
+_V1103_ROW = (
+    "| v1.10.3 | — | run stopped at T6 by the stop route — EC-01's repair "
+    "budget spent on four test pins the spec's list missed; gate 8 never "
+    "ran; the exec guard, the marker widening, the delegation lint and the "
+    "paperwork landed; ships with v1.10.4 |"
+)
+
 
 def test_t_v1102_rpt_02_stopped_release_rows_landed_at_t3():
     text = _read_readme()
@@ -127,7 +134,11 @@ def test_t_v1102_rpt_02_stopped_release_rows_landed_at_t3():
         None,
     )
     assert v1102_row == _V1102_ROW
-    assert not any(line.strip().startswith("| v1.10.3 |") for line in text.splitlines())
+    # v1.10.4 T1 (EC-02 row 6, REQ-V1104-PIN-01, REQ-V1104-VER-01): the
+    # "and no v1.10.3 row exists yet" absence pin is exactly the shape that
+    # stopped v1.10.3 -- replaced with a presence check for the row VER-01
+    # actually adds this task; nothing is asserted absent.
+    assert _V1103_ROW in text
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +147,7 @@ def test_t_v1102_rpt_02_stopped_release_rows_landed_at_t3():
 # ---------------------------------------------------------------------------
 
 
-def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1103():
+def test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104():
     text = _read_agents_md()
     normalized = _normalize(text)
     assert "All eight MUST exit 0" in text
@@ -147,8 +158,8 @@ def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1103():
         "comparable to the LM Studio baseline"
     ) in normalized
     assert "v1.10.2 carries the waiver: its prompt change moves the hash again" in normalized
-    assert "docs/spec/task-briefs/v1103-T<N>.md" in text
-    assert "docs/spec/task-briefs/v1102-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1104-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1103-T<N>.md" not in text
 
 
 # ---------------------------------------------------------------------------

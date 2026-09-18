@@ -253,7 +253,7 @@ def test_no_other_gate_in_the_real_config_carries_env():
 
 def test_t_v1102_rpt_01_lint_docs_repointed_to_this_release():
     config = checks.load_gate_config()
-    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.3.md"
+    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.4.md"
 
 
 # ---------------------------------------------------------------------------
@@ -342,17 +342,18 @@ def test_v1101_gate02_is_in_mutation_subsets_and_no_hook_profile():
 
 def test_v1101_gate02_mutation_all_comment_count_matches_len_mutations():
     # Parses the count out of `mutation-all`'s newest dated comment
-    # paragraph -- re-anchored at spec-v1.10.2 T5's own dated sentence
-    # (the only one in the block still carrying "is now") since T5
-    # reworded v1.10.1 T6a's sentence to drop that phrase -- rather than
-    # hardcoding a count -- a future release that adds an entry and
+    # paragraph -- release-agnostic anchor (v1.10.4 T1, EC-02 row 3,
+    # REQ-V1104-PIN-01: the prior `spec-v1\.10\.2 T5.*?` prefix pinned the
+    # sentence to one specific release's own dated paragraph, which the
+    # very next release's own dated paragraph would have broken) -- rather
+    # than hardcoding a count -- a future release that adds an entry and
     # forgets to update the comment must fail this test.
     text = checks.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
     match = re.search(
-        r"spec-v1\.10\.2 T5.*?MUTATIONS\)`\s*is now (\d+)",
+        r"MUTATIONS\)`\s*is now (\d+)",
         text,
         re.DOTALL,
     )
-    assert match, "mutation-all's v1.10.2 T5 dated comment paragraph not found"
+    assert match, "mutation-all's dated comment paragraph not found"
     documented_count = int(match.group(1))
     assert documented_count == len(mc.MUTATIONS)

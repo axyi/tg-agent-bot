@@ -229,7 +229,67 @@ nothing outside it was found.
 
 Executor model: `claude-sonnet-5`.
 
-## T1 — not reached: T1
+## T1 — the frozen-pin rewrites and repoints
+
+Test-first: wrote `tests/test_v1104_gates.py` (11 new tests) and
+`tests/test_v1104_docs.py` (3 new tests), watched all 14 fail for the
+right reason (six `ImportError`s against not-yet-rewritten names, five
+`AssertionError`s against not-yet-applied repoints/rows, two red on the
+not-yet-fixed `## T1` placeholder and the not-yet-repointed
+`report_path`/`lint-docs`), then applied the 15 amendment-table sites
+(rows 1-14 plus 12b) exactly as `docs/spec/spec-v1.10.4.md:93-108` gives
+each `file:line`/amendment cell, plus README's v1.10.3 row
+(`spec-v1.10.4.md:678`, verbatim) and `AGENTS.md:95`'s brief-path token.
+Every rewritten site now asserts presence + contiguity + order of its
+own release's group (`ids[start:start + len(GROUP)] == GROUP`), never
+equality with the whole tail; the `` MUTATIONS)` is now `` anchor is
+release-agnostic; row 4's `_mutation_all_comment_block` helper is
+module-level in `tests/test_v1102_gates.py`, imported (not redefined) by
+`tests/test_v1104_gates.py`; row 12b's rewrite drops the "no later row"
+loop over the live `_GATE_MATRIX_LABEL_TO_NAME` dict against the frozen
+spec-v1.10.3.md table, replaced by presence + immediately-after order of
+just the `v1103-` label, in both the live dict and the frozen matrix.
+`config/quality_gates.yaml:761`'s `report_path` and
+`tests/test_v15_standards.py:1824`'s parsed-file target both repoint to
+this release, in the same commit as the PIN-01 rewrites (`REQ-V1104-PIN-02`).
+No production or evaluation-instrument file touched (NG-01); no "no later
+row"/"nothing follows" assertion left in `tests/` (NG-10, spot-checked by
+`grep -rn 'tail ==\|not any(\|\.endswith(\|\[-1\]' tests/test_v1100_gates.py
+tests/test_v1101_gates.py tests/test_v1102_gates.py tests/test_v1102_docs.py
+tests/test_v1103_gates.py tests/test_v1103_docs.py` against the 15 sites —
+none of the surviving hits are on this task's own rewritten sites).
+
+The report's own `## Ledger row` section (not one of the brief's two named
+exemptions, `## Operator inputs`/`## Gate-7 attempt log`) was carrying T0's
+"Not reached" prose with no fenced code block, which fails
+`_lint_report_ledger` unconditionally once `report_path` repoints here —
+fixed to the 11-column `TBD` placeholder shape, precedent v1.10.1 T2 commit
+`d04fd53` (itself precedented by v1.10.0 T6 commit `761359a`); no other
+section touched.
+
+One disclosed EC-02 line-drift amendment: row 12b's cell cites
+`tests/test_v1103_gates.py:73-81`, but the function
+(`test_t_v1103_gate_03_gate_matrix_label_dict_matches_spec_v1103_table`)
+actually starts at `:62`, with the presence asserts at `:67-68` already in
+the shape PIN-01 wants (kept unchanged) and the rewritten portion (the
+order assertion plus the spec-matrix check) running `:70-81` — a 3-line
+offset from the cell's stated start, same end line, same test, same
+rewrite; not a different site.
+
+Gates 1-4 green: `uv sync --locked` (23 packages checked), `ruff check .`
+clean, `pytest -q` full suite green (2302 collected, floor 2285 + 17 this
+task's files add net after pytest's own double-collection of six imported
+`test_*`-named helper functions the new files call directly — a
+pre-existing pattern this codebase already uses, e.g.
+`tests/test_v1103_gates.py`'s own import of
+`test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`; no test
+deleted, `REQ-V190-EC-03`), `bot.py --selftest` OK.
+`devtools/checks.py lint-docs` green against this file.
+`bot.py --selftest-live`, `devtools/rag_eval.py`, `devtools/agent_eval.py`
+and `devtools/mutation_check.py` NOT run this task, per `REQ-V1104-EC-01`
+(scheduled at T0/T4 only).
+
+- T1 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1104-T1.md | map vs actual: matches the reading map, plus one disclosed EC-02 line-drift amendment (row 12b's cell cites tests/test_v1103_gates.py:73-81; the actual rewritten function starts at :62, same test, same end line, 3-line offset)
 
 ## T2 — not reached: T2
 
@@ -272,6 +332,11 @@ Not reached: written at T5.
 
 ## Ledger row (paste into `economics.md`)
 
-Not reached: the run has not bumped `pyproject.toml` yet (T5) and has not
-stopped early. Filled at close (T5 on green, or the stop route's stage
-if the run halts earlier).
+Provisional — filled finally at T5, or at the stop route's stage if the
+run halts earlier (placeholder shape matches `ledger_header`'s 11
+columns, precedent v1.10.1 T2 commit `d04fd53`, itself precedented by
+v1.10.0 T6 commit `761359a`):
+
+```
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+```

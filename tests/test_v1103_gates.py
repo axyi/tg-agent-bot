@@ -55,30 +55,40 @@ def test_t_v1103_rpt_01_v1102_report_is_red_under_the_function_directly():
 def test_t_v1103_rpt_01_quality_gates_yaml_repoints_and_enables_the_key():
     config = checks.load_gate_config()
     lint_docs = config["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.10.3.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.10.4.md"
     assert lint_docs["delegation_record"] is True
 
 
 def test_t_v1103_gate_03_gate_matrix_label_dict_matches_spec_v1103_table():
-    # Light duplicate of test_v15_standards.py's own
-    # test_v15_gate_04_profile_matrix_agrees_with_the_spec_table (already
-    # repointed at spec-v1.10.3.md there) -- this asserts the same
-    # precondition directly against the new label, per the task brief.
+    # v1.10.4 T1 (EC-02 row 12b, REQ-V1104-PIN-01): rewritten from an
+    # equality-shaped loop over every *current* label in the live
+    # _GATE_MATRIX_LABEL_TO_NAME dict against the frozen spec-v1.10.3.md
+    # table (an NG-10-forbidden "no later row" shape -- true only until a
+    # later release added its own label, which the frozen table could
+    # never contain) to presence + order of only the v1.10.3-defined
+    # labels: the `v1103-` label is present, correctly named, and sits
+    # immediately after the `v1102-` label -- both in the live dict and in
+    # the frozen spec-v1.10.3.md matrix. Nothing here asserts anything
+    # about labels a later release may add. `T-V1104-PIN-08` is the
+    # negative proof (a dropped or reordered v1103- label fails; an
+    # appended future label still passes). The active-spec exact-matrix
+    # test stays in tests/test_v15_standards.py, repointed by v1.10.4 T1's
+    # EC-02 row 12 at spec-v1.10.4.md.
     assert "`mutation_check.py --select v1103-`" in _GATE_MATRIX_LABEL_TO_NAME
     assert _GATE_MATRIX_LABEL_TO_NAME["`mutation_check.py --select v1103-`"] == "mutation-v1103"
 
-    # The new label sits immediately after the v1102- entry and before the
-    # "(all)" entry, per the task brief's exact insertion point.
     labels = list(_GATE_MATRIX_LABEL_TO_NAME)
     v1102_index = labels.index("`mutation_check.py --select v1102-`")
-    all_index = labels.index("`mutation_check.py` (all)")
     assert labels[v1102_index + 1] == "`mutation_check.py --select v1103-`"
-    assert labels.index("`mutation_check.py --select v1103-`") == all_index - 1
 
     spec_text = _SPEC_V1103.read_text(encoding="utf-8")
     matrix = _parse_gate_matrix(spec_text)
-    for label in _GATE_MATRIX_LABEL_TO_NAME:
-        assert label in matrix, f"spec-v1.10.3.md table row not found: {label!r}"
+    assert "`mutation_check.py --select v1103-`" in matrix, (
+        "spec-v1.10.3.md table row not found: '`mutation_check.py --select v1103-`'"
+    )
+    matrix_labels = list(matrix)
+    matrix_v1102_index = matrix_labels.index("`mutation_check.py --select v1102-`")
+    assert matrix_labels[matrix_v1102_index + 1] == "`mutation_check.py --select v1103-`"
 
 
 def test_t_v1103_gate_03_profile_matrix_test_is_green_against_this_release():

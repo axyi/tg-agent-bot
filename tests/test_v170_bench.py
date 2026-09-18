@@ -324,7 +324,7 @@ def test_t_v1103_rpt_01_lint_docs_repointed_to_this_release():
 
     raw = load_gate_config(DEFAULT_CONFIG_PATH)
     lint_docs = raw["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.10.3.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.10.4.md"
     assert lint_docs["ledger_header"] == (
         "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | "
         "Tokens ↑/↓ | Cost | Model | Harness |"

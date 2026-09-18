@@ -220,41 +220,52 @@ def test_gate8_timeout_seconds_always_a_multiple_of_100_and_at_least_the_raw_cei
 
 _EXPECTED_MUTATION_KEYS = {"id", "path", "find", "replace", "why"}
 
+_V1100_IDS = [
+    "v1100-injection-checker-always-passes",
+    "v1100-hallucination-any-of-vacuous",
+    "v1100-memory-structural-check-dropped",
+    "v1100-judge-floor-zeroed",
+    "v1100-judge-guard-dropped",
+    "v1100-reply-parts-split-before-redact",
+    "v1100-inbound-cap-code-points",
+]
+_V1101_IDS = [
+    "v1101-clause-c-negation-guard-dropped",
+    "v1101-clause-e-dropped",
+    "v1101-leak-shape-bare-name",
+    "v1101-hal-none-of-dropped",
+    "v1101-embeddings-auth-header-dropped",
+    "v1101-gate-env-passthrough-dropped",
+]
+_V1102_IDS = [
+    "v1102-secrets-line-dropped",
+    "v1102-first-clause-only",
+    "v1102-tool-log-not-filled",
+    "v1102-tool-log-unredacted",
+    "v1102-inj-gap-marker-dropped",
+    "v1102-hal-gap-marker-dropped",
+]
+
 
 def _v1100_mutations() -> list[dict]:
     return [m for m in mc.MUTATIONS if m["id"].startswith("v1100-")]
 
 
-def test_exactly_seven_v1100_then_six_v1101_then_six_v1102_mutations_after_the_last_v195_entry():
-    # spec-v1.10.2 T5 (REQ-V1102-GATE-02, the EC-02 amendment table's
-    # tests/test_v1100_gates.py:228-249 row): the whole tail after the last
-    # v195-* entry is now seven v1100-* entries followed by six v1101-*
-    # entries followed by six v1102-* entries, in order -- nineteen total,
-    # pinned exactly.
+def test_release_groups_after_the_last_v195_entry_are_contiguous_blocks_in_order():
+    # v1.10.4 T1 (EC-02 row 2, REQ-V1104-PIN-01): rewritten from a single
+    # frozen 19-id `tail == [...]` equality (the "ends here" shape that
+    # stopped v1.10.3 the moment a later release's group followed it) to
+    # one contiguous-block assertion per release group, in order -- the
+    # next release (T2, EC-02 row 2b) appends one more group to the tuple
+    # below and edits nothing else.
     ids = [m["id"] for m in mc.MUTATIONS]
     last_v195_index = max(i for i, mid in enumerate(ids) if mid.startswith("v195-"))
+    start = last_v195_index + 1
+    for group in (_V1100_IDS, _V1101_IDS, _V1102_IDS):
+        assert ids[start : start + len(group)] == group
+        start += len(group)
+
     tail = ids[last_v195_index + 1 :]
-    assert tail == [
-        "v1100-injection-checker-always-passes",
-        "v1100-hallucination-any-of-vacuous",
-        "v1100-memory-structural-check-dropped",
-        "v1100-judge-floor-zeroed",
-        "v1100-judge-guard-dropped",
-        "v1100-reply-parts-split-before-redact",
-        "v1100-inbound-cap-code-points",
-        "v1101-clause-c-negation-guard-dropped",
-        "v1101-clause-e-dropped",
-        "v1101-leak-shape-bare-name",
-        "v1101-hal-none-of-dropped",
-        "v1101-embeddings-auth-header-dropped",
-        "v1101-gate-env-passthrough-dropped",
-        "v1102-secrets-line-dropped",
-        "v1102-first-clause-only",
-        "v1102-tool-log-not-filled",
-        "v1102-tool-log-unredacted",
-        "v1102-inj-gap-marker-dropped",
-        "v1102-hal-gap-marker-dropped",
-    ]
     # ...and every v1100-* id in MUTATIONS is exactly the seven above, in
     # this order -- the original test's other guarantee, preserved.
     v1100_ids = tail[:7]
