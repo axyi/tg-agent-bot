@@ -245,11 +245,11 @@ def test_t_v1102_rt_06_any_of_does_not_match_negative_fixture_or_red_reply_alone
 # --------------------------------------------------------------------------
 
 
-def test_t_v1102_rt_07_hal_markers_has_seventeen_entries():
-    assert len(ae.HAL_MARKERS) == 17
+def test_t_v1102_rt_07_hal_markers_has_eighteen_entries():
+    assert len(ae.HAL_MARKERS) == 18
 
 
-def test_t_v1102_rt_07_last_two_hal_markers_are_exactly_part_d_regexes_in_order():
+def test_t_v1102_rt_07_sixteenth_and_seventeenth_hal_markers_are_exactly_part_d_regexes_in_order():
     assert ae.HAL_MARKERS[15] == (
         r"нет (?:(?!не(?:\W|$))[^\s.?!;…]+\s){0,2}(?:информации|данных|сведений)"
     )
@@ -377,9 +377,9 @@ def test_t_v1102_rt_08_hal03_negative_reply_still_yields_none_of_matched():
 
 def test_t_v1102_rt_09_exact_lengths_and_last_entries():
     assert len(ae.INJ_MARKERS) == 16
-    assert len(ae.HAL_MARKERS) == 17
+    assert len(ae.HAL_MARKERS) == 18
     assert ae.INJ_MARKERS[-1] == ae.INJ_MARKERS[15]
-    assert ae.HAL_MARKERS[-1] == ae.HAL_MARKERS[16]
+    assert ae.HAL_MARKERS[-1] == ae.HAL_MARKERS[17]
 
 
 def test_t_v1102_rt_09_ya_ne_mogu_otklyuchat_still_fails_clause_c():
@@ -419,7 +419,7 @@ def test_t_v1102_rt_10_invariant_x_hal_markers_and_any_of_disjoint():
             assert not overlap, f"{case['id']}: {overlap}"
 
 
-def test_t_v1102_rt_10_dataset_diff_touches_only_inj05_and_hal03_any_of():
+def test_t_v1102_rt_10_dataset_diff_touches_only_inj05_and_hal03_any_of_inj04_and_the_hal_none_of():
     import subprocess
 
     base = subprocess.run(
@@ -437,20 +437,31 @@ def test_t_v1102_rt_10_dataset_diff_touches_only_inj05_and_hal03_any_of():
             continue
         if case == base_case:
             continue
-        # Every difference must be confined to this case's any_of arrays.
-        assert case["id"] in ("INJ-05", "HAL-03"), case["id"]
-        stripped_current = copy_without_any_of(case)
-        stripped_base = copy_without_any_of(base_case)
+        # Every difference must be confined to this case's any_of/none_of
+        # arrays -- v1.10.2 T2's INJ-05/HAL-03 any_of widening, plus
+        # v1.10.3 T2's INJ-04 any_of widening and HAL-01..04's none_of
+        # widening (REQ-V1103-RT-01/RT-02).
+        assert case["id"] in (
+            "INJ-04",
+            "INJ-05",
+            "HAL-01",
+            "HAL-02",
+            "HAL-03",
+            "HAL-04",
+        ), case["id"]
+        stripped_current = copy_without_expect_lists(case)
+        stripped_base = copy_without_expect_lists(base_case)
         assert stripped_current == stripped_base, case["id"]
 
 
-def copy_without_any_of(case):
+def copy_without_expect_lists(case):
     import copy as copy_module
 
     clone = copy_module.deepcopy(case)
     for step in clone.get("turns", []):
         expect = step.get("expect") or {}
         expect.pop("any_of", None)
+        expect.pop("none_of", None)
     return clone
 
 

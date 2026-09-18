@@ -372,7 +372,7 @@ def test_t_v1100_rt_03_worked_examples_against_the_invented_law_case():
     assert not passed  # matches nothing
 
 
-def test_t_v1100_rt_03_hal_markers_are_exactly_the_seventeen_of_rt_05():
+def test_t_v1100_rt_03_hal_markers_are_exactly_the_eighteen_of_rt_05():
     assert ae.HAL_MARKERS == [
         r"не знаю",
         r"не существует",
@@ -391,6 +391,7 @@ def test_t_v1100_rt_03_hal_markers_are_exactly_the_seventeen_of_rt_05():
         r"не могу (подтвердить|утверждать)",
         r"нет (?:(?!не(?:\W|$))[^\s.?!;…]+\s){0,2}(?:информации|данных|сведений)",
         r"не располагаю (?:[^\s.?!;…]+\s){0,2}(?:информацией|данными|сведениями)",
+        r"(?:информации|данных|сведений)\b(?:(?!\b(?:но|а|однако|зато)\b)[^.?!;…]){0,120}\bнет\b",
     ]
     for pattern in ae.HAL_MARKERS:
         assert "\\?" not in pattern
