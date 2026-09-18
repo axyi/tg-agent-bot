@@ -1,6 +1,6 @@
 # spec-v1.10.4 — the five `v1103-*` mutation entries landed, every frozen-list test pin rewritten to presence-contiguity-order, the single gate 8 the stop route never reached, and the release rows three stopped runs left pending
 
-Status: draft — cross-review round 1 of at most 3 applied (Appendix C;
+Status: draft — cross-review rounds 1–2 of at most 3 applied (Appendix C;
 its opening paragraph is a placeholder until the last round closes).
 Base: `main` at `f3ce1a5` (tree clean, **72 commits ahead of
 `origin/main`**, unpushed by the operator's choice); last tag `v1.9.5` =
@@ -76,14 +76,14 @@ prompt, tool-schema or model change): `AGENTS.md:274-279`'s waiver
 paragraph is **unchanged** (NG-04); no bench run.
 
 **REQ-V1104-EC-02 (MUST) — test-first, the floor, the exhaustive
-amendment list, the four-part fail-closed T0 inventory, and the rule
+amendment list, the five-part fail-closed T0 inventory, and the rule
 that a missed pin is an amendment, never a cycle.** Write §6's tests, watch them fail
 for the right reason, then implement in §10's order. Every MUST has a
 named test, a negative test, a Gherkin scenario or a recorded artefact
 (Appendix A). **The floor**: `f3ce1a5` collects **2285** tests by `uv
 run --locked pytest --collect-only -q -o addopts="" | grep -c '::'`
 (facts §7); T0 re-measures; T5's acceptance check is count ≥ floor +
-**21** (TST-01). No test may be deleted (`REQ-V190-EC-03`). Tests
+**22** (TST-01). No test may be deleted (`REQ-V190-EC-03`). Tests
 existing at `f3ce1a5` may be modified **only** at these sites:
 
 | # | file:line | amendment | why | task |
@@ -98,15 +98,15 @@ existing at `f3ce1a5` may be modified **only** at these sites:
 | 7 | `tests/test_v190_agents.py:298-299` | `report_path: docs/reports/report-v1.10.3.md` in → `…v1.10.4.md`; the `not in` pin → `…v1.10.3.md` | PIN-02 | T1 |
 | 8–11 | `tests/test_v1101_gates.py:256`; `tests/test_v1102_gates.py:46`; `tests/test_v170_bench.py:327`; `tests/test_v1103_gates.py:58` | `report-v1.10.3.md` → `report-v1.10.4.md` (each; `:59` of the last kept) | PIN-02 | T1 |
 | 12 | `tests/test_v15_standards.py:1824` | the parsed file becomes `docs/spec/spec-v1.10.4.md` (`:1793` already carries `v1103-`) | GATE-02 | T1 |
+| 12b | `tests/test_v1103_gates.py:73-81` | rewritten: the test asserts that the labels defined by spec-v1.10.3 are present in `_GATE_MATRIX_LABEL_TO_NAME` and occur in the historical matrix in their specified order (the `v1103-` label immediately after the `v1102-` label); it asserts **no** equality between the current global dictionary and the frozen v1.10.3 matrix — the `all_index - 1` position pin and the loop over every *current* label against `spec-v1.10.3.md`'s table go; the active-spec exact-matrix test stays in `tests/test_v15_standards.py`, repointed at this file by row 12; `T-V1104-PIN-08` is its negative test | PIN-01 | T1 |
 | 13–14 | `tests/test_v1102_docs.py:139-151`; `tests/test_v190_agents.py:92-95` | `v1104-T<N>.md` in, `v1103-T<N>.md` not in; renamed `…is_v1104`; `tests/test_v1102_docs.py:141-149` unchanged | RPT-03 | T1 |
 | 15 | `tests/test_v195_version.py:18-22` | the live read → the `git show v1.9.5:pyproject.toml` blob read (`tests/test_v194_version.py:25-34`'s shape) | VER-01 | T5 |
 | 16 | `tests/test_v190_agents.py:134-152` | `"1638"` / `"120 entries"` → T5's measured numbers; renamed `test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5` | RPT-03 | T5 |
 
 **Verified unaffected at `f3ce1a5`** (the T0 hit table re-derives every
-other hit with its reason): `tests/test_v1103_gates.py:73-81` — the
-`v1103-` label is in this file's matrix and no `mutation-v1104` label
-exists; a later release adding a label must treat `:77-81` as its EC-02
-row; `tests/test_v1102_gates.py:28`, `:60`, `:76`,
+other hit with its reason; `tests/test_v1103_gates.py:73-81` is **not**
+on this list — it is row 12b, rewritten in this release, not postponed
+to the next): `tests/test_v1102_gates.py:28`, `:60`, `:76`,
 `tests/test_v1103_gates.py:30`, `:34`, `:45-52` (earlier specs and
 reports read by name, none edited); `tests/test_v1100_runner.py:576` (a
 tail over `GATE8_DEPENDENCIES`); `tests/test_v1101_gates.py:266-282`,
@@ -114,7 +114,7 @@ tail over `GATE8_DEPENDENCIES`); `tests/test_v1101_gates.py:266-282`,
 bounds).
 
 **The T0 inventory is the primary tool; the amendment table above is
-its expected result, not its input.** It is an explicit **four-part**
+its expected result, not its input.** It is an explicit **five-part**
 literal `grep` inventory over `tests/` **and `devtools/checks.py`** (no
 AST tooling), run at T0 (commands only, before any live call):
 
@@ -143,11 +143,24 @@ grep -rn -E 'report_path|_GATE_MATRIX_LABEL_TO_NAME|_parse_gate_matrix|task-brie
 grep -rn -E 'not in|not any\(|endswith\(|\[-1\]|(_IDS|ids|labels) == \[' tests/ devtools/checks.py
 ```
 
-- **(iv) fail-closed**: **every hit of (i)–(iii) is classified before
-  T1** — either an EC-02 row (by number) or a one-line "unaffected
-  because …" — in the report's T0 hit table (RPT-01); **an unclassified
-  hit blocks construction until it is classified** (ERR-01 row 14) and
-  spends no repair cycle.
+- **(iv) fail-closed**: **every hit of (i)–(iii) and (v) is classified
+  before T1** — either an EC-02 row (by number) or a one-line
+  "unaffected because …" — in the report's T0 hit table (RPT-01); **an
+  unclassified hit blocks construction until it is classified** (ERR-01
+  row 14) and spends no repair cycle;
+- **(v) the deliberately broad pass**: the targeted passes (i)–(iii)
+  recognise only the literal forms they name (a version read as
+  `['version']`, `.get("version")`, `metadata.version(…)`, a regex, or
+  a helper named around `pyproject` evades them), so one broad,
+  fail-closed pass catches what they miss:
+
+```bash
+grep -rn -E 'version|pyproject|uv\.lock|count|entries|task-brief|report[_-]?path|spec-v|report-v|_IDS|MUTATIONS|labels' tests/ devtools/checks.py
+```
+
+  **Every broad-pass hit is classified under (iv) exactly like a hit of
+  (i)–(iii)**; false positives are expected and each receives a one-line
+  "unaffected because …". No AST tooling is added.
 
 **A pin the inventory missed, tripped after T0, is a
 disclosed EC-02 amendment in the task's report section** (file, line,
@@ -167,7 +180,8 @@ dispatch and passed by path — never retyped; it carries what is already
 resolved (§3's strings, the rewrite shapes, T0's counts). **Committed briefs
 `v1104-T1.md`, `-T2`, `-T4` and `-T5`, plus `v1104-T3.md` iff T3 delegates a
 source-writing fix**; T0 is *commands only*; **T4's localized yaml
-calibration hunk (GATE-02 step (1)) is delegated under
+calibration hunk (GATE-02 step (1)) — and, on ERR-01 row 8's branch
+only, the `mutation-all` timeout repair hunk — is delegated under
 `docs/spec/task-briefs/v1104-T4.md`** while T4's calibration run,
 gate 6, the write-tree and the live gate sequence stay *commands only*
 (the T4 report section carries two bullets, one `yes` with the brief
@@ -221,7 +235,7 @@ exception); `--no-verify` is never used and the report attests it.
 | `REQ-V1104-NG-07` | Lowering the floors (`devtools/agent_eval.py:89`), the judge threshold, the no-rerun rule, temperature 0, the case count. |
 | `REQ-V1104-NG-08` | Editing any earlier report, handoff or `docs/llm-usage.md` row — history. |
 | `REQ-V1104-NG-09` | Any `git push`; any change to a gate's `argv`, `result_mode`, `blocking`, `severity` or profile membership beyond `mutation-v1103` joining `mutation-subsets`. |
-| `REQ-V1104-NG-10` | A "no later row" or "nothing follows" assertion anywhere in this release's tests — the defect class PIN-01 retires. |
+| `REQ-V1104-NG-10` | A "no later row" or "nothing follows" assertion anywhere in this release's tests — the defect class PIN-01 retires — including an equality between the current gate-label dictionary and a frozen historical spec's matrix (`tests/test_v1103_gates.py:73-81`, EC-02 row 12b, rewritten in this release, not postponed to the next). |
 
 ---
 
@@ -341,7 +355,9 @@ paragraph is **rewritten to this release's sentence, the block's only
 
 — the fragment `` MUTATIONS)` is now 144`` on one comment line; the
 v1.10.3 sentence is not written. `mutation-all` (`:708-716`) keeps its
-`argv`; its `timeout_seconds: 1640` is GATE-02's `[[VERIFY]]`.
+`argv`; its `timeout_seconds: 1640` is GATE-02's `[[VERIFY]]` —
+unchanged on the normal branch; ERR-01 row 8's repair hunk is the
+explicit exception.
 `T-V1104-MUT-03`, `T-V1104-MUT-04`; `E1`, `E3`.
 
 **REQ-V1104-PIN-01 (MUST) — every frozen-list pin rewritten to
@@ -351,7 +367,7 @@ the count narrowed to the block.** The lesson of v1.10.3
 stops the next run. **Rule**: such a test asserts that a release group forms **one contiguous block,
 in its listed order, at the position after the previous group** —
 `ids[start:start + len(GROUP)] == GROUP` — never equality with the
-whole tail. The sites are EC-02 rows 1–4 (T1) and 2b (T2); the anchor
+whole tail. The sites are EC-02 rows 1–4 and 12b (T1) and 2b (T2); the anchor
 becomes `MUTATIONS\)`\s*is now (\d+)` — **the anchor includes the closing
 backtick after `` MUTATIONS) ``; the sentence, the fixture and the regex
 are byte-consistent** (provenance lives in prose the
@@ -361,9 +377,12 @@ test does not parse; any fixture the anchor tests read must carry the fragment `
 `  # mutation-all:`) to the `mutation-all:` key (`:708`) — so an "is
 now" in another gate's comment cannot break it; the helper is
 module-level in `tests/test_v1102_gates.py`, imported by
-`tests/test_v1104_gates.py`. `tests/test_v1103_gates.py:73-81` stays
-(EC-02). The new tests prove the property, not the edit
-(`T-V1104-PIN-01…04`, `-06`). `E2`, `E3`, `E6`.
+`tests/test_v1104_gates.py`. `tests/test_v1103_gates.py:73-81` is
+rewritten to presence and order of the v1.10.3 labels, never equality
+with the frozen v1.10.3 matrix (EC-02 row 12b; `T-V1104-PIN-08`: a
+dropped or reordered historical label fails, an appended future label
+passes). The new tests prove the property, not the edit
+(`T-V1104-PIN-01…04`, `-06`, `-08`). `E2`, `E3`, `E6`.
 
 **REQ-V1104-PIN-02 (MUST) — the repoints.** At **T1**, in one commit
 with PIN-01: `config/quality_gates.yaml:761` `report_path:
@@ -400,13 +419,13 @@ not exist in this release** (EC-02); these rows are added or rebound:
 | 5 | `lint-docs` | a task section without a `^- T\d+ \| ` bullet; a `brief:` naming `v1103-T<n>.md` | the `REQ-V1103-LINT-01` text; blocked | fix the report; never the lint |
 | 6 | Stage 0 check 6 | the judge probe fails as `REQ-V1103-ERR-01` row 6 describes | the single fallback, recorded; the effective judge named (VER-01, RPT-02) | as row 6 |
 | 7 | T4, calibration | `2 × wall + 70 s` rounded up to 10 s differs from 110 | `mutation-v1103.timeout_seconds` set to the computed value inside GATE-02's one hunk (the dated comment lands even when the value stays 110) | recorded |
-| 8 | T4, gate 6 | the `mutation-all` wall exceeds 1640 s | the timeout recomputed in T4's commit (GATE-02's `[[VERIFY]]`) | recorded |
-| 9 | T4, gate 6 | `HEAD^{tree}` ≠ the recorded write-tree | gate 6 once more on the committed tree (`REQ-V1102-ERR-01` row 13) | recorded |
+| 8 | T4, gate 6 | the direct `mutation-all` wall exceeds 1640 s (gate 6 at T4 runs directly, so no timeout is enforced on that run; `timeout_seconds: 1640` governs only `checks.py`-driven runs — the yaml-configured `mutation-all` gate could not have finished under `checks.py`) | a construction defect: a separate `mutation-all` timeout hunk (`2 × wall + 70 s`, rounded up to 10 s) delegated under T4's brief, a new write-tree recorded, gate 6 once more on that final tree within one repair cycle; only the final green run is the acceptance result (GATE-02's explicit exception to the one-hunk rule); a wall ≤ 1640 s leaves the value unchanged | a repair cycle |
+| 9 | T4, gate 6 | `HEAD^{tree}` ≠ the write-tree recorded for the gate-6 run that is the acceptance result (the final one on row 8's branch) | gate 6 once more on the committed tree (`REQ-V1102-ERR-01` row 13) | recorded |
 | 10 | gate 8 at T4 | exit 1 — a category under floor or judge mean under 0.8 | Stage B′ (REV-03); the capture quoted in full | stop, no bump, no tag |
 | 11 | the gate-8 capture | `test -s` non-zero | `REQ-V1102-ERR-01` row 11 — never a re-run | the terminal record, or a blocked run |
 | 12 | gate 7 | `recall@5` red after the transient rule (exit 2 is never this row) | at T4: Stage B″; at T5: Stage B at T5 | stop |
 | 13 | T5, identity check | `dependency_diff_is_version_only` `False` on the diff `tested_tree`→`HEAD` | gate 8 **not** invoked; the defect repaired; gates 1–7 and the check rerun | a repair cycle; not restorable → Stage B at T5 |
-| 14 | T0, the inventory | a hit of EC-02's parts (i)–(iii) neither an EC-02 row nor a one-line "unaffected because …" | construction blocked until the hit is classified in the T0 hit table; never a stop | **no cycle** |
+| 14 | T0, the inventory | a hit of EC-02's parts (i)–(iii) or (v) neither an EC-02 row nor a one-line "unaffected because …" | construction blocked until the hit is classified in the T0 hit table; never a stop | **no cycle** |
 
 `T-V1104-ERR-01` covers row 2 offline; row 5 is `T-V1103-LINT-02`
 by reference and `T-V1104-PIN-07` offline; the other rows are recorded artefacts.
@@ -432,7 +451,7 @@ The eval still executes nothing (`REQ-V1103-SEC-01`). `gitleaks-tree`; the comma
 
 **REQ-V1104-TST-01 (MUST) — the modules, the count, the table.** New
 tests live in `tests/test_v1104_{gates,docs,version}.py`, all offline;
-**≥ 21** new collected tests (T5: count ≥ floor + 21); every id below
+**≥ 22** new collected tests (T5: count ≥ floor + 22); every id below
 appears in Appendix A.
 
 ### 6.1 The test table
@@ -452,7 +471,8 @@ tests" rows 3–4's, "the two re-pinned README tests" rows 5–6's.
 | `T-V1104-PIN-03` | `gates.py` | `checks.DEFAULT_CONFIG_PATH` monkeypatched to a `tmp_path` yaml copy whose block sentence reads, in full, `` spec-v9.9.9 T9 appended one entry; `len(devtools.mutation_check.MUTATIONS)` is now 145 `` (the fixture must carry the fragment the anchor regex matches, `` MUTATIONS)` is now ``) with `mc.MUTATIONS` monkeypatched to a list of length 145 → the two anchor tests pass | — |
 | `T-V1104-PIN-04` | `gates.py` | the same copy with `# note: is now` in the `mutation-v1103` comment → the count test passes; a second "is now" inside the block → `AssertionError`; the shipped block starts with `  # mutation-all:` and ends before `\n  mutation-all:\n` | yes |
 | `T-V1104-PIN-07` | `gates.py` | `checks._lint_report_delegation` on a `tmp_path` `report-v1.10.4.md`: a `## T1` section whose bullet reads `brief: docs/spec/task-briefs/v1104-T1.md` → `[]`; the same bullet reading `…/v1103-T1.md` → a failure whose text is "cell 4 is neither brief: — nor a v1104 task-brief path" (the prefix derived from `report_path`, `REQ-V1103-LINT-01`) | yes |
-| `T-V1104-PIN-05` | `gates.py` | `_parse_gate_matrix` over this file yields 29 rows containing every label of `_GATE_MATRIX_LABEL_TO_NAME`; `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table()` and `tests/test_v1103_gates.py:63-81`'s test pass | — |
+| `T-V1104-PIN-05` | `gates.py` | `_parse_gate_matrix` over this file yields 29 rows containing every label of `_GATE_MATRIX_LABEL_TO_NAME`; `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table()` and `tests/test_v1103_gates.py:63-81`'s test (as rewritten by EC-02 row 12b) pass | — |
+| `T-V1104-PIN-08` | `gates.py` | `tests.test_v1103_gates._GATE_MATRIX_LABEL_TO_NAME` (the module's own binding, `tests/test_v1103_gates.py:23-24`) monkeypatched to a copy with a future label `` `mutation_check.py --select v9999-` `` inserted before `` `mutation_check.py` (all) `` → the rewritten `:73-81` test passes; a copy with the `v1103-` label dropped, or with the `v1102-` and `v1103-` labels swapped → it raises `AssertionError` | yes |
 | `T-V1104-PIN-06` | `docs.py` | `_read_readme` monkeypatched (both modules) to the real text plus an appended `\| v1.10.9 \| — \| probe \|` line → the two re-pinned README tests pass | — |
 | `T-V1104-RPT-01` | `gates.py` | `lint-docs.report_path == "docs/reports/report-v1.10.4.md"`, `delegation_record is True`; `_lint_report_delegation(REPO_ROOT / "docs/reports/report-v1.10.4.md") == []` | — |
 | `T-V1104-DOC-01` | `docs.py` | README's `v1.10.3` row equals VER-01's text verbatim (`_V1103_ROW`); the `v1.10.2` row still equals `_V1102_ROW`; nothing asserted absent (T1) | — |
@@ -506,23 +526,37 @@ verdict); then **T4 makes exactly one localized YAML hunk in the
 `mutation-v1103` block: it replaces the placeholder comment with the
 dated measured-wall/formula comment and sets `timeout_seconds` to the
 computed value, even when that value remains 110. No other YAML content
-changes.** The hunk is in `:574-579`'s shape and is delegated under
+changes** — this one-hunk rule governs the normal branch; ERR-01 row 8's
+repair hunk in step (2) is its explicit exception. The hunk is in
+`:574-579`'s shape and is delegated under
 brief `docs/spec/task-briefs/v1104-T4.md` (EC-03), the wall and the
 computed value in the brief first; `[[VERIFY: v1102's
 calibration measured 18.11 s → 110 s (`config/quality_gates.yaml:575-577`)
 — decision rule: `timeout_seconds` is always the computed number, 110
 only if the formula yields it]]`;
 (2) the intended T4 files staged and **`git write-tree` recorded**, then
-**gate 6 once, directly**, wall measured (`REQ-V1102-GATE-02`'s
-procedure by reference); commit; `git rev-parse HEAD^{tree}` asserted
-equal to the recorded tree (ERR-01 row 9); `[[VERIFY: v1.10.2's direct
+**gate 6 run directly on the recorded write-tree**, its wall recorded
+(`REQ-V1102-GATE-02`'s procedure by reference). **When the wall is
+≤ 1640 s, `mutation-all.timeout_seconds` is not changed.** When the wall
+exceeds 1640 s (gate 6 at T4 runs directly — the `AGENTS.md` command —
+so no timeout is enforced on that run; `timeout_seconds: 1640` governs
+only `checks.py`-driven runs, so the yaml-configured `mutation-all`
+gate could not finish under `checks.py`), this is a construction defect
+(ERR-01 row 8): a separate `mutation-all` timeout hunk (`2 × wall +
+70 s`, rounded up to 10 s) is delegated under T4's brief, a new
+write-tree is recorded, and gate 6 runs once more on that final tree
+within one repair cycle; only the final green run is the acceptance
+result. The "exactly one localized YAML hunk" rule applies to the
+normal branch; this repair hunk is the explicit exception. Then commit;
+`git rev-parse HEAD^{tree}` asserted equal to the write-tree of the
+acceptance run (ERR-01 row 9); `[[VERIFY: v1.10.2's direct
 `mutation-all` run took 14m23.5s at 139 entries against 1640 s
-(`docs/llm-usage.md` row 129) — decision rule: recompute by the yaml's
-rule (2 × wall + 70 s, rounded up to 10 s) in the same T4 commit only
-if the wall exceeds 1640 s; otherwise the value stays]]`; then GATE-01's live sequence.
+(`docs/llm-usage.md` row 129) — decision rule: the direct wall is
+recorded; > 1640 s triggers the exceptional branch (ERR-01 row 8);
+otherwise the value stays]]`; then GATE-01's live sequence.
 `[[VERIFY: the collected-test count after T2 — `f3ce1a5` collects 2285
 and T1–T2 only add — decision rule: T0's re-measured number is the
-floor; T5 asserts count ≥ floor + 21; a lower count is a TST-01 defect,
+floor; T5 asserts count ≥ floor + 22; a lower count is a TST-01 defect,
 never a floor adjustment]]`.
 
 **The gate matrix**: `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
@@ -604,7 +638,7 @@ green, as the run's last action — **local, never pushed** (EC-01).
 **REQ-V1104-RPT-01 (MUST) — what `docs/reports/report-v1.10.4.md`
 carries.** `REQ-V1103-RPT-01`'s items (`spec-v1.10.3.md:916-952`) by
 reference with this release's names (T4 for T6, T5 for T7, the
-`v1104-gate8-${tested_tree}.log` path, floor + ≥ 21, 144 mutations, `##
+`v1104-gate8-${tested_tree}.log` path, floor + ≥ 22, 144 mutations, `##
 Operator inputs` with the fallback record, one attempt-log row per
 gate-7 execution, item 23's "shipped judge default
 `anthropic/claude-sonnet-5`; gate 8 judged by `<effective judge>`", "on
@@ -618,11 +652,17 @@ command and the exact node ids, the selected count, the pytest command
 run with those node ids — never `-k` — its result, the failing
 assertion); **the T0 inventory
 hit table** (`file:line | hit | EC-02 row or "unaffected because …"`,
-every hit of parts (i)–(iii) classified)
+every hit of parts (i)–(iii) and (v) classified)
 and any post-T0 amendment (ERR-01 row 4) in its task's section; **the
-calibration line** (wall, result, `timeout_seconds`); the push
-instruction naming the 72 pending commits and the operator's `git stash
-drop stash@{0}` after it. The T0 skeleton carries `## Operator inputs`,
+calibration line** (wall, result, `timeout_seconds`; on ERR-01 row 8's
+branch also the `mutation-all` wall, its repair hunk and the final
+green run); the push instruction naming the 72 pending commits,
+followed by the stash rule: **if and only if `git rev-parse stash@{0}`
+still equals `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3`, instruct the
+operator to run `git stash drop stash@{0}` after pushing. If the
+fallback was used because the stash was absent or had another id, do
+not issue any stash-drop command; record the observed state and leave
+all stashes untouched.** The T0 skeleton carries `## Operator inputs`,
 the attempt log with T0's row, `## T0 — preflight` with T0's bullet and
 the ledger-row block. `T-V1104-RPT-01`; the T0, T4 and T5 records.
 
@@ -663,19 +703,26 @@ sonnet`) in its **own clean context** at T3 — after T1–T2, before T4's
 live run. **Never self-review in the writing context.** Findings are
 fixed or waived with a reason; a fix that writes source is delegated by
 brief `v1104-T3.md` (EC-03); the review prompt is logged. Beyond the standard
-checklists: (1) `devtools/mutation_check.py`
-differs from `f3ce1a5` only by the five entries and their comment
-(Appendix D's post-image);
-`config/quality_gates.yaml` only by MUT-02's three hunks and PIN-02's
-`report_path`; no other source file differs; (2) every rewritten pin asserts presence, contiguity and order
-— no `tail ==`, whole-file "is now" count, release-name anchor or "no
-later row" assertion anywhere in `tests/` (NG-10); every renamed test
-keeps its intent; no test deleted; (3) every T0 inventory hit of EC-02's parts (i)–(iii) is
+checklists: (1) among production and evaluation-instrument sources,
+`tools.py`, `devtools/checks.py`, `devtools/agent_eval.py` and the other
+NG-01 instrument files are byte-equal to `f3ce1a5`;
+`devtools/mutation_check.py` differs only by Appendix D's five entries
+and rationale comment. Separately, `config/quality_gates.yaml` differs
+only by MUT-02's hunks and PIN-02's `report_path`. Test and
+documentation differences are limited to the EC-02 table, new v1.10.4
+tests, briefs, prompts, report artefacts, README and AGENTS changes
+authorized by this spec; (2) every rewritten pin asserts presence, contiguity and order
+— no `tail ==`, whole-file "is now" count, release-name anchor,
+frozen-matrix equality or "no later row" assertion anywhere in
+`tests/` (NG-10); every renamed test
+keeps its intent; no test deleted; (3) every T0 inventory hit of EC-02's parts (i)–(iii) and (v) is
 classified — an EC-02 row or a one-line reason — and no unclassified
 hit survived T0 (ERR-01 row 14); every post-T0 amendment is disclosed; (4) the isolation proofs
 name `T-V1103-LINT-09` for entry 4 and the inner predicate for entry 2;
 (5) no new dependency; no secret value anywhere (SEC-01); no live call
-in any test; `git stash list` still shows `stash@{0}`.
+in any test; on the id-match route `git rev-parse stash@{0}` still
+equals `e3c6e3ff…`; on the absent/other-id fallback the observed stash
+state is recorded and all stashes are untouched (MUT-01, RPT-01).
 
 **REQ-V1104-REV-02 (MUST) — acceptance, the live gates, the freeze,
 regression, no push.** `REQ-V1103-REV-02` (`spec-v1.10.3.md:1060-1090`)
@@ -697,7 +744,12 @@ output is reported only in the closing message.** `lint-docs` and
 tag `v1.10.4` is created on **that** commit — **locally; `git push` is
 not a command this run issues**; a finding withholds the tag. The
 post-tag closing checks are `spec-v1.10.3.md:1083-1090`'s with
-`v1.10.4`; the handoff says: push, then `git stash drop stash@{0}`. **Regression, no
+`v1.10.4`; the handoff says: push; then, **if and only if `git rev-parse
+stash@{0}` still equals `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3`,
+`git stash drop stash@{0}` after pushing — if the fallback was used
+because the stash was absent or had another id, no stash-drop command
+is issued; the observed state is recorded and all stashes are left
+untouched** (RPT-01). **Regression, no
 weakened posture**: every earlier release's acceptance properties still
 hold; no production or evaluation-instrument source changes;
 `devtools/mutation_check.py` differs from `f3ce1a5` only by MUT-01's
@@ -768,8 +820,10 @@ environment is available" applies only to a stop before their
 scheduled T4 execution, EC-01), `gitleaks` exit 0, the
 permitted evidence committed and nothing else, no `--no-verify`, the
 negative proofs (`pyproject.toml` at `1.9.5` before T5, `1.10.4` on
-Stage B at T5; no `v1.10.4` tag; `git status -sb` `ahead`; `stash@{0}`
-present); no later task runs.
+Stage B at T5; no `v1.10.4` tag; `git status -sb` `ahead`; on the
+id-match route `git rev-parse stash@{0}` still `e3c6e3ff…`, on the
+absent/other-id fallback the observed stash state recorded, all stashes
+untouched and no stash-drop instruction issued); no later task runs.
 
 ---
 
@@ -782,12 +836,12 @@ code they cover, in the same task.
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preflight (*commands only*): hooks, `doctor`, **test count re-measured** (2285 at authoring; the floor), `len(MUTATIONS)` 139, last prompt 227, last usage row 138 (both written by the authoring commit that lands this spec; at `f3ce1a5` they are 226 / 137), `<base>` `f3ce1a5`, the spec's `sha256`; `git stash list` shows `stash@{0}`, `git rev-parse stash@{0}` equals MUT-01's `e3c6e3ff…` and the two-path `git apply --check` exits 0 (or the T2 fallback — Appendix D — is announced now); EC-02's four-part inventory, every hit classified (ERR-01 row 14); the seven Stage 0 checks; gates 1–5 and 7; `docs/prompts/228-go-spec-v1.10.4.md`; the report skeleton (RPT-01) | every item recorded; the hit table; the fallback record; no key value anywhere; `git diff --exit-code` clean after check 7 |
-| **T1** | PIN-01, PIN-02; VER-01's `v1.10.3` row; RPT-03's T1 part; the report's T1 section with its bullet. `T-V1104-PIN-01…07`, `T-V1104-RPT-01`, `T-V1104-DOC-01`, `-03`, `-05`; gates 1–4 | green; `lint-docs` green against the run's own report; the matrix test green against **this** file; REV-01 item 2 holds |
-| **T2** | MUT-01, MUT-02: the post-T1 two-path `git apply --check`, the two-path `git apply` (or the Appendix D fallback), the post-image verification, the "is now" sentence, each entry re-verified in isolation under exact node ids, EC-02 row 2b. `T-V1104-MUT-01…05`, `T-V1104-ERR-01`; gates 1–4 | 5/5 killed in isolation with the proofs recorded (node ids, selected count per entry); `len(MUTATIONS)` 144; the `--check` and `git apply` exits (or the fallback's `sha256sum` match) and `git hash-object devtools/mutation_check.py` = `d09909d…` recorded; `stash@{0}` still listed; `doctor` green |
+| **T0** | Preflight (*commands only*): hooks, `doctor`, **test count re-measured** (2285 at authoring; the floor), `len(MUTATIONS)` 139, last prompt 227, last usage row 138 (both written by the authoring commit that lands this spec; at `f3ce1a5` they are 226 / 137), `<base>` `f3ce1a5`, the spec's `sha256`; `git stash list` shows `stash@{0}`, `git rev-parse stash@{0}` equals MUT-01's `e3c6e3ff…` and the two-path `git apply --check` exits 0 (or the T2 fallback — Appendix D — is announced now, the observed stash state recorded); EC-02's five-part inventory, every hit classified (ERR-01 row 14); the seven Stage 0 checks; gates 1–5 and 7; `docs/prompts/228-go-spec-v1.10.4.md`; the report skeleton (RPT-01) | every item recorded; the hit table; the fallback record; no key value anywhere; `git diff --exit-code` clean after check 7 |
+| **T1** | PIN-01, PIN-02; VER-01's `v1.10.3` row; RPT-03's T1 part; the report's T1 section with its bullet; EC-02 row 12b. `T-V1104-PIN-01…08`, `T-V1104-RPT-01`, `T-V1104-DOC-01`, `-03`, `-05`; gates 1–4 | green; `lint-docs` green against the run's own report; the matrix test green against **this** file; REV-01 item 2 holds |
+| **T2** | MUT-01, MUT-02: the post-T1 two-path `git apply --check`, the two-path `git apply` (or the Appendix D fallback), the post-image verification, the "is now" sentence, each entry re-verified in isolation under exact node ids, EC-02 row 2b. `T-V1104-MUT-01…05`, `T-V1104-ERR-01`; gates 1–4 | 5/5 killed in isolation with the proofs recorded (node ids, selected count per entry); `len(MUTATIONS)` 144; the `--check` and `git apply` exits (or the fallback's `sha256sum` match) and `git hash-object devtools/mutation_check.py` = `d09909d…` recorded; on the id-match route `stash@{0}` still listed with MUT-01's id, otherwise the observed stash state recorded and all stashes untouched; `doctor` green |
 | **T3** | **Review (REV-01) in a clean context**; its fixes land here (brief `v1104-T3.md` when they write source) | findings closed or waived with reasons; the review prompt logged; `v1104-T3.md` present iff a source-writing fix was delegated |
-| **T4** | GATE-01's T4 sequence and GATE-02's steps (1)–(2), verbatim: the calibration run, gate 6, the write-tree and the live sequence *commands only*; **the one localized `mutation-v1103` yaml hunk (the dated comment and the computed `timeout_seconds`, even at 110) delegated by brief `v1104-T4.md`**; commit between gate 6 and the live sequence; gate 8 last and once; no live gate after it on any route | the calibration line; `mutation-all` 144/144 with its wall; the write-tree and `HEAD^{tree}` equal; gates 1–7 green; the attempt-log rows; `gate8_exit` 0 with the floors and judge mean met, the per-case table, every `CASE`/`TOOLS`/`FAIL` line, "on this run"; exit 1 is Stage B′; a missing capture is ERR-01 row 11 |
-| **T5** | REV-02 verbatim — one prompt (233), two commits: the first (brief `v1104-T5.md` covering `pyproject.toml`, `uv.lock`, the tests and the documentation) lands VER-01, EC-02 rows 15–16, RPT-03's T5 part, the provisional artefacts; gates 1–7, the identity check, the collection check, `replay`, `E1`–`E7`; the second (*artefacts only*) is the evidence commit; `E8`, `lint-docs`, `gitleaks-tree`; the tag; **no push**. `T-V1104-VER-01`, `-VER-02`, `T-V1104-DOC-02`, `-DOC-04` | the four T5 tests red before, green after; `T-V1104-VER-02`; `git diff <tested_tree> HEAD -- config/quality_gates.yaml` empty; the reuse facts, gate 8 executed once; the count ≥ floor + 21; the evidence commit's `git show --stat` names exactly the four paths; `E8` green before the tag; no push in the command record |
+| **T4** | GATE-01's T4 sequence and GATE-02's steps (1)–(2), verbatim: the calibration run, gate 6, the write-tree and the live sequence *commands only*; **the one localized `mutation-v1103` yaml hunk (the dated comment and the computed `timeout_seconds`, even at 110) delegated by brief `v1104-T4.md`**; a direct `mutation-all` wall > 1640 s is ERR-01 row 8's exceptional branch (a separate `mutation-all` timeout hunk under the same brief, a new write-tree, gate 6 once more, one repair cycle; only the final green run is the acceptance result); commit between gate 6 and the live sequence; gate 8 last and once; no live gate after it on any route | the calibration line; `mutation-all` 144/144 with its wall (≤ 1640 s, or row 8's branch recorded with its final green run); the write-tree of the acceptance run and `HEAD^{tree}` equal; gates 1–7 green; the attempt-log rows; `gate8_exit` 0 with the floors and judge mean met, the per-case table, every `CASE`/`TOOLS`/`FAIL` line, "on this run"; exit 1 is Stage B′; a missing capture is ERR-01 row 11 |
+| **T5** | REV-02 verbatim — one prompt (233), two commits: the first (brief `v1104-T5.md` covering `pyproject.toml`, `uv.lock`, the tests and the documentation) lands VER-01, EC-02 rows 15–16, RPT-03's T5 part, the provisional artefacts; gates 1–7, the identity check, the collection check, `replay`, `E1`–`E7`; the second (*artefacts only*) is the evidence commit; `E8`, `lint-docs`, `gitleaks-tree`; the tag; **no push**. `T-V1104-VER-01`, `-VER-02`, `T-V1104-DOC-02`, `-DOC-04` | the four T5 tests red before, green after; `T-V1104-VER-02`; `git diff <tested_tree> HEAD -- config/quality_gates.yaml` empty; the reuse facts, gate 8 executed once; the count ≥ floor + 22; the evidence commit's `git show --stat` names exactly the four paths; `E8` green before the tag; no push in the command record |
 
 ### 10.1 Per-task reading map
 
@@ -797,11 +851,11 @@ forces delegation; the report records map versus actual in the bullet.
 
 | T | spec sections | repository files and ranges | delegate? |
 |---|---|---|---|
-| **T0** | §1 (EC-02's inventory, EC-04), §4 (rows 1, 14), §7, §9 (Stage 0) | `config/quality_gates.yaml:7-30`, `:258-266`; `docs/spec/spec-v1.10.1.md:1105-1170`; `docs/spec/spec-v1.10.3.md:1105-1120`; `pyproject.toml:1-21`; `docs/prompts/TEMPLATE.md`; `git stash show -p stash@{0}` (read only); `git rev-parse stash@{0}`; `devtools/checks.py` (grep only, EC-02 parts (ii)–(iii)) | no — *commands only* (the skeleton, prompt file and ledger block are prose no gate runs) |
+| **T0** | §1 (EC-02's inventory, EC-04), §4 (rows 1, 14), §7, §9 (Stage 0) | `config/quality_gates.yaml:7-30`, `:258-266`; `docs/spec/spec-v1.10.1.md:1105-1170`; `docs/spec/spec-v1.10.3.md:1105-1120`; `pyproject.toml:1-21`; `docs/prompts/TEMPLATE.md`; `git stash show -p stash@{0}` (read only); `git rev-parse stash@{0}`; `devtools/checks.py` (grep only, EC-02 parts (ii), (iii) and (v)) | no — *commands only* (the skeleton, prompt file and ledger block are prose no gate runs) |
 | **T1** | §3 (PIN-01, PIN-02), §4 (row 5), §8 (VER-01's `v1.10.3` row, RPT-03's T1 part), §1 (EC-02 rows 1–14) | EC-02 rows 1–14's sites (±10 lines); `devtools/checks.py:1672-1714` (`_lint_report_delegation`, read only); `config/quality_gates.yaml:736-764`; `README.md:913-916`; `AGENTS.md:92-97`; `tests/test_v15_standards.py:1772-1836`; `tests/test_v1104_{gates,docs}.py` | **yes** — brief `docs/spec/task-briefs/v1104-T1.md` |
 | **T2** | §3 (MUT-01, MUT-02), §4 (rows 1–3), §1 (row 2b), Appendix D | `devtools/mutation_check.py:40-61`, **tail only** (`:1895-1926`), `:2304-2325`; `config/quality_gates.yaml:26-31`, `:574-590`, `:696-716`; the five `find` lines only (§3); `tests/test_v1100_gates.py` (the group test); `tests/test_v1104_gates.py` | **yes** — brief `v1104-T2.md` (the strings and the apply command in the brief first) |
 | **T3** | §9 (REV-01) | the review's own reading map; otherwise only commands run | no — *the task is itself the clean-context review*; a source-writing fix is delegated by brief `v1104-T3.md` |
-| **T4** | §7, §4 (rows 7–12), §9 (Stage B′, B″) | `config/quality_gates.yaml` — the `mutation-v1103` block only (`:574-590`); `docs/spec/spec-v1.10.2.md:449-462`; `docs/spec/spec-v1.10.3.md:730-778` | **yes** for the calibration hunk — brief `v1104-T4.md` (the measured wall and the computed `timeout_seconds` in the brief first); **no** for the calibration run, gate 6, the write-tree and the live gate sequence — *commands only* |
+| **T4** | §7, §4 (rows 7–12; row 8's exceptional branch), §9 (Stage B′, B″) | `config/quality_gates.yaml` — the `mutation-v1103` block only (`:574-590`), plus the `mutation-all` block (`:708-716`) on ERR-01 row 8's branch only; `docs/spec/spec-v1.10.2.md:449-462`; `docs/spec/spec-v1.10.3.md:730-778` | **yes** for the calibration hunk and for row 8's repair hunk — brief `v1104-T4.md` (the measured wall and the computed `timeout_seconds` in the brief first; on row 8's branch the `mutation-all` wall and its computed value likewise); **no** for the calibration run, gate 6, the write-tree and the live gate sequence — *commands only* |
 | **T5** | §8, §9 (REV-02), §7 (the identity check), §4 (rows 12–13), §1 (rows 15–16, the floor) | first commit: `pyproject.toml` (`project.version` only); `README.md:594-600`, `:913-916`; `AGENTS.md:159-172`; `tests/test_v195_version.py`, `tests/test_v194_version.py:25-34`, `tests/test_v190_agents.py:134-152`; `tests/test_v1104_version.py`, `tests/test_v1104_docs.py`; second commit: this run's artefacts | **yes** for the first commit — brief `v1104-T5.md` (`pyproject.toml`, `uv.lock`, the tests and the documentation); **no** for the evidence commit only (*artefacts only*) |
 
 ---
@@ -815,18 +869,18 @@ id of §6.1 is cited at least once.
 | Requirement | Verified by |
 |---|---|
 | `REQ-V1104-EC-01` | `T-V1104-VER-02`; the gate tables and command record (no live gate after T4's gate 7 on any stop route); `T-V1104-DOC-03` |
-| `REQ-V1104-EC-02` | the T0 count and T5 check; the T0 hit table (parts (i)–(iii), every hit classified); post-T0 amendments; `T-V1104-PIN-01`, `T-V1104-PIN-06` |
+| `REQ-V1104-EC-02` | the T0 count and T5 check; the T0 hit table (parts (i)–(iii) and (v), every hit classified); post-T0 amendments; `T-V1104-PIN-01`, `T-V1104-PIN-06` |
 | `REQ-V1104-EC-03` | §10.1; the briefs `v1104-T1.md`, `-T2`, `-T4`, `-T5`, `-T3` iff a fix; the two T4 bullets; `T-V1104-RPT-01` |
 | `REQ-V1104-EC-04` | T0 check 1's output; `db_empty=True`; the `describe()` pairs; `replay --range`; `gitleaks-tree`; `E7` |
 | `REQ-V1104-MUT-01` | `T-V1104-MUT-01`, `T-V1104-MUT-02`, `T-V1104-MUT-05`; the stash record (identity, post-T1 `--check`, the post-image against Appendix D) and the per-entry proofs (exact node ids, selected count); `E1` |
 | `REQ-V1104-MUT-02` | `T-V1104-MUT-03`, `T-V1104-MUT-04`; `E1`, `E3` |
-| `REQ-V1104-PIN-01` | `T-V1104-PIN-01`, `T-V1104-PIN-02`, `T-V1104-PIN-03`, `T-V1104-PIN-04`, `T-V1104-PIN-06`; REV-01 item 2; `E2`, `E3` |
+| `REQ-V1104-PIN-01` | `T-V1104-PIN-01`, `T-V1104-PIN-02`, `T-V1104-PIN-03`, `T-V1104-PIN-04`, `T-V1104-PIN-06`, `T-V1104-PIN-08`; REV-01 item 2; `E2`, `E3` |
 | `REQ-V1104-PIN-02` | `T-V1104-RPT-01`, `T-V1104-PIN-05`, `T-V1104-DOC-03`, `T-V1104-PIN-07`; `E4` |
-| `REQ-V1104-ERR-01` | `T-V1104-ERR-01` (row 2); `T-V1103-LINT-02` and `T-V1104-PIN-07` (row 5); the task records (rows 1, 3, 14 in the T0 and T2 records); `E5` |
+| `REQ-V1104-ERR-01` | `T-V1104-ERR-01` (row 2); `T-V1103-LINT-02` and `T-V1104-PIN-07` (row 5); the task records (rows 1, 3, 14 in the T0 and T2 records; row 8 in the T4 record when taken); `E5` |
 | `REQ-V1104-SEC-01` | `gitleaks-tree` at every commit; the command record; `T-V1104-MUT-02`; `E1`, `E8` |
 | `REQ-V1104-TST-01` | the T5 collection check; `tests/test_v1104_*.py` present; Appendix A complete |
 | `REQ-V1104-GATE-01` | the gate tables; `tested_tree` and the clean-tree proof; the reuse facts; the attempt log; `E5`, `E8` |
-| `REQ-V1104-GATE-02` | `T-V1104-PIN-05`, `T-V1104-MUT-03`; the calibration and write-tree records; the brief `v1104-T4.md` and T4's one-hunk `git show --stat`; `E1` |
+| `REQ-V1104-GATE-02` | `T-V1104-PIN-05`, `T-V1104-MUT-03`; the calibration and write-tree records; the brief `v1104-T4.md` and T4's `git show --stat` (one hunk on the normal branch; row 8's repair hunk recorded when taken); `E1` |
 | `REQ-V1104-VER-01` | `T-V1104-VER-01`, `T-V1104-DOC-01`, `T-V1104-DOC-02`; the fallback record; `E6`, `E7`, `E8` |
 | `REQ-V1104-RPT-01` | the report under `lint-docs` (`T-V1104-RPT-01`); the T0, T2, T4 and T5 records |
 | `REQ-V1104-RPT-02` | `wc -m` quoted; `docs/llm-usage.md` rows; the fenced ledger row under `lint-docs` (`T-V1104-RPT-01`) |
@@ -846,14 +900,14 @@ the id that closes or declines it:
 | 2 | the parked pin `tests/test_v1102_gates.py:63-70` → `:80-87`, seen at T0, called "out of scope" (`:132-133`); `spec-v1.10.3.md:1203`'s stale `:113-125` cite (the anchor test is at `:131-145`) | `PIN-01` (EC-02 rows 1, 4; `T-V1104-PIN-01`, `-02`) |
 | 3 | v1.10.3 GATE-02's table wrote `if False:` for entry 2; reality is the inner predicate (`:569`) | `MUT-01` (§3 row 2; `T-V1104-MUT-02`, `-05`) |
 | 4 | v1.10.3 GATE-02's table named `T-V1103-LINT-06`/`-07` for entry 4; the killer is `-09` (`:571`) | `MUT-01` (§3 row 4; the isolation proofs) |
-| 5 | `mutation-v1103`'s placeholder `timeout_seconds: 110`, calibration never run (`:574-577`); `mutation-all`'s timeout not re-measured at 144 | `MUT-02`, `GATE-02` (ERR-01 rows 7–8; the `[[VERIFY]]`) |
+| 5 | `mutation-v1103`'s placeholder `timeout_seconds: 110`, calibration never run (`:574-577`); `mutation-all`'s timeout not re-measured at 144 | `MUT-02`, `GATE-02` (ERR-01 rows 7–8, row 8 the exceptional repair branch; the `[[VERIFY]]`) |
 | 6 | the stale `AGENTS.md` count lines (`:161-162`, `:172`: 1638 / 120 vs 2285 / 139) | `RPT-03` (`T-V1104-DOC-04`); EC-02 row 16 |
 | 7 | the unreached T7 block (`:636`): the bump, the release row, the `pending (T9)` rows, the `v1.9.5` clause, the tag, the version tests (`tests/test_v195_version.py`'s live pin); the ledger row at `Ver` 1.9.5 (`:742`) | `VER-01`; `RPT-03`; `RPT-02`; `RPT-01`; EC-02 row 15 |
-| 8 | the stash's untracked parent `043842f` collides on `pop`/`apply` (facts §1); its three test hunks carry the frozen shapes | `MUT-01` (the two-path apply, identity-pinned; Appendix D the byte-exact fallback; test hunks not applied); `NG-03`; the post-push `stash drop` (REV-02) |
+| 8 | the stash's untracked parent `043842f` collides on `pop`/`apply` (facts §1); its three test hunks carry the frozen shapes | `MUT-01` (the two-path apply, identity-pinned; Appendix D the byte-exact fallback; test hunks not applied); `NG-03`; the conditional post-push `stash drop` (REV-02, RPT-01) |
 | 9 | the verifier's informational gate 8 on `f3ce1a5` (5/5, 4/4, 3/3, 0.957) | `NG-06`; `GATE-01` |
 | 10 | the two README docs tests assert *no* `\| v1.10.3 \|` row (`tests/test_v1103_docs.py:99`, `tests/test_v1102_docs.py:130`) | `VER-01` (EC-02 rows 5–6; `T-V1104-DOC-01`, `T-V1104-PIN-06`); `NG-10` |
 | 11 | `text.count("is now") == 1` over the whole yaml (`tests/test_v1102_gates.py:138`) | `PIN-01` (`T-V1104-PIN-04`) |
-| 12 | `tests/test_v1103_gates.py:73-81` breaks on a future `mutation-v1104` label | EC-02's unaffected list; `NG-02` |
+| 12 | `tests/test_v1103_gates.py:73-81` breaks on a future `mutation-v1104` label | `PIN-01` (EC-02 row 12b, rewritten in this release; `T-V1104-PIN-08`); `NG-10`; `NG-02` |
 | 13 | the `.env` run file and the storage preflight; the check-2/3 numbering drift (`:39-44`) | `EC-04` (`data/run-v1104.db`; check 2) |
 | 14 | `LLM_EVAL_CHAT_MODEL` as a cheaper eval route; a benchmark run or waiver edit | `NG-05`; `NG-04`; `EC-01` |
 | 15 | `T-V1103-LINT-08` (the `report-v1.10.4.md` → `v1104` prefix test, `spec-v1.10.3.md:552-553`) was specified but never implemented — `tests/test_v1103_lint.py` at `f3ce1a5` uses only `report-v1.10.3.md` and `report-final.md` | `PIN-02` (`T-V1104-PIN-07`) — covered here |
@@ -897,7 +951,7 @@ Feature: E7 — the version and the dependencies
 
 Feature: E8 — the freeze and the local tag
   Scenario: run before the tag on T5's evidence commit
-    Then its name-only diff is exactly docs/reports/report-v1.10.4.md, docs/reports/tg-post-v1.10.4.md, the single docs/prompts/233-*.md file and docs/llm-usage.md; git tag -l lists no v1.10.4; git status -sb shows main ahead; git stash list still shows stash@{0}
+    Then its name-only diff is exactly docs/reports/report-v1.10.4.md, docs/reports/tg-post-v1.10.4.md, the single docs/prompts/233-*.md file and docs/llm-usage.md; git tag -l lists no v1.10.4; git status -sb shows main ahead; on the id-match route git rev-parse stash@{0} still equals e3c6e3ff… and the handoff carries the conditional stash-drop instruction, on the absent/other-id fallback the observed stash state is recorded, no stash-drop instruction is issued and all stashes are untouched
   Scenario: Stage B at T5 (ERR-01 row 12 or 13)
     Then pyproject.toml reads 1.10.4, git tag -l lists no v1.10.4, the evidence commit is the last, the report names Stage B at T5 with one gate-8 execution at T4 — never Stage B″
 ```
@@ -928,6 +982,19 @@ before it is applied.
 
 **Round 1: 9 findings, 8 accepted (2 adapted), 1 rejected.** New
 requirements: none (ERR-01 gains row 14; Appendix D added).
+
+### Round 2 of at most 3 — against the round-1 spec (`e7690f1`); 5 findings, 5 accepted (1 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R2-1 | Crit | MUT-01, ERR-01 row 1, RPT-01, REV-01 item 5, REV-02, REV-03, §10 T0/T2, E8 | accepted | Every "stash still present" assertion is route-dependent (on the id-match route `git rev-parse stash@{0}` still equals `e3c6e3ff…`; on the absent/other-id fallback the observed state is recorded and all stashes are untouched), and the handoff/report instruction reads: if and only if `git rev-parse stash@{0}` still equals `e3c6e3ff3bee60bff183ae056621d4dc984cd5a3`, instruct the operator to run `git stash drop stash@{0}` after pushing; if the fallback was used because the stash was absent or had another id, no stash-drop command is issued. |
+| R2-2 | Crit | GATE-02, ERR-01 rows 8–9, MUT-02, EC-03, §10 T4, §10.1 T4 | accepted, adapted | Gate 6 is run directly on the recorded write-tree and its wall recorded; a wall ≤ 1640 s leaves `mutation-all.timeout_seconds` unchanged; a wall > 1640 s is a construction defect (ERR-01 row 8, a repair cycle): a separate `mutation-all` timeout hunk (`2 × wall + 70 s`, rounded up to 10 s) is delegated under T4's brief, a new write-tree is recorded and gate 6 runs once more on that final tree within one repair cycle, only the final green run being the acceptance result; the one-hunk rule governs the normal branch and this repair hunk is its explicit exception; the "recompute in the same commit" wording is gone and the `[[VERIFY]]` reads "the direct wall is recorded; > 1640 s triggers the exceptional branch" — adapted to the repository fact that gate 6 at T4 is run directly (the `AGENTS.md` command), so no timeout is enforced on that run and `timeout_seconds: 1640` governs only `checks.py`-driven runs. |
+| R2-3 | High | EC-02 (row 12b), PIN-01, NG-10, `T-V1104-PIN-05`, `T-V1104-PIN-08`, tails row 12 | accepted | `tests/test_v1103_gates.py:73-81` is EC-02 row 12b, rewritten at T1 to assert that the labels defined by spec-v1.10.3 are present in `_GATE_MATRIX_LABEL_TO_NAME` and occur in the historical matrix in their specified order, with no equality between the current global dictionary and the frozen v1.10.3 matrix; the active-spec exact-matrix test stays in `tests/test_v15_standards.py` repointed to this file (row 12); `T-V1104-PIN-08` proves a dropped or reordered historical label fails while an appended future label passes; NG-10 names the frozen-matrix equality and tails row 12 no longer reads "postponed". |
+| R2-4 | High | EC-02 (parts (iv)–(v)), ERR-01 row 14, RPT-01, REV-01 item 3, §10.1 T0 | accepted | The T0 inventory is five-part: part (v) is the deliberately broad fail-closed pass `grep -rn -E 'version\|pyproject\|uv\.lock\|count\|entries\|task-brief\|report[_-]?path\|spec-v\|report-v\|_IDS\|MUTATIONS\|labels' tests/ devtools/checks.py` (the pipes escaped for this table; EC-02 part (v) carries the literal command); every broad-pass hit is classified under (iv) like a hit of (i)–(iii), false positives expected and each given a one-line "unaffected because …"; no AST tooling. |
+| R2-5 | Med | REV-01 item 1 | accepted | REV-01 item 1 reads: among production and evaluation-instrument sources, `tools.py`, `devtools/checks.py`, `devtools/agent_eval.py` and the other NG-01 instrument files are byte-equal to `f3ce1a5`; `devtools/mutation_check.py` differs only by Appendix D's five entries and rationale comment; separately, `config/quality_gates.yaml` differs only by MUT-02's hunks and PIN-02's `report_path`; test and documentation differences are limited to the EC-02 table, new v1.10.4 tests, briefs, prompts, report artefacts, README and AGENTS changes authorized by this spec. |
+
+**Round 2: 5 findings, 5 accepted (1 adapted), 0 rejected.** New
+requirements: none (`T-V1104-PIN-08`; EC-02 row 12b).
 
 ---
 
