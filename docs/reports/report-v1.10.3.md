@@ -164,7 +164,68 @@ outside it was found.
 
 Executor model: `claude-sonnet-5`.
 
-## T1 — not reached: T1
+## T1 — the exec guard
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/
+v1103-T1.md`. Commit `5a39ec7`.
+
+`_validate_exec_arguments` (`tools.py`) now runs three deny rules after
+every existing shape check and before the runner is ever called
+(REQ-V1103-EXEC-01, REQ-V1103-EXEC-02): `argv[0]`'s basename in
+`{"env", "printenv"}`; any argv element whose basename is `.env` or
+starts with `.env.`; and any argv element that full-matches
+`/proc/(?:self|\d+)/environ`. Each hit returns exactly
+`{"error": "exec refused: environment inspection is not available"}`
+(the pinned `tools.EXEC_ENV_REFUSAL_TEXT`), routed through `_run_exec`'s
+existing refused-record path with no change needed there — the audit
+record is the usual four keys (`tool`, `argv`, `outcome`, `error`),
+redacted by the existing `config.redact` pass before it reaches the
+sink. This is defense in depth only: gate 8's injection clause (e)
+still fails an `exec` call under attack regardless of the guard.
+
+Scope stayed deliberately narrow (NG-03, NG-04): no shell tokenising,
+allow-list, symlink resolution, path normalisation or Unicode folding
+was added, so the documented bypass shapes (`busybox printenv`, `sh -c
+printenv`, `python3 -c "import os;print(os.environ)"`, a
+`/proc/self/../1/environ` traversal, a Cyrillic look-alike `.еnv`, a
+symlinked `env-link`, and the empty-basename trailing-slash forms) keep
+running unrefused on purpose — `tests/test_v1103_exec.py`'s EXEC-04
+cases assert exactly that, one per shape. `os.path.basename` is used
+deliberately over `Path(...).name` (`# noqa: PTH119`), because pathlib
+silently normalises away a trailing slash — `Path("/app/.env/").name ==
+".env"` — which would have wrongly caught the `ls /app/.env/` bypass
+shape the spec explicitly requires to stay unrefused.
+
+Test-first: `tests/test_v1103_exec.py` (41 new tests — T-V1103-EXEC-01
+through -08, ERR-01 rows 1-2, SEC-01) was written and confirmed red
+against the unmodified guard (`AttributeError` on the not-yet-defined
+constants — the right reason) before the `tools.py` edit landed.
+`tests/test_exec.py` and `tests/test_v1100_toolcall.py` pass unamended.
+The exec tool description is byte-for-byte the `636a281` blob
+(`T-V1103-EXEC-08` asserts this directly) and the serialized tool
+catalog stays at 1798 of its 1800-char cap. Test-collection count:
+2170 → **2211** (+41), matching the new tests exactly; no pre-existing
+test deleted or renamed. Gates 1-4 green (full `pytest -q` green both
+before and after; gates 5-8 not run, per schedule).
+
+**EC-02 repair cycle 1 of 3 (ERR-01 row 9 — an unlisted semantic pin,
+never a silent edit).** `tests/test_v1_guardrails.py::
+test_t_v1_red_01_tool_envelopes_are_redacted` (not on the 19-row
+amendment table nor the verified-unaffected list — an EC-02 gap the T0
+inventory did not catch, since that test's incidental use of `.env` as
+an unrelated fixture value sits outside every token the T0 grep
+searched for) used `["cat", ".env"]` purely to exercise exec-output
+redaction; the new rule 2 now refuses that argv before the runner is
+ever called, breaking the test's actual point (redaction of a real
+output payload, never reached). Fixed by swapping the incidental
+fixture value to `["cat", "notes.txt"]` in both of that test's two exec
+calls (`tests/test_v1_guardrails.py:140`, `:150`) — the test's intent
+(exec-output redaction) is fully preserved; nothing about the guard
+itself, the dataset, or any other test changed as a result. This is the
+one and only test amendment T1 makes outside `tests/test_v1103_exec.py`.
+
+Delegation record:
+- T1 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T1.md | map vs actual: matches the reading map, plus tests/test_v1_guardrails.py:128-156 (the unlisted collision above) and tests/test_v1102_runner.py:1-230 / tests/test_v1100_runner.py:1735-1768 (read to confirm the tool-call log-entry shape and the `run_agent_outcome(..., runner=ae._refusing_runner, ...)` calling pattern before writing T-V1103-EXEC-07)
 
 ## T2 — not reached: T2
 
