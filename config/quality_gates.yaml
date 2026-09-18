@@ -597,10 +597,12 @@ gates:
   # whole list or under --select "v1103-") confirmed each of the five
   # entries killed by its expected test, but did not time the five as a
   # group under the real runner.
-  # calibration pending, orchestrator fills this: timeout_seconds below is
-  # a placeholder matching v1102's value until the orchestrator runs the
-  # one-time `--select v1103-` calibration (wall x 2 + 70s, rounded up to
-  # 10s) and commits the real number separately.
+  # spec-v1.10.4 T4 (orchestrator, commands only, on the committed tree,
+  # immediately after commit 2caa595): the `--select v1103-` calibration
+  # run measured 5/5 killed, real=16s -> 2x 16s + 70s (survivor-safe
+  # rule) = 102s, rounded up to 110s. This is the calibration run, not a
+  # gate-6 acceptance run -- the five entries' proof is the full
+  # `mutation-all` run that includes them.
   mutation-v1103:
     kind: command
     result_mode: exit_status
