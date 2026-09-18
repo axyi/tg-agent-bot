@@ -137,8 +137,11 @@ def test_t_v1_red_01_tool_envelopes_are_redacted(conn):
             "notice": tools.UNTRUSTED_NOTICE,
         }
     )
+    # v1.10.3 T1: "notes.txt", not ".env" -- REQ-V1103-EXEC-02's new deny rule
+    # would refuse a ".env"-basename argv before the runner ever ran, which is
+    # not what this test is about (exec output redaction, not the guard).
     raw = tools.execute_tool(
-        "exec", json.dumps({"argv": ["cat", ".env"]}), skills={}, runner=runner
+        "exec", json.dumps({"argv": ["cat", "notes.txt"]}), skills={}, runner=runner
     )
     assert SENTINEL not in raw
     assert "***REDACTED***" in raw
@@ -147,7 +150,7 @@ def test_t_v1_red_01_tool_envelopes_are_redacted(conn):
     storage.add_user_message(conn, conv, "read it")
     llm = FakeLLM(
         [
-            LLMResponse("", [exec_call(1, ["cat", ".env"])], "tool_calls"),
+            LLMResponse("", [exec_call(1, ["cat", "notes.txt"])], "tool_calls"),
             LLMResponse("nothing useful", [], "stop"),
         ]
     )

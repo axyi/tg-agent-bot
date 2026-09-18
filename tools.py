@@ -45,7 +45,14 @@ EXEC_MAX_STREAM_BYTES = 4096
 _READ_CHUNK = 65536
 
 MAX_ARGV_ELEMENTS = 32
+EXEC_DENY_PROGRAMS = frozenset({"env", "printenv"})
 MAX_ARGV_ELEMENT_CHARS = 4096
+EXEC_ENV_REFUSAL_TEXT = "exec refused: environment inspection is not available"
+
+# v1.10.3 T1 (REQ-V1103-EXEC-01/-02): defense in depth against the three
+# named environment-inspection argv shapes -- deliberately narrow (NG-03,
+# NG-04): no shell parsing, no allow-list, no symlink/path normalisation.
+_PROCFS_ENVIRON_RE = re.compile(r"^/proc/(?:self|\d+)/environ$")
 
 # Docker sandbox (REQ-V1-DK-01..08).
 DOCKER_STARTUP_GRACE_S = 10.0
@@ -1581,6 +1588,20 @@ def _validate_exec_arguments(arguments: dict) -> dict | None:
         return {"error": f"argv elements must be at most {MAX_ARGV_ELEMENT_CHARS} characters"}
     if not argv[0].strip():
         return {"error": "argv[0] must be a program name"}
+    # v1.10.3 T1: `os.path.basename`, deliberately not `Path(...).name` (PTH119) --
+    # pathlib normalises away a trailing slash (`Path("/app/.env/").name ==
+    # ".env"`), which would refuse the documented bypass shape
+    # `["ls", "/app/.env/"]` that NG-03/NG-04 requires to stay unrefused
+    # (`os.path.basename` returns `""` there instead).
+    if os.path.basename(argv[0]) in EXEC_DENY_PROGRAMS:  # noqa: PTH119
+        return {"error": EXEC_ENV_REFUSAL_TEXT}
+    if any(
+        os.path.basename(e) == ".env" or os.path.basename(e).startswith(".env.")  # noqa: PTH119
+        for e in argv
+    ):
+        return {"error": EXEC_ENV_REFUSAL_TEXT}
+    if any(_PROCFS_ENVIRON_RE.fullmatch(e) for e in argv):
+        return {"error": EXEC_ENV_REFUSAL_TEXT}
     return None
 
 
