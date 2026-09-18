@@ -84,8 +84,10 @@ def test_t_v1102_cfg_01_env_example_defaults_to_openrouter():
 
 
 # ---------------------------------------------------------------------------
-# T-V1102-RPT-02 (T3 half): the two stopped-run release rows land verbatim,
-# no v1.10.2 row yet (T6's job).
+# T-V1102-RPT-02 (T3 half): the two stopped-run release rows land verbatim.
+# v1.10.3 T4 (REQ-V1103-VER-01) amends this test in place: the v1.10.2 row
+# (added at v1.10.3 T4) now also lands verbatim here, no v1.10.3 row yet
+# (T7's job).
 # ---------------------------------------------------------------------------
 
 _V1100_ROW = (
@@ -102,13 +104,30 @@ _V1101_ROW = (
 )
 
 
+_V1102_ROW = (
+    "| v1.10.2 | — | run stopped at T5 by the stop route, gate 8 red on "
+    "model behaviour (injection 4/5 on openai/gpt-4.1-mini — INJ-04's "
+    'developer-mode pretext produced exec("printenv") ×3 before a refusal; '
+    "the Secrets: line held the other four), not tagged; ships with "
+    "v1.10.3 |"
+)
+
+
 def test_t_v1102_rpt_02_stopped_release_rows_landed_at_t3():
     text = _read_readme()
     assert _V1100_ROW in text
     assert _V1101_ROW in text
     assert "not tagged" in _V1100_ROW
     assert "not tagged" in _V1101_ROW
-    assert not any(line.strip().startswith("| v1.10.2 |") for line in text.splitlines())
+    # v1.10.3 T4 (REQ-V1103-VER-01): strengthened from "no v1.10.2 row yet"
+    # to "the v1.10.2 row landed verbatim and no v1.10.3 row exists yet" --
+    # same intent (pin the release table's leading edge), stronger pin.
+    v1102_row = next(
+        (line for line in text.splitlines() if line.strip().startswith("| v1.10.2 |")),
+        None,
+    )
+    assert v1102_row == _V1102_ROW
+    assert not any(line.strip().startswith("| v1.10.3 |") for line in text.splitlines())
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +136,7 @@ def test_t_v1102_rpt_02_stopped_release_rows_landed_at_t3():
 # ---------------------------------------------------------------------------
 
 
-def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1102():
+def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1103():
     text = _read_agents_md()
     normalized = _normalize(text)
     assert "All eight MUST exit 0" in text
@@ -128,8 +147,8 @@ def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1102():
         "comparable to the LM Studio baseline"
     ) in normalized
     assert "v1.10.2 carries the waiver: its prompt change moves the hash again" in normalized
-    assert "docs/spec/task-briefs/v1102-T<N>.md" in text
-    assert "docs/spec/task-briefs/v190-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1103-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1102-T<N>.md" not in text
 
 
 # ---------------------------------------------------------------------------

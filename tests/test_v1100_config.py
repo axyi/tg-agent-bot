@@ -145,7 +145,7 @@ def _env_example_text():
 def test_t_v1100_cfg_04_env_example_has_exactly_one_uncommented_line():
     text = _env_example_text()
     lines = text.splitlines()
-    expected = "LLM_JUDGE_MODEL=openrouter:openai/gpt-4.1"
+    expected = "LLM_JUDGE_MODEL=openrouter:anthropic/claude-sonnet-5"
     matches = [i for i, line in enumerate(lines) if line == expected]
     assert len(matches) == 1
 

@@ -1790,6 +1790,7 @@ _GATE_MATRIX_LABEL_TO_NAME = {
     "`mutation_check.py --select v1100-`": "mutation-v1100",
     "`mutation_check.py --select v1101-`": "mutation-v1101",
     "`mutation_check.py --select v1102-`": "mutation-v1102",
+    "`mutation_check.py --select v1103-`": "mutation-v1103",
     "`mutation_check.py` (all)": "mutation-all",
     "`rag_eval.py`": "rag-eval",
     "`agent_eval.py`": "agent-eval",
@@ -1820,7 +1821,7 @@ def _parse_gate_matrix(spec_text: str) -> dict[str, dict[str, bool]]:
 
 
 def test_v15_gate_04_profile_matrix_agrees_with_the_spec_table():
-    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.10.2.md").read_text(encoding="utf-8")
+    spec_text = (checks.REPO_ROOT / "docs" / "spec" / "spec-v1.10.3.md").read_text(encoding="utf-8")
     matrix = _parse_gate_matrix(spec_text)
     config = checks.load_gate_config()
 

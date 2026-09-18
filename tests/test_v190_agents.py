@@ -89,10 +89,10 @@ def test_t_v1102_ec_01_agents_md_eight_gate_block_present():
         assert gate_cmd in text, f"missing gate command: {gate_cmd!r}"
 
 
-def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1102():
+def test_t_v1102_rpt_03_agents_md_brief_path_token_is_v1103():
     text = _read_agents_md()
-    assert "docs/spec/task-briefs/v1102-T<N>.md" in text
-    assert "docs/spec/task-briefs/v190-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1103-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1102-T<N>.md" not in text
 
 
 def test_t_v190_ec_01_agents_md_brief_path_sentence_unchanged_besides_token():

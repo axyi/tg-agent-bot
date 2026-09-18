@@ -92,7 +92,7 @@ Delegate to a subagent when **any one** of the following holds — inside a
 
 **Brief by file, never by retyping.** Load-bearing content the orchestrator
 already resolved goes into a task-brief file at
-`docs/spec/task-briefs/v1102-T<N>.md`, and the subagent gets its path — never
+`docs/spec/task-briefs/v1103-T<N>.md`, and the subagent gets its path — never
 a retyped copy. The brief is ~5 lines, carries no history, and names files
 and line ranges. The subagent returns a summary — findings, counts,
 `file:line` — never raw content.
@@ -275,7 +275,8 @@ v1.10.1 waived this rule by operator decision — the provider, the model
 and `prompt_tools_sha256` all changed, so no run was comparable to the LM
 Studio baseline; **v1.10.2 carries the waiver: its prompt change moves the
 hash again**; a fresh OpenRouter baseline is a candidate for a later
-release.
+release. v1.10.3 carries the waiver again: the model under test and the
+judge changed, so no run is comparable to the LM Studio baseline.
 
 ## go protocol
 

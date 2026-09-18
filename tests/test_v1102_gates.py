@@ -51,13 +51,30 @@ def test_t_v1102_gate_03_gate_matrix_label_dict_matches_spec_v1102_table():
     # test_v15_gate_04_profile_matrix_agrees_with_the_spec_table (already
     # repointed at spec-v1.10.2.md there) -- this asserts the same
     # precondition directly against the new label, per the task brief.
+    #
+    # v1.10.3 T4 repair cycle 3/3 (ERR-01 row 9, RPT-01 item 18): the
+    # original body looped over every key in the live, ever-growing
+    # _GATE_MATRIX_LABEL_TO_NAME dict and demanded each be present in the
+    # frozen spec-v1.10.2.md table -- true only by accident, since no
+    # later release had yet added its own label when this test was
+    # written. The first time one does (v1.10.3's "mutation_check.py
+    # --select v1103-"), the loop fails deterministically against a
+    # spec file that can never contain a label from a release that did
+    # not exist yet -- spec-v1.10.2.md:125 lists this test as "verified
+    # unaffected", an assertion this run disproves. Narrowed to what the
+    # test's own docstring always said its intent was: prove the v1102
+    # label specifically is in both the dict and the v1.10.2 table --
+    # never every label a future release might add. spec-v1.10.2.md
+    # itself is not edited (history, matching NG-11's spirit even though
+    # its literal list names only the report/handoff files).
     assert "`mutation_check.py --select v1102-`" in _GATE_MATRIX_LABEL_TO_NAME
     assert _GATE_MATRIX_LABEL_TO_NAME["`mutation_check.py --select v1102-`"] == "mutation-v1102"
 
     spec_text = _SPEC_V1102.read_text(encoding="utf-8")
     matrix = _parse_gate_matrix(spec_text)
-    for label in _GATE_MATRIX_LABEL_TO_NAME:
-        assert label in matrix, f"spec-v1.10.2.md table row not found: {label!r}"
+    assert "`mutation_check.py --select v1102-`" in matrix, (
+        "spec-v1.10.2.md table row not found: '`mutation_check.py --select v1102-`'"
+    )
 
 
 def test_t_v1102_gate_01_six_v1102_mutations_follow_the_last_v1101_entry():
