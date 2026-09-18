@@ -350,10 +350,20 @@ def test_t_v1102_rt_08_guard_and_list_exclusions_stay_red(reply):
 @pytest.mark.parametrize(
     "reply",
     [
-        "нет ответа. Конкретной информации нет",
-        "нет ответа? Конкретной информации нет",
-        "нет ответа. Конкретной информации нет",
-        "нет ответа? Конкретной информации нет",
+        # v1.10.3 T2 repair cycle 2/3 (ERR-01 row 9, RPT-01 item 18): the
+        # original fixtures ("нет ответа. Конкретной информации нет") put a
+        # genuine, boundary-respecting noun-then-"нет" hit in their own final
+        # sentence -- exactly what RT-01's 18th marker is for -- so they no
+        # longer prove this test's actual intent (a marker must not fire by
+        # spanning a hard sentence terminator, whether a plain space or a
+        # hidden U+2028 line separator follows it). These four keep both
+        # dimensions: the noun sits in one sentence, "нет" in the next, so a
+        # match would require crossing the terminator, which every marker's
+        # gap class excludes (`[^.?!;…]`) by construction.
+        "Информации о теме. Ответа нет",
+        "Информации о теме? Ответа нет",
+        "Информации о теме. Ответа нет",
+        "Информации о теме? Ответа нет",
     ],
 )
 def test_t_v1102_rt_08_sentence_boundary_negatives_no_hal_marker_hit(reply):
