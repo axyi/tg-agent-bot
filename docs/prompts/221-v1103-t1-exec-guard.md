@@ -28,9 +28,10 @@ catalog stays 1798/1800 chars). Do not touch `tests/test_exec.py` or
 
 ## Acceptance
 
-See the brief's Acceptance section. Gates 1-4 green; refusal text
-byte-equal; near-misses and documented bypass shapes run unrefused;
-catalog still 1798 chars.
+See `docs/spec/task-briefs/v1103-T1.md`'s Acceptance section:
+`uv run --locked pytest tests/test_v1103_exec.py -q` green; gates 1-4
+green; refusal text byte-equal; near-misses and documented bypass
+shapes run unrefused; catalog still 1798 chars.
 
 ## Stop
 

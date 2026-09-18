@@ -320,7 +320,86 @@ strict-xfail); gates 1, 2, 4 confirmed green; gates 5-8 not run.
 Delegation record:
 - T2 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T2.md | map vs actual: matches the reading map, plus docs/spec/spec-v1.10.3.md:99-119 (EC-02 table), docs/reports/report-v1.10.1.md:285-288 and report-v1.10.2.md:286-290 (sha256 house-convention discriminator), config.py:340-410 (Config/provider validation for the judge-route test fixture) — read beyond the map to resolve the sha256 ambiguity and to construct an offline judge-route Config; the repair-cycle fix above was made by the orchestrator directly (a single edit under every threshold), not re-delegated
 
-## T3 — not reached: T3
+## T3 — the delegation-record lint
+
+Delegated (general-purpose subagent), brief `docs/spec/task-briefs/
+v1103-T3.md`. Commit `c076d6a`.
+
+`_lint_report_delegation` (`devtools/checks.py`, a sibling of
+`_lint_report_ledger` at `:1558-1577`) closes REQ-V1103-LINT-01: two
+prior releases (v1.10.1, v1.10.2) wrote prose in their task sections
+where a `- T<n> | delegated: ... | to: ... | brief: ... | map vs
+actual: ...` bullet was required, and nothing caught it. The checker
+walks every `^## T(\d+)\b` section (body to the next `^## ` heading or
+EOF), skips sections whose heading matches `^## T\d+ — not reached:
+.+$`, and requires every remaining section to carry at least one `^- T\d+
+\| ` candidate satisfying the five-cell grammar: cell 1 equals the
+section's own `T<n>`; cell 2 is exactly `delegated: yes` or `delegated:
+no`; cell 3 is non-empty `to: ...` (and, for `delegated: no`, must
+additionally contain one of the four §5.1 exemption phrases verbatim);
+cell 4 is either `brief: —` (required for `delegated: no`) or a
+`docs/spec/task-briefs/<prefix>-T<n>.md` path naming the same task
+number (required for `delegated: yes`); cell 5 is non-empty `map vs
+actual: ...`. `<prefix>` is derived per call from `report_path`'s own
+basename (`report-vX.Y.Z.md` → `vXYZ`), never hard-coded.
+
+Wired behind a new boolean `delegation_record` yaml key
+(`EXTRA_KEYS_BY_GATE["lint-docs"]` now `{"prompt_glob", "exempt_files",
+"report_path", "ledger_header", "delegation_record"}`,
+`_validate_builtin_gate` rejecting a non-bool value), the check runs
+only when `gate.get("delegation_record") is True` — an absent key is a
+no-op, so `report-v1.10.0.md`/`report-v1.10.1.md`/`report-v1.10.2.md`
+are never retroactively re-linted. `config/quality_gates.yaml`'s
+`lint-docs` block repoints `report_path` to
+`docs/reports/report-v1.10.3.md` and sets `delegation_record: true` in
+the same hunk (EC-02 rows 6-9 repoint the four test-pinned literals to
+match: `tests/test_v1101_gates.py`, `tests/test_v1102_gates.py`,
+`tests/test_v170_bench.py` — renamed
+`test_t_v1103_rpt_01_lint_docs_repointed_to_this_release` — and
+`tests/test_v190_agents.py`).
+
+Test-first: 30 cases in `tests/test_v1103_lint.py` (cell-count
+mismatches, every failure text, the em-dash/brief-path/wrong-task-number
+cell-4 shapes, exempt sections, multi-candidate sections, out-of-section
+candidates, an unparseable report basename, the `is True` call-site
+gating) plus 3 in `tests/test_v1103_gates.py` proving
+`_lint_report_delegation` returns `[]` for the current
+`docs/reports/report-v1.10.3.md` (T0-T2's bullets all validate) and five
+distinct `"T<n> has no delegation-record bullet"` problems for
+`docs/reports/report-v1.10.2.md`'s five prose sections, called directly
+(not via the gate). Test collection moved 2244 → 2277 (+33), all green;
+gates 1-4 green; `doctor` green.
+
+**Two disclosures, neither a repair cycle (both outside EC-01's
+test-semantic-pin scope — no pre-existing test file, no frozen
+amendment-table site, touched), fixed directly by the orchestrator,
+single edits each:**
+
+1. `docs/prompts/221-v1103-t1-exec-guard.md`'s `## Acceptance` section
+   (written at T1) contained no backtick-quoted command, `test_`-prefixed
+   identifier, or repository-relative path — a pre-existing
+   `_lint_prompt_blocks` violation the T3 subagent found and correctly
+   did not touch (out of its task's ownership), confirmed via `git
+   stash` to predate this task entirely. Fixed by naming
+   `` `docs/spec/task-briefs/v1103-T1.md` `` and quoting the actual
+   `uv run --locked pytest tests/test_v1103_exec.py -q` acceptance
+   command in that section's text.
+2. `spec-v1.10.3.md:600-603`'s claim that "`lint-docs` is green at every
+   commit from T3 on" did not account for the pre-existing
+   `_lint_report_ledger` check against this report's own progressively-
+   filled `## Ledger row` section, which correctly read "Not reached …
+   Filled at close (T7 …)" in prose with no fenced block — a shape
+   `_lint_report_ledger` has always rejected (it needs a fenced code
+   block with a table row matching the header's cell count, present or
+   not, values immaterial). Fixed by replacing the prose placeholder
+   with a fenced, all-`pending (T7)` row of the correct cell count (11
+   cells, matching `ledger_header`), so the check passes on structure
+   alone until T7 fills real values. `uv run --locked python
+   devtools/checks.py lint-docs` now reads `[PASS] lint-docs: all
+   prompts and the report ledger row pass`.
+
+Delegation record:
+- T3 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T3.md | map vs actual: matches the reading map, plus config/quality_gates.yaml:730-766, tests/test_v15_standards.py:1700-1799, and docs/spec/spec-v1.10.3.md:90-124/523-626 (EC-02 table plus the full REQ-V1103-LINT-01/ERR-01 text) — read beyond the map to confirm the exact grammar and to find the two disclosed pre-existing-artefact issues above; both fixes were made by the orchestrator directly (single edits under every threshold), not re-delegated
 
 ## T4 — not reached: T4
 
@@ -361,6 +440,14 @@ Not reached: written at T7.
 
 ## Ledger row (paste into `economics.md`)
 
-Not reached: the run has not bumped `pyproject.toml` yet (T7) and has not
-stopped early. Filled at close (T7 on green, or the stop route's stage
-if the run halts earlier).
+Provisional placeholder — every cell fills at close (T7 on green, or
+the stop route's stage if the run halts earlier); `_lint_report_ledger`
+needs a fenced row with the header's cell count present at every commit
+from T3 on, so this placeholder exists from T3 rather than only at T7
+(a gap the spec's own "green at every commit from T3 on" text did not
+anticipate — `pyproject.toml` has not bumped yet, `Ver` stays `1.9.5`
+until T7 actually bumps it):
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) | pending (T7) |
+```
