@@ -398,6 +398,20 @@ single edits each:**
    devtools/checks.py lint-docs` now reads `[PASS] lint-docs: all
    prompts and the report ledger row pass`.
 
+**Classification note, disclosed rather than silently settled**: both
+fixes above were judged not to be EC-01 repair cycles on the reasoning
+that ERR-01 row 9 is scoped to pre-existing *test* files and neither
+fix touched one. A stricter reading is available and not unreasonable:
+EC-01's "3 total cycles" is not itself explicitly scoped to row 9's
+test case — it could be read as covering any "fix a failing gate"
+loop. Against that reading: `lint-docs` is not one of the eight
+schedule gates (`AGENTS.md:148-159`); both fixes repaired artefacts
+this run itself authored (a prompt file at T1, the report skeleton at
+T0), not a semantic pin in a `636a281` test. The orchestrator's
+classification stands, but the disagreement is recorded here rather
+than resolved by omission, since it affects how the budget accounting
+in T4's section should be read by a reviewer.
+
 Delegation record:
 - T3 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T3.md | map vs actual: matches the reading map, plus config/quality_gates.yaml:730-766, tests/test_v15_standards.py:1700-1799, and docs/spec/spec-v1.10.3.md:90-124/523-626 (EC-02 table plus the full REQ-V1103-LINT-01/ERR-01 text) — read beyond the map to confirm the exact grammar and to find the two disclosed pre-existing-artefact issues above; both fixes were made by the orchestrator directly (single edits under every threshold), not re-delegated
 
