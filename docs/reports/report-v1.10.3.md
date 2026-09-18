@@ -487,7 +487,70 @@ with that constraint in mind.
 Delegation record:
 - T4 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1103-T4.md | map vs actual: matches the reading map, plus the full EC-02 table and verified-unaffected list at spec-v1.10.3.md:99-132 (checked the brief's own EC-02 summary against source, found one omission and one genuine spec erratum) and the full tests/test_v1102_gates.py (traced the shared-dict-import mechanism) — both reads produced the findings above; the repair-cycle-3 fix was made by the orchestrator directly (a single edit under every threshold), not re-delegated
 
-## T5 — not reached: T5
+## T5 — clean-context review (REV-01)
+
+Review only — no delegation (§13.1: *the task is itself the
+clean-context review*). `code-reviewer` subagent (`model: sonnet`),
+clean context, reviewing commits `636a281..8687117` (T0-T4) against
+`docs/spec/spec-v1.10.3.md` in full plus REV-01's seven items. Prompt
+`docs/prompts/225-v1103-t5-review.md`. No commit of its own (read-only);
+its two 🔴 findings and the disclosure below are fixed by the
+orchestrator directly and land in T5's own commit.
+
+**Verdict: request changes**, both findings artefacts-only, zero
+EC-01 budget cost, both fixed:
+- `docs/prompts/225-v1103-t5-review.md`'s own `## Acceptance` section
+  lacked a lintable backtick reference — the same defect class T3
+  disclosed for prompt 221. Fixed by naming
+  `` `docs/reports/report-v1.10.3.md` `` in that section.
+- `docs/llm-usage.md` had no rows for prompts 221-224 (T1-T4) — the
+  per-task discipline every prior row establishes was skipped for four
+  tasks running back-to-back. Backfilled as rows 132-135, matching each
+  task's report section and each subagent dispatch's harness-reported
+  token count.
+
+**Per-item results (REV-01's seven checklist items), independently
+re-verified by the reviewer, not merely re-reading the report's own
+claims**: all seven **PASS**. Item 3 carries a 🟡 note (below); item 7
+surfaced the two 🔴 artefact gaps above, now closed. Highlights the
+reviewer confirmed independently: the `tools.py` diff is `+21/-0`,
+confined to `_validate_exec_arguments` and its two header constants;
+`HAL_MARKERS`/`INJ_MARKERS` counts and the dataset diff's five-field
+scope recomputed directly, not inferred from a passing test; both
+dataset `sha256`s recomputed and matched; test-collection growth
+(2170→2211→2244→2277→2285) re-measured via disposable `git worktree`s
+at each commit, monotonic, nothing deleted; `_lint_report_delegation`
+re-run directly against both reports with matching results;
+`pyproject.toml`/`uv.lock` diff against `636a281` empty; a tracked-only
+`gitleaks` scan (matching what the real gate's `{tracked_tree}`
+placeholder scans) found no leaks — the 12 raw hits from an untracked-
+inclusive scan are all in gitignored files (`.env`, `.idea/`,
+`.bench/checks/`, `__pycache__/`); all 15 commits in range reference
+their prompt file.
+
+**🟡 Gate-8 risk, disclosed for T6, not a finding to fix (nothing
+forbidden may be edited — NG-08, NG-10, and the spec itself is never
+edited).** T2's disclosed `xfail(strict=True)` records that INJ-04's
+*historical* red reply (the enumeration with a bare «и» before
+«недоступен») still misses clause (d) after RT-02's widening, because
+`_CLAUSE_BOUNDARY` splits it into two clauses no `any_of` gap can
+bridge — the exact shape that motivated the widening in the first
+place. If `openai/gpt-4.1` produces a similarly-shaped reply at T6,
+INJ-04 could fail (d) again → gate 8 red → Stage B′, for substantially
+the same underlying reason v1.10.2 stopped. The widening still clears
+RT-03's ≥2-positive-fixture floor functionally (the reviewer confirmed
+both the dataset's own `positive_reply` and the second RT-02 fixture
+pass `check_injection(..., tool_calls=[])` end-to-end) — only the one
+historical reply shape is affected. T6 should read any INJ-04
+clause-(d) miss in this light rather than as a surprise.
+
+**🟢 T3's repair-cycle classification confirmed correct**, independently
+re-derived from ERR-01 row 9's own text ("a test at `636a281` fails on
+a semantic pin") rather than taken on trust — neither T3 fix touched a
+`636a281` test, so the narrow reading is textually supported.
+
+Delegation record:
+- T5 | delegated: no | to: — (the task is itself the clean-context review) | brief: — | map vs actual: matches §13.1; the two disclosed fixes above were made by the orchestrator directly, single edits under every threshold, not re-delegated
 
 ## T6 — not reached: T6
 
