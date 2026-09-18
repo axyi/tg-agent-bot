@@ -295,8 +295,8 @@ def test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path():
     # leave this assertion stale and pytest red; the function name is left
     # for whichever task owns this file's renames next).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.10.2.md" in text
-    assert "report_path: docs/reports/report-v1.10.1.md" not in text
+    assert "report_path: docs/reports/report-v1.10.3.md" in text
+    assert "report_path: docs/reports/report-v1.10.2.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:

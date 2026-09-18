@@ -253,7 +253,7 @@ def test_no_other_gate_in_the_real_config_carries_env():
 
 def test_t_v1102_rpt_01_lint_docs_repointed_to_this_release():
     config = checks.load_gate_config()
-    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.2.md"
+    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.3.md"
 
 
 # ---------------------------------------------------------------------------

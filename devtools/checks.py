@@ -338,7 +338,13 @@ EXTRA_KEYS_BY_GATE: dict[str, set[str]] = {
     "ruff-format": {"blocking_paths"},
     "branch-name": {"pattern", "warn_refs", "warn_on_detached"},
     "doctor": {"warn_only_tools"},
-    "lint-docs": {"prompt_glob", "exempt_files", "report_path", "ledger_header"},
+    "lint-docs": {
+        "prompt_glob",
+        "exempt_files",
+        "report_path",
+        "ledger_header",
+        "delegation_record",
+    },
 }
 
 _COMMAND_BASE_KEYS = {
@@ -555,6 +561,12 @@ def _validate_builtin_gate(name: str, gate: dict[str, Any], extra_allowed: set[s
     forbidden = _BUILTIN_FORBIDDEN & set(gate)
     if forbidden:
         raise GateConfigError(f"gates.{name}: builtin gate must not carry {sorted(forbidden)}")
+    if (
+        "delegation_record" in extra_allowed
+        and "delegation_record" in gate
+        and not isinstance(gate["delegation_record"], bool)
+    ):
+        raise GateConfigError(f"gates.{name}.delegation_record must be a boolean")
     allowed = _BUILTIN_BASE_KEYS | extra_allowed
     unknown = set(gate) - allowed
     if unknown:
@@ -1577,12 +1589,139 @@ def _lint_report_ledger(report_path: Path, ledger_header: str) -> list[str]:
     return []
 
 
+# ---------------------------------------------------------------------------
+# REQ-V1103-LINT-01: the delegation-record lint, a sibling of
+# _lint_report_ledger. A task section is a `^## T(\d+)\b` heading; its body
+# runs to the next `^## ` heading or EOF. A section is exempt when its
+# heading reads `## T<n> — not reached: ...`. Only `^- T<n> | ` lines inside
+# a non-exempt section's body are delegation-record candidates; every other
+# bullet is ignored. Every non-exempt section needs >=1 candidate, and every
+# candidate must split (on ` | `, after stripping the leading `- `) into
+# exactly five cells matching the grammar in docs/spec/spec-v1.10.3.md Sec.6.
+# ---------------------------------------------------------------------------
+
+_TASK_SECTION_RE = re.compile(r"^## T(\d+)\b.*$", re.MULTILINE)
+_DELEGATION_CANDIDATE_RE = re.compile(r"^- T\d+ \| .*$", re.MULTILINE)
+_SECTION_HEADING_RE = re.compile(r"^## .*$", re.MULTILINE)
+_EXEMPT_SECTION_RE = re.compile(r"^## T\d+ — not reached: .+$")
+_DELEGATION_CELL3_RE = re.compile(r"^to: \S.*$")
+_DELEGATION_CELL5_RE = re.compile(r"^map vs actual: \S.*$")
+_REPORT_BASENAME_RE = re.compile(r"^report-v(\d+)\.(\d+)\.(\d+)\.md$")
+_DELEGATION_EXEMPTION_PHRASES = (
+    "commands only",
+    "artefacts only",
+    "a single edit under every threshold",
+    "the task is itself the clean-context review",
+)
+
+
+def _brief_prefix_for_report(report_name: str) -> str | None:
+    match = _REPORT_BASENAME_RE.match(report_name)
+    if not match:
+        return None
+    return "v" + "".join(match.groups())
+
+
+def _validate_delegation_candidate(
+    candidate: str,
+    *,
+    report_name: str,
+    label: str,
+    prefix: str,
+    brief_re: re.Pattern[str],
+) -> list[str]:
+    tag = f"{report_name}: {label}"
+    cells = candidate.removeprefix("- ").split(" | ")
+    if len(cells) != 5:
+        return [f"{tag}: bullet has {len(cells)} cells, expected 5"]
+
+    cell1, cell2, cell3, cell4, cell5 = cells
+
+    if cell1 != label:
+        return [f"{tag}: bullet names {cell1}"]
+
+    if cell2 not in ("delegated: yes", "delegated: no"):
+        return [f"{tag}: cell 2 is neither delegated: yes nor delegated: no"]
+
+    if not _DELEGATION_CELL3_RE.match(cell3):
+        return [f"{tag}: cell 3 is empty"]
+
+    if cell2 == "delegated: no" and not any(
+        phrase in cell3 for phrase in _DELEGATION_EXEMPTION_PHRASES
+    ):
+        return [f"{tag}: delegated: no without a §5.1 exemption phrase"]
+
+    brief_match = brief_re.match(cell4)
+    if cell4 != "brief: —" and not brief_match:
+        return [f"{tag}: cell 4 is neither brief: — nor a {prefix} task-brief path"]
+
+    if cell2 == "delegated: yes":
+        if cell4 == "brief: —":
+            return [f"{tag}: delegated: yes without a brief path"]
+        if brief_match.group(1) != label[1:]:
+            return [f"{tag}: brief names T{brief_match.group(1)}"]
+    elif cell4 != "brief: —":
+        return [f"{tag}: delegated: no with a brief path"]
+
+    if not _DELEGATION_CELL5_RE.match(cell5):
+        return [f"{tag}: cell 5 is empty"]
+
+    return []
+
+
+def _lint_report_delegation(report_path: Path) -> list[str]:
+    if not report_path.exists():
+        return [f"{report_path.name}: report file does not exist"]
+
+    prefix = _brief_prefix_for_report(report_path.name)
+    if prefix is None:
+        return [f"{report_path.name}: cannot derive a brief prefix from {report_path.name}"]
+    brief_re = re.compile(rf"^brief: docs/spec/task-briefs/{re.escape(prefix)}-T(\d+)\.md$")
+
+    text = report_path.read_text(encoding="utf-8")
+    task_matches = list(_TASK_SECTION_RE.finditer(text))
+    if not task_matches:
+        return [f"{report_path.name}: no ## T<n> section found"]
+
+    heading_starts = [m.start() for m in _SECTION_HEADING_RE.finditer(text)]
+
+    problems: list[str] = []
+    for match in task_matches:
+        label = f"T{match.group(1)}"
+        if _EXEMPT_SECTION_RE.match(match.group(0)):
+            continue
+
+        later_starts = [s for s in heading_starts if s > match.start()]
+        body_end = min(later_starts) if later_starts else len(text)
+        body = text[match.end() : body_end]
+
+        candidates = [m.group(0) for m in _DELEGATION_CANDIDATE_RE.finditer(body)]
+        if not candidates:
+            problems.append(f"{report_path.name}: {label} has no delegation-record bullet")
+            continue
+
+        for candidate in candidates:
+            problems.extend(
+                _validate_delegation_candidate(
+                    candidate,
+                    report_name=report_path.name,
+                    label=label,
+                    prefix=prefix,
+                    brief_re=brief_re,
+                )
+            )
+
+    return problems
+
+
 def _run_lint_docs(name: str, gate: dict[str, Any], repo_root: Path) -> GateResult:
     exempt = set(gate["exempt_files"])
     problems: list[str] = []
     for path in sorted(repo_root.glob(gate["prompt_glob"])):
         problems.extend(_lint_prompt_file(path, exempt=path.name in exempt))
     problems.extend(_lint_report_ledger(repo_root / gate["report_path"], gate["ledger_header"]))
+    if gate.get("delegation_record") is True:
+        problems.extend(_lint_report_delegation(repo_root / gate["report_path"]))
     message = "; ".join(problems) if problems else "all prompts and the report ledger row pass"
     return GateResult(name, ran=True, blocked=gate["blocking"] and bool(problems), message=message)
 
