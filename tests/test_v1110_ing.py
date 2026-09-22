@@ -284,6 +284,7 @@ def test_t_v1110_ing_02_worker_split_and_thread_owned_connection(tmp_path, monke
     worker._lock = lock_spy
 
     # -- the split: the loop thread only reserves, sends status, enqueues --
+    enter_count_before = lock_spy.enter_count
     bot._handle_document(
         _doc(),
         conn=conn,
@@ -294,14 +295,16 @@ def test_t_v1110_ing_02_worker_split_and_thread_owned_connection(tmp_path, monke
         embedder=embedder,
         worker=worker,
     )
+    # reserve() and enqueue() each acquire the lock exactly once -- a
+    # snapshot taken *before* any other lock-touching call (in_flight()
+    # below also enters the spy, so counting *after* it would make this
+    # assertion pass even with reserve()'s own lock removed).
+    assert lock_spy.enter_count - enter_count_before == 2
     assert tg.sent == [(USER_ID, "📄 received")]
     assert tg.get_file_calls == []
     assert index_calls == []
     assert worker.in_flight(USER_ID) is not None
     assert worker._queue.maxsize == bot.INGEST_QUEUE_MAX + 1
-    # reserve()/enqueue() actually acquired the lock (ING-02/-03), not
-    # just left it unheld afterward.
-    assert lock_spy.enter_count >= 2
 
     connect_calls: list[dict] = []
 
