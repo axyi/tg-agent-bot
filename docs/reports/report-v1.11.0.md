@@ -518,28 +518,34 @@ recording for a later reviewer):
   and can't be typed back into `/delete #<id>` as shown. This is a
   spec-level property of the pinned column width, not something this task
   changed or should change — flagged here for a later reviewer (T7).
-- The full-suite `pytest -q` run's final "N passed in Xs" summary line did
-  not render in this session's non-TTY `pytest-xdist -n auto` environment,
-  on every attempt including `rtk proxy`. **Not investigated** — the cause
-  was not isolated to rtk's own output filtering versus xdist/pytest
-  itself; T1's own usage row quoted a normal collected-and-passed count
-  without mentioning this, so rtk is the likelier explanation, but that is
-  a guess, not a finding. The 2331-collected/0-failed/exit-0 figures below
-  come from `--collect-only` runs (with and without this task's changes)
-  and the run's own exit code, not from a printed summary.
+- Every gate-3 run in this task's earlier drafting added an extra `-q`
+  (and later `--color=no`) on top of `pyproject.toml`'s own `addopts = "-q
+  -n auto"`, doubling `-q` to `-qq` — verbosity below pytest's threshold
+  for printing the final "N passed in Xs" summary line at all, which is
+  why it looked missing across many runs (including through `rtk proxy`,
+  which does not change verbosity). Re-run **verbatim**, exactly as
+  AGENTS.md's gate 3 command reads (`uv run --locked pytest`, no added
+  flags), the summary prints normally: `2328 passed, 1 skipped, 2 xfailed
+  in 24.17s` — 2328 + 1 + 2 = 2331, matching the `--collect-only` count
+  below exactly. The 1 skip and 2 xfails are pre-existing, unrelated to
+  this task (present on the T1-committed tree too).
+- `tables.fit_lines`'s own docstring still says "the `_fit` pattern
+  (`bot.py:1190-1197`)" — `_fit` no longer exists, removed by this task as
+  an orphan (see "Built" above). `tables.py` is out of this task's owned
+  paths, so left untouched; flagged here for whoever next touches
+  `tables.py`.
 
 - T2 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T2.md | map vs actual: matches the reading map, two disclosed drifts ≤3 lines each (`STATS_MAX_CHARS`, `DELETE_USAGE_REPLY`/`DOCUMENTS_EMPTY_REPLY`), plus the additional test files and further disclosures listed above
 
 **Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
-brief): `uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run
---locked ruff check .` — all checks passed, exit 0. `uv run --locked
-pytest` — 2331 collected (2322 at T1's `2b2dd4e` + 9 new this task: 3 in
-`tests/test_v1110_sta.py`, 6 in `tests/test_v1110_doc.py`), 0 failed, exit
-0 (see the "further disclosures" note above — pytest's final summary line
-did not render in this session, cause not investigated; the 2331/0-failed
-figures come from `--collect-only` against both trees plus the full run's
-exit code, not from a printed summary). `uv run --locked python bot.py
---selftest` — `selftest: OK`, exit 0.
+brief), each run verbatim as AGENTS.md lists it, no added flags:
+`uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run --locked
+ruff check .` — all checks passed, exit 0. `uv run --locked pytest` —
+`2328 passed, 1 skipped, 2 xfailed in 24.17s`, exit 0 (2331 collected;
+2322 at T1's `2b2dd4e` + 9 new this task: 3 in `tests/test_v1110_sta.py`,
+6 in `tests/test_v1110_doc.py`; see the "further disclosures" note above
+for why earlier runs in this task didn't show this line). `uv run
+--locked python bot.py --selftest` — `selftest: OK`, exit 0.
 
 ## T3 — not reached
 

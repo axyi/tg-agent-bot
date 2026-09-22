@@ -89,10 +89,13 @@ sites T0's inventory also listed (`test_obs07_status_carries_the_token_line`,
 `test_obs07_status_token_line_without_a_conversation`) were checked and
 left unchanged — `/status` is out of this task's scope. README's `### /stats`
 and the `## Commands` table rows for `/documents`/`/delete` updated to match
-the new table output. Gates 1-4 green: `uv sync --locked` (25 resolved, 23
-checked), `uv run --locked ruff check .` (all checks passed), `uv run
---locked pytest` (2331 collected — 2322 baseline at T1's `2b2dd4e` + 9 new
-this task, 0 failed, exit 0), `uv run --locked python bot.py --selftest`
+the new table output. Gates 1-4 green, each run verbatim (no added flags —
+an earlier doubled `-q` had suppressed pytest's own summary line in
+several runs during this task; the report's `## T2` section has the
+account): `uv sync --locked` (25 resolved, 23 checked), `uv run --locked
+ruff check .` (all checks passed), `uv run --locked pytest` (`2328 passed,
+1 skipped, 2 xfailed in 24.17s` — 2331 collected, 2322 baseline at T1's
+`2b2dd4e` + 9 new this task), `uv run --locked python bot.py --selftest`
 (`selftest: OK`).
 
 ## Stop
