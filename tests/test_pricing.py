@@ -18,6 +18,7 @@ import agent
 import bot
 import config
 import storage
+import tables
 from llm import pricing
 from llm.base import Usage
 from llm.pricing import Price
@@ -626,11 +627,16 @@ def test_prc03_every_basis_form_is_stored_and_rendered(conn, basis):
     )
     stored = conn.execute("SELECT cost_basis FROM llm_calls").fetchone()["cost_basis"]
     assert stored == basis
-    # Reference prices are estimates and `/stats` says so, in the OBS-07 layout.
-    line = next(
-        row for row in bot._render_stats(conn, USER_ID).splitlines() if row.startswith("Est. cost:")
-    )
-    assert line == f"Est. cost: $0.0123 | $0.0123 (basis: {basis} | {basis})"
+    # Reference prices are estimates and `/stats` says so, now in the
+    # REQ-V1110-STA-01 table layout: "est. cost" and "cost basis" are
+    # separate rows, and a `basis` longer than the "cost basis" column's
+    # 16-unit `max_width` is truncated there like any other cell (T2's
+    # width choice, not REQ-V13-OBS-07's verbatim-content rule, which
+    # covers presence/format, not overflow handling).
+    body = bot._render_stats(conn, USER_ID)
+    assert body.count("$0.0123") == 2
+    expected_cell = tables._truncate_cell(basis, 16)
+    assert body.count(expected_cell) == 2
 
 
 # --------------------------------------------------------------------------

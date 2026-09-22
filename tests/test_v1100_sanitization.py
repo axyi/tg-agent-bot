@@ -284,7 +284,12 @@ def test_t_v1100_out_03_split_message_used_only_inside_reply_parts():
     outside_reply_parts_def = bot_source.count("reply_parts(") - bot_source.count(
         "def reply_parts("
     )
-    assert outside_reply_parts_def >= 5
+    # spec-v1.11.0 T2 (REQ-V1110-STA-01/DOC-01) moves `/stats` and
+    # `/documents` off `reply_parts` onto the table path (`send_pre`),
+    # dropping this from 5 call sites to 3 (`/status`, the agent-turn
+    # reply, `/summary`); the floor tracks whichever commands still reply
+    # through the plain path, not a fixed historical count.
+    assert outside_reply_parts_def >= 3
 
 
 # --------------------------------------------------------------------------

@@ -14,6 +14,7 @@ order at the *real* `TelegramClient.download_file` boundary through a real
 from __future__ import annotations
 
 import ast
+import html
 import inspect
 import json
 import logging
@@ -588,10 +589,15 @@ def test_t_v190_cmd_05_documents_lists_uploaded_files(tmp_path):
         sha256="y" * 8,
     )
     tg = process(conn, cfg, text_update("/documents"))
-    reply = tg.sent[0][1]
-    assert reply.startswith("Your documents (2):")
-    assert "a.txt — txt, 2 chunks, 2026-01-02" in reply
-    assert "b.pdf — pdf, 4 chunks, 3 pages, 2026-01-03" in reply
+    raw = tg.sent[0][1]
+    # REQ-V1110-DOC-01: /documents is now a table sent via the `<pre>` path
+    # (`bot.send_pre`), not the old plain "filename — type, chunks[, pages],
+    # date" line format `_render_document_line` used to build.
+    assert raw.startswith("<pre>") and raw.endswith("</pre>")
+    body = html.unescape(raw[len("<pre>") : -len("</pre>")])
+    assert body.startswith(f"Your documents (2 of {documents.DOCUMENT_LIMIT}):")
+    for needle in ["a.txt", "b.pdf", "txt", "pdf", "2026-01-02", "2026-01-03"]:
+        assert needle in body
     conn.close()
 
 
@@ -861,6 +867,23 @@ def test_t_v190_err_01_row_5a_mid_stream_exceeds_the_cap(tmp_path):
     conn.close()
 
 
+# REQ-V1110-DOC-03 (spec-v1.11.0 T2) splits these three variants onto their
+# own reply strings (a 2,001-page PDF used to be wrongly told it had too
+# many *characters*). `type(exc) -> bot attribute name` lets the test below
+# keep its original name and its original single-`exc` parametrize --
+# same node ids ([exc0]/[exc1]/[exc2]) as the v1.9.0 baseline
+# (docs/spec/task-briefs/v1110-T0-nodeids.txt), even though "the same
+# reply" is no longer true for two of the three -- the same
+# name-preserved-despite-content-change pattern as
+# test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path elsewhere in
+# this suite.
+_ROW_5B_REPLY_ATTR_BY_EXCEPTION = {
+    documents.ExtractedTextTooLargeError: "DOC_TEXT_TOO_LARGE_REPLY",
+    documents.DocxArchiveTooLargeError: "DOC_DOCX_BOUNDS_REPLY",
+    documents.PdfTooManyPagesError: "DOC_PDF_PAGES_REPLY",
+}
+
+
 @pytest.mark.parametrize(
     "exc",
     [
@@ -885,7 +908,8 @@ def test_t_v190_err_01_row_5b_variants_map_to_the_same_reply(tmp_path, monkeypat
         from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
-    _assert_failure_kept(tg, bot.DOC_TEXT_TOO_LARGE_REPLY)
+    expected = getattr(bot, _ROW_5B_REPLY_ATTR_BY_EXCEPTION[type(exc)])
+    _assert_failure_kept(tg, expected)
     conn.close()
 
 

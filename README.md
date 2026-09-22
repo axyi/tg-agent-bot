@@ -113,8 +113,8 @@ suppressed — see [Dashboard](#dashboard)) and `--version` (prints
 | `/summary` | summarize the current conversation on demand and show the five-field rendering |
 | `/model [lmstudio\|openrouter\|auto]` | show or change the provider override; the override survives restarts |
 | `/reload_skills` | re-read `skills/` without restarting the bot |
-| `/documents` | list the caller's uploaded documents (filename, type, size, chunk count) |
-| `/delete <filename>` | delete one of the caller's documents, its chunks and its vectors; exact match only |
+| `/documents` | list the caller's uploaded documents as a table (`#`, filename, type, size, chunks, pages, added) |
+| `/delete <filename>` \| `/delete #<id>` | delete one of the caller's documents, its chunks and its vectors; exact filename match, or the `#`-prefixed id shown by `/documents` — a filename that itself starts with `#` is only reachable by id after this |
 
 Any other `/…` text is passed to the model as an ordinary message. Commands are
 reachable only by allowlisted senders and are never stored in the conversation.
@@ -126,15 +126,31 @@ of a conversation is a query rather than a guess.
 
 ### `/stats`
 
+Sent as one `<pre>`-wrapped table (`tables.render_table`, the outbound table
+path from spec-v1.11.0): a `metric | this conv | all time` block, a blank
+line, then four single-value lines. A single-value line longer than the
+72-UTF-16-unit line ceiling wraps onto indented continuation lines instead of
+being cut mid-value; the whole body is still capped at 3500 characters,
+whole lines dropped from the end with a trailing `… N more` marker.
+
 ```
-Stats (this conversation | all time)
-LLM calls: 7 | 143 (errors 0 | 2)
-Tokens in: 21430 | 402118 (cached: n/a | n/a, reasoning: 0 | 0)
-Tokens out: 1204 | 38001
-Est. cost: $0.0123 | $0.4110 (basis: reference:<model> | mixed)
-Avg prompt/call: 3061 | 2813; re-sent share: 71% | 68%
-Top tools by output tokens (all time): exec 1812 (78%), fetch 401 (17%), load_skill 110 (5%)
+metric           this conv       all time
+---------------  --------------  --------
+LLM calls        7               143
+errors           0               2
+tokens in        21430           402118
+cached           n/a             n/a
+reasoning        0               0
+tokens out       1204            38001
+est. cost        $0.0123         $0.4110
+cost basis       reference:gpt4  mixed
+avg prompt/call  3061            2813
+re-sent share    71%             68%
+
+Top tools: exec 1812 (78%), fetch 401 (17%), load_skill 110 (5%)
 Last turn: r1 in 2980 out 88 → exec 412 ms; r2 in 3512 out 210 (final)
+Errors: 2 (finish reasons: stop 141, tool_calls 4; kinds: http 2)
+Summaries: 12 ok, 1 truncated-retried, 0 failed
 ```
 
 Both columns are computed from the stored rows; `n/a` stands where the provider

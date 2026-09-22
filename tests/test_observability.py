@@ -4,8 +4,10 @@ Everything here is offline: no Docker, no network, no real provider. The only
 secrets used are synthetic canaries registered through `config.register_secret`.
 """
 
+import html
 import json
 import logging
+import re
 import sqlite3
 
 import httpx
@@ -16,6 +18,7 @@ import bot
 import config
 import metrics
 import storage
+import tables
 from llm.base import (
     REASONING_DEFAULT,
     REQUEST_DEFAULTS,
@@ -31,7 +34,7 @@ from llm.base import (
 from llm.failover import FAILOVER_THRESHOLD, FailoverLLMClient
 from llm.lmstudio import LMStudioClient
 from llm.openrouter import OpenRouterClient
-from tests.fakes import FakeLLM, RecordingRunner
+from tests.fakes import FakeLLM, FakeTelegram, RecordingRunner
 
 NOW = "2026-09-02T10:00:00Z"
 USER_ID = 424242
@@ -877,23 +880,53 @@ def seed_conversation(conn, *, basis=(None, None), user_id=USER_ID):
 
 
 def stats_text(conn, cfg, update_id=1):
-    tg = process(conn, cfg, update(text="/stats", update_id=update_id))
-    return "".join(text for _chat, text in tg.sent)
+    """REQ-V1110-STA-01: `/stats` is now sent via `bot.send_pre` (the table
+    path), so `RecordingTelegram` (no `send_message_html`) can't stand in --
+    a real `FakeTelegram` is passed explicitly. Returns the plain, unescaped
+    `<pre>` body."""
+    tg = process(conn, cfg, update(text="/stats", update_id=update_id), tg=FakeTelegram())
+    raw = "".join(text for _chat, text in tg.sent)
+    if raw.startswith("<pre>") and raw.endswith("</pre>"):
+        raw = html.unescape(raw[len("<pre>") : -len("</pre>")])
+    return raw
+
+
+def _stats_row(text: str, label: str, *values: str) -> bool:
+    """REQ-V1110-PIN-01's rewrite form: `label` followed, in order and
+    tolerant of table padding, by each of `values` -- presence/contiguity,
+    never a whole-line equality."""
+    pattern = re.escape(label) + r"\s+" + r"\s+".join(re.escape(v) for v in values)
+    return re.search(pattern, text) is not None
 
 
 def test_obs07_stats_layout(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     seed_conversation(conn, basis=("reference:big", "reference:big"))
     text = stats_text(conn, cfg)
-    lines = text.splitlines()
-    assert lines[0] == "Stats (this conversation | all time)"
-    assert lines[1] == "LLM calls: 2 | 2 (errors 0 | 0)"
-    assert lines[2] == "Tokens in: 6492 | 6492 (cached: n/a | n/a, reasoning: 0 | 0)"
-    assert lines[3] == "Tokens out: 298 | 298"
-    assert lines[4] == "Est. cost: $0.0223 | $0.0223 (basis: reference:big | reference:big)"
-    assert lines[5].startswith("Avg prompt/call: 3246 | 3246; re-sent share: ")
-    assert lines[6].startswith("Top tools by output tokens (all time): exec 1812 (100%)")
-    assert lines[7] == "Last turn: r1 in 2980 out 88 → exec 412 ms; r2 in 3512 out 210 (final)"
+    labels = [
+        "LLM calls",
+        "errors",
+        "tokens in",
+        "cached",
+        "reasoning",
+        "tokens out",
+        "est. cost",
+        "cost basis",
+        "avg prompt/call",
+        "re-sent share",
+        "Top tools:",
+        "Last turn:",
+    ]
+    positions = [text.index(label) for label in labels]
+    assert positions == sorted(positions)
+    assert _stats_row(text, "LLM calls", "2", "2")
+    assert _stats_row(text, "tokens in", "6492", "6492")
+    assert _stats_row(text, "tokens out", "298", "298")
+    assert _stats_row(text, "est. cost", "$0.0223", "$0.0223")
+    assert _stats_row(text, "cost basis", "reference:big", "reference:big")
+    assert _stats_row(text, "avg prompt/call", "3246", "3246")
+    assert "Top tools: exec 1812 (100%)" in text
+    assert "Last turn: r1 in 2980 out 88 → exec 412 ms; r2 in 3512 out 210 (final)" in text
     assert len(text) <= 3500
 
 
@@ -901,23 +934,24 @@ def test_obs07_stats_reports_no_pricing(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     seed_conversation(conn)
     text = stats_text(conn, cfg)
-    assert "Est. cost: n/a (no pricing)" in text
-    assert "LLM calls: 2 |" in text
+    assert _stats_row(text, "est. cost", "n/a (no pricing)", "n/a (no pricing)")
+    assert _stats_row(text, "LLM calls", "2", "2")
 
 
 def test_obs07_stats_basis_is_mixed_when_the_rows_disagree(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     seed_conversation(conn, basis=("provider", "openrouter-list-stale"))
-    assert "(basis: mixed | mixed)" in stats_text(conn, cfg)
+    assert _stats_row(stats_text(conn, cfg), "cost basis", "mixed", "mixed")
 
 
 def test_obs07_stats_on_an_empty_database(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     text = stats_text(conn, cfg)
-    assert "LLM calls: 0 | 0 (errors 0 | 0)" in text
-    assert "Tokens in: n/a | n/a" in text
-    assert "Est. cost: n/a (no pricing)" in text
-    assert "Top tools by output tokens (all time): none" in text
+    assert _stats_row(text, "LLM calls", "0", "0")
+    assert _stats_row(text, "errors", "0", "0")
+    assert _stats_row(text, "tokens in", "n/a", "n/a")
+    assert _stats_row(text, "est. cost", "n/a (no pricing)", "n/a (no pricing)")
+    assert "Top tools: none" in text
     assert "Last turn: none" in text
     # A read-only command never opens a conversation.
     assert conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
@@ -931,15 +965,18 @@ def test_obs07_stats_separates_this_conversation_from_all_time(conn, tmp_path):
     )
     seed_conversation(conn)
     text = stats_text(conn, cfg)
-    assert "LLM calls: 2 | 3 (errors 0 | 1)" in text
-    assert "Tokens in: 6492 | 7492" in text
+    assert _stats_row(text, "LLM calls", "2", "3")
+    assert _stats_row(text, "errors", "0", "1")
+    assert _stats_row(text, "tokens in", "6492", "7492")
 
 
 def test_obs07_stats_reports_cached_and_reasoning_when_present(conn, tmp_path):
     cfg = make_cfg(tmp_path)
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     add_call(conn, conv, cached_tokens=128, reasoning_tokens=12)
-    assert "(cached: 128 | 128, reasoning: 12 | 12)" in stats_text(conn, cfg)
+    text = stats_text(conn, cfg)
+    assert _stats_row(text, "cached", "128", "128")
+    assert _stats_row(text, "reasoning", "12", "12")
 
 
 def test_obs07_status_carries_the_token_line(conn, tmp_path):
@@ -1115,11 +1152,23 @@ def test_obs08_turn_timeline_defaults_to_the_last_exchange(conn):
 
 
 def test_obs07_stats_drops_whole_lines_before_it_cuts_one(conn, tmp_path):
+    """REQ-V1110-STA-01: an absurdly long `cost_basis` used to force `_fit`'s
+    whole-line-drop path directly. Every value cell is now bounded by the
+    table's own `max_width` (16 units, via `tables.render_table`), so this
+    value no longer overflows `STATS_MAX_CHARS` by itself --
+    `tests/test_v1110_sta.py::test_t_v1110_sta_02_stats_fit_drops_whole_lines`
+    owns the whole-line-drop overflow case now, via an oversized `top
+    tools` value. This test keeps its original regression: an oddly long
+    `cost_basis` still renders safely (truncated with an ellipsis, never
+    crashing, never exceeding the cap) with the table header leading the
+    body."""
     cfg = make_cfg(tmp_path)
     conv = storage.get_or_create_active_conversation(conn, USER_ID)
     add_call(conn, conv, cost_usd=0.5, cost_basis="reference:" + "m" * 4000)
     text = stats_text(conn, cfg)
     lines = text.splitlines()
     assert len(text) <= 3500
-    assert lines[0] == "Stats (this conversation | all time)"
-    assert lines[1].startswith("LLM calls: 1 | 1")
+    assert "metric" in lines[0]
+    assert _stats_row(text, "LLM calls", "1", "1")
+    truncated = tables._truncate_cell("reference:" + "m" * 4000, 16)
+    assert text.count(truncated) == 2

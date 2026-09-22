@@ -1229,11 +1229,15 @@ def test_summary_health_row_based_formulas(conn):
 
 
 def test_stats_gains_two_lines_appended(conn):
+    # REQ-V1110-STA-01: the old literal title line ("Stats (this
+    # conversation | all time)") is now the table header row -- the table
+    # itself carries that scope split via its "this conv"/"all time"
+    # columns. Position/prefix checks on Errors:/Summaries: still hold.
     import bot
 
     storage.get_or_create_active_conversation(conn, USER_ID)
     lines = bot._render_stats(conn, USER_ID).splitlines()
-    assert lines[0] == "Stats (this conversation | all time)"
+    assert "metric" in lines[0]
     assert any(line.startswith("Errors: ") for line in lines)
     assert any(line.startswith("Summaries: ") for line in lines)
     assert lines[-2].startswith("Errors: ")

@@ -88,7 +88,14 @@ DOC_LIMIT_REPLY = "Limit of 20 documents reached. Use /delete <filename>."
 DOC_CORRUPTED_PDF_REPLY = "Could not read this PDF file."
 DOC_CORRUPTED_DOCX_REPLY = "Could not read this DOCX file."
 DOC_EMPTY_REPLY = "The document contains no readable text."
-DOC_TEXT_TOO_LARGE_REPLY = "Document too large (over 500,000 characters)."
+DOC_TEXT_TOO_LARGE_REPLY = "Document too large (over 2,000,000 characters)."
+# REQ-V1110-DOC-03: DocxArchiveTooLargeError/PdfTooManyPagesError used to
+# share DOC_TEXT_TOO_LARGE_REPLY, wrongly telling an over-page-limit PDF it
+# had too many *characters*. T5 moves the underlying constants they
+# describe (MAX_EXTRACTED_TEXT_CHARS, PDF_MAX_PAGES) to these numbers; T2
+# lands only the three reply strings.
+DOC_DOCX_BOUNDS_REPLY = "Document too large (DOCX archive bounds)."
+DOC_PDF_PAGES_REPLY = "Document too large (over 2,000 pages)."
 DOC_EMBEDDING_ERROR_REPLY = "Embedding service error. Please try again later."
 DOC_EMBEDDING_TIMEOUT_REPLY = "Embedding service timed out. Please try again later."
 DOC_STORAGE_ERROR_REPLY = "Storage error. The document was not saved."
@@ -97,7 +104,7 @@ DOC_TELEGRAM_ERROR_REPLY = "Telegram error while receiving the file. Please try 
 DOC_BUDGET_EXCEEDED_REPLY = "Indexing timed out (over 300 s). Nothing was saved."
 DOC_HANDLER_FAILED_REPLY = "Something went wrong while processing the document."
 DOCUMENTS_EMPTY_REPLY = "No documents yet. Send me a .txt, .md, .docx or .pdf file."
-DELETE_USAGE_REPLY = "Usage: /delete <filename>"
+DELETE_USAGE_REPLY = "Usage: /delete <filename> | /delete #<id>"
 
 log = logging.getLogger("bot")
 
@@ -946,7 +953,7 @@ def process_update(
             )
             return
         if name == "/stats":
-            _send(tg, chat_id, reply_parts(_render_stats(conn, from_id)))
+            send_pre(tg, chat_id, _render_stats(conn, from_id))
             return
         if name == "/summary":
             _handle_summary(conn, tg, cfg, llm, chat_id, from_id, resolve_cost, summary_llm)
@@ -1152,38 +1159,57 @@ def _render_status(
 
 
 def _render_stats(conn, from_id: int) -> str:
-    """REQ-V13-OBS-07. Two columns — this conversation and all time — over the
-    rows `agent.py` recorded. Reading them never opens a conversation."""
+    """REQ-V1110-STA-01. A three-column `metric | this conv | all time` table
+    (`tables.render_table`) over the rows `agent.py` recorded, followed by a
+    blank line and the four single-value lines (wrapped, never truncated, by
+    `_wrap_line`). Reading them never opens a conversation. Cell-content
+    semantics are REQ-V13-OBS-07's, preserved verbatim: `n/a` for a missing
+    value (`_cell`), `n/a (no pricing)` for a side with no pricing basis
+    (`_render_cost`), `mixed` when several bases disagree, the percent
+    rendering of `_render_share`. `tables.fit_lines` replaces `_fit` at the
+    `STATS_MAX_CHARS` cap, whole lines (continuation lines included) dropped
+    from the end, `… N more` appended."""
     conv_id = storage.active_conversation_id(conn, from_id)
     here = metrics.conversation_stats(conn, conv_id)
     everywhere = metrics.global_stats(conn)
-    return _fit(
+    table = tables.render_table(
+        ["metric", "this conv", "all time"],
         [
-            "Stats (this conversation | all time)",
+            ("LLM calls", _cell(here.calls, str), _cell(everywhere.calls, str)),
+            ("errors", _cell(here.errors, str), _cell(everywhere.errors, str)),
+            ("tokens in", _cell(here.tokens_in, str), _cell(everywhere.tokens_in, str)),
+            ("cached", _cell(here.cached_tokens, str), _cell(everywhere.cached_tokens, str)),
             (
-                f"LLM calls: {here.calls} | {everywhere.calls} "
-                f"(errors {here.errors} | {everywhere.errors})"
+                "reasoning",
+                _cell(here.reasoning_tokens, str),
+                _cell(everywhere.reasoning_tokens, str),
+            ),
+            ("tokens out", _cell(here.tokens_out, str), _cell(everywhere.tokens_out, str)),
+            ("est. cost", _render_cost(here.cost_usd), _render_cost(everywhere.cost_usd)),
+            ("cost basis", _cell(here.cost_basis, str), _cell(everywhere.cost_basis, str)),
+            (
+                "avg prompt/call",
+                _cell(here.avg_prompt, str),
+                _cell(everywhere.avg_prompt, str),
             ),
             (
-                f"Tokens in: {_pair(here.tokens_in, everywhere.tokens_in)} "
-                f"(cached: {_pair(here.cached_tokens, everywhere.cached_tokens)}, "
-                f"reasoning: {_pair(here.reasoning_tokens, everywhere.reasoning_tokens)})"
+                "re-sent share",
+                _cell(here.resent_share, _render_share),
+                _cell(everywhere.resent_share, _render_share),
             ),
-            f"Tokens out: {_pair(here.tokens_out, everywhere.tokens_out)}",
-            (
-                f"Est. cost: {_render_cost(here.cost_usd)} | {_render_cost(everywhere.cost_usd)} "
-                f"(basis: {_pair(here.cost_basis, everywhere.cost_basis)})"
-            ),
-            (
-                f"Avg prompt/call: {_pair(here.avg_prompt, everywhere.avg_prompt)}; "
-                f"re-sent share: {_pair(here.resent_share, everywhere.resent_share, _render_share)}"
-            ),
-            f"Top tools by output tokens (all time): {_render_top_tools(conn)}",
-            f"Last turn: {_render_last_turn(conn, conv_id)}",
-            _render_errors_line(conn),
-            _render_summaries_line(conn),
-        ]
+        ],
+        max_width=[22, 16, 16],
     )
+    single_value_lines = [
+        f"Top tools: {_render_top_tools(conn)}",
+        f"Last turn: {_render_last_turn(conn, conv_id)}",
+        _render_errors_line(conn),
+        _render_summaries_line(conn),
+    ]
+    lines = [*table.split("\n"), ""]
+    for line in single_value_lines:
+        lines.extend(_wrap_line(line))
+    return tables.fit_lines(lines, limit=STATS_MAX_CHARS)
 
 
 def _render_counts(counts: dict[str, int]) -> str:
@@ -1209,19 +1235,47 @@ def _render_summaries_line(conn) -> str:
     return f"Summaries: {health.ok} ok, {health.retried} truncated-retried, {health.failed} failed"
 
 
-def _fit(lines: list[str]) -> str:
-    """Hold the character cap without breaking the fixed layout: whole lines go
-    from the end, never half of one. Every line is bounded by a limit of its own
-    (`ROUND_LIMIT` rounds, `TOP_TOOLS_LIMIT` tools), so this only ever fires on
-    an absurdly long `cost_basis`; the final slice is the hard guarantee."""
-    while len(lines) > 1 and len("\n".join(lines)) > STATS_MAX_CHARS:
-        lines.pop()
-    return "\n".join(lines)[:STATS_MAX_CHARS]
+def _wrap_line(
+    line: str, *, width: int = tables.MAX_TABLE_LINE_UNITS, indent: str = "  "
+) -> list[str]:
+    """REQ-V1110-STA-01: wrap, never truncate, one of `/stats`'s four
+    single-value lines. Continuation lines are indented by two spaces;
+    every line -- first and continuation -- stays within `width` UTF-16
+    units (`tables.py`'s own OUT-03 ceiling, reused rather than
+    reimplemented); breaks prefer the last space within budget and never
+    split a Unicode scalar."""
+    if tables.utf16_length(line) <= width:
+        return [line]
+    wrapped: list[str] = []
+    remaining = line
+    prefix = ""
+    while remaining:
+        budget = width - tables.utf16_length(prefix)
+        if tables.utf16_length(remaining) <= budget:
+            wrapped.append(prefix + remaining)
+            break
+        cut = max(_break_point(remaining, budget), 1)
+        piece, remaining = remaining[:cut], remaining[cut:].lstrip(" ")
+        wrapped.append(prefix + piece)
+        prefix = indent
+    return wrapped
 
 
-def _pair(left, right, render=None) -> str:
-    render = render or (str)
-    return f"{_cell(left, render)} | {_cell(right, render)}"
+def _break_point(text: str, budget: int) -> int:
+    """The largest prefix of `text` that fits `budget` UTF-16 units: cut at
+    the last space within that budget when one exists, else at the widest
+    whole-scalar boundary that still fits (never splitting a supplementary
+    character in half)."""
+    used = 0
+    last_space = None
+    for idx, char in enumerate(text):
+        width = 2 if ord(char) > 0xFFFF else 1
+        if used + width > budget:
+            return last_space if last_space is not None else idx
+        if char == " ":
+            last_space = idx
+        used += width
+    return len(text)
 
 
 def _cell(value, render) -> str:
@@ -1454,11 +1508,11 @@ def _handle_document(
         return
     except documents.DocxArchiveTooLargeError as exc:
         log.warning("document refused: docx archive bounds %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_TEXT_TOO_LARGE_REPLY)
+        _document_error_ending(tg, chat_id, status, typing, DOC_DOCX_BOUNDS_REPLY)
         return
     except documents.PdfTooManyPagesError as exc:
         log.warning("document refused: pdf pages %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_TEXT_TOO_LARGE_REPLY)
+        _document_error_ending(tg, chat_id, status, typing, DOC_PDF_PAGES_REPLY)
         return
     except DocumentTooLarge:
         log.warning("document refused: file too large")
@@ -1490,11 +1544,13 @@ def _handle_document(
     _send(tg, chat_id, [_document_success_reply(filename, result)])
 
 
-def _render_document_line(row) -> str:
-    pages = f", {row['page_count']} pages" if row["page_count"] is not None else ""
-    date = str(row["created_at"])[:10]
-    filename = redact(row["filename"])
-    return f"{filename} — {row['file_type']}, {row['chunk_count']} chunks{pages}, {date}"
+def _render_size(size_bytes: int) -> str:
+    """`size_bytes` in human units, decimal (1 MB = 1,000,000 bytes, never
+    1,048,576), one decimal place: `< 1 MB` renders as KB, `0.0 KB` for
+    zero (REQ-V1110-DOC-01)."""
+    if size_bytes >= 1_000_000:
+        return f"{size_bytes / 1_000_000:.1f} MB"
+    return f"{size_bytes / 1_000:.1f} KB"
 
 
 def _handle_documents(conn, tg, chat_id: int, from_id: int) -> None:
@@ -1502,18 +1558,58 @@ def _handle_documents(conn, tg, chat_id: int, from_id: int) -> None:
     if not rows:
         _send(tg, chat_id, [DOCUMENTS_EMPTY_REPLY])
         return
-    lines = [f"Your documents ({len(rows)}):"] + [_render_document_line(row) for row in rows]
-    _send(tg, chat_id, reply_parts("\n".join(lines)))
+    table = tables.render_table(
+        ["#", "file", "type", "size", "chunks", "pages", "added"],
+        [
+            (
+                row["id"],
+                redact(row["filename"]),
+                row["file_type"],
+                _render_size(row["size_bytes"]),
+                row["chunk_count"],
+                row["page_count"],
+                str(row["created_at"])[:10],
+            )
+            for row in rows
+        ],
+        max_width=[3, 24, 4, 8, 6, 5, 10],
+    )
+    # T-V1110-DOC-05 (T5) appends an in-flight `⏳ indexing …` line after the
+    # table once the ingest worker exists; with no job in flight the table
+    # is the last thing in the body (every case this task, T2).
+    body = f"Your documents ({len(rows)} of {documents.DOCUMENT_LIMIT}):\n\n{table}"
+    send_pre(tg, chat_id, body)
+
+
+_DELETE_MAX_ID = 2**63 - 1  # sqlite3's INTEGER ceiling; a bigger id can't exist
+
+
+def _no_document_named_reply(argument: str) -> str:
+    return f"No document named {redact(argument)[:120]}."
 
 
 def _handle_delete(conn, tg, chat_id: int, from_id: int, argument: str) -> None:
     if not argument:
         _send(tg, chat_id, [DELETE_USAGE_REPLY])
         return
+    if argument.startswith("#"):
+        id_part = argument[1:]
+        # ASCII digits only (REQ-V1110-DOC-02): `str.isdigit()` alone also
+        # accepts non-ASCII decimal digits `int()` would happily parse.
+        parsed_id = int(id_part) if id_part.isascii() and id_part.isdigit() else None
+        deleted = (
+            parsed_id is not None
+            and parsed_id <= _DELETE_MAX_ID
+            and storage.delete_document(conn, user_id=from_id, document_id=parsed_id)
+        )
+        if deleted:
+            _send(tg, chat_id, [f"Deleted {argument}."])
+        else:
+            _send(tg, chat_id, [_no_document_named_reply(argument)])
+        return
     document_id = storage.document_id_for(conn, user_id=from_id, filename=argument)
     if document_id is None:
-        shown = redact(argument)[:120]
-        _send(tg, chat_id, [f"No document named {shown}."])
+        _send(tg, chat_id, [_no_document_named_reply(argument)])
         return
     storage.delete_document(conn, user_id=from_id, document_id=document_id)
     _send(tg, chat_id, [f"Deleted {argument}."])
