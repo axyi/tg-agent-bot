@@ -80,7 +80,7 @@ def text_update(text, update_id=1, user_id=USER_ID):
     }
 
 
-def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None):
+def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None, worker=None):
     tg = tg if tg is not None else FakeTelegram()
     llm = llm if llm is not None else FakeLLM([])
     bot.process_update(
@@ -93,8 +93,33 @@ def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None):
         runner=RecordingRunner(),
         bot_username=BOT_USERNAME,
         embedder=embedder,
+        worker=worker,
     )
     return tg
+
+
+def _run_document(document, *, conn, tg, cfg, chat_id, from_id, embedder, worker=None, **kwargs):
+    """v1.11.0 T5 (REQ-V1110-ING-02): `_handle_document` only reserves and
+    enqueues on the loop thread now -- this drives the one enqueued job (if
+    any) to completion with `worker.run_one(conn=conn)`, synchronously, on
+    the same thread, mirroring `tests/test_v190_commands.py`'s own helper
+    of the same name (self-contained, not imported, per this file's own
+    convention)."""
+    w = worker if worker is not None else bot.IngestWorker(cfg, tg, embedder, cfg.db_path)
+    bot._handle_document(
+        document,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=chat_id,
+        from_id=from_id,
+        embedder=embedder,
+        worker=w,
+        **kwargs,
+    )
+    if w.in_flight(from_id) is not None:
+        w.run_one(conn=conn)
+    return w
 
 
 def _add_document(conn, user_id, **overrides):
@@ -290,7 +315,7 @@ def test_t_v1110_doc_04_refusal_wording_split(
     tg.files["documents/f1"] = b"enough bytes to pass the pre-download size check comfortably"
     monkeypatch.setattr(documents, "extract", _raise(exc))
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 60}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -301,4 +326,95 @@ def test_t_v1110_doc_04_refusal_wording_split(
     )
     assert getattr(bot, expected_attr) == expected_text
     _assert_failure_kept(tg, expected_text)
+    conn.close()
+
+
+# --------------------------------------------------------------------------
+# REQ-V1110-DOC-05 (T5) -- the in-flight line after the table.
+# --------------------------------------------------------------------------
+
+
+def _table_body(tg) -> str:
+    raw = tg.sent[0][1]
+    assert raw.startswith("<pre>") and raw.endswith("</pre>")
+    return html.unescape(raw[len("<pre>") : -len("</pre>")])
+
+
+def test_t_v1110_doc_05_inflight_line_after_table(tmp_path, monkeypatch):
+    """Drives a real job through `run_one` (`_process`'s own `progress=
+    status.update` wiring, not a poked-in stage string) and, mid-flight,
+    re-enters `process_update` for `/documents` through the worker's
+    `worker=` parameter -- proving both the progress wiring and the
+    dispatch-level plumbing DOC-05 depends on, not just the rendering
+    function in isolation."""
+    conn = new_conn(tmp_path)
+    other_id = USER_ID + 1
+    cfg = make_cfg(tmp_path, allowed_tg_ids=frozenset({USER_ID, other_id}))
+    _add_document(
+        conn,
+        USER_ID,
+        filename="report.pdf",
+        file_type="pdf",
+        created_at="2026-01-05T00:00:00Z",
+        size_bytes=1_500_000,
+        page_count=42,
+        chunk_count=7,
+    )
+    _add_document(
+        conn,
+        other_id,
+        filename="other.txt",
+        created_at="2026-01-05T00:00:00Z",
+    )
+
+    # Three paragraphs, each just under `target` (1000 chars) so no two
+    # merge into one chunk -- `chunk_text` produces exactly 3 chunks.
+    # `EMBED_BATCH_SIZE` patched to 1 so each chunk is its own embed()
+    # call/batch, matching the real "embedding: i/3" progress strings.
+    base = "Sentence number with enough words to take up real space in the paragraph. "
+    paragraphs = [f"Section {i}: " + (base * 12)[:900] for i in range(3)]
+    text = "\n\n".join(paragraphs)
+    assert len(documents.chunk_text(text)) == 3
+    monkeypatch.setattr(documents, "EMBED_BATCH_SIZE", 1)
+
+    tg = FakeTelegram()
+    tg.files["documents/f1"] = text.encode("utf-8")
+    captured: dict[str, str] = {}
+
+    def hook(call_no):
+        if call_no == 2:
+            # batch 1/3's progress edit has already landed by now -- the
+            # in-flight line should read "embedding: 1/3".
+            tg_docs = process(conn, cfg, text_update("/documents"), worker=worker)
+            captured["mid_flight"] = _table_body(tg_docs)
+            # a different user's own listing shows no line at all.
+            tg_other = process(
+                conn, cfg, text_update("/documents", user_id=other_id), worker=worker
+            )
+            captured["other_user"] = _table_body(tg_other)
+
+    embedder = FakeEmbedder(dim=16, hook=hook)
+    worker = bot.IngestWorker(cfg, tg, embedder, cfg.db_path)
+    bot._handle_document(
+        {"file_id": "f1", "file_name": "uploading.txt", "file_size": len(text)},
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=embedder,
+        worker=worker,
+    )
+    worker.run_one(conn=conn)
+
+    assert captured["mid_flight"].endswith("⏳ indexing uploading.txt — embedding: 1/3")
+    assert "⏳" not in captured["other_user"]
+
+    # The job completed normally (the hook never cancelled it) and left
+    # the in-flight map -- the line is gone from a fresh /documents call.
+    assert worker.in_flight(USER_ID) is None
+    assert any(t.startswith("✅ uploading.txt:") for _c, t in tg.sent)
+    tg_after = process(conn, cfg, text_update("/documents"), worker=worker)
+    body_after = _table_body(tg_after)
+    assert "⏳" not in body_after
     conn.close()

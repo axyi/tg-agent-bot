@@ -475,7 +475,7 @@ call):
 Ingest:
   Telegram upload -> classify (extension) -> extract (in-memory bytes)
        -> chunk_text (paragraph-aware; per page for PDF)
-       -> embed (batched, LM Studio) -> storage.add_chunks / add_vectors
+       -> embed (batched, OpenRouter by default) -> storage.add_chunks / add_vectors
        -> documents row (chunk_count, sha256)
 
 Query:
@@ -511,8 +511,12 @@ tool output.
 *this* deployment stays local instead: `EMBEDDING_MODEL=
 text-embedding-nomic-embed-text-v1.5`, `EMBEDDING_DIM=768` — served locally
 by LM Studio, so retrieval adds no new external dependency and no API cost
-for this instance. Texts are embedded in batches of
-`llm.embeddings.BATCH_SIZE` = 32. The
+for this instance. Texts are embedded in batches of two independent
+constants, both 32 today but serving different layers: the ingest
+pipeline's own `documents.EMBED_BATCH_SIZE` (what `IngestWorker` actually
+drives, one progress edit per batch) and the embeddings client's own
+internal `llm.embeddings.BATCH_SIZE` (`EmbeddingsClient.embed`'s own
+per-request chunking). The
 active `model:dim` pair is recorded once in `bot_state` under the key
 `rag.embedding` (e.g. `text-embedding-nomic-embed-text-v1.5:768`) — see
 Storage below for what happens when it changes.
@@ -586,13 +590,19 @@ document, its chunks and its vectors are deleted first). When a
 attribution machinery's `Sources:` fallback rather than an empty
 Sources line. The evaluation below reports two items as advisory-only, not
 part of the gating metric — see the eval command and numbers below. The
-300-second indexing budget (`INDEX_BUDGET_S_DEFAULT`) is checked *between*
-stages (extract, chunk, embed, store) and *between individual PDF pages* —
-not by a cancellable worker that can interrupt a single slow operation
-mid-flight; the hard bounds enforced before that budget is even reached
-(10 MiB upload, 500,000 extracted characters, the DOCX archive bounds, the
-500-page PDF ceiling — see Limits below) are what actually caps the worst
-case.
+1800-second indexing budget (`INDEX_BUDGET_S_DEFAULT`) is checked *between*
+stages (extract, chunk, embed, store), *between individual PDF pages*, and
+(v1.11.0 T5) at every checkpoint around `getFile`/download too; large
+documents run on `IngestWorker`'s own daemon thread, cooperatively
+cancellable (`/cancel`) up to the moment a job commits — the hard bounds
+enforced before that budget is even reached (20 MB upload, 2,000,000
+extracted characters, the DOCX archive bounds, the 2,000-page PDF ceiling —
+see Limits below) are what actually caps the worst case. Process
+termination before `main()`'s 10-second worker-join completes relies only
+on SQLite's own transaction atomicity: an in-progress `BEGIN
+IMMEDIATE`/`COMMIT` rolls back with the connection, and every ingest
+checkpoint (cancel, budget) precedes it, so nothing partial is ever left
+committed.
 
 ### Evaluation
 
@@ -903,12 +913,13 @@ delivery is not provided and is not claimed.
 | send retries | 3 attempts |
 | summary output cap | 512 tokens for the first attempt; on truncation (`finish_reason == "length"`) one retry at `LLM_SUMMARY_MAX_TOKENS`, default 1536 (256–8192) |
 | failover threshold / cooldown | 3 consecutive failures / 300 s |
-| document upload size | 10 MiB (`DOCUMENT_MAX_BYTES` = 10,485,760 bytes) |
-| document extracted text length | 500,000 characters |
+| document upload size | 20 MB (`DOCUMENT_MAX_BYTES` = 20,000,000 bytes) |
+| document extracted text length | 2,000,000 characters |
 | documents per user | 20 (`DOCUMENT_LIMIT`) |
-| document indexing budget | 300 s (`INDEX_BUDGET_S_DEFAULT`), checked between stages (extract/chunk/embed/store) and between PDF pages — no cancellable worker |
+| document indexing budget | 1800 s (`INDEX_BUDGET_S_DEFAULT`), checked between stages (extract/chunk/embed/store), between PDF pages, and around `getFile`/download — cooperatively cancellable (`/cancel`) up to commit, on `IngestWorker`'s own thread |
+| ingest queue | 4 concurrent jobs (`INGEST_QUEUE_MAX`), one in flight per user; a 5th user's upload is refused, a 2nd from an in-flight user is refused |
 | DOCX archive bounds | 2,000 members / 50 MiB total uncompressed / 20 MiB per member / compression ratio 100 |
-| PDF page ceiling | 500 pages |
+| PDF page ceiling | 2,000 pages |
 | chunk size / overlap | target 1000 chars, hard max 1200, overlap 200, minimum 50 (tail-merge threshold) |
 | retrieval K (passages returned) | 5 (`RAG_TOP_K`, default) |
 | rerank candidates | 10 (RRF cut before the optional listwise rerank) |
@@ -938,17 +949,25 @@ delivery is not provided and is not claimed.
 | document: corrupted PDF (`PdfReader`/page enumeration/`extract_text()`, not a budget or size limit) | refused, nothing stored | `Could not read this PDF file.` |
 | document: corrupted DOCX (`BadZipFile`/`PackageNotFoundError`/`KeyError`) | refused, nothing stored | `Could not read this DOCX file.` |
 | document: no readable text (< 20 non-whitespace characters extracted; also a PDF whose per-page chunking yields zero chunks overall even though the summed text clears that floor — `documents.EmptyDocumentError`, same string) | refused, nothing stored | `The document contains no readable text.` |
-| document: too large before or during download (over 10 MiB) | refused before indexing, nothing stored | `File too large (over 10 MiB).` |
-| document: too large after extraction (over 500,000 chars), or a DOC-02 pre-parse guard (DOCX archive bounds, PDF > 500 pages) | refused, nothing stored | `Document too large (over 500,000 characters).` |
+| document: too large before or during download (over 20 MB) | refused before indexing, nothing stored | `File too large (over 20 MB).` |
+| document: too large after extraction (over 2,000,000 chars) | refused, nothing stored | `Document too large (over 2,000,000 characters).` |
+| document: DOCX archive bounds exceeded (DOC-02 pre-parse guard) | refused, nothing stored | `Document too large (DOCX archive bounds).` |
+| document: PDF over 2,000 pages (DOC-02 pre-parse guard) | refused, nothing stored | `Document too large (over 2,000 pages).` |
 | document: embedding service error (non-200, malformed body, wrong dimension, a non-timeout transport failure) | refused, nothing stored | `Embedding service error. Please try again later.` |
 | document: storage error (`sqlite3.Error`) | refused, transaction rolled back | `Storage error. The document was not saved.` |
 | document: Telegram download timeout | refused, nothing stored | `Download timed out. Please try again.` |
 | document: embedding service timeout | refused, nothing stored | `Embedding service timed out. Please try again later.` |
-| document: indexing budget exceeded (300 s, between stages or between PDF pages) | refused, nothing stored | `Indexing timed out (over 300 s). Nothing was saved.` |
+| document: indexing budget exceeded (1800 s, between stages, between PDF pages, or around `getFile`/download) | refused, nothing stored | `Indexing timed out (over 1800 s). Nothing was saved.` |
 | document: Telegram error on `getFile`/download (not a timeout) | refused, nothing stored | `Telegram error while receiving the file. Please try again.` |
 | document: user already at the 20-document limit (checked before the status message, and re-checked inside the indexing transaction) | refused, nothing stored | `Limit of 20 documents reached. Use /delete <filename>.` |
 | document: RAG not configured (no embedder) | refused, nothing stored | `Document search is not configured on this bot.` |
-| document: any other exception in the handler | logged with traceback (redacted), nothing stored, the poll loop advances normally | `Something went wrong while processing the document.` |
+| document: a second upload while the caller's job is queued or running | nothing reserved or enqueued | `⏳ Still indexing <name>; wait for it to finish.` |
+| document: the 4-job ingest queue is full | nothing reserved or enqueued, no status message | `Indexing queue is full; try again later.` |
+| document: `/cancel` with a job `queued` or `running` | the event is set; a still-queued job's status is edited on dequeue, before any Telegram file call | `Cancelling <name>…`, then `❌ Cancelled.` |
+| document: `/cancel` with nothing in flight | — | `Nothing to cancel.` |
+| document: the worker's `shutdown()` drains a job in phase `queued` or `running` | nothing stored, slot and token freed; a `committing` job is not interrupted | `❌ Interrupted by restart.` |
+| document: any other exception in the handler | logged with traceback (redacted), nothing stored, the worker continues with the next job | `Something went wrong while processing the document.` |
+| document: `/cancel` once the job has entered its non-cancellable commit phase | the event is not set; the commit proceeds to the success reply | `Indexing is already finishing.` |
 
 ## Versioning
 

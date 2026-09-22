@@ -13,6 +13,7 @@ import hashlib
 import io
 import re
 import sqlite3
+import threading
 import time
 import zipfile
 from collections.abc import Callable
@@ -106,7 +107,7 @@ DOCX_MAX_TOTAL_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 DOCX_MAX_MEMBER_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
 DOCX_MAX_COMPRESSION_RATIO = 100
 
-PDF_MAX_PAGES = 500
+PDF_MAX_PAGES = 2_000
 
 
 def extract(
@@ -116,18 +117,22 @@ def extract(
     monotonic: Callable[[], float] | None = None,
     started_at: float | None = None,
     budget_s: float | None = None,
+    cancel: threading.Event | None = None,
 ) -> Extracted:
     """`monotonic`/`started_at`/`budget_s` are DOC-04's between-pages budget
     check, threaded through only as far as `_extract_pdf`'s per-page loop --
     `txt`/`md`/`docx` extraction has no internal loop to check between, so
-    they ignore the three. `started_at is None` (the default, and every T3
-    call site unchanged) skips the check entirely."""
+    they ignore the three (and `cancel`, v1.11.0 T5 REQ-V1110-ING-04). `
+    started_at is None` (the default, and every T3 call site unchanged)
+    skips the check entirely."""
     if file_type in ("txt", "md"):
         return _extract_text(data)
     if file_type == "docx":
         return _extract_docx(data)
     if file_type == "pdf":
-        return _extract_pdf(data, monotonic=monotonic, started_at=started_at, budget_s=budget_s)
+        return _extract_pdf(
+            data, monotonic=monotonic, started_at=started_at, budget_s=budget_s, cancel=cancel
+        )
     raise ValueError(f"unsupported file_type: {file_type!r}")
 
 
@@ -197,13 +202,15 @@ def _extract_pdf(
     monotonic: Callable[[], float] | None = None,
     started_at: float | None = None,
     budget_s: float | None = None,
+    cancel: threading.Event | None = None,
 ) -> Extracted:
     # Only exceptions from PdfReader, from page enumeration or from
     # extract_text() are the corrupted-PDF class (ERR-01 row 2); none of
     # them is caught here, they propagate to the caller by type.
-    # `_check_budget` (raising `IndexBudgetExceeded`) sits outside that
-    # implicit boundary too -- it is never wrapped in a try here, so it can
-    # never be mistaken for a corrupted PDF (DOC-02, ERR-01 row 2 vs 10c).
+    # `_check_budget` (raising `IndexBudgetExceeded`/`IndexCancelled`) sits
+    # outside that implicit boundary too -- it is never wrapped in a try
+    # here, so it can never be mistaken for a corrupted PDF (DOC-02,
+    # ERR-01 row 2 vs 10c).
     reader = pypdf.PdfReader(io.BytesIO(data))
     if len(reader.pages) > PDF_MAX_PAGES:
         raise PdfTooManyPagesError(
@@ -212,7 +219,7 @@ def _extract_pdf(
     pages = []
     for physical_index, page in enumerate(reader.pages, start=1):
         if started_at is not None:
-            _check_budget(monotonic, started_at, budget_s, stage="pdf extraction")
+            _check_budget(monotonic, started_at, budget_s, stage="pdf extraction", cancel=cancel)
         text = page.extract_text()
         if text.strip():
             pages.append(ExtractedPage(text=text, page=physical_index))
@@ -375,9 +382,9 @@ def chunk_text(
 # message) so `bot.py` (T7) can match them in its ERR-01 handlers.
 # ---------------------------------------------------------------------------
 
-MAX_EXTRACTED_TEXT_CHARS = 500_000
+MAX_EXTRACTED_TEXT_CHARS = 2_000_000
 EMBED_BATCH_SIZE = 32
-INDEX_BUDGET_S_DEFAULT = 300.0
+INDEX_BUDGET_S_DEFAULT = 1800.0
 DOCUMENT_LIMIT = 20
 
 
@@ -410,6 +417,17 @@ class IndexBudgetExceeded(Exception):
     too-large class -- it always propagates to the caller unmapped."""
 
 
+class IndexCancelled(Exception):
+    """v1.11.0 T5 (REQ-V1110-ING-04): `cancel.is_set()` at a `_check_budget`
+    checkpoint (after extraction, between PDF pages, after chunking, after
+    an embeddings batch). A plain `Exception` subclass, the same shape as
+    `IndexBudgetExceeded` right above and, like it, never caught anywhere
+    in this module -- always propagates to the caller (`bot.py`'s
+    `IngestWorker`) unmapped, and checked *before* the budget at a shared
+    checkpoint (a cancelled-and-also-over-budget job reports as
+    cancelled)."""
+
+
 class DocumentLimitExceededError(Exception):
     """ERR-01 row 13: the user already has `DOCUMENT_LIMIT` (20) documents
     and this filename is not one of them -- so this upload would not be a
@@ -429,8 +447,18 @@ class IndexResult:
 
 
 def _check_budget(
-    monotonic: Callable[[], float], started_at: float, budget_s: float, *, stage: str
+    monotonic: Callable[[], float],
+    started_at: float,
+    budget_s: float,
+    *,
+    stage: str,
+    cancel: threading.Event | None = None,
 ) -> None:
+    # Cancel checked before budget: a job cancelled and also over budget
+    # reports as cancelled (ING-04 -- "the two outcomes, exclusive by
+    # phase").
+    if cancel is not None and cancel.is_set():
+        raise IndexCancelled(f"cancelled during {stage}")
     elapsed = monotonic() - started_at
     if elapsed > budget_s:
         raise IndexBudgetExceeded(f"budget exceeded after {stage}: {elapsed:.1f}s > {budget_s}s")
@@ -462,18 +490,28 @@ def index_document(
     started_at: float,
     monotonic: Callable[[], float] = time.monotonic,
     budget_s: float = INDEX_BUDGET_S_DEFAULT,
+    cancel: threading.Event | None = None,
+    before_commit: Callable[[], None] | None = None,
 ) -> IndexResult:
     """DOC-05's pipeline: classify -> extract -> chunk -> embed -> store.
-    `started_at` has no default -- the caller (`bot.py`'s `_handle_document`)
+    `started_at` has no default -- the caller (`bot.py`'s `IngestWorker`)
     must supply its own first-action `monotonic()` reading, so the budget's
     origin can never be lost by omission. Emits exactly three progress
-    strings (classify and store emit nothing); on any DOC-04 limit or budget
-    failure, raises before any store -- no transaction has opened yet, so
-    nothing is written."""
+    strings (classify and store emit nothing); on any DOC-04 limit or
+    budget/cancel (v1.11.0 T5, REQ-V1110-ING-04) failure, raises before any
+    store -- no transaction has opened yet, so nothing is written.
+    `before_commit`, when given, is called immediately before `BEGIN
+    IMMEDIATE`, after the last checkpoint -- the worker's own hook that
+    moves the job to its non-cancellable `committing` phase."""
     file_type = classify(filename)
 
     extracted = extract(
-        data, file_type, monotonic=monotonic, started_at=started_at, budget_s=budget_s
+        data,
+        file_type,
+        monotonic=monotonic,
+        started_at=started_at,
+        budget_s=budget_s,
+        cancel=cancel,
     )
     text_chars = sum(len(page.text) for page in extracted.pages)
     if extracted.page_numbered:
@@ -491,7 +529,7 @@ def index_document(
             f"{nonwhitespace_chars} non-whitespace chars extracted, under the "
             f"{_MIN_NONWHITESPACE_CHARS_FOR_ONE_CHUNK}-char floor"
         )
-    _check_budget(monotonic, started_at, budget_s, stage="extraction")
+    _check_budget(monotonic, started_at, budget_s, stage="extraction", cancel=cancel)
 
     chunk_rows = _document_chunks(extracted)
     progress(f"📄 chunked: {len(chunk_rows)}")
@@ -508,7 +546,7 @@ def index_document(
             f"chunking yielded 0 chunks from {nonwhitespace_chars} non-whitespace "
             "chars (each page/section fell under chunk_text's own floor)"
         )
-    _check_budget(monotonic, started_at, budget_s, stage="chunking")
+    _check_budget(monotonic, started_at, budget_s, stage="chunking", cancel=cancel)
 
     texts = [chunk.text for _, chunk in chunk_rows]
     total_batches = (len(texts) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
@@ -519,11 +557,16 @@ def index_document(
         vectors.extend(sqlite_vec.serialize_float32(vector) for vector in batch_vectors)
         batch_no = batch_start // EMBED_BATCH_SIZE + 1
         progress(f"📄 embedding: {batch_no}/{total_batches}")
-        _check_budget(monotonic, started_at, budget_s, stage=f"embedding batch {batch_no}")
+        _check_budget(
+            monotonic, started_at, budget_s, stage=f"embedding batch {batch_no}", cancel=cancel
+        )
 
     page_count = len(extracted.pages) if extracted.page_numbered else None
     size_bytes = len(data)
     sha256 = hashlib.sha256(data).hexdigest()
+
+    if before_commit is not None:
+        before_commit()
 
     conn.execute("BEGIN IMMEDIATE")
     try:

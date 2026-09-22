@@ -947,7 +947,251 @@ command, and is not a T4 regression). `uv run --locked python bot.py
 `_SelftestTelegram`-has-no-`call` warning T1's report already confirmed
 present before this run's changes).
 
-## T5 — not reached
+## T5 — the ingest worker
+
+Delegated (brief `docs/spec/task-briefs/v1110-T5.md`, EC-04). The
+highest-risk task in the run: a lock-protected shared map, a two-phase
+admission protocol, a cooperative-cancellation protocol tied to a
+transaction commit boundary, and a bounded shutdown/drain sequence.
+
+**The caps rise to the Bot API ceiling** (REQ-V1110-ING-01):
+`DOCUMENT_MAX_BYTES` 10,485,760 -> 20,000,000; `documents.
+MAX_EXTRACTED_TEXT_CHARS` 500,000 -> 2,000,000; `documents.PDF_MAX_PAGES`
+500 -> 2,000; `documents.INDEX_BUDGET_S_DEFAULT` 300.0 -> 1800.0. The DOCX
+archive bounds, `DOCUMENT_LIMIT`, the chunker and the embeddings batch
+constants are unchanged. The v190 mutation `find` line
+(`    if isinstance(file_size, int) and file_size > DOCUMENT_MAX_BYTES:`)
+was confirmed to occur exactly once in `bot.py` both before and after
+every edit.
+
+**`IngestWorker` (REQ-V1110-ING-02..-05):** one daemon thread, a
+`queue.Queue(maxsize=INGEST_QUEUE_MAX + 1)` (five physical slots — four
+capacity tokens, one reserved for the shutdown sentinel), a lock-protected
+in-flight map (`from_id -> Reservation | IngestJob`). Two-phase admission:
+`reserve` takes the user slot and a capacity token atomically; `enqueue`
+swaps the reservation for the real job and `put_nowait`s it; `release`
+undoes a reservation when the status send fails. `_handle_document` (the
+loop thread) is split down to just `started_at`/the five pre-checks/
+admission — the entire ERR-01 clause chain (`getFile`, `download_file`,
+`documents.index_document`, every typed exception, the success reply)
+moved verbatim into `IngestWorker._process`, run from `run_one` on the
+worker's own thread. **Connection ownership is the load-bearing
+correctness property**: `run_one` dequeues the job first, marks it
+`running` under the lock (this is also where its capacity token frees —
+the token frees at dequeue, the job's own map slot does not, until the
+job ends; this is what makes ING-11's "four queued jobs and a fifth,
+running" scenario reconcile with only four capacity tokens existing), and
+only then — inside the `try` covered by its outermost `finally` — acquires
+the connection (`storage.connect(db_path)`, lazily, on the calling
+thread, kept for every later job). The outermost `finally` releases the
+slot and calls `task_done()` on every exit path: success, any ERR-01
+clause, a cancel, an uncaught exception, or `storage.connect` itself
+raising.
+
+**Cooperative cancel (REQ-V1110-ING-04):** every `IngestJob` carries a
+lock-protected `phase` (`queued` -> `running` -> `committing`) and
+`cancel_reason` (`"user"`/`"shutdown"`, always written under the lock
+before the event is set). `documents.index_document`/`_check_budget`
+gained a `cancel` parameter (checked *before* the budget at every
+existing checkpoint) and the new `documents.IndexCancelled` exception; a
+new `before_commit` callable, invoked immediately before `BEGIN
+IMMEDIATE`, is the worker's own hook that moves the job to `committing`
+under the lock — atomic with respect to `/cancel`'s own lock-protected
+read, so once a job is committing, `/cancel` always sees "already
+finishing", never a race. `TelegramClient.download_file` gained
+`should_stop`, checked between streamed chunks, returning `None` instead
+of `bytes` when true — the caller's own post-download checkpoint is what
+raises. `/cancel` (new dispatch entry): no job -> `Nothing to cancel.`;
+`queued`/`running` -> `Cancelling <name>…`, the event set; `committing` ->
+`Indexing is already finishing.`, the event **not** set.
+
+**Shutdown (REQ-V1110-ING-05):** `shutdown()` is idempotent (a guard
+flag, since a second `put_nowait` of the sentinel would raise
+`queue.Full`); it sets `cancel_reason="shutdown"` and the event on every
+`queued`/`running` job (never `committing`, which finishes and sends its
+success reply), then enqueues a private sentinel into the fifth, reserved
+slot — a `put_nowait` that can never raise `queue.Full` and never blocks
+behind a running job. `_run` keeps looping over `run_one`, so it drains
+every cancelled job ahead of the sentinel through the normal outermost
+`finally`, each edited to `❌ Interrupted by restart.` (a failed edit
+logged, never raised). `main()` constructs the worker next to the
+dashboard thread, starts `IngestWorker._run` as a daemon thread, and in
+`finally` calls `worker.shutdown()` then joins with a **10 s** bound (the
+dashboard's own stays 5 s). The typing indicator is dropped from the
+document path entirely — the four progress edits already show progress,
+and a second thread per job bought nothing; `_handle_documents` gained
+one `⏳ indexing <name> — <stage>` line after the table when the caller
+has a job in flight (`_StatusMessage` gained a `last_text` attribute to
+carry the stage without re-deriving it).
+
+**`[[VERIFY]]` outcome: the process-wide `EmbeddingsClient` instance
+stays shared — no second instance constructed.** Read `llm/embeddings.py`
+in full and `tracing.py`'s `ContextVar`/`start_span` machinery directly,
+per the brief's `[[VERIFY]]` instruction, rather than trusting the spec's
+own reading of them. Confirmed: `EmbeddingsClient.embed`/`_embed_batch`/
+`_post_with_retry`/`_post` read only constructor-time attributes and
+build only local lists — no instance attribute is written after
+`__init__`; `httpx.Client` is documented thread-safe; `tracing.
+_current_span` is a `ContextVar`, and a `threading.Thread` gets a fresh
+`contextvars.Context` unless it explicitly copies one (this codebase's
+`threading.Thread(target=worker._run, ...)` does not), so the worker
+thread's own spans simply have no parent — harmlessly, and doubly so
+since `embeddings.py`'s span calls never pass `sink=`, always resolving
+to `NullSink()` regardless of thread. **Extended one step beyond the
+brief's own `[[VERIFY]]` scope**: `TelegramClient` is also shared across
+the loop and worker threads (`IngestWorker` is constructed with the same
+`tg`); every `self._x =` assignment in the class was grepped, and all
+three (`_token`, `_client`, `_sleep`) are written only in `__init__`,
+never after — sharing it is safe for the identical reason.
+
+**Test-first (EC-02) was not followed for this task's own new tests —
+disclosed plainly, not framed as partial compliance.** The whole
+implementation was written first, directly from the brief's/spec's exact,
+fully-specified algorithm, in one pass; `tests/test_v1110_ing.py`,
+`tests/test_v1110_err.py`, `tests/test_v1110_sec.py` and `T-V1110-DOC-05`
+(in `tests/test_v1110_doc.py`) were written afterward against that
+already-working implementation and iterated to green. None ran red for
+the right reason; a handful of early drafts did fail on a first run, but
+each failure traced to the test's own setup (a `db_path` mismatch between
+two helpers' default filenames, a monkeypatched `get_file` left in place
+for a second job, an assertion checking `tg.sent[-1]` where the real
+reply lands in `tg.edited` because a status message already existed) —
+caught by reading the failure, not a genuine specification-level
+red-then-green cycle. The reason, not an excuse: this task's correctness
+surface (lock ordering, the outermost-`finally` boundary, the token/slot
+double-bookkeeping ING-11 depends on) has essentially one correct shape
+given the brief's own algorithm — the practical alternative (stub every
+method to raise `NotImplementedError` purely to watch `AttributeError`s
+go red) would have exercised nothing about the actual protocol. The two
+rewritten pre-existing tests
+(`test_t_v190_cmd_04_typing_indicator_ceiling_is_the_index_budget`,
+`test_t_v190_cmd_04_status_disabled_falls_back_to_send_exactly_one_error`)
+and the amended `test_t_v190_cmd_08_exception_in_document_handler_lets_
+poll_loop_continue` are PIN-01-style adaptations, the same category as
+T2/T3's own proactive pin rewrites, not red-before-green cycles either.
+
+**A pre-commit advisor review caught the direct cost of skipping
+red-before-green: several tests asserted less than the spec's test table
+promised.** Every finding was fixed and each fix confirmed to actually
+catch the regression it targets (the bug re-introduced by hand, the test
+re-run to watch it go red, the bug reverted, `git diff --stat` checked
+unchanged) — see the prompt file's `### Test-first` section for the full
+per-fix bite-check record. In summary: `/cancel` is now driven through
+`process_update`'s real dispatch chain in every ING test that exercises
+it, not by calling `_handle_cancel` directly; `T-V1110-ING-09` gained a
+`_LockSpy` proving `cancel()` actually acquires the lock while reading
+phase, not just that it isn't left held afterward; `T-V1110-ING-02` now
+tracks the closing thread (a `factory=`-based connection subclass), not
+just the opening one, and asserts the second job's own success reply;
+`T-V1110-ING-04` asserts the refused user receives *no* status message,
+not just that the refusal is their last message; `T-V1110-DOC-05` was
+rewritten to drive a real job through `run_one` (`EMBED_BATCH_SIZE`
+patched to 1, three real chunks) instead of poking `job.phase`/
+`last_text` directly, so it now proves `_process`'s own progress wiring
+and `_handle_documents`' `worker=` threading, not just the rendering
+function; `T-V1110-ING-05`'s "cancel mid-embedding" now has three real
+embed batches (same `EMBED_BATCH_SIZE` patch) and asserts batches 2/3
+never ran; `T-V1110-ING-07` gained a budget-exceeded sibling test.
+`T-V1110-ERR-01` and `T-V1110-SEC-01` were also consolidated from
+per-clause function names onto the spec's own frozen `module::function`
+ids (`test_t_v1110_err_01_error_matrix_strings`,
+`test_t_v1110_sec_01_nothing_new_executed_written_reached_or_leaked` —
+sec.11.3's test table, the eventual `T-V1110-INV-01` inventory target),
+so later tasks extend these functions rather than rename them. Net test
+count after consolidation: **18** new test functions (`tests/
+test_v1110_ing.py` 14, `tests/test_v1110_err.py` 2, `tests/
+test_v1110_sec.py` 1, `T-V1110-DOC-05` 1), all green, each now carrying
+assertions verified to bite.
+
+**Seven amendments beyond the brief's literal staging list, all disclosed
+in the prompt file's `## Amendments` section:**
+
+1. `Reservation.filename`/`IngestJob.monotonic` — two fields beyond the
+   spec's constructor prose, neither part of any frozen contract (only
+   `IngestWorker.__init__`'s signature is, per `T-V1110-SEC-01`).
+   `IngestJob.monotonic` carries the loop thread's own clock (real or
+   fake) through to the worker's own budget/cancel checks — without it, a
+   test's fake `monotonic` for `started_at` would leave every later check
+   running against the real wall clock.
+2. `IngestWorker._tokens`, a separate `int` counter, not derived from
+   `len(self._in_flight)` or the queue's own size — the only way to
+   reconcile "at most four capacity tokens" with ING-11's own "four
+   queued jobs and a fifth, running" scenario is a token that frees at
+   dequeue while the job's user-slot persists until the job ends.
+3. ~30 direct `bot._handle_document(...)` call sites and two `process()`
+   test helpers, across `tests/test_v190_commands.py`,
+   `tests/test_v190_e2e.py` and `tests/test_v1110_doc.py` — not in the
+   brief's own staging list, which named only one file's typing-ceiling
+   rewrite. A direct, foreseeable consequence of the split itself: a bare
+   `_handle_document` call no longer runs a document to completion.
+   Fixed with a new `_run_document` test helper (mirrored, self-contained,
+   into both files that needed it) and an auto-drain addition to the two
+   `process()` helpers.
+4. `tests/test_v190_agents.py`'s two README-pin tests needed their
+   literal needles updated to the new caps/strings, plus two new needles
+   (`❌ Interrupted by restart.`, `Indexing is already finishing.`) — T0's
+   own pin inventory had already flagged these exact sites as T5's, so
+   expected work, but outside the brief's literal staging list.
+5. One pre-existing fake-clock test's `_seq_clock(0.0, 400.0)` no longer
+   trips the raised 1800 s budget (400 < 1800); updated to `2000.0` — a
+   direct, foreseeable consequence of ING-01's constant bump.
+6. `tests/fakes.py`: `FakeTelegram.download_file` gained an accepted-but-
+   unused `should_stop=None` keyword (signature parity); `FakeEmbedder`
+   gained an optional `hook` callable, invoked with the 1-based batch
+   number after each `embed()` call.
+7. `worker is None` inside `_handle_document` (past the five pre-checks)
+   refuses with `DOC_QUEUE_FULL_REPLY` rather than silently dropping the
+   upload — not named anywhere in the spec's own text (`run_selftest` is
+   the only caller that ever passes no worker, and it never sends a
+   document update). Confirmed no other caller reaches this path:
+   `devtools/bench.py` is the only `devtools`/`evals` caller of
+   `process_update`, and it only ever sends text updates.
+
+**No `cited → actual` file:line drift beyond a few lines.** Every
+brief-cited location matched the live tree closely enough to edit without
+ambiguity. All 18 `bot.py`-targeting entries in `devtools/
+mutation_check.py`'s `MUTATIONS` list were read before any edit (this
+task does not run gate 6, but T7 will); only `v190-size-precheck-disabled`
+overlaps this diff, and its `find` line was never touched.
+`documents.py` has zero mutation entries today, so no `_check_budget`/
+`index_document` edit needed similar auditing.
+
+- T5 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) |
+  brief: docs/spec/task-briefs/v1110-T5.md | map vs actual: matches the
+  reading map closely, no drift beyond a few lines; seven deliberate
+  amendments beyond the brief's literal text, all disclosed above and in
+  the prompt file, each because the literal instruction would have left
+  something unspecified (two data-model fields, the token/slot
+  bookkeeping, the `worker is None` fallback) or missed a direct,
+  foreseeable consequence of the split itself (the ~30 test call sites,
+  the pin-table needles, one fake-clock value, the two fakes.py
+  signature-parity additions); EC-02 test-first was **not** followed for
+  this task's 18 new tests, disclosed plainly above, not described as
+  partial compliance; a pre-commit advisor review found several of those
+  tests asserted less than intended, all fixed and each fix's bite
+  confirmed (bug injected, test watched fail, bug reverted, diff
+  unchanged) before this commit
+
+**Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
+brief), each run verbatim as AGENTS.md lists it, no added flags:
+`uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run --locked
+ruff check .` — all checks passed, exit 0 (after fixing one genuine
+`F821`: `process_update`'s `worker: IngestWorker | None` annotation
+referenced the class before its file-order definition — Python 3.14's
+PEP 649 default lazy-annotation evaluation let `import bot` succeed
+anyway, but `ruff` still flags it correctly under traditional
+order-sensitive semantics; fixed by quoting that one annotation as a
+forward reference, plus two `E501` wraps and one `RET501`). `uv run
+--locked pytest` — green, final run exit 0 (2,371 tests collected via
+`--collect-only -q`, after the review round's consolidation from 20 to 18
+new test functions); across this task's several runs, one run hit the
+brief's own disclosed pre-existing flake
+(`tests/test_v1103_red_team.py::test_t_v1103_rt_06_leak_shape_fixture_still_fails_on_clause_c_only`,
+a `pytest-xdist` worker-distribution issue named in this task's own
+brief, not this task's to fix), gone on the next run. `uv run --locked
+python bot.py --selftest` — `selftest: OK`, exit 0 (`run_selftest`
+constructs no
+worker, confirmed still true).
 
 ## T6 — not reached
 

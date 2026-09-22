@@ -1,15 +1,23 @@
 """Entry point: Telegram long polling, update dispatch and the two selftests.
 
-The process is single-threaded and sequential: updates are handled strictly one
-at a time. The only threads are the two output readers created per `exec` call.
+The polling loop itself is single-threaded and sequential: updates are
+dequeued and dispatched strictly one at a time. Document uploads are the one
+exception (v1.11.0 T5, `REQ-V1110-ING-02`): `_handle_document` only
+pre-checks, reserves and enqueues on the loop thread -- the actual indexing
+runs on `IngestWorker`'s own daemon thread, `IngestWorker._run`, so a large
+upload never blocks the chat. The dashboard server (`dashboard_server.py`)
+and the two output readers created per `exec` call are the process's other
+threads.
 """
 
+import enum
 import functools
 import hashlib
 import html
 import json
 import logging
 import os
+import queue
 import random
 import re
 import shutil
@@ -26,6 +34,7 @@ import tomllib
 import unicodedata
 import zipfile
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import docx.opc.exceptions
@@ -87,11 +96,15 @@ USAGE = "usage: bot.py [--selftest|--selftest-live|--version] [--no-dashboard]"
 
 # v1.9.0: the document upload flow (REQ-V190-CMD-01..07) and its error matrix
 # (REQ-V190-ERR-01), the Telegram-facing half. `DOCUMENT_MAX_BYTES` is
-# CMD-02/-03's 10 MiB cap, checked both before download (`file_size`) and
-# during it (`TelegramClient.download_file`'s streamed cap).
-DOCUMENT_MAX_BYTES = 10_485_760
+# CMD-02/-03's cap, checked both before download (`file_size`) and during it
+# (`TelegramClient.download_file`'s streamed cap). v1.11.0 T5 (REQ-V1110-
+# ING-01) raises it to 20,000,000 -- decimal 20 MB, the Bot API's own
+# ceiling ("bots can download files of up to 20MB in size" -- `getFile`
+# docs); decimal keeps the cap under that ceiling whichever unit Telegram
+# means.
+DOCUMENT_MAX_BYTES = 20_000_000
 DOC_RAG_NOT_CONFIGURED_REPLY = "Document search is not configured on this bot."
-DOC_TOO_LARGE_REPLY = "File too large (over 10 MiB)."
+DOC_TOO_LARGE_REPLY = "File too large (over 20 MB)."
 DOC_UNSUPPORTED_REPLY = "Unsupported file type. Supported: .txt .md .docx .pdf"
 DOC_LIMIT_REPLY = "Limit of 20 documents reached. Use /delete <filename>."
 DOC_CORRUPTED_PDF_REPLY = "Could not read this PDF file."
@@ -110,10 +123,19 @@ DOC_EMBEDDING_TIMEOUT_REPLY = "Embedding service timed out. Please try again lat
 DOC_STORAGE_ERROR_REPLY = "Storage error. The document was not saved."
 DOC_DOWNLOAD_TIMEOUT_REPLY = "Download timed out. Please try again."
 DOC_TELEGRAM_ERROR_REPLY = "Telegram error while receiving the file. Please try again."
-DOC_BUDGET_EXCEEDED_REPLY = "Indexing timed out (over 300 s). Nothing was saved."
+DOC_BUDGET_EXCEEDED_REPLY = "Indexing timed out (over 1800 s). Nothing was saved."
 DOC_HANDLER_FAILED_REPLY = "Something went wrong while processing the document."
 DOCUMENTS_EMPTY_REPLY = "No documents yet. Send me a .txt, .md, .docx or .pdf file."
 DELETE_USAGE_REPLY = "Usage: /delete <filename> | /delete #<id>"
+# v1.11.0 T5 (REQ-V1110-ING-02..05): the ingest worker -- one in-flight job
+# per user, a four-slot admission queue (a fifth, reserved physical slot
+# for the shutdown sentinel -- see `INGEST_QUEUE_MAX`), cooperative cancel.
+INGEST_QUEUE_MAX = 4
+DOC_QUEUE_FULL_REPLY = "Indexing queue is full; try again later."
+CANCEL_NOTHING_REPLY = "Nothing to cancel."
+CANCEL_ALREADY_FINISHING_REPLY = "Indexing is already finishing."
+DOC_CANCELLED_REPLY = "❌ Cancelled."
+DOC_INTERRUPTED_REPLY = "❌ Interrupted by restart."
 # v1.11.0 T3 (REQ-V1110-SES-02/-03): sessions -- list and switch.
 SESSIONS_LIST_LIMIT = 10
 SESSION_USAGE_REPLY = "Usage: /session <id> (see /sessions)"
@@ -301,11 +323,22 @@ class TelegramClient:
     def get_file(self, file_id: str) -> dict:
         return self.call("getFile", {"file_id": file_id}, read_timeout=DEFAULT_READ_TIMEOUT_S)
 
-    def download_file(self, file_path: str, *, max_bytes: int) -> bytes:
+    def download_file(
+        self,
+        file_path: str,
+        *,
+        max_bytes: int,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> bytes | None:
         """REQ-V190-CMD-02: a streamed GET, capped at `max_bytes` -- the
         buffer is never allowed to exceed it, not even transiently. Clause
         order is normative (see `TelegramDownloadTimeout`): the timeout
-        clause must come before the generic `TransportError` one."""
+        clause must come before the generic `TransportError` one.
+        `should_stop` (REQ-V1110-ING-04, v1.11.0 T5) is checked between
+        streamed chunks; the agent's own fetch/exec paths pass nothing
+        (`None`, unchanged behavior). Once `should_stop()` is true the
+        stream is closed and this returns `None` instead of `bytes` --
+        the caller's own post-download checkpoint is what raises."""
         url = f"{TELEGRAM_API_HOST}/file/bot{self._token}/{file_path}"
         timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
         try:
@@ -320,6 +353,9 @@ class TelegramClient:
                         response.close()
                         raise DocumentTooLarge("downloaded file exceeds the size cap")
                     buffer.extend(chunk)
+                    if should_stop is not None and should_stop():
+                        response.close()
+                        return None
         except httpx.TimeoutException as exc:
             raise TelegramDownloadTimeout("download timed out") from exc
         except httpx.TransportError as exc:
@@ -410,6 +446,10 @@ class _StatusMessage:
         self._chat_id = chat_id
         self._message_id: int | None = None
         self._disabled = False
+        # v1.11.0 T5 (REQ-V1110-DOC-05): the last text `update()` attempted
+        # to send, so `/documents`' in-flight line can show an ingest job's
+        # progress without re-deriving it from anywhere else.
+        self.last_text: str | None = None
 
     def on_tool(self, name: str, first_argument: str) -> None:
         if self._disabled:
@@ -429,6 +469,7 @@ class _StatusMessage:
         caller's cue to fall back to `_send` when it returns `False`."""
         if self._disabled:
             return False
+        self.last_text = text
         if self._message_id is None:
             self._start(text)
         else:
@@ -895,6 +936,7 @@ def process_update(
     dashboard_status: str = "off (--no-dashboard)",
     embedder=None,
     rerank_llm=None,
+    worker: "IngestWorker | None" = None,
 ) -> None:
     if not isinstance(update, dict) or not isinstance(update.get("update_id"), int):
         log.warning("update without a usable update_id ignored")
@@ -960,6 +1002,7 @@ def process_update(
             chat_id=chat_id,
             from_id=from_id,
             embedder=embedder,
+            worker=worker,
         )
         return
     text = message.get("text")
@@ -1024,11 +1067,14 @@ def process_update(
             _handle_reload_skills(tg, skills, chat_id)
             return
         if name == "/documents":
-            _handle_documents(conn, tg, chat_id, from_id)
+            _handle_documents(conn, tg, chat_id, from_id, worker=worker)
             return
         if name == "/delete":
             argument = stripped[len(token) :].strip()
             _handle_delete(conn, tg, chat_id, from_id, argument)
+            return
+        if name == "/cancel":
+            _handle_cancel(tg, chat_id, from_id, worker)
             return
         if name == "/sessions":
             _handle_sessions(conn, tg, chat_id, from_id)
@@ -1785,13 +1831,13 @@ def _log_ext(filename: str | None) -> str:
     return filename.rsplit(".", 1)[-1].lower()[:10]
 
 
-def _document_error_ending(tg, chat_id: int, status: "_StatusMessage", typing, reply: str) -> None:
-    """REQ-V190-CMD-04's failure ending: the typing indicator stops on every
-    path; the status message is edited to `reply` and kept, or -- when no
-    message exists or status work is disabled -- `reply` goes through
-    `_send` instead. Exactly one error message reaches the user either way.
+def _document_error_ending(tg, chat_id: int, status: "_StatusMessage", reply: str) -> None:
+    """REQ-V190-CMD-04's failure ending (the typing indicator dropped from
+    this path entirely, v1.11.0 T5 REQ-V1110-ING-05): the status message is
+    edited to `reply` and kept, or -- when no message exists or status work
+    is disabled -- `reply` goes through `_send` instead. Exactly one error
+    message reaches the user either way.
     """
-    typing.stop()
     if not status.update(reply):
         _send(tg, chat_id, [reply])
 
@@ -1805,6 +1851,352 @@ def _document_success_reply(filename: str, result: "documents.IndexResult") -> s
     return f"✅ {filename}: {result.chunk_count} chunks. Ask me about it."
 
 
+def _still_indexing_reply(filename: str) -> str:
+    return f"⏳ Still indexing {filename}; wait for it to finish."
+
+
+def _cancelling_reply(filename: str) -> str:
+    return f"Cancelling {filename}…"
+
+
+class SubmitError(enum.Enum):
+    """`IngestWorker.reserve`'s two atomic-admission failures (REQ-V1110-
+    ING-03): `inflight` -- the caller already holds a reservation or a job;
+    `full` -- no capacity token is free."""
+
+    inflight = "inflight"
+    full = "full"
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """The window between a successful `reserve()` and the matching
+    `enqueue()`/`release()` (REQ-V1110-ING-02) -- carries just enough to
+    build `IngestJob` and to name the reservation's own filename in a
+    row-6 refusal that lands during that window (`T-V1110-ING-10`)."""
+
+    from_id: int
+    filename: str
+
+
+@dataclass
+class IngestJob:
+    """One admitted document upload, lock-protected `phase`/`cancel_reason`
+    fields aside (REQ-V1110-ING-04) -- both are read and written only
+    through `IngestWorker`'s own lock, never touched directly. `monotonic`
+    is a T5 addition beyond the spec's own constructor prose: it is not
+    part of any frozen signature, and carrying the loop thread's own clock
+    (real or, in a test, a fake one) is what lets `started_at`'s clock and
+    the worker's own budget/cancel checks agree -- without it a test using a
+    fake `monotonic` for `started_at` would still be timed against the real
+    wall clock everywhere else, and `test_t_v190_cmd_07_budget_after_*`-style
+    scripted clocks would spuriously fire (or fail to fire) real time.
+    """
+
+    chat_id: int
+    from_id: int
+    document: dict
+    filename: str
+    status: "_StatusMessage"
+    started_at: float
+    cancel: threading.Event
+    cancel_reason: str | None = None
+    phase: str = "queued"
+    monotonic: Callable[[], float] = time.monotonic
+
+    def should_stop(self) -> bool:
+        """`TelegramClient.download_file`'s `should_stop` callable (REQ-
+        V1110-ING-04): true once cancelled or once the budget from
+        `started_at` is spent."""
+        if self.cancel.is_set():
+            return True
+        return (self.monotonic() - self.started_at) > documents.INDEX_BUDGET_S_DEFAULT
+
+
+def _check_cancel_budget(job: IngestJob) -> None:
+    """The worker's own pre-index checkpoint (REQ-V1110-ING-04): raises
+    `documents.IndexCancelled` when `job.cancel` is set, `documents.
+    IndexBudgetExceeded` when the budget from `job.started_at` is spent --
+    called before `getFile`, after `getFile` and immediately after
+    `download_file` returns; `documents.index_document`'s own checkpoints
+    (extraction, chunking, each embeddings batch, between PDF pages) follow
+    from there, threaded the same `cancel` event."""
+    if job.cancel.is_set():
+        raise documents.IndexCancelled(f"cancelled ({job.cancel_reason})")
+    elapsed = job.monotonic() - job.started_at
+    if elapsed > documents.INDEX_BUDGET_S_DEFAULT:
+        raise documents.IndexBudgetExceeded(
+            f"budget exceeded before index_document: {elapsed:.1f}s > "
+            f"{documents.INDEX_BUDGET_S_DEFAULT}s"
+        )
+
+
+def _cancel_ending_reply(job: IngestJob) -> str:
+    return DOC_INTERRUPTED_REPLY if job.cancel_reason == "shutdown" else DOC_CANCELLED_REPLY
+
+
+_INGEST_SENTINEL = object()  # never handed out by admission; see `IngestWorker.shutdown`
+
+
+class IngestWorker:
+    """v1.11.0 T5 (REQ-V1110-ING-02..05): one daemon thread, a bounded
+    queue, its own lazily-acquired connection, driven synchronously in
+    tests via `run_one()`. See the class methods for the two-phase
+    admission protocol, the cooperative-cancel protocol and the shutdown
+    drain -- this docstring only fixes the one frozen contract other tasks
+    depend on: `__init__`'s exact signature (`T-V1110-SEC-01`)."""
+
+    def __init__(self, cfg: Config, tg, embedder, db_path: Path) -> None:
+        self._cfg = cfg
+        self._tg = tg
+        self._embedder = embedder
+        self._db_path = db_path
+        # Five physical slots: admission (`reserve`) hands out at most
+        # `INGEST_QUEUE_MAX` (4) capacity tokens, one slot always free for
+        # the shutdown sentinel -- `shutdown()`'s `put_nowait` can never
+        # raise `queue.Full` and never blocks behind a running job.
+        self._queue: queue.Queue = queue.Queue(maxsize=INGEST_QUEUE_MAX + 1)
+        self._lock = threading.Lock()
+        self._in_flight: dict[int, Reservation | IngestJob] = {}
+        self._tokens = 0
+        self._conn: sqlite3.Connection | None = None
+        self._shutdown_called = False
+        self._drained = False
+
+    # -- two-phase admission (REQ-V1110-ING-02/-03) ------------------------
+
+    def reserve(self, from_id: int, filename: str) -> Reservation | SubmitError:
+        with self._lock:
+            if from_id in self._in_flight:
+                return SubmitError.inflight
+            if self._tokens >= INGEST_QUEUE_MAX:
+                return SubmitError.full
+            self._tokens += 1
+            reservation = Reservation(from_id=from_id, filename=filename)
+            self._in_flight[from_id] = reservation
+            return reservation
+
+    def enqueue(self, reservation: Reservation, job: IngestJob) -> None:
+        with self._lock:
+            self._in_flight[reservation.from_id] = job
+        self._queue.put_nowait(job)
+
+    def release(self, reservation: Reservation) -> None:
+        with self._lock:
+            self._in_flight.pop(reservation.from_id, None)
+            self._tokens -= 1
+
+    def _blocking_filename(self, from_id: int) -> str | None:
+        """Not part of ING-02's public API: a small T5 addition so a row-6
+        refusal can name whatever is blocking `from_id` -- a bare
+        `Reservation` (the `reserve`/`enqueue` race, `T-V1110-ING-10`) or a
+        queued/running `IngestJob` -- since `in_flight()` itself only ever
+        returns an `IngestJob` by ING-02's own contract."""
+        with self._lock:
+            entry = self._in_flight.get(from_id)
+            return entry.filename if entry is not None else None
+
+    # -- introspection (REQ-V1110-ING-03/-04) -------------------------------
+
+    def in_flight(self, from_id: int) -> IngestJob | None:
+        with self._lock:
+            entry = self._in_flight.get(from_id)
+            return entry if isinstance(entry, IngestJob) else None
+
+    def cancel(self, from_id: int) -> bool | None:
+        with self._lock:
+            entry = self._in_flight.get(from_id)
+            if not isinstance(entry, IngestJob):
+                return None
+            if entry.phase == "committing":
+                return False
+            entry.cancel_reason = "user"
+            entry.cancel.set()
+            return True
+
+    # -- processing (REQ-V1110-ING-02) --------------------------------------
+
+    def run_one(self, conn: sqlite3.Connection | None = None) -> None:
+        """One `get()` -> process -> mark done, run on the calling thread.
+        The thread wrapper `_run` is the only place that loops over this --
+        keeping the loop out of `run_one` is what lets a test drive exactly
+        one job per call, synchronously."""
+        item = self._queue.get()
+        try:
+            if item is _INGEST_SENTINEL:
+                self._drained = True
+                return
+            job = item
+            with self._lock:
+                job.phase = "running"
+                self._tokens -= 1  # freed at dequeue -- ING-11 relies on this
+            try:
+                active_conn = conn
+                if active_conn is None:
+                    # Lazy, long-lived, acquired on the calling thread --
+                    # never before a job was dequeued (REQ-V1110-ING-02).
+                    if self._conn is None:
+                        self._conn = storage.connect(self._db_path)
+                    active_conn = self._conn
+                self._process(job, active_conn)
+            except Exception:
+                # A connection-acquisition failure lands here too (it is
+                # outside `_process`'s own try): the job still ends with
+                # DOC_HANDLER_FAILED_REPLY and the worker continues.
+                log.exception("document handler failed")
+                _document_error_ending(self._tg, job.chat_id, job.status, DOC_HANDLER_FAILED_REPLY)
+            finally:
+                with self._lock:
+                    self._in_flight.pop(job.from_id, None)
+        finally:
+            self._queue.task_done()
+
+    def _process(self, job: IngestJob, conn: sqlite3.Connection) -> None:
+        """The ERR-01 clause chain, moved verbatim (plus DOC-03's two new
+        rows and ING-04's cancel checkpoints/clause) from the pre-T5 inline
+        `_handle_document` -- see that function's own history for the
+        original shape."""
+        status = job.status
+        try:
+            _check_cancel_budget(job)
+            file_info = self._tg.get_file(job.document.get("file_id"))
+            file_path = file_info.get("file_path") if isinstance(file_info, dict) else None
+            if not isinstance(file_path, str) or not file_path:
+                # `file_path` is optional on Telegram's `File` object; treat a
+                # reply without it as a transport failure (row 11), never as a
+                # corrupted-document class further down this chain.
+                raise TelegramError(redact("telegram getFile returned no file_path"))
+            _check_cancel_budget(job)
+            data = self._tg.download_file(
+                file_path, max_bytes=DOCUMENT_MAX_BYTES, should_stop=job.should_stop
+            )
+            _check_cancel_budget(job)
+            result = documents.index_document(
+                conn,
+                user_id=job.from_id,
+                filename=job.filename,
+                data=data,
+                embedder=self._embedder,
+                progress=status.update,
+                now=storage.utc_now_iso(),
+                started_at=job.started_at,
+                monotonic=job.monotonic,
+                budget_s=documents.INDEX_BUDGET_S_DEFAULT,
+                cancel=job.cancel,
+                before_commit=lambda: self._mark_committing(job),
+            )
+        except documents.IndexCancelled:
+            log.warning("document cancelled: %s", job.cancel_reason)
+            _document_error_ending(self._tg, job.chat_id, status, _cancel_ending_reply(job))
+            return
+        except documents.DocumentLimitExceededError:
+            log.warning("document refused: limit")
+            _document_error_ending(self._tg, job.chat_id, status, DOC_LIMIT_REPLY)
+            return
+        except TelegramDownloadTimeout:
+            log.warning("document failed: download timeout")
+            _document_error_ending(self._tg, job.chat_id, status, DOC_DOWNLOAD_TIMEOUT_REPLY)
+            return
+        except TelegramError as exc:
+            log.warning("document failed: telegram: %s", redact(str(exc)))
+            _document_error_ending(self._tg, job.chat_id, status, DOC_TELEGRAM_ERROR_REPLY)
+            return
+        except EmbeddingTimeoutError:
+            log.warning("document failed: embeddings timeout")
+            _document_error_ending(self._tg, job.chat_id, status, DOC_EMBEDDING_TIMEOUT_REPLY)
+            return
+        except documents.IndexBudgetExceeded as exc:
+            log.warning("document failed: %s", redact(str(exc)))
+            _document_error_ending(self._tg, job.chat_id, status, DOC_BUDGET_EXCEEDED_REPLY)
+            return
+        except documents.EmptyDocumentError:
+            log.warning("document refused: empty")
+            _document_error_ending(self._tg, job.chat_id, status, DOC_EMPTY_REPLY)
+            return
+        except documents.ExtractedTextTooLargeError as exc:
+            log.warning("document refused: text too large %s", redact(str(exc)))
+            _document_error_ending(self._tg, job.chat_id, status, DOC_TEXT_TOO_LARGE_REPLY)
+            return
+        except documents.DocxArchiveTooLargeError as exc:
+            log.warning("document refused: docx archive bounds %s", redact(str(exc)))
+            _document_error_ending(self._tg, job.chat_id, status, DOC_DOCX_BOUNDS_REPLY)
+            return
+        except documents.PdfTooManyPagesError as exc:
+            log.warning("document refused: pdf pages %s", redact(str(exc)))
+            _document_error_ending(self._tg, job.chat_id, status, DOC_PDF_PAGES_REPLY)
+            return
+        except DocumentTooLarge:
+            log.warning("document refused: file too large")
+            _document_error_ending(self._tg, job.chat_id, status, DOC_TOO_LARGE_REPLY)
+            return
+        except (zipfile.BadZipFile, docx.opc.exceptions.PackageNotFoundError, KeyError) as exc:
+            log.warning("document refused: corrupted docx: %s", exc.__class__.__name__)
+            _document_error_ending(self._tg, job.chat_id, status, DOC_CORRUPTED_DOCX_REPLY)
+            return
+        except pypdf.errors.PyPdfError as exc:
+            log.warning("document refused: corrupted pdf: %s", exc.__class__.__name__)
+            _document_error_ending(self._tg, job.chat_id, status, DOC_CORRUPTED_PDF_REPLY)
+            return
+        except EmbeddingError as exc:
+            log.warning("document failed: embeddings: %s", redact(str(exc)))
+            _document_error_ending(self._tg, job.chat_id, status, DOC_EMBEDDING_ERROR_REPLY)
+            return
+        except sqlite3.Error as exc:
+            log.exception("document failed: sqlite: %s", exc.__class__.__name__)
+            _document_error_ending(self._tg, job.chat_id, status, DOC_STORAGE_ERROR_REPLY)
+            return
+        except Exception:
+            log.exception("document handler failed")
+            _document_error_ending(self._tg, job.chat_id, status, DOC_HANDLER_FAILED_REPLY)
+            return
+
+        status.finish(ok=True)
+        _send(self._tg, job.chat_id, [_document_success_reply(job.filename, result)])
+
+    def _mark_committing(self, job: IngestJob) -> None:
+        """`documents.index_document`'s `before_commit` callable (REQ-1110-
+        ING-04): moves the job to `committing` under the lock, immediately
+        before `BEGIN IMMEDIATE` -- so the transition is atomic with respect
+        to `/cancel`'s own lock-protected read; no checkpoint follows it."""
+        with self._lock:
+            job.phase = "committing"
+
+    # -- wake-up and shutdown (REQ-V1110-ING-02/-05) -------------------------
+
+    def _run(self) -> None:
+        """The thread wrapper `main()` starts as a daemon: loops over
+        `run_one` until the sentinel is drained, then closes the
+        worker-owned connection (idempotent)."""
+        try:
+            while not self._drained:
+                self.run_one()
+        finally:
+            self.close()
+
+    def shutdown(self) -> None:
+        """Idempotent (a second call is a no-op -- `queue.Queue.put_nowait`
+        would otherwise raise `queue.Full` on a second sentinel): sets
+        `cancel_reason = "shutdown"` and the cancel event on every job in
+        phase `queued` or `running` (never `committing`, which finishes),
+        then enqueues the private sentinel into the fifth, reserved slot."""
+        with self._lock:
+            if self._shutdown_called:
+                return
+            self._shutdown_called = True
+            for entry in self._in_flight.values():
+                if isinstance(entry, IngestJob) and entry.phase in ("queued", "running"):
+                    entry.cancel_reason = "shutdown"
+                    entry.cancel.set()
+        self._queue.put_nowait(_INGEST_SENTINEL)
+
+    def close(self) -> None:
+        """Idempotent -- safe to call twice (`_run`'s own `finally` and,
+        harmlessly, a caller that also calls it)."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
 def _handle_document(
     document: dict,
     *,
@@ -1814,13 +2206,18 @@ def _handle_document(
     chat_id: int,
     from_id: int,
     embedder,
+    worker: IngestWorker | None = None,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
-    """REQ-V190-CMD-01..04, -07: the whole document flow. `started_at` is the
-    handler's first action (DOC-04's budget origin); the five pre-checks
-    (CMD-03) return a plain reply with no status message and no `getFile`
-    call; only past them does the one exception boundary (CMD-07) take
-    over, one typed clause per ERR-01 row this task owns."""
+    """REQ-V190-CMD-01..04, -07 / REQ-V1110-ING-02: the loop-thread half
+    only. `started_at` is still the handler's first action (DOC-04's budget
+    origin); the five pre-checks (CMD-03) still a plain reply with no
+    status message and no `getFile` call. Past them, this function's only
+    remaining job is the two-phase `reserve`/`enqueue` admission (ING-03):
+    the actual indexing (`getFile`, `download_file`,
+    `documents.index_document`, the ERR-01 clause chain) moved to
+    `IngestWorker._process`, run on the worker's own thread through
+    `run_one` -- so a large upload never blocks the chat."""
     started_at = monotonic()
 
     if embedder is None or not cfg.rag_enabled:
@@ -1854,95 +2251,42 @@ def _handle_document(
         _send(tg, chat_id, [DOC_LIMIT_REPLY])
         return
 
+    if worker is None:
+        # No worker configured (`run_selftest` constructs none, REQ-V1110-
+        # ING-02) -- a document past the five pre-checks has nowhere to go;
+        # refuse the same way a full queue would rather than drop it.
+        log.warning("document refused: no ingest worker configured")
+        _send(tg, chat_id, [DOC_QUEUE_FULL_REPLY])
+        return
+
+    reservation = worker.reserve(from_id, filename)
+    if reservation is SubmitError.inflight:
+        log.warning("document refused: already indexing")
+        blocking_name = worker._blocking_filename(from_id) or filename
+        _send(tg, chat_id, [_still_indexing_reply(blocking_name)])
+        return
+    if reservation is SubmitError.full:
+        log.warning("document refused: queue full")
+        _send(tg, chat_id, [DOC_QUEUE_FULL_REPLY])
+        return
+
     status = _StatusMessage(tg, chat_id)
-    typing = _TypingIndicator(tg, chat_id, ceiling_s=documents.INDEX_BUDGET_S_DEFAULT)
-    status.update("📄 received")
-    typing.start()
-
-    try:
-        file_info = tg.get_file(document.get("file_id"))
-        file_path = file_info.get("file_path") if isinstance(file_info, dict) else None
-        if not isinstance(file_path, str) or not file_path:
-            # `file_path` is optional on Telegram's `File` object; treat a
-            # reply without it as a transport failure (row 11), never as a
-            # corrupted-document class further down this chain.
-            raise TelegramError(redact("telegram getFile returned no file_path"))
-        data = tg.download_file(file_path, max_bytes=DOCUMENT_MAX_BYTES)
-        result = documents.index_document(
-            conn,
-            user_id=from_id,
-            filename=filename,
-            data=data,
-            embedder=embedder,
-            progress=status.update,
-            now=storage.utc_now_iso(),
-            started_at=started_at,
-            monotonic=monotonic,
-        )
-    except documents.DocumentLimitExceededError:
-        log.warning("document refused: limit")
-        _document_error_ending(tg, chat_id, status, typing, DOC_LIMIT_REPLY)
+    if not status.update("📄 received"):
+        worker.release(reservation)
         return
-    except TelegramDownloadTimeout:
-        log.warning("document failed: download timeout")
-        _document_error_ending(tg, chat_id, status, typing, DOC_DOWNLOAD_TIMEOUT_REPLY)
-        return
-    except TelegramError as exc:
-        log.warning("document failed: telegram: %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_TELEGRAM_ERROR_REPLY)
-        return
-    except EmbeddingTimeoutError:
-        log.warning("document failed: embeddings timeout")
-        _document_error_ending(tg, chat_id, status, typing, DOC_EMBEDDING_TIMEOUT_REPLY)
-        return
-    except documents.IndexBudgetExceeded as exc:
-        log.warning("document failed: %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_BUDGET_EXCEEDED_REPLY)
-        return
-    except documents.EmptyDocumentError:
-        log.warning("document refused: empty")
-        _document_error_ending(tg, chat_id, status, typing, DOC_EMPTY_REPLY)
-        return
-    except documents.ExtractedTextTooLargeError as exc:
-        log.warning("document refused: text too large %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_TEXT_TOO_LARGE_REPLY)
-        return
-    except documents.DocxArchiveTooLargeError as exc:
-        log.warning("document refused: docx archive bounds %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_DOCX_BOUNDS_REPLY)
-        return
-    except documents.PdfTooManyPagesError as exc:
-        log.warning("document refused: pdf pages %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_PDF_PAGES_REPLY)
-        return
-    except DocumentTooLarge:
-        log.warning("document refused: file too large")
-        _document_error_ending(tg, chat_id, status, typing, DOC_TOO_LARGE_REPLY)
-        return
-    except (zipfile.BadZipFile, docx.opc.exceptions.PackageNotFoundError, KeyError) as exc:
-        log.warning("document refused: corrupted docx: %s", exc.__class__.__name__)
-        _document_error_ending(tg, chat_id, status, typing, DOC_CORRUPTED_DOCX_REPLY)
-        return
-    except pypdf.errors.PyPdfError as exc:
-        log.warning("document refused: corrupted pdf: %s", exc.__class__.__name__)
-        _document_error_ending(tg, chat_id, status, typing, DOC_CORRUPTED_PDF_REPLY)
-        return
-    except EmbeddingError as exc:
-        log.warning("document failed: embeddings: %s", redact(str(exc)))
-        _document_error_ending(tg, chat_id, status, typing, DOC_EMBEDDING_ERROR_REPLY)
-        return
-    except sqlite3.Error as exc:
-        log.exception("document failed: sqlite: %s", exc.__class__.__name__)
-        _document_error_ending(tg, chat_id, status, typing, DOC_STORAGE_ERROR_REPLY)
-        return
-    except Exception:
-        log.exception("document handler failed")
-        _document_error_ending(tg, chat_id, status, typing, DOC_HANDLER_FAILED_REPLY)
-        return
-
-    typing.stop()
-    status.finish(ok=True)
-    _send(tg, chat_id, [_document_success_reply(filename, result)])
+    job = IngestJob(
+        chat_id=chat_id,
+        from_id=from_id,
+        document=document,
+        filename=filename,
+        status=status,
+        started_at=started_at,
+        cancel=threading.Event(),
+        cancel_reason=None,
+        phase="queued",
+        monotonic=monotonic,
+    )
+    worker.enqueue(reservation, job)
 
 
 def _render_size(size_bytes: int) -> str:
@@ -1954,7 +2298,22 @@ def _render_size(size_bytes: int) -> str:
     return f"{size_bytes / 1_000:.1f} KB"
 
 
-def _handle_documents(conn, tg, chat_id: int, from_id: int) -> None:
+def _in_flight_stage(job: IngestJob) -> str:
+    """DOC-05: the job's last progress string with its `📄 ` prefix
+    stripped (`received`, `extracted: …`, `chunked: N`, `embedding: i/n`)
+    -- or, before the first progress string ever landed (a job still
+    `queued`, or a `_StatusMessage` that never recorded one), the fixed
+    word `queued`."""
+    text = job.status.last_text
+    if text is None:
+        return "queued"
+    prefix = "📄 "
+    return text[len(prefix) :] if text.startswith(prefix) else text
+
+
+def _handle_documents(
+    conn, tg, chat_id: int, from_id: int, worker: IngestWorker | None = None
+) -> None:
     rows = storage.list_documents(conn, user_id=from_id)
     if not rows:
         _send(tg, chat_id, [DOCUMENTS_EMPTY_REPLY])
@@ -1975,11 +2334,33 @@ def _handle_documents(conn, tg, chat_id: int, from_id: int) -> None:
         ],
         max_width=[3, 24, 4, 8, 6, 5, 10],
     )
-    # T-V1110-DOC-05 (T5) appends an in-flight `⏳ indexing …` line after the
-    # table once the ingest worker exists; with no job in flight the table
-    # is the last thing in the body (every case this task, T2).
+    # REQ-V1110-DOC-05 (T5): one in-flight `⏳ indexing …` line after the
+    # table when the caller has a queued or running ingest job; with none,
+    # the table is the last thing in the body (every case before T5, T2).
     body = f"Your documents ({len(rows)} of {documents.DOCUMENT_LIMIT}):\n\n{table}"
+    job = worker.in_flight(from_id) if worker is not None else None
+    if job is not None:
+        body += f"\n⏳ indexing {job.filename} — {_in_flight_stage(job)}"
     send_pre(tg, chat_id, body)
+
+
+def _handle_cancel(tg, chat_id: int, from_id: int, worker: IngestWorker | None) -> None:
+    """REQ-V1110-ING-04: `/cancel` reads the caller's job and phase under
+    the worker's own lock (`IngestWorker.cancel`, atomically) -- `None` no
+    job, `True` the event was set (`queued`/`running`), `False` the job is
+    already `committing`."""
+    if worker is None:
+        _send(tg, chat_id, [CANCEL_NOTHING_REPLY])
+        return
+    result = worker.cancel(from_id)
+    if result is None:
+        _send(tg, chat_id, [CANCEL_NOTHING_REPLY])
+        return
+    if result is False:
+        _send(tg, chat_id, [CANCEL_ALREADY_FINISHING_REPLY])
+        return
+    job = worker.in_flight(from_id)
+    _send(tg, chat_id, [_cancelling_reply(job.filename if job is not None else "")])
 
 
 _DELETE_MAX_ID = 2**63 - 1  # sqlite3's INTEGER ceiling; a bigger id can't exist
@@ -2171,6 +2552,7 @@ def poll_loop(
     dashboard_status: str = "off (--no-dashboard)",
     embedder=None,
     rerank_llm=None,
+    worker: IngestWorker | None = None,
 ) -> int:
     raw = storage.get_state(conn, "last_update_id")
     offset = int(raw) + 1 if raw is not None else None
@@ -2216,6 +2598,7 @@ def poll_loop(
                     dashboard_status=dashboard_status,
                     embedder=embedder,
                     rerank_llm=rerank_llm,
+                    worker=worker,
                 )
                 if isinstance(update, dict) and isinstance(update.get("update_id"), int):
                     offset = update["update_id"] + 1
@@ -2768,6 +3151,21 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
 
+    # v1.11.0 T5 (REQ-V1110-ING-02): the ingest worker's own daemon thread,
+    # started next to the dashboard thread below -- `run_selftest` (above)
+    # constructs no worker at all, `process_update`'s `worker=None` default
+    # stays true there. The process-wide `embedder` instance above is
+    # shared with the worker thread: `[[VERIFY]]` (T5's brief) confirmed
+    # `EmbeddingsClient` holds no per-call mutable state (`llm/embeddings.py`
+    # -- `embed`/`_embed_batch`/`_post_with_retry`/`_post` build only local
+    # lists and read only constructor-time attributes), `httpx.Client` is
+    # documented thread-safe, and `tracing.start_span`'s `_current_span` is a
+    # `ContextVar` a new OS thread starts empty (`tracing.py`) -- a second
+    # `EmbeddingsClient` is not needed.
+    ingest_worker = IngestWorker(cfg, tg, embedder, cfg.db_path)
+    ingest_thread = threading.Thread(target=ingest_worker._run, daemon=True)
+    ingest_thread.start()
+
     # REQ-V160-SRV-01/-07: on by default; either switch suffices to turn it
     # off, the flag winning when they disagree. A failure to bind, to create
     # the server, or to start the thread is caught -- broadly, not just
@@ -2843,6 +3241,7 @@ def main(argv: list[str] | None = None) -> int:
             dashboard_status=dashboard_status,
             embedder=embedder,
             rerank_llm=rerank_llm,
+            worker=ingest_worker,
         )
     finally:
         if dashboard_srv is not None:
@@ -2852,6 +3251,14 @@ def main(argv: list[str] | None = None) -> int:
                 dashboard_thread.join(timeout=5.0)
                 if dashboard_thread.is_alive():
                     log.warning("dashboard: server thread did not stop within 5s")
+        # v1.11.0 T5 (REQ-V1110-ING-05): shutdown() sets the stop/cancel
+        # state and enqueues the sentinel; the join bound is 10s (not the
+        # dashboard's 5s) -- inside that window `_run` drains every
+        # cancelled job and lets a `committing` one finish its commit.
+        ingest_worker.shutdown()
+        ingest_thread.join(timeout=10.0)
+        if ingest_thread.is_alive():
+            log.warning("ingest worker: did not stop within 10s")
         client.close()
         conn.close()
 

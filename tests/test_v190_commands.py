@@ -107,9 +107,20 @@ def text_update(text, update_id=1):
     }
 
 
-def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None, **kwargs):
+def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None, worker=None, **kwargs):
+    """v1.11.0 T5 (REQ-V1110-ING-02): the document-handler split means a
+    document update, by itself, no longer runs the job to completion --
+    `_handle_document` only reserves and enqueues on the loop thread now.
+    This helper keeps every pre-T5 caller working unchanged: it builds a
+    worker when the caller does not supply one, passes it through, and --
+    only for a document update, and only when something actually got
+    enqueued (a pre-check refusal or a `SubmitError` enqueues nothing) --
+    drives that one job to completion with `worker.run_one(conn=conn)`
+    before returning, on the same (test) thread, synchronously."""
     tg = tg if tg is not None else FakeTelegram()
     llm = llm if llm is not None else FakeLLM([])
+    if worker is None:
+        worker = bot.IngestWorker(cfg, tg, embedder, cfg.db_path)
     bot.process_update(
         upd,
         conn=conn,
@@ -120,9 +131,41 @@ def process(conn, cfg, upd, *, tg=None, llm=None, embedder=None, **kwargs):
         runner=RecordingRunner(),
         bot_username=BOT_USERNAME,
         embedder=embedder,
+        worker=worker,
         **kwargs,
     )
+    message = upd.get("message")
+    if isinstance(message, dict) and isinstance(message.get("document"), dict):
+        sender = message.get("from") or {}
+        from_id = sender.get("id")
+        if worker.in_flight(from_id) is not None:
+            worker.run_one(conn=conn)
     return tg
+
+
+def _run_document(document, *, conn, tg, cfg, chat_id, from_id, embedder, worker=None, **kwargs):
+    """v1.11.0 T5 (REQ-V1110-ING-02): the direct-call equivalent of
+    `process()`'s auto-drain, for the (many) tests that call
+    `bot._handle_document` itself rather than going through
+    `process_update`. Same synchronous, same-thread completion; a no-op
+    `run_one` call when nothing was actually enqueued (a pre-check refusal
+    or a `SubmitError`). Returns the worker, so a test that wants to poke
+    at it (`in_flight`, a second call, ...) still can."""
+    w = worker if worker is not None else bot.IngestWorker(cfg, tg, embedder, cfg.db_path)
+    bot._handle_document(
+        document,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=chat_id,
+        from_id=from_id,
+        embedder=embedder,
+        worker=w,
+        **kwargs,
+    )
+    if w.in_flight(from_id) is not None:
+        w.run_one(conn=conn)
+    return w
 
 
 def _seq_clock(*values):
@@ -357,7 +400,7 @@ def test_t_v190_cmd_03_started_at_is_the_handlers_first_action(tmp_path):
 
     # rag not configured -- returns immediately after the one plain reply,
     # but `started_at` must still have been captured before it.
-    bot._handle_document(
+    _run_document(
         {"file_id": "f1", "file_name": "a.txt", "file_size": 10},
         conn=conn,
         tg=tg,
@@ -386,7 +429,7 @@ def test_t_v190_cmd_03_classify_runs_on_the_cleaned_name_not_the_raw_one(tmp_pat
     assert documents.classify(documents.clean_filename(raw_name)) == "txt"
 
     doc = {"file_id": "f1", "file_name": raw_name, "file_size": len(data)}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -433,7 +476,7 @@ def test_t_v190_err_01_row_13_pre_check_replace_at_20_is_not_the_limit(tmp_path)
     data = b"Fresh content that replaces the existing file, long enough to chunk."
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "existing.txt", "file_size": len(data)}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -459,7 +502,7 @@ def test_t_v190_cmd_04_progress_strings_and_success_ending_txt(tmp_path):
     data = b"Vacation policy: employees accrue paid leave across the year, details follow soon."
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "policy.txt", "file_size": len(data)}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -485,7 +528,7 @@ def test_t_v190_cmd_04_success_ending_pdf_carries_pages(tmp_path):
     data = write_pdf(["Page one has enough readable text to form a chunk on its own here."])
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "report.pdf", "file_size": len(data)}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -502,20 +545,25 @@ def test_t_v190_cmd_04_success_ending_pdf_carries_pages(tmp_path):
 
 
 def test_t_v190_cmd_04_typing_indicator_ceiling_is_the_index_budget(tmp_path, monkeypatch):
+    """PIN-01, rewritten by v1.11.0 T5 (REQ-V1110-ING-05): the typing
+    indicator is dropped from the document path entirely -- no
+    `_TypingIndicator` is constructed anywhere along it, loop-side
+    (reserve/enqueue) or worker-side (`run_one`). Kept under its original
+    name (T0's node-id baseline)."""
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
-    captured = {}
+    constructed = []
     real_init = bot._TypingIndicator.__init__
 
-    def spy_init(self, tg, chat_id, *, ceiling_s, **kwargs):
-        captured["ceiling_s"] = ceiling_s
-        real_init(self, tg, chat_id, ceiling_s=ceiling_s, **kwargs)
+    def spy_init(self, *args, **kwargs):
+        constructed.append((args, kwargs))
+        real_init(self, *args, **kwargs)
 
     monkeypatch.setattr(bot._TypingIndicator, "__init__", spy_init)
     tg = FakeTelegram()
     tg.files["documents/f1"] = b"short but valid enough content for one chunk to be produced okay."
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -524,17 +572,32 @@ def test_t_v190_cmd_04_typing_indicator_ceiling_is_the_index_budget(tmp_path, mo
         from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
-    assert captured["ceiling_s"] == documents.INDEX_BUDGET_S_DEFAULT == 300.0
+    assert constructed == []
     conn.close()
 
 
-def test_t_v190_cmd_04_status_disabled_falls_back_to_send_exactly_one_error(tmp_path):
+def test_t_v190_cmd_04_status_disabled_falls_back_to_send_exactly_one_error(tmp_path, monkeypatch):
+    """v1.11.0 T5 amendment (disclosed): the pre-T5 scenario here was the
+    *first* `send_message` call (the `📄 received` status send) failing --
+    under the split handler that now means `reserve()` succeeds but the
+    status send fails, so `_handle_document` calls `release()` and returns
+    with nothing enqueued at all (REQ-V1110-ING-03); the job never reaches
+    this handler, and the "falls back to `_send`" behaviour this test's
+    name describes cannot fire from that failure any more. The still-live
+    fallback this test now covers instead: the *initial* send succeeds
+    (the job is enqueued and starts), a later *edit* fails mid-job (here,
+    the first progress edit), `_StatusMessage` disables itself, and the
+    error ending falls back to `_send` for exactly one message -- the
+    `📄 received` send plus that one fallback, `tg.sent` now carries two
+    entries where the old scenario's degenerate path only ever produced
+    one."""
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
-    tg = FakeTelegram(fail_on=1, error=bot.TelegramError("boom"))
+    tg = FakeTelegram()
     tg.files["documents/f1"] = b"hi"
+    monkeypatch.setattr(tg, "edit_message_text", _raise(bot.TelegramError("boom")))
     doc = {"file_id": "f1", "file_name": "empty.txt", "file_size": 2}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -543,7 +606,7 @@ def test_t_v190_cmd_04_status_disabled_falls_back_to_send_exactly_one_error(tmp_
         from_id=USER_ID,
         embedder=FakeEmbedder(dim=16),
     )
-    assert tg.sent == [(USER_ID, bot.DOC_EMPTY_REPLY)]
+    assert tg.sent == [(USER_ID, "📄 received"), (USER_ID, bot.DOC_EMPTY_REPLY)]
     assert tg.edited == []
     conn.close()
 
@@ -739,7 +802,7 @@ def test_t_v190_err_01_row_1_no_filename_is_unsupported(tmp_path):
     cfg = make_cfg(tmp_path)
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": None, "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -757,7 +820,7 @@ def test_t_v190_err_01_row_1_unknown_extension_is_unsupported(tmp_path):
     cfg = make_cfg(tmp_path)
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "notes.exe", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -777,7 +840,7 @@ def test_t_v190_err_01_row_2_corrupted_pdf(tmp_path, monkeypatch):
     tg.files["documents/f1"] = b"not really a pdf but long enough to pass the size check okay"
     monkeypatch.setattr(documents, "extract", _raise(pypdf.errors.PdfStreamError("boom")))
     doc = {"file_id": "f1", "file_name": "report.pdf", "file_size": 60}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -797,7 +860,7 @@ def test_t_v190_err_01_row_3_corrupted_docx(tmp_path, monkeypatch):
     tg.files["documents/f1"] = b"not really a docx but long enough to pass the size check yes"
     monkeypatch.setattr(documents, "extract", _raise(zipfile.BadZipFile("boom")))
     doc = {"file_id": "f1", "file_name": "report.docx", "file_size": 60}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -816,7 +879,7 @@ def test_t_v190_err_01_row_4_empty_document(tmp_path):
     tg = FakeTelegram()
     tg.files["documents/f1"] = b"hi"
     doc = {"file_id": "f1", "file_name": "empty.txt", "file_size": 2}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -835,7 +898,7 @@ def test_t_v190_err_01_row_5a_pre_file_size_too_large(tmp_path):
     cfg = make_cfg(tmp_path)
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "big.txt", "file_size": bot.DOCUMENT_MAX_BYTES + 1}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -854,7 +917,7 @@ def test_t_v190_err_01_row_5a_mid_stream_exceeds_the_cap(tmp_path):
     tg = FakeTelegram()
     tg.files["documents/f1"] = b"x" * (bot.DOCUMENT_MAX_BYTES + 1)
     doc = {"file_id": "f1", "file_name": "big.txt", "file_size": 10}  # understates its own size
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -899,7 +962,7 @@ def test_t_v190_err_01_row_5b_variants_map_to_the_same_reply(tmp_path, monkeypat
     tg.files["documents/f1"] = b"enough bytes to pass the pre-download size check comfortably"
     monkeypatch.setattr(documents, "extract", _raise(exc))
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 60}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -921,7 +984,7 @@ def test_t_v190_err_01_row_6_embedding_error(tmp_path):
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": len(data)}
     embedder = FakeEmbedder(dim=16, script=[EmbeddingError("boom")])
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -943,7 +1006,7 @@ def test_t_v190_err_01_row_7_sqlite_error(tmp_path, monkeypatch, caplog):
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": len(data)}
     monkeypatch.setattr(storage, "add_document", _raise(sqlite3.OperationalError("boom")))
     with caplog.at_level(logging.ERROR):
-        bot._handle_document(
+        _run_document(
             doc,
             conn=conn,
             tg=tg,
@@ -963,7 +1026,7 @@ def test_t_v190_err_01_row_10a_download_timeout(tmp_path):
     tg = FakeTelegram()
     tg.download_errors["documents/f1"] = bot.TelegramDownloadTimeout("download timed out")
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -984,7 +1047,7 @@ def test_t_v190_err_01_row_10b_embedding_timeout_before_row_6(tmp_path):
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": len(data)}
     embedder = FakeEmbedder(dim=16, script=[EmbeddingTimeoutError("boom")])
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1002,16 +1065,22 @@ def test_t_v190_err_01_row_10c_and_cmd_09_budget_counts_pre_index_time(tmp_path)
     the download, so even though nothing between the handler's first line
     and `index_document`'s first internal budget check calls `monotonic`
     again, the elapsed time `index_document` computes already reflects that
-    whole span."""
+    whole span. v1.11.0 T5 amendment (disclosed, direct consequence of
+    ING-01's budget bump 300.0 -> 1800.0): the clock's second value must
+    clear the *new* default to still trip the budget -- 400.0 no longer
+    does (400 < 1800). The worker's own pre-`getFile` checkpoint
+    (`_check_cancel_budget`, ING-04) now fires this before `index_document`
+    is even called, one checkpoint earlier than pre-T5, an even more
+    direct proof of "the whole span counts"."""
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
     tg = FakeTelegram()
     data = b"Some readable content that would normally index just fine right here."
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": len(data)}
-    clock = _seq_clock(0.0, 400.0)
+    clock = _seq_clock(0.0, 2000.0)
     embedder = FakeEmbedder(dim=16)
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1036,7 +1105,7 @@ def test_t_v190_err_01_row_11_get_file_without_a_file_path(tmp_path):
     tg = FakeTelegram()
     tg.get_file = lambda _file_id: {}
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1055,7 +1124,7 @@ def test_t_v190_err_01_row_11_other_telegram_error(tmp_path):
     tg = FakeTelegram()
     tg.download_errors["documents/f1"] = bot.TelegramError("telegram file download http 500")
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1076,7 +1145,7 @@ def test_t_v190_err_01_row_12_confirmation_send_failure_document_still_stored(tm
     tg = FakeTelegram(fail_on=2, error=bot.TelegramError("boom"))
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "notes.txt", "file_size": len(data)}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1108,7 +1177,7 @@ def test_t_v190_err_01_row_13_pre_check_limit_reached_plain_reply(tmp_path):
         )
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "new.txt", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1136,7 +1205,7 @@ def test_t_v190_err_01_row_13_transactional_recheck_via_the_handler(tmp_path, mo
     data = b"Enough content here to produce one real chunk for the index pipeline."
     tg.files["documents/f1"] = data
     doc = {"file_id": "f1", "file_name": "new.txt", "file_size": len(data)}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1155,7 +1224,7 @@ def test_t_v190_err_01_row_14_rag_not_configured(tmp_path):
     cfg = make_cfg(tmp_path)
     tg = FakeTelegram()
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 10}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1176,7 +1245,7 @@ def test_t_v190_err_01_row_15_catch_all(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(documents, "extract", _raise(ZeroDivisionError("boom")))
     doc = {"file_id": "f1", "file_name": "a.txt", "file_size": 60}
     with caplog.at_level(logging.WARNING):
-        bot._handle_document(
+        _run_document(
             doc,
             conn=conn,
             tg=tg,
@@ -1202,6 +1271,19 @@ def test_t_v190_err_01_row_15_catch_all(tmp_path, monkeypatch, caplog):
 def test_t_v190_cmd_08_exception_in_document_handler_lets_poll_loop_continue(
     tmp_path, monkeypatch, caplog
 ):
+    """v1.11.0 T5 amendment (disclosed): the exception boundary this test
+    names (REQ-V190-CMD-07/T-V190-CMD-08) moved from `process_update`
+    itself to `IngestWorker.run_one` (REQ-V1110-ING-02) -- the loop thread
+    now only reserves and enqueues a document, so it was never going to
+    block on this exception in the first place; `poll_loop` processing the
+    second (text) update in the same batch is no longer proof of survival
+    through a crash, just a direct consequence of the split. This test
+    still proves both halves: `poll_loop` returns having handled both
+    updates (unaffected either way), and the *worker*, once it actually
+    drains the enqueued job (`run_one`, done manually here -- `poll_loop`
+    itself starts no worker thread), still ends it with
+    DOC_HANDLER_FAILED_REPLY, logged without a traceback leaking to the
+    user, exactly as it did inline pre-T5."""
     conn = new_conn(tmp_path)
     cfg = make_cfg(tmp_path)
     monkeypatch.setattr(documents, "extract", _raise(ZeroDivisionError("boom")))
@@ -1223,6 +1305,7 @@ def test_t_v190_cmd_08_exception_in_document_handler_lets_poll_loop_continue(
 
     tg.get_updates = get_updates
     llm = FakeLLM([LLMResponse("hi there", [], "stop")])
+    worker = bot.IngestWorker(cfg, tg, FakeEmbedder(dim=16), cfg.db_path)
     with caplog.at_level(logging.WARNING):
         rc = bot.poll_loop(
             conn=conn,
@@ -1234,14 +1317,23 @@ def test_t_v190_cmd_08_exception_in_document_handler_lets_poll_loop_continue(
             bot_username=BOT_USERNAME,
             sleep=lambda _s: None,
             embedder=FakeEmbedder(dim=16),
+            worker=worker,
         )
     assert rc == 0
+    # The second update in the same batch was processed within this one
+    # `poll_loop` call.
+    assert tg.sent[-1] == (USER_ID, "hi there")
+    assert storage.get_state(conn, "last_update_id") == "2"
+
+    # The document job itself only got as far as reserve+enqueue inside
+    # `poll_loop` -- draining it (as the worker thread would, in
+    # production) is what actually exercises the exception boundary.
+    assert worker.in_flight(USER_ID) is not None
+    with caplog.at_level(logging.WARNING):
+        worker.run_one(conn=conn)
     assert tg.edited[-1][2] == bot.DOC_HANDLER_FAILED_REPLY
     assert not any("Traceback" in t for _c, _m, t in tg.edited)
     assert not any("Traceback" in t for _c, t in tg.sent)
-    # The second update in the same batch was still processed.
-    assert tg.sent[-1] == (USER_ID, "hi there")
-    assert storage.get_state(conn, "last_update_id") == "2"
     conn.close()
 
 
@@ -1259,7 +1351,7 @@ def test_t_v190_err_02_no_traceback_text_reaches_the_user(tmp_path, monkeypatch)
         documents, "extract", _raise(ZeroDivisionError("division by zero at line 42"))
     )
     doc = {"file_id": "f1", "file_name": "notes.txt", "file_size": 30}
-    bot._handle_document(
+    _run_document(
         doc,
         conn=conn,
         tg=tg,
@@ -1283,7 +1375,7 @@ def test_t_v190_err_02_a_secret_sentinel_in_the_filename_never_reaches_the_user_
     raw_name = f"{sentinel}.exe"  # unsupported extension -> row 1
     doc = {"file_id": "f1", "file_name": raw_name, "file_size": 10}
     with caplog.at_level(logging.WARNING):
-        bot._handle_document(
+        _run_document(
             doc,
             conn=conn,
             tg=tg,

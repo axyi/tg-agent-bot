@@ -236,17 +236,20 @@ def test_t_v190_ec_01_readme_commands_table_gains_documents_and_delete():
 
 
 def test_t_v190_ec_01_readme_limits_table_gains_rag_rows():
+    """v1.11.0 T5 (REQ-V1110-ING-01/DOC-03) rewrote the four needles the
+    caps rise touches: 20,000,000 bytes / 2,000,000 chars / 1800 s / 2,000
+    pages, replacing 10,485,760 / 500,000 / 300 s / 500 pages."""
     text = _read_readme()
     limits_idx = text.index("## Limits")
     error_idx = text.index("## Error behaviour")
     section = text[limits_idx:error_idx]
     for needle in [
-        "10,485,760",
-        "500,000",
+        "20,000,000",
+        "2,000,000",
         "20 (`DOCUMENT_LIMIT`)",
-        "300 s",
+        "1800 s",
         "2,000 members",
-        "500 pages",
+        "2,000 pages",
         "1000 chars, hard max 1200, overlap 200, minimum 50",
         "5 (`RAG_TOP_K`",
         "10 (RRF cut",
@@ -256,6 +259,9 @@ def test_t_v190_ec_01_readme_limits_table_gains_rag_rows():
 
 
 def test_t_v190_ec_01_readme_error_behaviour_table_gains_document_rows():
+    """v1.11.0 T5 (REQ-V1110-ING-01/DOC-03/ERR-01) rewrote the size/budget
+    strings for the raised caps and added rows 10 and 17 (`T-V1110-ERR-01`,
+    `T-V1110-PIN-01`)."""
     text = _read_readme()
     error_idx = text.index("## Error behaviour")
     versioning_idx = text.index("## Versioning")
@@ -265,17 +271,21 @@ def test_t_v190_ec_01_readme_error_behaviour_table_gains_document_rows():
         "Could not read this PDF file.",
         "Could not read this DOCX file.",
         "The document contains no readable text.",
-        "File too large (over 10 MiB).",
-        "Document too large (over 500,000 characters).",
+        "File too large (over 20 MB).",
+        "Document too large (over 2,000,000 characters).",
+        "Document too large (DOCX archive bounds).",
+        "Document too large (over 2,000 pages).",
         "Embedding service error. Please try again later.",
         "Storage error. The document was not saved.",
         "Download timed out. Please try again.",
         "Embedding service timed out. Please try again later.",
-        "Indexing timed out (over 300 s). Nothing was saved.",
+        "Indexing timed out (over 1800 s). Nothing was saved.",
         "Telegram error while receiving the file. Please try again.",
         "Limit of 20 documents reached. Use /delete <filename>.",
         "Document search is not configured on this bot.",
         "Something went wrong while processing the document.",
+        "❌ Interrupted by restart.",
+        "Indexing is already finishing.",
     ]:
         assert exact_string in section, f"missing exact ERR-01 string: {exact_string!r}"
 

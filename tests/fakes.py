@@ -239,7 +239,13 @@ class FakeTelegram:
         self.get_file_calls.append(file_id)
         return {"file_path": f"documents/{file_id}"}
 
-    def download_file(self, file_path, *, max_bytes):
+    def download_file(self, file_path, *, max_bytes, should_stop=None):
+        # v1.11.0 T5 (REQ-V1110-ING-04): accepted for signature
+        # compatibility with the real `TelegramClient.download_file`, but
+        # this fake never streams in chunks, so `should_stop` has nothing
+        # to be checked between -- `T-V1110-ING-07`'s own real streamed-
+        # cancel coverage goes through the real `TelegramClient` +
+        # `httpx.MockTransport` instead, not this fake.
         self.downloads.append((file_path, max_bytes))
         if file_path in self.download_errors:
             raise self.download_errors[file_path]
@@ -271,10 +277,18 @@ class FakeEmbedder:
     would have none.
     """
 
-    def __init__(self, dim=768, *, script=None):
+    def __init__(self, dim=768, *, script=None, hook=None):
         self.dim = dim
         self.calls = []
         self._script = list(script) if script is not None else None
+        # v1.11.0 T5 (REQ-V1110-ING-04/-05): called with the 1-based batch
+        # number after `calls` records it, before the (possibly scripted)
+        # vectors are returned -- a synchronous hook a test can use to set
+        # a cancel event, or a blocking one (waiting on a `threading.Event`
+        # the test's own thread later `.set()`s) to park a real `_run`
+        # thread mid-embedding (`T-V1110-ING-05`, `-09`, `-10`, `-11`,
+        # `T-V1110-DOC-05`) -- never a `time.sleep`.
+        self._hook = hook
 
     def describe(self):
         return ("fake", "fake-embedding-model")
@@ -282,6 +296,8 @@ class FakeEmbedder:
     def embed(self, texts, *, conv_id=None):
         texts = list(texts)
         self.calls.append((texts, conv_id))
+        if self._hook is not None:
+            self._hook(len(self.calls))
         if self._script is not None:
             if not self._script:
                 raise AssertionError("FakeEmbedder script exhausted")

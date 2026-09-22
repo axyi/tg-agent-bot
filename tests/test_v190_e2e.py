@@ -91,7 +91,16 @@ def text_update(text, update_id):
     }
 
 
-def process(conn, cfg, upd, *, tg, llm, embedder):
+def process(conn, cfg, upd, *, tg, llm, embedder, worker=None):
+    """v1.11.0 T5 (REQ-V1110-ING-02): a document update no longer runs to
+    completion inside `process_update` itself -- `_handle_document` only
+    reserves and enqueues on the loop thread. This helper keeps every
+    caller in this file working unchanged: a worker is built (or reused
+    across calls, when a test passes one in) and, for a document update
+    that actually got enqueued, `run_one(conn=conn)` drives it to
+    completion synchronously before returning."""
+    if worker is None:
+        worker = bot.IngestWorker(cfg, tg, embedder, cfg.db_path)
     bot.process_update(
         upd,
         conn=conn,
@@ -102,7 +111,14 @@ def process(conn, cfg, upd, *, tg, llm, embedder):
         runner=RecordingRunner(),
         bot_username=BOT_USERNAME,
         embedder=embedder,
+        worker=worker,
     )
+    message = upd.get("message")
+    if isinstance(message, dict) and isinstance(message.get("document"), dict):
+        sender = message.get("from") or {}
+        from_id = sender.get("id")
+        if worker.in_flight(from_id) is not None:
+            worker.run_one(conn=conn)
 
 
 def search_call(index, query):
