@@ -24,6 +24,9 @@ REDACTION = "***REDACTED***"
 MIN_SECRET_LENGTH = 8
 SECRET_FRAGMENT_MIN = 8
 PROVIDERS = ("lmstudio", "openrouter")
+# v1.11.0 T4 addition (REQ-V1110-MOD-04): the model-menu catalogue ceiling --
+# entries beyond the 20th are dropped at config load with one warning.
+MODEL_CATALOGUE_MAX = 20
 FAILOVER_MODES = ("auto", "off")
 HISTORY_TOOL_STUB_MODES = ("on", "off")
 DEFAULT_DOCKER_IMAGE = (
@@ -93,6 +96,8 @@ _DOMAIN_SHAPE_RE = re.compile(
     r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
 )
 _secrets: set[str] = set()
+
+log = logging.getLogger("config")
 
 
 class ConfigError(Exception):
@@ -199,6 +204,20 @@ class Config:
     # else, including an LM Studio embeddings URL, so the client sends no
     # `Authorization` header (EC-05's "unset stays harmless" pattern).
     embedding_api_key: str = ""
+    # v1.11.0 T4 addition (REQ-V1110-MOD-04): the model-menu catalogue --
+    # comma-separated LMSTUDIO_MODELS/OPENROUTER_MODELS env allowlists,
+    # parsed by `load_config` (the configured default always first,
+    # deduplicated, capped at MODEL_CATALOGUE_MAX). Placed here rather than
+    # next to `lmstudio_model`/`openrouter_model` (the brief's cited
+    # position) -- REQ-V1-EC-05 requires every addition after the original
+    # ten v0 fields to carry a default so every existing direct
+    # `Config(...)` construction keeps working; inserting between
+    # `openrouter_model` and `llm_timeout_s` (both defaultless) would force
+    # a default-less field there too, breaking ~19 test files' `make_cfg`
+    # helpers. Defaults to an empty tuple; `load_config` itself never
+    # leaves it empty when a default model is configured.
+    lmstudio_models: tuple[str, ...] = ()
+    openrouter_models: tuple[str, ...] = ()
 
     @property
     def rag_enabled(self) -> bool:
@@ -360,6 +379,8 @@ def load_config(
     lmstudio_model = _value(source, "LMSTUDIO_MODEL")
     openrouter_api_key = _value(source, "OPENROUTER_API_KEY")
     openrouter_model = _value(source, "OPENROUTER_MODEL")
+    lmstudio_models = _parse_model_catalogue(source, "LMSTUDIO_MODELS", lmstudio_model)
+    openrouter_models = _parse_model_catalogue(source, "OPENROUTER_MODELS", openrouter_model)
 
     failover = _value(source, "LLM_FAILOVER").lower() or "auto"
     if failover not in FAILOVER_MODES:
@@ -594,6 +615,8 @@ def load_config(
         embedding_api_key=embedding_api_key,
         rag_top_k=rag_top_k,
         rag_rerank=rag_rerank,
+        lmstudio_models=lmstudio_models,
+        openrouter_models=openrouter_models,
     )
 
 
@@ -686,6 +709,38 @@ def _parse_choice(
     if raw not in choices:
         raise ConfigError(f"{key} must be one of {', '.join(choices)}, got: {raw}")
     return raw
+
+
+def _parse_model_catalogue(
+    source: Mapping[str, str], env_var: str, default: str
+) -> tuple[str, ...]:
+    """REQ-V1110-MOD-04: `env_var` (`LMSTUDIO_MODELS`/`OPENROUTER_MODELS`) is
+    comma-separated, each entry stripped, empty entries dropped; `default`
+    (the provider's own configured model) is always first even when the
+    list omits it, then the list in env order, deduplicated (first
+    occurrence wins). An empty `default` means the provider has no
+    configured model at all, so the catalogue is empty regardless of what
+    `env_var` names -- there is nothing to fall back to. Entries beyond
+    `MODEL_CATALOGUE_MAX` are dropped with one warning naming the count
+    dropped, never the ids."""
+    if not default:
+        return ()
+    raw = _value(source, env_var)
+    entries = [item.strip() for item in raw.split(",")] if raw else []
+    entries = [item for item in entries if item]
+
+    seen: set[str] = set()
+    catalogue: list[str] = []
+    for item in (default, *entries):
+        if item not in seen:
+            seen.add(item)
+            catalogue.append(item)
+
+    if len(catalogue) > MODEL_CATALOGUE_MAX:
+        dropped = len(catalogue) - MODEL_CATALOGUE_MAX
+        log.warning("%s: %d model entries beyond %d dropped", env_var, dropped, MODEL_CATALOGUE_MAX)
+        catalogue = catalogue[:MODEL_CATALOGUE_MAX]
+    return tuple(catalogue)
 
 
 def _parse_purposes(source: Mapping[str, str], key: str, default: str) -> frozenset[str]:

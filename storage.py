@@ -1544,6 +1544,18 @@ def delete_state(conn: sqlite3.Connection, key: str) -> None:
     conn.execute("DELETE FROM bot_state WHERE key = ?", (key,))
 
 
+def delete_state_prefix(conn: sqlite3.Connection, prefix: str) -> None:
+    """REQ-V1110-MOD-02: delete every `bot_state` row whose key starts with
+    `prefix` (used for the `model_override:*` family). `prefix` is escaped
+    against SQL LIKE's own `%`/`_` wildcards before use -- `prefix` is
+    always a hardcoded literal from this codebase, never user input, but
+    `model_override:` itself contains an underscore, and `_` matches any
+    single character in a LIKE pattern, so leaving it unescaped would widen
+    the match past what the prefix actually names."""
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    conn.execute("DELETE FROM bot_state WHERE key LIKE ? ESCAPE '\\'", (escaped + "%",))
+
+
 def _fetch_turn_rows(
     conn: sqlite3.Connection, conv_id: int, turns: int = WINDOW_TURNS
 ) -> list[sqlite3.Row]:

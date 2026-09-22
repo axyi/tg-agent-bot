@@ -33,6 +33,7 @@ def build_llm_client(
     client: httpx.Client,
     override: str | None = None,
     purpose: str = "agent",
+    model: str | None = None,
 ) -> LLMClient:
     """The client for one purpose, on the caller's `httpx.Client`.
 
@@ -47,6 +48,12 @@ def build_llm_client(
     `LLM_EVAL_CHAT_MODEL` -- gate 7's smoke-turn chat completions only.
     `purpose="judge"` (v1.10.0 T3) mirrors it once more, on
     `LLM_JUDGE_MODEL` -- gate 8's LLM-as-a-judge purpose only.
+
+    `model` (v1.11.0 T4, REQ-V1110-MOD-05) overrides the agent purpose's
+    primary-side model only -- the `/model` menu's per-provider override.
+    It has no effect on a routed purpose above (each already names its own
+    model) and never reaches the failover secondary: the override names one
+    provider's model, not the other side's fallback.
     """
     if purpose == "summary":
         routed = parse_summary_model(cfg.llm_summary_model)
@@ -78,12 +85,12 @@ def build_llm_client(
         provider_is_configured(cfg, name) for name in (primary, secondary)
     ):
         return FailoverLLMClient(
-            _client_for(cfg, primary, client),
+            _client_for(cfg, primary, client, model=model),
             _client_for(cfg, secondary, client),
             primary_name=primary,
             secondary_name=secondary,
         )
-    return _client_for(cfg, primary, client)
+    return _client_for(cfg, primary, client, model=model)
 
 
 def _client_for(

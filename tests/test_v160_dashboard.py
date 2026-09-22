@@ -1178,9 +1178,11 @@ def make_cfg_for_bot(tmp_path, **overrides):
 def _stub_bot_startup(monkeypatch):
     monkeypatch.setattr(bot_module.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot_module.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
-    monkeypatch.setattr(
-        bot_module, "build_llm_client", lambda cfg, *, client, override=None, purpose=None: object()
-    )
+
+    def _fake_build(cfg, *, client, override=None, purpose=None, model=None):
+        return object()
+
+    monkeypatch.setattr(bot_module, "build_llm_client", _fake_build)
     monkeypatch.setattr(bot_module, "exec_backend_status", lambda: (None, False))
     monkeypatch.setattr(bot_module, "_startup_docker_wiring", lambda cfg, docker_ok: (False, None))
     monkeypatch.setattr(bot_module.signal, "signal", lambda signum, handler: None)

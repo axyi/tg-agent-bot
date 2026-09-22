@@ -289,7 +289,7 @@ def _stub_startup(monkeypatch, cfg, captured, built):
     monkeypatch.setattr(bot.signal, "signal", lambda signum, handler: None)
     monkeypatch.setattr(bot, "poll_loop", lambda **kwargs: captured.update(kwargs) or 0)
 
-    def fake_build(cfg, *, client, override=None, purpose="agent"):
+    def fake_build(cfg, *, client, override=None, purpose="agent", model=None):
         built.append(purpose)
         return f"client-{purpose}"
 

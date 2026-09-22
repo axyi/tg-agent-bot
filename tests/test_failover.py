@@ -11,7 +11,7 @@ from llm.base import LLMError, LLMResponse
 from llm.failover import FAILOVER_COOLDOWN_S, FAILOVER_THRESHOLD, FailoverLLMClient
 from llm.lmstudio import LMStudioClient
 from llm.openrouter import OpenRouterClient
-from tests.fakes import RecordingRunner, mock_llm_transport
+from tests.fakes import FakeTelegram, RecordingRunner, mock_llm_transport
 
 TOKEN = "123456789:sentinel-telegram-token-for-failover-tests"
 USER_ID = 424242
@@ -85,15 +85,6 @@ def command(text, update_id=1):
             "text": text,
         },
     }
-
-
-class RecordingTelegram:
-    def __init__(self):
-        self.sent = []
-
-    def send_message(self, chat_id, text):
-        self.sent.append((chat_id, text))
-        return {"message_id": len(self.sent)}
 
 
 def test_t_v1_fo_01_three_failures_switch_to_the_secondary():
@@ -200,7 +191,7 @@ def test_t_v1_fo_05_model_command(conn, tmp_path):
         return StubClient(name or "lmstudio")
 
     def process(text, llm, update_id):
-        tg = RecordingTelegram()
+        tg = FakeTelegram()
         bot.process_update(
             command(text, update_id),
             conn=conn,
@@ -212,14 +203,24 @@ def test_t_v1_fo_05_model_command(conn, tmp_path):
             bot_username=BOT_USERNAME,
             set_provider=set_provider,
         )
-        return tg.sent
+        return tg
+
+    def status_body(tg):
+        """Bare `/model` moved onto the table path (v1.11.0 T4, MOD-01) --
+        `<pre>`-wrapped, so this unwraps it once for a substring check
+        rather than an exact-string pin (PIN-01)."""
+        assert len(tg.sent) == 1
+        chat_id, text = tg.sent[0]
+        assert chat_id == USER_ID
+        assert text.startswith("<pre>") and text.endswith("</pre>")
+        return text[len("<pre>") : -len("</pre>")]
 
     active = wrapper(StubClient("lmstudio"), StubClient("openrouter"))
-    assert process("/model", active, 1) == [
-        (USER_ID, "Provider: lmstudio (override: none, failures: lmstudio=0, openrouter=0)")
-    ]
+    body1 = status_body(process("/model", active, 1))
+    assert "lmstudio" in body1 and "none" in body1
+    assert "lmstudio=0" in body1 and "openrouter=0" in body1
 
-    assert process("/model openrouter", active, 2) == [
+    assert process("/model openrouter", active, 2).sent == [
         (USER_ID, "Provider switched to openrouter.")
     ]
     assert installed == ["openrouter"]
@@ -230,21 +231,20 @@ def test_t_v1_fo_05_model_command(conn, tmp_path):
 
     switched = wrapper(StubClient("openrouter"), StubClient("lmstudio"))
     switched.failure_counts["openrouter"] = 2
-    assert process("/model", switched, 3) == [
-        (USER_ID, "Provider: openrouter (override: openrouter, failures: lmstudio=0, openrouter=2)")
-    ]
+    body3 = status_body(process("/model", switched, 3))
+    assert "openrouter" in body3 and "openrouter" in body3  # active provider + override
+    assert "lmstudio=0" in body3 and "openrouter=2" in body3
 
-    assert process("/model auto", active, 4) == [(USER_ID, "Provider override cleared.")]
+    assert process("/model auto", active, 4).sent == [(USER_ID, "Provider override cleared.")]
     assert storage.get_state(conn, "provider_override") is None
     assert bot.load_provider_override(conn) is None
     assert installed == ["openrouter", None]
 
-    assert process("/model ollama", active, 5) == [
-        (USER_ID, "Usage: /model [lmstudio|openrouter|auto]")
-    ]
+    assert process("/model ollama", active, 5).sent == [(USER_ID, bot.MODEL_USAGE_REPLY)]
+    assert bot.MODEL_USAGE_REPLY == "Usage: /model [lmstudio|openrouter|auto] [<model>]"
 
     bare = make_cfg(tmp_path, openrouter=False)
-    tg = RecordingTelegram()
+    tg = FakeTelegram()
     bot.process_update(
         command("/model openrouter", 6),
         conn=conn,

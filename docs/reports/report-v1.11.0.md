@@ -821,7 +821,131 @@ exit 0 (2328 at T2's `09f8d8a` + 5 new this task, all in
 `tests/test_v1110_ses.py`). `uv run --locked python bot.py --selftest` —
 `selftest: OK`, exit 0.
 
-## T4 — not reached
+## T4 — the `/model` menu and callback queries
+
+Delegated (brief `docs/spec/task-briefs/v1110-T4.md`, EC-04). The largest
+task in the run: `callback_query` handling, inline keyboards, and a
+two-step `/model` provider->model menu behind a `callback_data` grammar
+backed by a SHA-256 hash for staleness detection.
+
+**EC-02, stated at the granularity that actually happened.** Both new
+test files (`tests/test_v1110_cbq.py`, 8 functions;
+`tests/test_v1110_mod.py`, 9 functions) were written complete and run
+against the unmodified `6594c8f` tree *before* any production file was
+touched, and all 17 genuinely failed — but most died at a shared
+`make_cfg`/`load_config` touchpoint (`Config` rejecting the new catalogue
+keyword arguments) rather than at each test's own targeted line:
+
+- `T-V1110-CBQ-01`: red on its own first substantive assertion — the
+  `get_updates` body (`allowed_updates` still `["message"]`) — for the
+  right reason; the callback-branch half of the test never executed
+  until that first half passed.
+- `T-V1110-CBQ-02`, `-03`, `-04`, `-05`, `-07`, `-08`: red at the shared
+  `make_cfg`'s `config.Config(**fields)` call — `TypeError: unexpected
+  keyword argument 'lmstudio_models'` — before any of these six tests'
+  own logic executed at all.
+- `T-V1110-CBQ-06`: red on its own first line —
+  `tg.answer_callback_query("cbq-a")` — `AttributeError:
+  'TelegramClient' object has no attribute 'answer_callback_query'` —
+  directly targeted.
+- `T-V1110-MOD-01`…`-04`, `-06`, `-08`, `-09`: the same `make_cfg`
+  `TypeError`, same mechanism — none of these seven tests' own targeted
+  assertions ran red themselves.
+- `T-V1110-MOD-05`, `-07`: red directly on their own target —
+  `AttributeError: 'Config' object has no attribute 'openrouter_models'`
+  — since both call `config.load_config` directly rather than through
+  `make_cfg`.
+
+Every one of the 17 is green after implementation, unmodified from its
+red-state intent. See the prompt file's `### Test-first` section for the
+complete per-test breakdown.
+
+**Five design amendments beyond the brief's literal text**, each because
+following it verbatim would have broken something real, all disclosed in
+the prompt file's `## Goal`:
+
+1. `Config`'s two new fields (`lmstudio_models`, `openrouter_models`)
+   sit at the dataclass's end, not spliced between `openrouter_model` and
+   `llm_timeout_s` as the brief cites (`config.py:102-111`) — REQ-V1-EC-05
+   requires every addition after the original v0 fields to carry a
+   default so every existing direct `Config(...)` construction (~19 test
+   files' `make_cfg` helpers) keeps working; the cited position sits
+   between two already-default-less fields, which would have forced the
+   new fields default-less too.
+2. The `/model` dispatch site passes `parts[1:]` (all remaining tokens)
+   with the two-argument cap enforced inside `_handle_model`, not the
+   brief's literal `parts[1:3]` slice, which would silently drop a third
+   argument (`/model openrouter <model> extra` would have been silently
+   accepted) instead of refusing it. `T-V1110-MOD-04` includes this exact
+   sub-case.
+3. `load_model_override(conn, provider) -> str | None` stays a raw
+   2-argument storage read, matching the spec's literal signature; a
+   separate private `_effective_model_override(conn, cfg, provider)`
+   filters that value against the provider's current catalogue, and is
+   what `main()`'s initial construction and `set_provider` both call.
+4. `storage.delete_state_prefix`'s LIKE pattern escapes `%`/`_` before
+   use — `model_override:` itself contains an underscore, a LIKE
+   wildcard that would otherwise over-match.
+5. A new `_answer_callback` wraps `TelegramClient.answer_callback_query`
+   in the same `TelegramError` catch-and-log pattern `_send` already
+   uses, so a failed acknowledgement cannot crash the poll loop.
+
+**The callback-data grammar and its hash/index bounds check**
+(`_resolve_callback_action`, `bot.py`) is the security-relevant surface
+mutation `v1110-model-index-unbounded` targets at T7: `0 <= idx <
+len(catalogue)` **and** the recomputed hash must match, both checked
+against `cfg` re-derived fresh at handling time, never anything cached.
+`T-V1110-MOD-08` proves a catalogue reordered between render and click
+(same entries, different env order, so a different SHA-256 over the
+framed JSON array) is correctly treated as stale with zero state change.
+
+**A pre-existing, unrelated test flake was discovered and disclosed, not
+fixed.** `tests/test_v1103_red_team.py::
+test_t_v1103_rt_06_leak_shape_fixture_still_fails_on_clause_c_only`
+intermittently fails depending on `pytest-xdist` worker distribution —
+some other test in the suite registers a secret into the global
+`config._secrets` registry without restoring it, and when that test lands
+in the same worker process ahead of this one, a fixture literal that
+should only trip clause (c) also trips clause (b). Confirmed unrelated to
+this task three ways: the literal gate 3 command run three times on the
+finished tree (green twice, red once with exactly this one failure); the
+full suite run serially with both new T4 test files excluded reproduces
+the identical failure among purely pre-existing tests; `git stash` back
+to the unmodified `6594c8f` tree and the same serial run reproduces the
+identical failure again. None of T4's changes touch
+`config.redact`/`register_secret`/`RedactingFormatter`. Not fixed — out
+of this task's scope; see the prompt file's `## Stop` for the full
+three-way confirmation.
+
+**The field-column truncation in `_model_status_table`'s status table is
+a known cosmetic effect, not a defect.** MOD-01's stated `max_width` is
+`[12, 44]`; the row label `openrouter model` is 16 UTF-16 units, past the
+12-unit field-column cap, so it renders truncated with an ellipsis
+(`render_table` only raises on a computed line width past 72, which this
+combination cannot reach). Implemented literally as specified rather than
+silently widening the column.
+
+**No `cited → actual` file:line drift beyond the 5-line stop threshold.**
+One 2-line drift recorded for completeness:
+`tests/test_telegram.py`'s `allowed_updates` pin, cited at `:272`,
+actually sits at `:274`. Every other cited `file:line` in the brief
+matched the live tree closely enough to locate and edit without
+ambiguity.
+
+- T4 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T4.md | map vs actual: matches the reading map closely (one 2-line pin-location drift disclosed above); five deliberate design amendments beyond the brief's literal text, all disclosed above and in the prompt file, each because the literal instruction would have broken something real (REQ-V1-EC-05's default-field contract, the dispatch site's argument handling, a LIKE-wildcard-escaping nicety, and a defensive error-handling wrap)
+
+**Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
+brief), each run verbatim as AGENTS.md lists it, no added flags:
+`uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run --locked
+ruff check .` — all checks passed, exit 0. `uv run --locked pytest` —
+`2350 passed, 1 skipped, 2 xfailed`, exit 0 (2353 collected = 2336
+baseline at T3's `6594c8f` + 17 new, all in `tests/test_v1110_cbq.py`
+and `tests/test_v1110_mod.py`; the pre-existing flaky red-team test
+disclosed above hit once across three verbatim runs of this same
+command, and is not a T4 regression). `uv run --locked python bot.py
+--selftest` — `selftest: OK`, exit 0 (the same pre-existing
+`_SelftestTelegram`-has-no-`call` warning T1's report already confirmed
+present before this run's changes).
 
 ## T5 — not reached
 

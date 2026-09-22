@@ -271,7 +271,11 @@ def test_t_tg_09_get_updates_request_shape():
     request = seen[0]
     assert request.url.path.endswith("/getUpdates")
     body = json.loads(request.read())
-    assert body == {"timeout": 50, "allowed_updates": ["message"], "offset": 41}
+    assert body == {
+        "timeout": 50,
+        "allowed_updates": ["message", "callback_query"],
+        "offset": 41,
+    }
     timeout = request.extensions["timeout"]
     assert timeout["read"] == 60.0
     assert timeout["read"] > body["timeout"]

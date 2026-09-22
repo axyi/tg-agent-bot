@@ -745,7 +745,9 @@ def test_t_v12_err_01_config_error_from_seam_is_caught(tmp_path, monkeypatch, ca
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
-    monkeypatch.setattr(bot, "build_llm_client", lambda cfg, *, client, override=None: object())
+    monkeypatch.setattr(
+        bot, "build_llm_client", lambda cfg, *, client, override=None, model=None: object()
+    )
     monkeypatch.setattr(bot, "exec_backend_status", lambda: ("27.1.2", True))
 
     def seam(cfg, docker_ok):
@@ -880,7 +882,9 @@ def test_t_v12_cov_06_empty_resolv_reaches_the_runner_partial(tmp_path, monkeypa
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
-    monkeypatch.setattr(bot, "build_llm_client", lambda cfg, *, client, override=None: object())
+    monkeypatch.setattr(
+        bot, "build_llm_client", lambda cfg, *, client, override=None, model=None: object()
+    )
     monkeypatch.setattr(bot, "exec_backend_status", lambda: ("27.1.2", True))
     monkeypatch.setattr(bot, "_startup_docker_wiring", lambda cfg, docker_ok: (True, real_path))
     monkeypatch.setattr(bot.signal, "signal", lambda signum, handler: None)

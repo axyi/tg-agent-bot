@@ -111,7 +111,7 @@ suppressed — see [Dashboard](#dashboard)) and `--version` (prints
 | `/status` | uptime, active provider, provider failure counts, exec backend, database size and schema version, loaded skills, a token line — `Tokens this conversation: in N / out M` — and a `Dashboard: <state>` line reporting whether the local dashboard is running |
 | `/stats` | token, cost and tool counters for this conversation and for all time — see [Observability](#observability) |
 | `/summary` | summarize the current conversation on demand and show the five-field rendering |
-| `/model [lmstudio\|openrouter\|auto]` | show or change the provider override; the override survives restarts |
+| `/model [lmstudio\|openrouter\|auto] [<model>]` | show the provider/model status and pick via inline buttons (bare `/model`), or switch directly by text — the override survives restarts; see [Switch provider](#switch-provider) |
 | `/reload_skills` | re-read `skills/` without restarting the bot |
 | `/documents` | list the caller's uploaded documents as a table (`#`, filename, type, size, chunks, pages, added) |
 | `/delete <filename>` \| `/delete #<id>` | delete one of the caller's documents, its chunks and its vectors; exact filename match, or the `#`-prefixed id shown by `/documents` — a filename that itself starts with `#` is only reachable by id after this |
@@ -326,6 +326,22 @@ hides a failure. `/status` and `/model` show which side is answering.
 
 Each provider carries its own context length (`LMSTUDIO_CONTEXT_LENGTH`,
 `OPENROUTER_CONTEXT_LENGTH`); the history budget follows the active side.
+
+**The `/model` menu (spec-v1.11.0).** Bare `/model` shows a status table and
+one inline button per configured provider plus `auto`; picking a provider
+shows its model catalogue as buttons (`← back` returns to the status
+screen), and picking a model sets both the provider and model override in
+one step. `LMSTUDIO_MODELS`/`OPENROUTER_MODELS` name each provider's
+catalogue: comma-separated model ids, the provider's own `LMSTUDIO_MODEL`/
+`OPENROUTER_MODEL` always included first even when the list omits it, kept
+in env order, duplicates dropped (first occurrence wins), at most 20
+entries — the rest dropped at startup with a warning naming the count, never
+the ids. The text form still works for scripts and tests:
+`/model <provider> <model>` switches both the provider and the model
+override in one command (the model must be one of that provider's
+catalogue entries); `/model <provider>` alone switches only the provider,
+leaving any existing model override for it untouched; `/model auto` clears
+both overrides, by button or by text.
 
 ## Reasoning policy
 

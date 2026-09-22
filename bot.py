@@ -5,11 +5,13 @@ at a time. The only threads are the two output readers created per `exec` call.
 """
 
 import functools
+import hashlib
 import html
 import json
 import logging
 import os
 import random
+import re
 import shutil
 import signal
 import socket
@@ -21,8 +23,9 @@ import tempfile
 import threading
 import time
 import tomllib
+import unicodedata
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import docx.opc.exceptions
@@ -73,7 +76,11 @@ RATE_LIMIT_REPLY = "Rate limit exceeded. Please wait a moment."
 TOO_LONG_REPLY = "Message too long (over 4000 characters). Please shorten it."
 SUMMARY_FAILED_REPLY = "Could not summarize this conversation right now."
 NOTHING_TO_SUMMARIZE_REPLY = "Nothing to summarize yet."
-MODEL_USAGE_REPLY = "Usage: /model [lmstudio|openrouter|auto]"
+MODEL_USAGE_REPLY = "Usage: /model [lmstudio|openrouter|auto] [<model>]"
+# v1.11.0 T4 (REQ-V1110-CBQ-02): the callback-data grammar's byte ceiling and
+# the one text every stale/malformed callback is acknowledged with.
+CALLBACK_DATA_MAX_BYTES = 64
+CALLBACK_EXPIRED_REPLY = "Expired — send the command again."
 STATUS_WORKING = "⚙️ working…"
 STATUS_FAILED = "⚠️ failed"
 USAGE = "usage: bot.py [--selftest|--selftest-live|--version] [--no-dashboard]"
@@ -233,7 +240,10 @@ class TelegramClient:
         return self.call("getMe", {}, read_timeout=DEFAULT_READ_TIMEOUT_S)
 
     def get_updates(self, offset: int | None) -> list[dict]:
-        payload = {"timeout": LONG_POLL_TIMEOUT_S, "allowed_updates": ["message"]}
+        payload = {
+            "timeout": LONG_POLL_TIMEOUT_S,
+            "allowed_updates": ["message", "callback_query"],
+        }
         if offset is not None:
             payload["offset"] = offset
         return self.call("getUpdates", payload, read_timeout=GET_UPDATES_READ_TIMEOUT_S)
@@ -270,6 +280,18 @@ class TelegramClient:
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         return self._call_with_retry("editMessageText", payload)
+
+    def answer_callback_query(
+        self, callback_query_id: str, *, text: str | None = None
+    ) -> dict | bool:
+        """REQ-V1110-CBQ-03: `answerCallbackQuery`, `text` only when given.
+        `edit_pre`'s handled-callback caller acknowledges once, first --
+        this method itself carries no ordering guarantee, that is the
+        caller's job (`_answer_callback`/`_handle_callback`)."""
+        payload = {"callback_query_id": callback_query_id}
+        if text is not None:
+            payload["text"] = text
+        return self._call_with_retry("answerCallbackQuery", payload)
 
     def delete_message(self, chat_id: int, message_id: int) -> bool:
         return self._call_with_retry(
@@ -795,6 +817,15 @@ def load_provider_override(conn: sqlite3.Connection) -> str | None:
     return value if value in PROVIDERS else None
 
 
+def load_model_override(conn: sqlite3.Connection, provider: str) -> str | None:
+    """REQ-V1110-MOD-05: the raw `model_override:<provider>` read, next to
+    `load_provider_override` and the same shape -- a plain lookup, no
+    catalogue validation. Catalogue membership (`cfg` is not available
+    here) is `_effective_model_override`'s job, the wrapper `main()`'s
+    wiring and the `/model` status block both call instead."""
+    return storage.get_state(conn, f"model_override:{provider}")
+
+
 def build_cost_resolver(
     conn: sqlite3.Connection,
     cfg: Config,
@@ -871,6 +902,24 @@ def process_update(
     update_id = update["update_id"]
     # The at-most-once boundary: the cursor is persisted before any side effect.
     storage.set_state(conn, "last_update_id", str(update_id))
+
+    callback_query = update.get("callback_query")
+    if isinstance(callback_query, dict):
+        # REQ-V1110-CBQ-01: a callback_query update is handled entirely by
+        # `_handle_callback` -- its own guard chain replicates the
+        # message-path order below, plus the two callback-only checks
+        # (from.id == chat.id, the rate limiter) -- and never falls through
+        # to the message-only guard past this point.
+        _handle_callback(
+            callback_query,
+            conn=conn,
+            tg=tg,
+            cfg=cfg,
+            llm=llm,
+            set_provider=set_provider,
+            limiter=limiter,
+        )
+        return
 
     message = update.get("message")
     if not isinstance(message, dict):
@@ -965,15 +1014,11 @@ def process_update(
             return
         if name == "/model":
             parts = stripped.split()
-            _handle_model(
-                conn,
-                tg,
-                cfg,
-                llm,
-                chat_id,
-                parts[1] if len(parts) > 1 else "",
-                set_provider,
-            )
+            # REQ-V1110-MOD-03: every remaining token is handed to
+            # `_handle_model`, which enforces the "at most two arguments"
+            # rule itself -- a `parts[1:3]` slice at this site would
+            # silently drop a third argument instead of refusing it.
+            _handle_model(conn, tg, cfg, llm, chat_id, parts[1:], set_provider)
             return
         if name == "/reload_skills":
             _handle_reload_skills(tg, skills, chat_id)
@@ -1338,23 +1383,156 @@ def _render_failures(llm) -> str:
     return f"lmstudio={counts.get('lmstudio', 0)}, openrouter={counts.get('openrouter', 0)}"
 
 
-def _handle_model(conn, tg, cfg: Config, llm, chat_id: int, argument: str, set_provider) -> None:
+def model_display(model_id: str, *, limit: int) -> str:
+    """REQ-V1110-MOD-04: the only form of a model id that ever reaches a
+    human -- a `<pre>` catalogue row, a button, the selection body, the text
+    form's confirmation. `redact` first (a hostile catalogue could carry a
+    secret as a "model id"), then every Unicode `Cc`/`Cf` control/format
+    character (`unicodedata.category`) replaced by a space, whitespace
+    collapsed, then truncated UTF-16-safe to `limit` units -- OUT-03's exact
+    algorithm, reused via `tables._truncate_cell` rather than duplicated
+    (already reached across this same module boundary by
+    `tests/test_observability.py`/`tests/test_pricing.py`). Exact ids are
+    used only for catalogue validation, hashing, storage and client
+    construction -- never surfaced raw anywhere a human reads them."""
+    redacted = redact(model_id)
+    cleaned = "".join(" " if unicodedata.category(ch) in ("Cc", "Cf") else ch for ch in redacted)
+    collapsed = " ".join(cleaned.split())
+    return tables._truncate_cell(collapsed, limit)
+
+
+def _catalogue_for(cfg: Config, provider: str) -> tuple[str, ...]:
+    return cfg.lmstudio_models if provider == "lmstudio" else cfg.openrouter_models
+
+
+def _catalogue_hash(catalogue: Sequence[str]) -> str:
+    """REQ-V1110-CBQ-02: the first 8 hex digits of the SHA-256 of the
+    catalogue's framed JSON array -- a framed list so `["a\\nb", "c"]` and
+    `["a", "b\\nc"]` never collide on a naive join."""
+    digest = hashlib.sha256(
+        json.dumps(list(catalogue), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return digest[:8]
+
+
+def _effective_model_override(conn: sqlite3.Connection, cfg: Config, provider: str) -> str | None:
+    """REQ-V1110-MOD-05: `load_model_override`'s raw read, filtered against
+    `provider`'s current catalogue -- a stale env change since the override
+    was set falls back to the default instead of erroring. `model in
+    catalogue` is `False` for `model is None` too (a tuple of `str`), so a
+    never-set override and a now-invalid one both resolve to `None` here."""
+    model = load_model_override(conn, provider)
+    return model if model in _catalogue_for(cfg, provider) else None
+
+
+_OVERRIDE_SUFFIX = " (override)"
+
+
+def _model_row_value(model_id: str, *, is_override: bool) -> str:
+    limit = 44 - len(_OVERRIDE_SUFFIX) if is_override else 44
+    display = model_display(model_id, limit=limit)
+    return display + _OVERRIDE_SUFFIX if is_override else display
+
+
+def _model_status_table(conn: sqlite3.Connection, cfg: Config, llm) -> str:
+    """REQ-V1110-MOD-01: bare `/model`'s (and `mod:back:-`'s) `<pre>` body --
+    a `field | value` table, `max_width` 12/44 (58 units with the
+    separator, <= 72). A row label past 12 units (`openrouter model`, 16
+    units) truncates with an ellipsis -- a known cosmetic effect of the
+    brief's own stated widths, not a rendering error (`render_table` never
+    raises on cell content, only on a line width past 72, which this
+    combination cannot reach)."""
     override = load_provider_override(conn)
-    if not argument:
-        _send(
+    rows: list[tuple[str, str]] = [
+        ("provider", _active_provider(cfg, llm, override)),
+        ("override", override or "none"),
+    ]
+    for provider in PROVIDERS:
+        if not provider_is_configured(cfg, provider):
+            continue
+        default = cfg.lmstudio_model if provider == "lmstudio" else cfg.openrouter_model
+        overridden = _effective_model_override(conn, cfg, provider)
+        rows.append(
+            (
+                f"{provider} model",
+                _model_row_value(
+                    overridden if overridden is not None else default,
+                    is_override=overridden is not None,
+                ),
+            )
+        )
+    rows.append(("failures", _render_failures(llm)))
+    return tables.render_table(["field", "value"], rows, max_width=[12, 44])
+
+
+def _model_step1_keyboard(cfg: Config) -> dict:
+    buttons = [
+        {"text": provider, "callback_data": f"mod:prov:{provider}"}
+        for provider in PROVIDERS
+        if provider_is_configured(cfg, provider)
+    ]
+    buttons.append({"text": "auto", "callback_data": "mod:auto:-"})
+    return {"inline_keyboard": [buttons]}
+
+
+def _model_step2_body(cfg: Config, name: str) -> str:
+    catalogue = _catalogue_for(cfg, name)
+    lines = [f"Models for {name}:"]
+    lines.extend(f"{idx}. {model_display(model, limit=64)}" for idx, model in enumerate(catalogue))
+    return "\n".join(lines)
+
+
+def _model_step2_keyboard(cfg: Config, name: str) -> dict:
+    catalogue = _catalogue_for(cfg, name)
+    digest = _catalogue_hash(catalogue)
+    rows = [
+        [
+            {
+                "text": model_display(model, limit=32),
+                "callback_data": f"mod:model:{idx}:{digest}",
+            }
+        ]
+        for idx, model in enumerate(catalogue)
+    ]
+    rows.append([{"text": "← back", "callback_data": "mod:back:-"}])
+    return {"inline_keyboard": rows}
+
+
+_MODEL_HEADER_RE = re.compile(r"^Models for ([a-z]+):$")
+
+
+def _parse_model_header(text: str) -> str | None:
+    """REQ-V1110-MOD-02: "state lives in the message text, not the server" --
+    the provider a `mod:model` selection applies to is parsed back out of
+    `callback_query.message.text`'s first line, never cached server-side."""
+    first_line = text.splitlines()[0] if text else ""
+    match = _MODEL_HEADER_RE.match(first_line)
+    return match.group(1) if match else None
+
+
+def _handle_model(
+    conn, tg, cfg: Config, llm, chat_id: int, arguments: list[str], set_provider
+) -> None:
+    if len(arguments) > 2:
+        _send(tg, chat_id, [MODEL_USAGE_REPLY])
+        return
+    if not arguments:
+        send_pre(
             tg,
             chat_id,
-            [
-                (
-                    f"Provider: {_active_provider(cfg, llm, override)} "
-                    f"(override: {override or 'none'}, failures: {_render_failures(llm)})"
-                )
-            ],
+            _model_status_table(conn, cfg, llm),
+            reply_markup=_model_step1_keyboard(cfg),
         )
         return
-    choice = argument.casefold()
+    provider_arg, *rest = arguments
+    model_arg = rest[0] if rest else ""
+    choice = provider_arg.casefold()
     if choice == "auto":
+        if model_arg:
+            _send(tg, chat_id, [MODEL_USAGE_REPLY])
+            return
         storage.delete_state(conn, PROVIDER_OVERRIDE_KEY)
+        storage.delete_state_prefix(conn, "model_override:")
         if set_provider is not None:
             set_provider(None)
         _send(tg, chat_id, ["Provider override cleared."])
@@ -1365,10 +1543,221 @@ def _handle_model(conn, tg, cfg: Config, llm, chat_id: int, argument: str, set_p
     if not provider_is_configured(cfg, choice):
         _send(tg, chat_id, [f"Provider {choice} is not configured."])
         return
+    if not model_arg:
+        # REQ-V1110-MOD-03: the single-argument form -- unchanged strings,
+        # never touches any `model_override:*` key.
+        storage.set_state(conn, PROVIDER_OVERRIDE_KEY, choice)
+        if set_provider is not None:
+            set_provider(choice)
+        _send(tg, chat_id, [f"Provider switched to {choice}."])
+        return
+    catalogue = _catalogue_for(cfg, choice)
+    if model_arg not in catalogue:
+        _send(tg, chat_id, [f"Unknown model for {choice}; see /model"])
+        return
     storage.set_state(conn, PROVIDER_OVERRIDE_KEY, choice)
+    storage.set_state(conn, f"model_override:{choice}", model_arg)
     if set_provider is not None:
         set_provider(choice)
-    _send(tg, chat_id, [f"Provider switched to {choice}."])
+    _send(
+        tg,
+        chat_id,
+        [f"Provider switched to {choice}, model: {model_display(model_arg, limit=64)}."],
+    )
+
+
+def _answer_callback(tg, callback_query_id: str, *, text: str | None = None) -> bool:
+    try:
+        tg.answer_callback_query(callback_query_id, text=text)
+        return True
+    except TelegramError as exc:
+        # TRY400: same classified-failure reasoning as `_send`'s own
+        # TelegramError handler.
+        log.error("acknowledging the callback failed: %s", redact(str(exc)))  # noqa: TRY400
+        return False
+
+
+_CALLBACK_NAMESPACES = ("mod", "ses")
+
+
+def _resolve_callback_action(data, message_text: str, cfg: Config) -> tuple | None:
+    """REQ-V1110-CBQ-02: parse and validate `callback_data` against the
+    closed grammar, re-deriving the catalogue from `cfg` fresh -- never
+    trusting anything cached. Returns `None` for anything stale or
+    malformed (unknown ns/verb, non-ASCII, over 64 bytes, a non-integer
+    index, an out-of-range index, a hash mismatch, an unconfigured
+    provider, or a `mod:model` selection whose message no longer shows a
+    provider header); never interprets `callback_data` as a filename, a
+    path or SQL."""
+    if not isinstance(data, str) or not data.isascii():
+        return None
+    if len(data) > CALLBACK_DATA_MAX_BYTES:
+        return None
+    parts = data.split(":")
+    if len(parts) < 3 or parts[0] not in _CALLBACK_NAMESPACES:
+        return None
+    ns, verb = parts[0], parts[1]
+    if ns != "mod":
+        # `ses` is reserved so the grammar is closed -- not emitted this
+        # release, always stale.
+        return None
+
+    if verb == "prov" and len(parts) == 3:
+        name = parts[2]
+        if name in PROVIDERS and provider_is_configured(cfg, name):
+            return ("prov", name)
+        return None
+
+    if verb == "auto" and len(parts) == 3 and parts[2] == "-":
+        return ("auto",)
+
+    if verb == "back" and len(parts) == 3 and parts[2] == "-":
+        return ("back",)
+
+    if verb == "model" and len(parts) == 4:
+        idx_raw, digest = parts[2], parts[3]
+        if not (idx_raw.isascii() and idx_raw.isdigit()):
+            return None
+        name = _parse_model_header(message_text)
+        if name is None or name not in PROVIDERS or not provider_is_configured(cfg, name):
+            return None
+        catalogue = _catalogue_for(cfg, name)
+        if digest != _catalogue_hash(catalogue):
+            return None
+        idx = int(idx_raw)
+        if not (0 <= idx < len(catalogue)):
+            return None
+        return ("model", name, catalogue[idx])
+
+    return None
+
+
+def _apply_callback_action(
+    action: tuple,
+    *,
+    conn: sqlite3.Connection,
+    tg,
+    cfg: Config,
+    llm,
+    chat_id: int,
+    message_id: int,
+    set_provider,
+) -> None:
+    verb = action[0]
+    if verb == "prov":
+        name = action[1]
+        edit_pre(
+            tg,
+            chat_id,
+            message_id,
+            _model_step2_body(cfg, name),
+            reply_markup=_model_step2_keyboard(cfg, name),
+        )
+        return
+    if verb == "model":
+        name, model = action[1], action[2]
+        # REQ-V1110-MOD-02: both keys, in this order, then set_provider,
+        # then the edit.
+        storage.set_state(conn, PROVIDER_OVERRIDE_KEY, name)
+        storage.set_state(conn, f"model_override:{name}", model)
+        if set_provider is not None:
+            set_provider(name)
+        edit_pre(
+            tg, chat_id, message_id, f"Provider: {name}, model: {model_display(model, limit=64)}"
+        )
+        return
+    if verb == "auto":
+        storage.delete_state(conn, PROVIDER_OVERRIDE_KEY)
+        storage.delete_state_prefix(conn, "model_override:")
+        if set_provider is not None:
+            set_provider(None)
+        edit_pre(tg, chat_id, message_id, "Provider override cleared.")
+        return
+    if verb == "back":
+        edit_pre(
+            tg,
+            chat_id,
+            message_id,
+            _model_status_table(conn, cfg, llm),
+            reply_markup=_model_step1_keyboard(cfg),
+        )
+        return
+
+
+def _handle_callback(
+    callback_query: dict,
+    *,
+    conn: sqlite3.Connection,
+    tg,
+    cfg: Config,
+    llm,
+    set_provider,
+    limiter: RateLimiter | None,
+) -> None:
+    """REQ-V1110-CBQ-01/-02: the callback_query counterpart of the
+    message-path guards (`process_update:897-...`), same order, plus the two
+    callback-only checks (`from.id == chat.id`, the rate limiter)."""
+    callback_id = callback_query.get("id")
+    if not isinstance(callback_id, str):
+        log.info("callback query carries no usable id; ignored")
+        return
+    message = callback_query.get("message")
+    if not isinstance(message, dict):
+        log.info("callback query carries no message; ignored")
+        return
+    chat = message.get("chat")
+    if (
+        not isinstance(chat, dict)
+        or chat.get("type") != "private"
+        or not isinstance(chat.get("id"), int)
+    ):
+        log.info("callback query is not from a usable private chat; ignored")
+        return
+    sender = callback_query.get("from")
+    if not isinstance(sender, dict) or sender.get("is_bot"):
+        log.info("callback query has no human sender; ignored")
+        return
+    from_id = sender.get("id")
+    if from_id not in cfg.allowed_tg_ids:
+        # Nothing below this line can spend a resource on an intruder --
+        # the one acknowledgement is what stops Telegram's spinner.
+        log.warning("unauthorized update from tg_id=%s", from_id)
+        _answer_callback(tg, callback_id)
+        return
+    chat_id = chat["id"]
+    if from_id != chat_id:
+        # A private chat's id is its user's id -- a mismatch is ignored
+        # without an answer at all.
+        log.info("callback query chat/from mismatch; ignored")
+        return
+    if limiter is not None and not limiter.allow(from_id):
+        log.warning("rate limit hit for tg_id=%s", from_id)
+        _answer_callback(tg, callback_id, text=RATE_LIMIT_REPLY)
+        return
+
+    message_id = message.get("message_id")
+    if not isinstance(message_id, int):
+        _answer_callback(tg, callback_id, text=CALLBACK_EXPIRED_REPLY)
+        return
+
+    action = _resolve_callback_action(callback_query.get("data"), message.get("text") or "", cfg)
+    if action is None:
+        _answer_callback(tg, callback_id, text=CALLBACK_EXPIRED_REPLY)
+        return
+
+    # REQ-V1110-CBQ-02: acknowledged exactly once, before any other
+    # Telegram call in this handler path.
+    _answer_callback(tg, callback_id)
+    _apply_callback_action(
+        action,
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        llm=llm,
+        chat_id=chat_id,
+        message_id=message_id,
+        set_provider=set_provider,
+    )
 
 
 def _handle_reload_skills(tg, skills: dict, chat_id: int) -> None:
@@ -2324,10 +2713,26 @@ def main(argv: list[str] | None = None) -> int:
         conn.close()
         return 2
     override = load_provider_override(conn)
-    live = {"llm": build_llm_client(cfg, client=client, override=override)}
+    live = {
+        "llm": build_llm_client(
+            cfg,
+            client=client,
+            override=override,
+            model=_effective_model_override(conn, cfg, override or cfg.llm_provider),
+        )
+    }
 
     def set_provider(name: str | None):
-        live["llm"] = build_llm_client(cfg, client=client, override=name)
+        # REQ-V1110-MOD-05: read `model_override:<provider>` at the same
+        # moment the provider override is read -- a value not in the
+        # provider's current catalogue is ignored (a stale env change is
+        # not an error, just a fall-through to the default).
+        live["llm"] = build_llm_client(
+            cfg,
+            client=client,
+            override=name,
+            model=_effective_model_override(conn, cfg, name or cfg.llm_provider),
+        )
         return live["llm"]
 
     # REQ-V13-RTE-01: a second client, on the same `httpx.Client`, only when the
