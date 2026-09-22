@@ -547,7 +547,279 @@ ruff check .` — all checks passed, exit 0. `uv run --locked pytest` —
 for why earlier runs in this task didn't show this line). `uv run
 --locked python bot.py --selftest` — `selftest: OK`, exit 0.
 
-## T3 — not reached
+## T3 — sessions: list and switch, no schema change
+
+Delegated (brief `docs/spec/task-briefs/v1110-T3.md`, EC-04).
+
+**EC-02, stated at the granularity that actually happened, an explicit "no"
+named where it applies**: all five tests in the new
+`tests/test_v1110_ses.py` were written and run against the unmodified tree
+*before* `storage.py`/`bot.py` were touched, and every one of the five
+genuinely failed — but not every assertion inside every test body executed
+red, and the failure mechanism differs by test.
+
+- `T-V1110-SES-01` (`test_t_v1110_ses_01_list_conversations_and_schema_6`):
+  red with `AttributeError: module 'storage' has no attribute
+  'list_conversations'` at the test's first call to that function. The two
+  assertions above it (`SCHEMA_VERSION == 6`, `PRAGMA table_info
+  (conversations)` has 4 columns) ran and passed on the unmodified tree —
+  they are regression guards proving the schema really is untouched, not
+  red-then-green assertions, and never ran red. Everything below the
+  `list_conversations` call (title derivation, ordering, `limit`,
+  `count_conversations`) never executed at all until the function existed.
+- `T-V1110-SES-02` (`test_t_v1110_ses_02_activate_conversation_ownership`):
+  red with `AttributeError: module 'storage' has no attribute
+  'activate_conversation'` at the test's first call to that function.
+  Nothing past that line (foreign id, missing id, the 50-alternating-switch
+  loop) executed red.
+- `T-V1110-SES-03` (`test_t_v1110_ses_03_sessions_table`): red on the very
+  first `process(..., "/sessions")` call, but through an **indirect
+  symptom**, not a direct assertion on the table body. `/sessions` was not
+  yet a recognized command, so the message fell through the dispatch chain
+  into the ordinary agent path, which called the scripted `FakeLLM` with no
+  script queued: `AssertionError: FakeLLM script exhausted`. This is a
+  genuine consequence of the missing dispatch entry — a real `/sessions`
+  handler would never reach the LLM at all — but it is a symptom, not a
+  targeted assertion; none of the table-shape assertions (column headers,
+  10-row cap, active marker, trailing-line count) or the 3-conversation
+  no-trailing-line sub-case ever executed red.
+- `T-V1110-SES-04` (`test_t_v1110_ses_04_session_switch_and_context`): red
+  the same indirect way, on the first `process(..., "/session <id>")` call.
+  Everything written after that first call — the switch reply, the
+  no-summary/no-`summaries`-row checks, the next-turn context-adoption
+  check, the foreign-id and missing-id checks, the three usage-string
+  sub-cases — never executed red. The huge-id sub-case (reusing T2's
+  `_DELETE_MAX_ID` guard) is not a red-then-green case at all: see below.
+- `T-V1110-SES-05` (`test_t_v1110_ses_05_new_reply_names_id`): red directly
+  on its first assertion — the expected `"New conversation started
+  (#{first_id})."` against the still-old literal `"New conversation
+  started."` — exactly the reason the test targets. The second `/new`
+  sub-case (proving the id actually changes between calls) never executed
+  red; it is an extra correctness check, not part of the red-before-green
+  sequence.
+
+**The huge-id `/session` guard is not a red-then-green test.** `_handle_session`
+reuses `_handle_delete`'s existing `_DELETE_MAX_ID` (sqlite3's signed
+64-bit `INTEGER` ceiling) guard — `/session` parses its argument the same
+`isascii()`/`isdigit()` way `/delete` does, so it was exposed to the
+identical `OverflowError` crash T2 already found and fixed once. The guard
+was written into `_handle_session`'s first version from the start (not
+found by a later review this time — carried forward from the known T2
+precedent), so the test case passed immediately once added and never ran
+red through EC-02's own sequence. Its ability to actually catch a
+regression was verified separately: the guard was temporarily removed from
+`bot.py`, the huge-id test case re-run and observed to fail with an
+uncaught `OverflowError` (`storage.py`'s `activate_conversation`, binding
+the oversized id into the `UPDATE`), then the guard restored and the full
+suite re-confirmed green. The same mutation-kill-style proof T2 used for
+its own two `/delete` guard tests.
+
+**The five `NEW_CONVERSATION_REPLY` pin rewrites** (`bot.py:69`'s
+definition, `tests/test_telegram.py:244`, `tests/test_summary.py:190`/
+`:208`/`:244`, `tests/test_v1100_red_team.py:680`) were rewritten
+proactively from T0's pin inventory, to
+`.startswith("New conversation started (#")`, following the PIN-01
+procedure this run has used since T1/T2 — not a red-then-green test in
+themselves. They were never run against the new `/new` reply to watch them
+fail first; each was confirmed correct by the full gate-3 run after both
+the pin rewrite and the `_handle_new` fix landed together.
+
+**Built**: `storage.py` gains three functions, placed right after
+`start_new_conversation` (`:646-662`), before `add_user_message` — the one
+place `git diff -U0 storage.py | grep '^@@'` shows a change, a single
+insertion hunk (`@@ -664,0 +665,105 @@`), nowhere near `SCHEMA_VERSION`
+(`:21`) or `_SCHEMA` (`:229-276`), so `_SCHEMA` is provably byte-unchanged,
+not merely asserted:
+
+- `list_conversations(conn, tg_user_id, *, limit)` — `recent_conversations`'s
+  column set (`id`, `created_at`, `active`, `message_count`,
+  `last_activity`), filtered by `tg_user_id`, plus a computed `title`.
+  `title` is produced by `_derive_session_title` (the whitespace-collapse-
+  and-cut-to-40-characters algorithm the spec gives verbatim), registered
+  on the connection as a SQL function via `conn.create_function` inside the
+  call and invoked from a correlated scalar subquery over each
+  conversation's first `user` message. This is a pattern new to this
+  codebase — no prior `create_function` call exists anywhere in `storage.py`
+  — chosen deliberately over two alternatives: (a) fetching base columns
+  then doing N synthetic per-row re-selects to reconstruct real
+  `sqlite3.Row` objects with an added `title` key, or (b) returning
+  `list[dict]` that only duck-types as a Row. `create_function` keeps
+  `list_conversations` one query, returning genuine `sqlite3.Row` results —
+  matching both the brief's literal `-> list[sqlite3.Row]` signature and
+  `recent_conversations`'s own shape — while still computing the title with
+  exactly the Python semantics the spec specifies
+  (`" ".join(content.split())`), not an approximation built from SQL
+  string functions. Verified against a real in-memory query before writing
+  any test (NULLS LAST behaviour, whitespace collapsing, 40-character cut)
+  — see the prompt file.
+- `count_conversations(conn, tg_user_id)` — the `/sessions` trailing-line
+  total.
+- `activate_conversation(conn, tg_user_id, conv_id)` — `start_new_conversation`'s
+  exact `BEGIN IMMEDIATE` / two `UPDATE`s / `COMMIT`-or-`ROLLBACK` recipe,
+  switching to an existing conversation instead of inserting a new one.
+  When the second `UPDATE`'s `rowcount` is 0 (a missing or foreign
+  `conv_id`), the transaction is rolled back — restoring the first
+  `UPDATE` so the caller's own active row is left exactly as it was — and
+  `False` is returned; otherwise `COMMIT` and `True`.
+
+`bot.py` dispatches two new commands (`:926-982`'s chain, added after
+`/delete`, order doesn't matter — every branch returns) and fixes `/new`'s
+reply:
+
+- `/sessions` → `_handle_sessions`: one table-path body (`send_pre`) over
+  `render_table`'s `●`/`#`/`title`/`msgs`/`last` columns (`max_width`
+  `[1, 4, 28, 4, 16]`, summing with four two-space separators to 61 ≤ 72
+  units), the caller's 10 most recent sessions
+  (`list_conversations(..., limit=SESSIONS_LIST_LIMIT)`), `title`
+  explicitly `redact()`-ed (the same defense-in-depth pattern
+  `_handle_documents` already uses for filenames, on top of `send_pre`'s
+  own blanket `redact()` over the whole body). New `_render_last_activity`
+  (`value[:16].replace("T", " ")`, `n/a` for `NULL`) — a slice-and-replace,
+  not a datetime round trip, since `last_activity` is always
+  `utc_now_iso()`'s own `%Y-%m-%dT%H:%M:%SZ` shape; the same "exact string
+  shape, no parser" style `_handle_documents`' `str(row["created_at"])[:10]`
+  already uses. When `count_conversations` exceeds 10, a trailing
+  `N older sessions not shown` line is appended to the body before it goes
+  through `send_pre` (no established "table plus one more line" helper
+  existed yet from T1/T2 to reuse, so this task just concatenates, per the
+  brief's own fallback instruction).
+- `/session <id>` → `_handle_session`: exactly one argument of ASCII
+  digits (`parts[0].isascii() and parts[0].isdigit()`) → `activate_conversation`;
+  `True` → plain reply `Switched to session #<id>: <title>` (the title via
+  the new `storage.conversation_title`, which calls the same
+  `_derive_session_title` `list_conversations` uses, `redact()`-ed); `False`
+  → `No session #<id>.`, identical wording whether the id doesn't exist at
+  all or belongs to another caller. Bare `/session`, more than one
+  argument, or a non-digit argument → `SESSION_USAGE_REPLY`
+  (`"Usage: /session <id> (see /sessions)"`). An ASCII-digit argument past
+  `_DELETE_MAX_ID` (sqlite3's `INTEGER` ceiling) is rejected the same way,
+  reusing T2's existing guard — see above. `_handle_session` calls neither
+  `agent.summarize_conversation` nor any `messages`/`summaries` write —
+  only `activate_conversation`'s own transaction touches `conversations`.
+- `_handle_new`: `conv_id = storage.start_new_conversation(conn, from_id)`
+  now captures the return value (previously discarded);
+  `NEW_CONVERSATION_REPLY` becomes the format template
+  `"New conversation started (#{conv_id})."`, formatted with the captured
+  id.
+
+**Tests**: `T-V1110-SES-01`…`-05` in `tests/test_v1110_ses.py` (5
+functions, 5 collected items, no parametrization), all green; see the EC-02
+section above for exactly which assertions genuinely ran red first, which
+never ran red at all, and which sub-case (the huge-id guard) is a
+mutation-kill-style proof rather than a red-then-green test. The five
+`NEW_CONVERSATION_REPLY` pin sites (`bot.py:69`, `tests/test_telegram.py:244`,
+`tests/test_summary.py:190`/`:208`/`:244`, `tests/test_v1100_red_team.py:680`)
+rewritten from exact-string equality to `.startswith("New conversation
+started (#")` — all five sites re-verified against the live tree first and
+matched the brief's cited lines exactly.
+
+**`T-V1110-SEC-01` does not belong to this task**, checked rather than
+assumed. The spec's REQ-to-test table (`spec-v1.11.0.md:1668`) lists
+`T-V1110-SEC-01` (a `<script>&</script>` first-message case, spec line 539)
+against REQ-V1110-SES-02 alongside `T-V1110-SES-03`, which could look like
+a T3 test the brief silently dropped. Grepping the spec's own §14 task
+table shows otherwise: `tests/test_v1110_sec.py` is explicitly created by
+**T5** ("`tests/test_v1110_{ing,err,sec}.py` (created)") and finished by
+**T6** ("the rest of `T-V1110-SEC-01`"); T3's own §14 row lists only
+`T-V1110-SES-01…05`. `T-V1110-SEC-01` is a cross-cutting security test
+built incrementally across several tasks' surfaces, not a T3 deliverable.
+The `<script>&</script>` input is, incidentally, already safe through this
+task's own table path regardless — every `/sessions` cell goes through
+`send_pre`'s `_pre_text`, which HTML-escapes the whole fitted body before
+wrapping it in `<pre>`, the same mechanism `/documents`' filenames already
+relied on in T2 — but no dedicated test for it was added here; that
+remains `T-V1110-SEC-01`'s job in its own task.
+
+**One advisor review**, called after gates 1-4 first went green, before any
+docs were written. Four findings, all fixed before this commit:
+
+1. The README `## Sessions` sample table was hand-drawn and didn't match
+   `render_table`'s real output: the `#` column is content-width (1 unit
+   for single-digit ids in the drafted example, not the 4-unit `max_width`
+   cap drawn), and the hand-picked title `why is the export cron failing on
+   sundays only` collapses to 47 characters — past the 40-character cut —
+   so both the table cell and the switch-reply sample needed the real
+   `…`-truncated string, not the untruncated one. Fixed by actually running
+   `storage.list_conversations`/`conversation_title` and
+   `tables.render_table` against a seeded database and pasting the output
+   verbatim, rather than hand-editing the wrong sample.
+2. Whether `T-V1110-SEC-01` was silently dropped from this task's scope —
+   checked against the spec's own task table and confirmed it belongs to
+   T5/T6, not T3 (above), rather than assumed either way.
+3. The `_SCHEMA` byte-unchanged claim was asserted without proof —
+   `git diff -U0 storage.py | grep '^@@'` run and quoted above (Built).
+4. An earlier draft of this section's EC-02 account glossed over which
+   individual assertions inside each test body actually ran red versus
+   which never executed, collapsing SES-03/04's per-assertion detail into
+   "the test file ran red." Rewritten to the assertion-level granularity
+   above — this run's standing requirement after two prior tasks needed
+   their own record corrections (T1's `238-v1110-t1-record-correction.md`,
+   T2's own corrected `## T2` section above).
+
+Separately, `tests/test_v1110_ses.py`'s usage-string loop originally used
+`update_id=5 + hash(text) % 1000` — Python's string hashing is salted per
+process by default, so a rerun (as `devtools/mutation_check.py` does, once
+per mutation) would generate different `update_id` values run to run.
+Replaced with `enumerate(..., start=5)` before this commit, found and fixed
+in the same advisor review pass above; not itself a correctness bug (each
+`update_id` only needs to be distinct within one run), but a
+reproducibility smell worth closing rather than leaving for a later task.
+
+A first commit attempt was rejected by the `pre-commit` hook's
+`ruff-format-all` gate (whole-tree `ruff format --check .`, distinct from
+gate 2's `ruff check .` which stayed green throughout): one multi-line
+`assert` in `tests/test_v1110_ses.py` didn't match `ruff format`'s
+canonical single-line form. Not bypassed (`--no-verify` is forbidden) and
+not fixed by running `ruff format` itself (forbidden by this task's brief,
+and the whole-file reformat risk the user's own standing note warns about)
+— the one flagged line was hand-edited to the suggested single-line form;
+`ruff format --check .` then reported all 127 tracked `.py` files
+formatted, and gates 1-4 were re-run and reconfirmed green before
+committing again.
+
+**Drift (EC-02)**: none. Every cited `file:line` in the brief's reading map
+matched the live tree exactly on independent re-verification:
+`storage.py:21` (`SCHEMA_VERSION`), `:229-276`/`:238-243`/`:245-246`/
+`:248-263` (`_SCHEMA`, `conversations`, the partial unique index,
+`messages`), `:632-643` (`get_or_create_active_conversation`), `:646-662`
+(`start_new_conversation`), `:721-768` (`load_context_messages`),
+`:1229-1245` (`recent_conversations`); `bot.py:69`
+(`NEW_CONVERSATION_REPLY`), `:926-982` (the dispatch chain), `:1048-1077`
+(`_handle_new`, the reply line at `:1077`); all four pin-rewrite sites in
+`tests/test_telegram.py`, `tests/test_summary.py`,
+`tests/test_v1100_red_team.py`. No `cited → actual` correction needed this
+task.
+
+**Further disclosures** (not drift, not amendments — worth recording for a
+later reviewer):
+
+- Zero-session `/sessions`: if a caller with no `conversations` row at all
+  sends `/sessions` as their very first command, `list_conversations`
+  returns an empty list and `render_table` renders a header and rule with
+  no data rows (a valid, non-crashing table) rather than a dedicated empty
+  reply like `DOCUMENTS_EMPTY_REPLY`. Not in the brief's test table and not
+  added speculatively; flagged here since `/documents` has an explicit
+  empty-state string and `/sessions` does not.
+- `/sessions`' `#` and `msgs` columns are 4 units wide, so an id or message
+  count of 10000 or more truncates in the rendered table — the same
+  spec-level property T2's report already flagged for `/documents`' `#`
+  column (width 3, truncates at 1000).
+- README's `## Sessions` section was placed directly after `## Commands`
+  and before `## Observability`, matching the brief's suggested location;
+  the two new `## Commands` table rows (`/sessions`, `/session <id>`) and
+  the `/new` row's description (now naming its id) were also updated.
+
+- T3 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T3.md | map vs actual: matches the reading map exactly, zero drift; one deliberate addition beyond the brief (the `/session` huge-id guard, reusing T2's `_DELETE_MAX_ID`) and one deliberate design choice (`conn.create_function` for `list_conversations`'s title column) both disclosed above
+
+**Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
+brief), each run verbatim as AGENTS.md lists it, no added flags:
+`uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run --locked
+ruff check .` — all checks passed, exit 0 (one `E501` line-too-long on
+`list_conversations`'s multi-argument signature found and fixed before
+this run). `uv run --locked pytest` — `2333 passed, 1 skipped, 2 xfailed`,
+exit 0 (2328 at T2's `09f8d8a` + 5 new this task, all in
+`tests/test_v1110_ses.py`). `uv run --locked python bot.py --selftest` —
+`selftest: OK`, exit 0.
 
 ## T4 — not reached
 

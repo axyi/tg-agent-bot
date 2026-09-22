@@ -66,7 +66,9 @@ TYPING_JOIN_TIMEOUT_S = 3.0
 TYPING_REQUEST_TIMEOUT_S = 2.0
 
 NON_TEXT_REPLY = "I can only process plain text messages."
-NEW_CONVERSATION_REPLY = "New conversation started."
+# v1.11.0 T3 (REQ-V1110-SES-03): a format template, not a literal string --
+# `_handle_new` names the id `start_new_conversation` returns.
+NEW_CONVERSATION_REPLY = "New conversation started (#{conv_id})."
 RATE_LIMIT_REPLY = "Rate limit exceeded. Please wait a moment."
 TOO_LONG_REPLY = "Message too long (over 4000 characters). Please shorten it."
 SUMMARY_FAILED_REPLY = "Could not summarize this conversation right now."
@@ -105,6 +107,9 @@ DOC_BUDGET_EXCEEDED_REPLY = "Indexing timed out (over 300 s). Nothing was saved.
 DOC_HANDLER_FAILED_REPLY = "Something went wrong while processing the document."
 DOCUMENTS_EMPTY_REPLY = "No documents yet. Send me a .txt, .md, .docx or .pdf file."
 DELETE_USAGE_REPLY = "Usage: /delete <filename> | /delete #<id>"
+# v1.11.0 T3 (REQ-V1110-SES-02/-03): sessions -- list and switch.
+SESSIONS_LIST_LIMIT = 10
+SESSION_USAGE_REPLY = "Usage: /session <id> (see /sessions)"
 
 log = logging.getLogger("bot")
 
@@ -980,6 +985,13 @@ def process_update(
             argument = stripped[len(token) :].strip()
             _handle_delete(conn, tg, chat_id, from_id, argument)
             return
+        if name == "/sessions":
+            _handle_sessions(conn, tg, chat_id, from_id)
+            return
+        if name == "/session":
+            argument = stripped[len(token) :].strip()
+            _handle_session(conn, tg, chat_id, from_id, argument)
+            return
 
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
     storage.add_user_message(conn, conv_id, redact(text))
@@ -1073,8 +1085,8 @@ def _handle_new(
                 storage.add_summary(conn, conv_id, from_id, summary)
         except Exception as exc:  # summarization never blocks /new
             log.warning("summarizing the outgoing conversation failed: %s", redact(str(exc)))
-    storage.start_new_conversation(conn, from_id)
-    _send(tg, chat_id, [NEW_CONVERSATION_REPLY])
+    conv_id = storage.start_new_conversation(conn, from_id)
+    _send(tg, chat_id, [NEW_CONVERSATION_REPLY.format(conv_id=conv_id)])
 
 
 def _handle_summary(
@@ -1613,6 +1625,66 @@ def _handle_delete(conn, tg, chat_id: int, from_id: int, argument: str) -> None:
         return
     storage.delete_document(conn, user_id=from_id, document_id=document_id)
     _send(tg, chat_id, [f"Deleted {argument}."])
+
+
+def _render_last_activity(value: str | None) -> str:
+    """`YYYY-MM-DD HH:MM`, `n/a` when `NULL` -- `last_activity` is always
+    `utc_now_iso()`'s `%Y-%m-%dT%H:%M:%SZ` shape, so a slice-and-replace is
+    exact and avoids a datetime round trip (REQ-V1110-SES-02)."""
+    return "n/a" if value is None else value[:16].replace("T", " ")
+
+
+def _handle_sessions(conn, tg, chat_id: int, from_id: int) -> None:
+    """REQ-V1110-SES-02: one table-path body over the `SESSIONS_LIST_LIMIT`
+    most recent sessions, plus a trailing `N older sessions not shown` line
+    when `count_conversations` exceeds that limit."""
+    rows = storage.list_conversations(conn, from_id, limit=SESSIONS_LIST_LIMIT)
+    total = storage.count_conversations(conn, from_id)
+    table = tables.render_table(
+        ["●", "#", "title", "msgs", "last"],
+        [
+            (
+                "●" if row["active"] else "",
+                row["id"],
+                redact(row["title"]),
+                row["message_count"],
+                _render_last_activity(row["last_activity"]),
+            )
+            for row in rows
+        ],
+        max_width=[1, 4, 28, 4, 16],
+    )
+    body = table
+    if total > SESSIONS_LIST_LIMIT:
+        body = f"{table}\n\n{total - SESSIONS_LIST_LIMIT} older sessions not shown"
+    send_pre(tg, chat_id, body)
+
+
+def _no_session_reply(conv_id: int) -> str:
+    # Never reveals whether `conv_id` doesn't exist at all or belongs to
+    # someone else -- identical wording either way (REQ-V1110-SES-03).
+    return f"No session #{conv_id}."
+
+
+def _handle_session(conn, tg, chat_id: int, from_id: int, argument: str) -> None:
+    """REQ-V1110-SES-03: `/session <id>` -- switch the caller's active
+    conversation. Exactly one argument of ASCII digits, else the usage
+    string; the same `_DELETE_MAX_ID` sqlite3-INTEGER-ceiling guard
+    `_handle_delete` uses, for the same reason (a huge digit string would
+    otherwise raise `OverflowError` binding it into the `UPDATE`)."""
+    parts = argument.split()
+    if len(parts) != 1 or not (parts[0].isascii() and parts[0].isdigit()):
+        _send(tg, chat_id, [SESSION_USAGE_REPLY])
+        return
+    conv_id = int(parts[0])
+    if conv_id > _DELETE_MAX_ID:
+        _send(tg, chat_id, [_no_session_reply(conv_id)])
+        return
+    if not storage.activate_conversation(conn, from_id, conv_id):
+        _send(tg, chat_id, [_no_session_reply(conv_id)])
+        return
+    title = redact(storage.conversation_title(conn, conv_id))
+    _send(tg, chat_id, [f"Switched to session #{conv_id}: {title}"])
 
 
 def _send(tg, chat_id: int, parts: list[str]) -> bool:

@@ -241,7 +241,9 @@ def test_t_tg_08_new_command(conn, tmp_path):
 
     for i, text in enumerate(("/new", "/new@ThisBot", "/new keep this", " /NEW "), start=10):
         tg, llm, _runner = process(conn, cfg, update(text=text, update_id=i))
-        assert tg.sent == [(USER_ID, "New conversation started.")]
+        assert len(tg.sent) == 1
+        assert tg.sent[0][0] == USER_ID
+        assert tg.sent[0][1].startswith("New conversation started (#")
         assert llm.calls == []
     active = conn.execute(
         "SELECT COUNT(*) FROM conversations WHERE tg_user_id = ? AND active = 1", (USER_ID,)

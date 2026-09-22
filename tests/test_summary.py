@@ -187,7 +187,9 @@ def test_t_v1_sum_02_new_summarizes_before_resetting(conn, tmp_path):
     conv = seed(conn, ("user", "how do I ship it"), ("assistant", "like this"))
     llm = scripted(json.dumps(VALID_SUMMARY))
 
-    assert process(conn, cfg, "/new", llm) == [(USER_ID, "New conversation started.")]
+    sent = process(conn, cfg, "/new", llm)
+    assert len(sent) == 1 and sent[0][0] == USER_ID
+    assert sent[0][1].startswith("New conversation started (#")
 
     assert llm.max_tokens_calls == [512]
     assert llm.calls[0][1] is None  # no tools are exposed
@@ -205,7 +207,9 @@ def test_t_v1_sum_02_new_without_history_does_not_call_the_model(conn, tmp_path)
     cfg = make_cfg(tmp_path)
     seed(conn, ("user", "only one message"))
     llm = FakeLLM([])
-    assert process(conn, cfg, "/new", llm) == [(USER_ID, "New conversation started.")]
+    sent = process(conn, cfg, "/new", llm)
+    assert len(sent) == 1 and sent[0][0] == USER_ID
+    assert sent[0][1].startswith("New conversation started (#")
     assert llm.calls == []
 
 
@@ -241,7 +245,9 @@ def test_t_v1_sum_03_unparsable_summary_never_blocks_new(conn, tmp_path):
     conv = seed(conn, ("user", "a"), ("assistant", "b"))
     llm = FakeLLM([LLMResponse("not json", [], "stop"), LLMResponse("still not", [], "stop")])
 
-    assert process(conn, cfg, "/new", llm) == [(USER_ID, "New conversation started.")]
+    sent = process(conn, cfg, "/new", llm)
+    assert len(sent) == 1 and sent[0][0] == USER_ID
+    assert sent[0][1].startswith("New conversation started (#")
     assert len(llm.calls) == 2
     assert "not valid JSON" in llm.calls[1][0][-1]["content"]
     assert storage.get_summary(conn, conv) is None

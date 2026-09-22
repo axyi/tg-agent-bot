@@ -662,6 +662,111 @@ def start_new_conversation(conn: sqlite3.Connection, tg_user_id: int) -> int:
     return conv_id
 
 
+_SES_TITLE_MAX_CHARS = 40
+
+
+def _derive_session_title(content: str | None) -> str:
+    """REQ-V1110-SES-01: a session's title -- the content of its first
+    `user` message, whitespace-collapsed (`" ".join(content.split())`), cut
+    to 40 characters with a trailing `…` when longer, `(empty)` when there
+    is no user message (or its content collapses to nothing). Never
+    stored -- computed at list time by `list_conversations` (registered
+    below as a SQL function, so the whole query stays one round trip) and,
+    for the single conversation `/session` just switched to, by
+    `conversation_title`."""
+    if content is None:
+        return "(empty)"
+    collapsed = " ".join(content.split())
+    if not collapsed:
+        return "(empty)"
+    if len(collapsed) > _SES_TITLE_MAX_CHARS:
+        return collapsed[:_SES_TITLE_MAX_CHARS] + "…"
+    return collapsed
+
+
+def conversation_title(conn: sqlite3.Connection, conv_id: int) -> str:
+    """The title `/session`'s switch reply shows (REQ-V1110-SES-03),
+    computed the same way `list_conversations` derives it."""
+    row = conn.execute(
+        "SELECT content FROM messages WHERE conv_id = ? AND role = 'user' ORDER BY id LIMIT 1",
+        (conv_id,),
+    ).fetchone()
+    return _derive_session_title(None if row is None else row["content"])
+
+
+_LIST_CONVERSATIONS_QUERY = (
+    "SELECT c.id AS id, c.created_at AS created_at, c.active AS active, "
+    "       COUNT(m.id) AS message_count, MAX(m.created_at) AS last_activity, "
+    "       _v1110_derive_session_title("
+    "           (SELECT content FROM messages "
+    "            WHERE conv_id = c.id AND role = 'user' ORDER BY id LIMIT 1)"
+    "       ) AS title "
+    "FROM conversations AS c "
+    "LEFT JOIN messages AS m ON m.conv_id = c.id "
+    "WHERE c.tg_user_id = ? "
+    "GROUP BY c.id, c.created_at, c.active "
+    "ORDER BY last_activity DESC NULLS LAST, c.id DESC "
+    "LIMIT ?"
+)
+
+
+def list_conversations(
+    conn: sqlite3.Connection, tg_user_id: int, *, limit: int
+) -> list[sqlite3.Row]:
+    """REQ-V1110-SES-01: `recent_conversations`'s column set (`id`,
+    `created_at`, `active`, `message_count`, `last_activity`), filtered by
+    `tg_user_id`, plus a computed `title` (`_derive_session_title`, never
+    stored -- no column, no migration; `SCHEMA_VERSION` stays 6 and
+    `_SCHEMA` is byte-unchanged). `title` is computed by a SQL function
+    registered on `conn` so the whole thing stays one query and a real
+    `sqlite3.Row` per result, exactly `recent_conversations`'s own shape.
+    Ordered `last_activity DESC NULLS LAST, id DESC`, bounded by `limit`."""
+    conn.create_function("_v1110_derive_session_title", 1, _derive_session_title)
+    return conn.execute(_LIST_CONVERSATIONS_QUERY, (tg_user_id, limit)).fetchall()
+
+
+def count_conversations(conn: sqlite3.Connection, tg_user_id: int) -> int:
+    """REQ-V1110-SES-01: the total behind `/sessions`'s trailing line."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM conversations WHERE tg_user_id = ?",
+        (tg_user_id,),
+    ).fetchone()
+    return row["n"]
+
+
+def activate_conversation(conn: sqlite3.Connection, tg_user_id: int, conv_id: int) -> bool:
+    """REQ-V1110-SES-01: `start_new_conversation`'s exact transactional
+    recipe (above), switching to an existing conversation instead of
+    creating a new one. `BEGIN IMMEDIATE`; deactivate the caller's current
+    active row; activate `conv_id` scoped to `tg_user_id`. When that second
+    `UPDATE`'s `rowcount` is 0 -- `conv_id` is missing or belongs to another
+    user -- the transaction is rolled back (restoring the first `UPDATE`,
+    so the caller's own active row is left exactly as it was) and `False`
+    is returned; otherwise `COMMIT` and `True`. This must be one
+    transaction, never two independent statements: the partial unique
+    index `idx_conversations_one_active` allows only one `active = 1` row
+    per user, and only the rollback guarantees a foreign/missing id changes
+    nothing."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "UPDATE conversations SET active = 0 WHERE tg_user_id = ? AND active = 1",
+            (tg_user_id,),
+        )
+        cursor = conn.execute(
+            "UPDATE conversations SET active = 1 WHERE id = ? AND tg_user_id = ?",
+            (conv_id, tg_user_id),
+        )
+        if cursor.rowcount == 0:
+            conn.execute("ROLLBACK")
+            return False
+        conn.execute("COMMIT")
+        return True
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def add_user_message(conn: sqlite3.Connection, conv_id: int, content: str) -> int:
     return _add_single_row(conn, conv_id, "user", config.redact(content))
 

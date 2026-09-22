@@ -677,7 +677,8 @@ def test_t_v1100_rt_07_the_full_new_path_offline(conn, tmp_path):
     sent2 = _process(conn, cfg, "Второе сообщение", llm, 2)
     assert sent2 == [(USER_ID, "Отвечаю на второе сообщение.")]
     sent_new = _process(conn, cfg, "/new", llm, 3)
-    assert sent_new == [(USER_ID, "New conversation started.")]
+    assert len(sent_new) == 1 and sent_new[0][0] == USER_ID
+    assert sent_new[0][1].startswith("New conversation started (#")
     sent3 = _process(conn, cfg, "Третье сообщение", llm, 4)
     assert sent3 == [(USER_ID, "Отвечаю на третье сообщение, в новом разговоре.")]
 

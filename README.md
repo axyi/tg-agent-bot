@@ -107,7 +107,7 @@ suppressed — see [Dashboard](#dashboard)) and `--version` (prints
 
 | Command | Effect |
 |---|---|
-| `/new` | summarize the current conversation, store the summary, start a fresh one |
+| `/new` | summarize the current conversation, store the summary, start a fresh one (named by id: `New conversation started (#7).`) |
 | `/status` | uptime, active provider, provider failure counts, exec backend, database size and schema version, loaded skills, a token line — `Tokens this conversation: in N / out M` — and a `Dashboard: <state>` line reporting whether the local dashboard is running |
 | `/stats` | token, cost and tool counters for this conversation and for all time — see [Observability](#observability) |
 | `/summary` | summarize the current conversation on demand and show the five-field rendering |
@@ -115,9 +115,55 @@ suppressed — see [Dashboard](#dashboard)) and `--version` (prints
 | `/reload_skills` | re-read `skills/` without restarting the bot |
 | `/documents` | list the caller's uploaded documents as a table (`#`, filename, type, size, chunks, pages, added) |
 | `/delete <filename>` \| `/delete #<id>` | delete one of the caller's documents, its chunks and its vectors; exact filename match, or the `#`-prefixed id shown by `/documents` — a filename that itself starts with `#` is only reachable by id after this |
+| `/sessions` | list the caller's 10 most recent sessions as a table (`●`, `#`, `title`, `msgs`, `last`) — see [Sessions](#sessions) |
+| `/session <id>` | switch the caller's active session to `#<id>` |
 
 Any other `/…` text is passed to the model as an ordinary message. Commands are
 reachable only by allowlisted senders and are never stored in the conversation.
+
+## Sessions
+
+A session is a `conversations` row — switching sessions never changes the
+database schema; it only moves which row is `active` for the caller.
+`/sessions` sends one `<pre>`-wrapped table (the same outbound table path as
+`/stats`/`/documents`) over the caller's 10 most recent sessions, ordered by
+`last_activity` (most recent first; a session with no message yet sorts
+last):
+
+```
+●  #  title                         msgs  last
+-  -  ----------------------------  ----  ----------------
+●  7  let us check today's deploy…     1  2026-09-22 21:29
+   6  why is the export cron fail…     6  2026-09-22 21:29
+   5  deploy the staging branch       14  2026-09-22 21:29
+   4  filler conversation 3            2  2026-09-22 21:29
+   3  filler conversation 2            2  2026-09-22 21:29
+   2  filler conversation 1            2  2026-09-22 21:29
+   1  filler conversation 0            2  2026-09-22 21:29
+```
+
+`●` marks the currently active session; the `#`/`title`/`msgs`/`last` columns
+widen to fit their content, up to `render_table`'s own per-column caps (`#`
+and `msgs` are 4 units wide, so an id or message count of 10000 or more
+truncates — the same property `/documents`' `#` column has). `title` is
+derived, never stored: the content of the session's first message from the
+caller, whitespace-collapsed and cut to 40 characters (`…` when longer),
+`(empty)` when the session has no message yet. A caller with no sessions yet
+sees the header and rule only. When the caller has more than 10 sessions, a
+trailing line names how many older ones aren't shown, e.g. `2 older sessions
+not shown`; `/sessions` never paginates further.
+
+`/session <id>` switches the caller's active session to `#<id>`:
+
+```
+Switched to session #6: why is the export cron failing on sunday…
+```
+
+An id that doesn't exist, or belongs to another caller, gets the same reply
+either way — `No session #<id>.` — so a `/session` guess can never confirm
+whether a given id belongs to someone else. Switching does **not** summarize
+the conversation being left (unlike `/new`) and writes nothing to `messages`
+or `summaries`; the next turn simply continues in the newly active session.
 
 ## Observability
 
