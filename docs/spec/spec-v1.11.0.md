@@ -1,9 +1,9 @@
 # spec-v1.11.0 — the Telegram surface: monospace tables, sessions, inline keyboards, a `/model` menu and large-document ingest off the polling loop
 
 Status: ready for `go`.
-Base: `v1.10.4` (tagged locally 2026-09-19, `6532d4c`; `main` at `295b01f`,
+Base: `v1.10.4` (tagged 2026-09-19, `6532d4c`, tag and `main` pushed to origin the same day; `main` at `295b01f`,
 tree clean except an untracked vim swap file `.README.md.swp`, ignored;
-tag not pushed). Nothing about v1.10.4 is reopened.
+no local-only state). Nothing about v1.10.4 is reopened.
 Target version: **1.11.0** — MINOR by `README.md:889-891` (new commands
 `/sessions`, `/session`, `/cancel`, `/help`, `/start`; new environment
 variables `LMSTUDIO_MODELS`, `OPENROUTER_MODELS`; no schema migration —
@@ -37,14 +37,16 @@ which used it undeclared). Ids are `REQ-V1110-<GROUP>-NN`, tagged MUST or
 NON-GOAL; tests `T-V1110-<GROUP>-NN` in `tests/test_v1110_<group>.py`, one
 file per group (the one exception is `INV`, whose file is
 `tests/test_v1110_inventory.py`, EC-03); mutations `v1110-<slug>` (exactly eight); tasks T0…T8
-(nine tasks); task-brief files `docs/spec/task-briefs/v1110-T<n>.md`. The
+(nine tasks); task-brief files `docs/spec/task-briefs/v1110-T<n>.md`, plus
+T0's two committed artefacts `v1110-T0-pin-inventory.md` and
+`v1110-T0-nodeids.txt` in the same directory. The
 authoring prompt is `docs/prompts/235-v1110-spec-authoring.md` (written
 by the lab); the run's prompts start at **236**; `docs/llm-usage.md` rows
 for the run start at **146**. Executor model **`claude-sonnet-5`**;
 reviewer the project's pinned `code-reviewer` agent
 (`.claude/agents/code-reviewer.md:4`, `model: sonnet`) in a clean
 context. This file states forty-four MUST requirements, fourteen
-`NON-GOAL` rows, fifty-nine test ids, eight mutation ids, eighteen ERR-01
+`NON-GOAL` rows, sixty-two test ids, eight mutation ids, eighteen ERR-01
 rows and fourteen Gherkin scenarios; Appendix A is in bijection with the
 MUST ids.
 
@@ -113,9 +115,9 @@ v1.10.4 suite is **2311 collected tests** (`AGENTS.md:161`, `tests/test_v190_age
 T0 re-measures with `uv run --locked pytest --collect-only -q -o addopts=""
 | grep -c '::'` and the measured number is the floor. **The floor is a
 release acceptance check at T8**, not a gate-3 mechanism: the final count
-MUST be ≥ floor + 59 (the §11 table) — no test is deleted
+MUST be ≥ floor + 62 (the §11 table) — no test is deleted
 (`REQ-V190-EC-03` carries). The count is a floor, not the proof that the
-fifty-nine tests landed — parametrised tests inflate it — so two
+sixty-two tests landed — parametrised tests inflate it — so two
 structural checks accompany it: **(a)** the §11 table names, for every
 `T-V1110-*` id, its module and test function as
 `tests/test_v1110_<group>.py::test_<name>`, and T8 adds
@@ -127,13 +129,15 @@ module, `hasattr`); **(b)** T0 records the baseline node-id list —
 sort` — to `docs/spec/task-briefs/v1110-T0-nodeids.txt`, committed with
 T0; T8 re-collects the same way and asserts by command (`comm -23
 <baseline> <after>`) that no baseline node id disappeared except the
-renames T0's inventory lists as an explicit `old → new` mapping (PIN-01);
+renames the T0 pin inventory (`v1110-T0-pin-inventory.md`, PIN-01) lists
+as an explicit `old → new` mapping;
 a missing node id outside the mapping is a T8 repair cycle. Tests may be
-modified only at the sites T0's inventory names (PIN-01) plus the four
+modified only at the sites `v1110-T0-pin-inventory.md` names (PIN-01)
+plus the four
 release-mechanics sites of VER-01; a site discovered later is a
 disclosed amendment (PIN-01), not a stop. `[[VERIFY: the collected count
-after T0 is the floor; T8's collection check reads floor + 59 or more,
-the exact number written into AGENTS.md by T8; a count below floor + 59,
+after T0 is the floor; T8's collection check reads floor + 62 or more,
+the exact number written into AGENTS.md by T8; a count below floor + 62,
 a `T-V1110-INV-01` failure, or a `comm -23` line outside the rename
 mapping means a §11 test was not landed or a baseline test was lost — the
 task that owns it (Appendix A; for a lost baseline test, the task whose
@@ -145,14 +149,18 @@ route]]`.
 writes source is delegated and briefed by a task-brief file**
 `docs/spec/task-briefs/v1110-T<n>.md`, written by the orchestrator before
 dispatch and passed by path — never retyped into a prompt. The brief
-carries whatever load-bearing thing is already resolved (T0's pin table,
+carries whatever load-bearing thing is already resolved (the pin table of
+`v1110-T0-pin-inventory.md`,
 §3's payload rule, §7's `callback_data` grammar, §13's eight `find`
 strings) by copying it from this spec or from an earlier task's output;
 the executor never retypes a table into a prompt. Task-brief files are
 committed with the task. §14.1's `delegate` column defaults to **yes** for
 T0–T8 — T0 included: its pin-inventory reading and the construction of
-`v1110-T0.md` are source reading and are delegated (a subagent reads the
-tests and sources PIN-01 names and writes the brief); *commands only*
+`v1110-T0-pin-inventory.md` are source reading and are delegated (the
+orchestrator writes the pre-dispatch brief `v1110-T0.md`; the subagent it
+dispatches reads the tests and sources PIN-01 names and writes the
+inventory to that distinct artefact, never back into its own brief);
+*commands only*
 covers solely T0's precondition checks and its measurements (the
 collection and node-id list, the mutation count, the `find`-string grep,
 the `bot_state` count). A `no` cell carries one of the four §5.1
@@ -206,7 +214,8 @@ commit, the evidence commit included.
 
 **REQ-V1110-EC-07 (MUST) — the order; the live gates never overlap.** Work
 in §14's order; tests before the code they cover, inside the same task;
-each task rewrites the pins T0's inventory assigns to it (PIN-01) so gate 3
+each task rewrites the pins `v1110-T0-pin-inventory.md` assigns to it
+(PIN-01) so gate 3
 is green at every commit. **Gates 6, 7 and 8 never run in parallel with
 one another or with any other gate** (the lab's record: the mutation gate
 mutates the tree in place and poisons concurrent readers). The version
@@ -447,7 +456,9 @@ when the caller has a queued or running ingest job (ING-03), the body
 ends with one line `⏳ indexing <name> — <stage>` where `<stage>` is the
 job's last progress string without its `📄 ` prefix (`received`,
 `extracted: …`, `chunked: N`, `embedding: i/n`) — wired in T5, after the
-worker exists. `T-V1110-DOC-01`, `-02`; `T-V1110-SEC-01` (a filename
+worker exists, and owned by its own test there. `T-V1110-DOC-01`, `-02`
+(the table and the empty case, T2); `T-V1110-DOC-05` (the in-flight line
+after the table, T5); `T-V1110-SEC-01` (a filename
 `<script>&</script>`).
 
 **REQ-V1110-DOC-02 (MUST) — `/delete #<id>`.** `_handle_delete`
@@ -564,8 +575,10 @@ a `private` chat with an int id; `callback_query.from` must be a human
 sender (`is_bot` false); `from.id in cfg.allowed_tg_ids` — **an
 intruder's callback is answered with `answerCallbackQuery(callback_query_id)`
 carrying no `text` and nothing else happens**: no log line beyond the
-existing `unauthorized update from tg_id=%s` warning (`:860`), no state
-read, no LLM, no second Telegram call (the intruder cost rule of
+existing `unauthorized update from tg_id=%s` warning (`:860`), no LLM, no
+second Telegram call, and no application state read or written — **the
+mandatory cursor read/write may occur before authorization; no
+application state other than the cursor is read or written** (the intruder cost rule of
 `REQ-V1-*`'s allowlist carries; the one acknowledgement is what stops
 Telegram's client spinner and costs nothing); `message.chat.id` must equal
 `from.id` (a private chat's id is its user's id — a mismatch is ignored
@@ -587,7 +600,7 @@ ses}`; the complete verb list is:
 | data | meaning | arg |
 |---|---|---|
 | `mod:prov:<name>` | show `<name>`'s model buttons (MOD-02 step 2) | `lmstudio` \| `openrouter` |
-| `mod:model:<idx>:<h>` | select model `<idx>` of the provider currently shown (MOD-02) | `<idx>` a decimal index into the rendered catalogue; `<h>` the first 8 hex digits of `sha256("\n".join(catalogue))` for that provider at render time (`mod:model:19:0123abcd` is 21 bytes) |
+| `mod:model:<idx>:<h>` | select model `<idx>` of the provider currently shown (MOD-02) | `<idx>` a decimal index into the rendered catalogue; `<h>` the first 8 hex digits of `sha256(json.dumps(catalogue, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()` over that provider's catalogue of exact ids at render time — a framed JSON list, so `["a\nb", "c"]` and `["a", "b\nc"]` never collide (`mod:model:19:0123abcd` is 21 bytes) |
 | `mod:auto:-` | clear both overrides (MOD-02) | literal `-` |
 | `mod:back:-` | return to step 1 (MOD-01) | literal `-` |
 | `ses:switch:<id>` | reserved for a later release; **not emitted** and treated as stale | — |
@@ -601,7 +614,8 @@ from the catalogue re-derived at handling time (the env was reordered or
 changed since the menu was rendered), a provider that is not configured,
 a `mod:model` selection whose message no longer shows a provider — is
 acknowledged with `text = "Expired — send the command again."` and **no
-state change** (no `bot_state` write, no `set_provider` call, no edit).
+state change** (no `bot_state` write beyond the cursor, no `set_provider`
+call, no edit).
 `callback_data` is never interpreted as a filename, a path or SQL
 (SEC-01); on `mod:model` the handler re-derives the catalogue from `cfg`,
 recomputes `<h>`, and accepts the index only if both `<h>` matches and
@@ -658,20 +672,22 @@ one row. `T-V1110-MOD-01`.
 keys; `auto` clears both.** On `mod:prov:<name>` the same message is
 edited (CBQ-03, through `edit_pre`) to a `<pre>` body `Models for <name>:`
 followed by the catalogue (MOD-04) one per line as `<idx>. <display>`,
-where `<display>` is the model id's **display form** (MOD-04:
-`redact(" ".join(model_id.split()))`, whitespace-collapsed and
-control-free, escaped by `_pre_text` like every user- or env-supplied
-string) truncated OUT-03's way — UTF-16-safe — so that a row is ≤ 64
-UTF-16 units, with one button per model (text = the same display form,
-UTF-16-safe truncated to 32 units — never the raw id, since
-`reply_markup` bypasses `_pre_text`; data
+where `<display>` is `model_display(model_id, limit=64)` (MOD-04:
+redacted, every `Cc`/`Cf` character replaced by a space,
+whitespace-collapsed, UTF-16-safe truncated to ≤ 64 units; escaped by
+`_pre_text` like every user- or env-supplied string), with one button
+per model (text = `model_display(model_id, limit=32)` — never the raw
+id, since `reply_markup` bypasses `_pre_text`; data
 `mod:model:<idx>:<h>` — the index as rendered and `<h>` = the first 8 hex
-digits of `sha256("\n".join(catalogue))` for that provider at render
-time; the id itself may exceed 64 bytes, the data never does: at most
+digits of `sha256(json.dumps(catalogue, ensure_ascii=False,
+separators=(",", ":")).encode("utf-8")).hexdigest()` over that
+provider's catalogue of exact ids at render time (CBQ-02); the id itself
+may exceed 64 bytes, the data never does: at most
 `mod:model:19:0123abcd`, 21 bytes) and a last row `← back` (`mod:back:-`).
 **The invariant, stated on display forms**: a catalogue holds at most 20
-entries (MOD-04) and every display form is one line (no newline or
-control character survives the collapse), so with ≤ 20 rows of ≤ 64
+entries (MOD-04) and every `model_display` form is one line (no newline
+or control character survives the replacement and collapse), so with ≤
+20 rows of ≤ 64
 units the body cannot exceed 4096 units, `_pre_text`'s fit never drops a
 row, and rendered rows ↔ emitted buttons stay one-to-one, one row per
 model. The provider shown is carried by the message text, not
@@ -685,7 +701,8 @@ index outside `range(len(catalogue))` is stale (CBQ-02). On a valid
 `mod:model:<idx>:<h>`: `storage.set_state(conn, PROVIDER_OVERRIDE_KEY, name)`
 **and** `storage.set_state(conn, f"model_override:{name}", model)` (the new
 key family; global, NG-02), then `set_provider(name)` (MOD-05), then the
-message is edited to `Provider: <name>, model: <model>` with the keyboard
+message is edited to `Provider: <name>, model: <model_display(model)>`
+(the exact id never reaches a `<pre>` body, MOD-04) with the keyboard
 removed. `mod:auto:-` (and the text form `/model auto`) deletes
 `provider_override` **and every `model_override:*` row** (`DELETE FROM
 bot_state WHERE key LIKE 'model_override:%'` — a new `storage.delete_state_prefix(conn,
@@ -694,9 +711,10 @@ replies (text) `Provider override cleared.` (`bot.py:1268-1272`'s string,
 unchanged). `mod:back:-` edits back to step 1's body and keyboard.
 `T-V1110-MOD-02`, `-03`, `-07` (a 25-entry allowlist → 20 rows, 20
 buttons, one warning), `-08` (reordered between render and click → stale,
-no state change — negative), `-09` (a sentinel secret and a
-newline-bearing id in the allowlist: neither raw value in `text` or
-`reply_markup` — negative); mutation `v1110-model-index-unbounded`;
+no state change — negative), `-09` (a sentinel secret and an id
+bearing `\n`, `\x00` and `\x07` in the allowlist: neither raw value and
+no control character in `text`, in `reply_markup` or in the
+post-selection edit — negative); mutation `v1110-model-index-unbounded`;
 Gherkin `E7`.
 
 **REQ-V1110-MOD-03 (MUST) — the text form, kept for scripts and tests.**
@@ -706,7 +724,8 @@ switched to <p>.` strings unchanged; it does not touch any
 `model_override:*` key). `/model <provider> <model>` — the model must be
 in `<provider>`'s catalogue (MOD-04), else `Unknown model for <provider>;
 see /model` — sets both keys as MOD-02 and replies `Provider switched to
-<provider>, model: <model>.`. `/model auto` as MOD-02. More than two
+<provider>, model: <model_display(model)>.` (the exact id is stored, its
+display form echoed, MOD-04). `/model auto` as MOD-02. More than two
 arguments → usage. `MODEL_USAGE_REPLY` (`bot.py:71`) becomes `Usage:
 /model [lmstudio|openrouter|auto] [<model>]`; T0 inventories its pins
 (`tests/test_failover.py`, one hit at `295b01f`; the README Commands row
@@ -723,10 +742,17 @@ always first even when the list omits it**, then the list in env order,
 deduplicated (first occurrence wins). **The stored model id remains
 exact** — it is what MOD-03 validates against, what MOD-05 hands to the
 client and what `llm_calls.model` records; **its display form is
-`redact(" ".join(model_id.split()))`**, whitespace-collapsed and
-control-free, UTF-16-safe truncated for catalogue rows (≤ 64 units) and
-buttons (≤ 32 units) — the only form that reaches a `<pre>` body or a
-`reply_markup` (MOD-02, SEC-01). **A catalogue holds at most 20
+`model_display(model_id, *, limit)`**, one helper in `bot.py` used
+everywhere a model id is shown: `redact(model_id)` first, then every
+Unicode `Cc`/`Cf` character (`unicodedata.category`) replaced by a
+space, whitespace collapsed (`" ".join(s.split())`), then UTF-16-safe
+truncation OUT-03's way (never inside a scalar, one unit reserved for
+`…`) to the requested surface — catalogue rows ≤ 64 units, buttons ≤ 32
+units, the selection body's and the text form's `model:` value at 64 —
+the only form that reaches a `<pre>` body, a plain reply or a
+`reply_markup` (MOD-02, MOD-03, SEC-01). **Exact ids are used only for
+catalogue validation (MOD-03), hashing (CBQ-02), storage (the
+`model_override:*` value) and client construction (MOD-05).** **A catalogue holds at most 20
 entries** (`config.MODEL_CATALOGUE_MAX = 20`): entries beyond the 20th
 are dropped at config load with **one** warning log line naming the count
 dropped (never the ids — `log.warning("%s: %d model entries beyond %d
@@ -745,7 +771,8 @@ dropped; at most 20 entries, the rest dropped with a warning) and the
 provider-variable table: the `README.md:75-91` table is the output
 windows / history / pricing / observability sub-table and is **not
 touched**. `T-V1110-MOD-05`, `T-V1110-MOD-07` (the 20-entry bound),
-`T-V1110-MOD-09` (the display form in rows and buttons — negative).
+`T-V1110-MOD-09` (`model_display` in rows, buttons and the selection body
+— negative).
 
 **REQ-V1110-MOD-05 (MUST) — the override reaches the client; what
 `llm_calls.model` records; the gate-time precondition.** `build_llm_client`
@@ -812,16 +839,28 @@ queue, its own connection, driven synchronously in tests.** Today
 `_handle_document` runs inline in `poll_loop` and blocks every chat for
 the whole ingest (`bot.py:1559-1582` calls `process_update` inline; the
 offset advances only after it returns). New in `bot.py`: `class
-IngestWorker` with `queue.Queue(maxsize=INGEST_QUEUE_MAX)` (`INGEST_QUEUE_MAX
-= 4`), a **lock-protected in-flight map** (`from_id → IngestJob`, guarded
-by one `threading.Lock`), `submit(job) -> bool` (reserve the caller's slot
-in the map **and** `put_nowait` as one atomic step under that lock;
-`False` on `queue.Full`, in which case the slot is not reserved),
-`run_one(conn=None) -> None` (one `get()` → process → mark done — **the
+IngestWorker` with `queue.Queue(maxsize=INGEST_QUEUE_MAX + 1)`
+(`INGEST_QUEUE_MAX = 4`; the physical queue has five slots, admission
+hands out at most four job-capacity tokens, so one slot is always free
+for the shutdown sentinel), a **lock-protected in-flight map** (`from_id
+→ Reservation | IngestJob`, guarded by one `threading.Lock`) and a
+**two-phase admission API**: `reserve(from_id, filename) -> Reservation |
+SubmitError` atomically, under that lock, reserves the caller's user slot
+**and** one of the four capacity tokens — or returns
+`SubmitError.inflight` (the caller already holds a reservation or a job)
+/ `SubmitError.full` (no token left), reserving nothing;
+`enqueue(reservation, job) -> None` swaps the `IngestJob` into the map
+for that reservation and `put_nowait`s it — it cannot fail for capacity
+reasons, the token is the reservation's; `release(reservation) -> None`
+removes both the user slot and the token without enqueueing (used when
+the status send fails, ING-03); `run_one(conn=None) -> None` (one `get()` → process → mark done — **the
 thread wrapper `_run` only loops over `run_one` until shutdown**),
 `shutdown()`, `close()`, `cancel(from_id) -> bool | None` (`None` no
 job, `True` event set, `False` the job is `committing`, ING-04) and
-`in_flight(from_id) -> IngestJob | None` (ING-03, ING-04),
+`in_flight(from_id) -> IngestJob | None` (ING-03, ING-04; a bare
+`Reservation` — the window between `reserve` and `enqueue` — counts for
+`reserve` but is neither a job to cancel nor a line for `/documents`:
+`in_flight` and `cancel` see `None`),
 started as `threading.Thread(target=…, daemon=True)` in `main()` next to
 the dashboard thread (`bot.py:2141`) **only in the real run** — `run_selftest`
 (`bot.py:1669-1716`) constructs no worker. The split of `_handle_document`
@@ -829,12 +868,17 @@ the dashboard thread (`bot.py:2141`) **only in the real run** — `run_selftest`
 the handler's first action (`:1347`, `REQ-V190-CMD-03`) and the **five
 pre-checks in their order** (`:1349-1378`: RAG configured, `file_size`
 cap, `clean_filename`, `classify`, the 20-document count), each still a
-plain synchronous reply with no status message and no `getFile`; then the
-per-user and queue guards (ING-03); then it sends the status message
-`📄 received` (`_StatusMessage.update`, `bot.py:368-380`) **from the loop
-thread** — so the job carries a live `_StatusMessage` — enqueues
-`IngestJob(chat_id, from_id, document, filename, status, started_at,
-cancel=threading.Event(), phase="queued")` and returns. `run_one`
+plain synchronous reply with no status message and no `getFile`; then
+**`reserve(from_id, filename)`** — the per-user and capacity guards as
+one atomic step (ING-03), a `SubmitError` answered with its plain reply
+and nothing else; only after a successful reservation does it send the
+status message `📄 received` (`_StatusMessage.update`, `bot.py:368-380`)
+**from the loop thread** — so the job carries a live `_StatusMessage` —
+then `enqueue(reservation, IngestJob(chat_id, from_id, document,
+filename, status, started_at, cancel=threading.Event(),
+cancel_reason=None, phase="queued"))` and returns; when the status send
+raises, it calls `release(reservation)` — both reservations gone, nothing
+enqueued, no orphan status message — and the handler returns. `run_one`
 dequeues the job **first**, marks it `running` under the lock (ING-04),
 and only then — inside the `try` covered by its outermost `finally` —
 obtains the connection; it performs the ING-04 checkpoints, `getFile` +
@@ -862,10 +906,19 @@ uses a test-supplied connection for that job and never stores it, or
 and the test closes it with `worker.close()`; **no connection crosses
 threads** (`T-V1110-ING-02` asserts by monkeypatching `storage.connect`
 to record the calling thread). **Wake-up and shutdown**: `run_one`'s
-`get()` blocks, so `shutdown()` sets the stop event **and enqueues a
-private sentinel**; `_run` recognizes the sentinel, calls `task_done()`,
-exits, and closes its connection in `finally`. The sentinel does not
-consume an in-flight user slot (it is not an `IngestJob`, reserves
+`get()` blocks, so `shutdown()` sets the stop event, then — under the
+lock — sets cancellation with `cancel_reason = "shutdown"` on every job
+in phase `queued` or `running` (never on a `committing` job, which
+finishes its commit, ING-04), then **`put_nowait`s a private sentinel**
+into the fifth slot, which admission never hands out, so the put cannot
+raise `queue.Full` and never blocks behind a running job. `_run` keeps
+looping over `run_one` and so **drains the cancelled jobs ahead of the
+sentinel** through the normal outermost `finally` (slot and token
+release, `task_done()`), each drained job editing its status to `❌
+Interrupted by restart.` (ERR-01 row 10; a failed edit is logged, never
+raised); on the sentinel `_run` calls `task_done()`, exits, and closes
+its connection in `finally`. The sentinel does not consume an in-flight
+user slot or a capacity token (it is not an `IngestJob`, reserves
 nothing and is never counted by `in_flight`). Slot release (ING-03) and
 `queue.task_done()` happen in `run_one`'s **outermost `finally`**, which
 covers `BaseException` and a connection-acquisition failure alike, so no
@@ -890,32 +943,47 @@ acquired inside `run_one` on the worker thread and closed in `_run`'s
 `finally` after `shutdown()`'s sentinel; the pre-checks and `started_at`
 unchanged — extends `T-V190-CMD-03`), `T-V1110-ING-08` (`storage.connect`
 fails once, then succeeds: the first job's slot is released and the next
-job runs — negative); Gherkin `E10`.
+job runs — negative), `T-V1110-ING-10` (paused between `reserve` and the
+status send while another submit and a dequeue occur — negative),
+`T-V1110-ING-11` (four queued jobs and one running at `shutdown()`: the
+drain, the sentinel, the bounded join); Gherkin `E10`.
 
 **REQ-V1110-ING-03 (MUST) — one in-flight job per user; a bounded queue.**
 A second upload from a user whose job is queued or running → plain reply
 `⏳ Still indexing <name>; wait for it to finish.` (`<name>` = the in-flight
 job's filename, redacted), nothing enqueued; a different user's upload is
-accepted. When the queue holds `INGEST_QUEUE_MAX` jobs → `Indexing queue is
-full; try again later.`, nothing enqueued, no status message. Both guards
-run after the five pre-checks and before the status message; the
-in-flight check and the reservation are one atomic step under the
-worker's lock (ING-02), so two uploads racing from one user cannot both
-pass. The slot is freed in `run_one`'s outermost `finally` when the job
+accepted. When the four capacity tokens are taken (`INGEST_QUEUE_MAX` jobs
+reserved or queued) → `Indexing queue is full; try again later.`, nothing
+reserved, nothing enqueued, no status message. Both guards are **one
+atomic `reserve(from_id, filename)` call** under the worker's lock
+(ING-02), after the five pre-checks and before the status message: a
+`SubmitError.inflight` / `SubmitError.full` result is answered with the
+row-6 / row-7 string and nothing else; a `Reservation` is followed by the
+status send and then `enqueue(reservation, job)`, which cannot fail for
+capacity reasons; a status send that raises is followed by
+`release(reservation)`, which removes the user slot and the token. So two
+uploads racing from one user cannot both pass, a dequeue or another
+user's admission during the send window cannot disturb the caller's
+reservation, and no `📄 received` message is ever orphaned by a later
+capacity failure. The slot is freed in `run_one`'s outermost `finally` when the job
 ends on any path (success, ERR-01, cancel, exception, `BaseException`, a
 connection-acquisition failure — ING-02). `/documents` shows the in-flight
 line (DOC-01). `T-V1110-ING-03` (second upload — negative),
 `T-V1110-ING-04` (queue full — negative), `T-V1110-ING-08` (the slot
-survives no connection failure — negative); mutation
+survives no connection failure — negative), `T-V1110-ING-10` (the
+reservation race between `reserve` and the status send — negative); mutation
 `v1110-inflight-guard-dropped`; Gherkin `E13`.
 
 **REQ-V1110-ING-04 (MUST) — cooperative cancel; the job phase.** Every
 `IngestJob` carries a **lock-protected `phase`** — `queued` (set by
-`submit`), `running` (set by `run_one` on dequeue) or `committing` — read
-and written only under the worker's lock (ING-02). `/cancel` (dispatched
+`enqueue`), `running` (set by `run_one` on dequeue) or `committing` — and
+a **`cancel_reason: str | None`** (`"user"` written by `/cancel`,
+`"shutdown"` by `shutdown()`, always under the lock and before the event
+is set) — read and written only under the worker's lock (ING-02). `/cancel` (dispatched
 like every command, D14) reads the caller's job and its phase **under
 the lock**: no job → `Nothing to cancel.`; phase `queued` or `running` →
-the job's `cancel` event is set and the reply is `Cancelling <name>…` on
+the job's `cancel_reason` becomes `"user"`, its `cancel` event is set and
+the reply is `Cancelling <name>…` on
 the plain path; phase `committing` → the reply is `Indexing is already
 finishing.` and the event is **not** set (ERR-01 row 17).
 `documents.index_document` gains `cancel:
@@ -942,13 +1010,17 @@ when the cancel event is set or the budget is exhausted), and when it
 returns `True` between chunks `download_file` closes the stream and
 returns `None`, whereupon the post-download `_check_cancel_budget(job)`
 raises; the agent path passes nothing. **A job already cancelled when
-dequeued** edits `❌ Cancelled.` without any Telegram file call. **The
+dequeued** edits its reason's status (`❌ Cancelled.` for `"user"`, `❌
+Interrupted by restart.` for `"shutdown"`, ING-05) without any Telegram
+file call. **The
 two outcomes, exclusive by phase**: if cancellation is observed at a
 remaining checkpoint, the status becomes `❌ Cancelled.` and nothing is
 stored — every checkpoint precedes `BEGIN IMMEDIATE` (`documents.py:528`),
 so the transaction is never opened; the worker maps `IndexCancelled` to
-that status edit (`_document_error_ending`, `bot.py:1311-1319`, the
-message kept) and frees the slot. Once the job has entered its
+that status edit — `❌ Cancelled.` for `cancel_reason == "user"`, `❌
+Interrupted by restart.` for `"shutdown"` (ING-05) —
+(`_document_error_ending`, `bot.py:1311-1319`, the message kept) and
+frees the slot. Once the job has entered its
 non-cancellable commit phase (`committing`), `/cancel` replies `Indexing
 is already finishing.`, does not set the event, and the commit proceeds
 to the success reply. `T-V1110-ING-05` (cancel between embedding batches
@@ -978,17 +1050,27 @@ is untouched. **Vectors**: `storage.add_vectors` (`storage.py:1045-1071`)
 already inserts with one `executemany` per call (`:1068-1071`) — the lab's
 recon recorded per-row inserts; it is wrong at `295b01f` and the spec
 changes nothing here (transaction boundaries as today, `documents.py:528-563`).
-**Shutdown**: `_handle_signal` (`bot.py:1589-1591`) sets `_shutdown`;
-`main()`'s shutdown path calls `worker.shutdown()` (ING-02: the stop
-event and the sentinel, so an idle worker wakes, exits and closes its
-connection); the worker is a daemon and an in-flight job is abandoned
-(nothing stored — the checkpoints never reach `BEGIN IMMEDIATE` on a
-killed thread, and a transaction in progress rolls back with the
-connection); a best-effort edit of the job's status message to `❌
-Interrupted by restart.` in `main()`'s shutdown path is a **SHOULD**, not
-a MUST — no test, no mutation (ERR-01 row 10 is documentation-only), the
-report says whether it landed. `T-V1110-ING-01` (the constant),
-`T-V1110-ING-02` (no typing indicator; the sentinel exit); Gherkin `E10`.
+**Shutdown** — one policy, a MUST: `_handle_signal` (`bot.py:1589-1591`)
+sets `_shutdown`; `main()`'s shutdown path calls `worker.shutdown()`
+(ING-02: the stop event, cancellation with reason `shutdown` on every
+`queued`/`running` job, never on a `committing` one, then the sentinel
+into the reserved fifth slot), then **joins the worker thread with a
+bounded timeout of 10 s**. Inside that window `_run` drains every
+cancelled job through the outermost `finally` — each edits its status to
+`❌ Interrupted by restart.` (ERR-01 row 10; a failed edit is logged,
+never raised), nothing is stored, the slot and the token are released —
+a `committing` job finishes its commit and sends the success reply, then
+the sentinel is consumed, the thread exits and closes its connection. The
+worker stays a daemon: **process termination before the join completes
+relies only on SQLite transaction atomicity** (a transaction in progress
+rolls back with the connection; every checkpoint precedes `BEGIN
+IMMEDIATE`, ING-04) — README's `### Limitations` says so in one sentence
+(VER-02). `T-V1110-ING-01` (the constant), `T-V1110-ING-02` (no typing
+indicator; the sentinel exit), `T-V1110-ING-11` (four queued jobs and
+one running at `shutdown()`: four `❌ Interrupted by restart.` edits, the
+running job's outcome by phase, the sentinel consumed, the thread exited
+within the join bound, the connection closed), `T-V1110-ERR-01` (row
+10); Gherkin `E10`.
 
 ---
 
@@ -1048,37 +1130,36 @@ Rows 1–5 replace `spec-v1.9.0.md:1330-1331,1338`'s 5a/5b/10c strings; the othe
 | 3 | `DocxArchiveTooLargeError` (DOC-03) | `Document too large (DOCX archive bounds).` | nothing |
 | 4 | `PdfTooManyPagesError`, > 2,000 pages (DOC-03) | `Document too large (over 2,000 pages).` | nothing |
 | 5 | `IndexBudgetExceeded`, 1800 s from `started_at`, at any ING-04 checkpoint (ING-05) | `Indexing timed out (over 1800 s). Nothing was saved.` | nothing |
-| 6 | a second upload while the caller's job is queued or running (ING-03) | `⏳ Still indexing <name>; wait for it to finish.` | nothing enqueued |
-| 7 | the queue holds 4 jobs (ING-03) | `Indexing queue is full; try again later.` | nothing enqueued |
+| 6 | a second upload while the caller's job is queued or running (ING-03) | `⏳ Still indexing <name>; wait for it to finish.` | nothing reserved or enqueued (`SubmitError.inflight`) |
+| 7 | the four capacity tokens are taken — `INGEST_QUEUE_MAX` jobs reserved or queued (ING-03) | `Indexing queue is full; try again later.` | nothing reserved or enqueued (`SubmitError.full`); no status message |
 | 8 | `/cancel` with a job in phase `queued` or `running` (ING-04) | `Cancelling <name>…`; if cancellation is observed at a remaining checkpoint (for a still-queued job: on dequeue, before any Telegram file call), the status becomes `❌ Cancelled.` and nothing is stored | nothing stored; slot freed |
 | 9 | `/cancel` with nothing in flight (ING-04) | `Nothing to cancel.` | — |
-| 10 | shutdown with a job in flight (ING-05, SHOULD) | status edited to `❌ Interrupted by restart.` best-effort | nothing stored; test: `— (SHOULD)` |
+| 10 | `shutdown()` with a job in phase `queued` or `running` (ING-05) | status edited to `❌ Interrupted by restart.` by the draining `run_one` (a failed edit logged, never raised); a `committing` job is not interrupted — it finishes and sends the success reply | nothing stored; slot and token freed |
 | 11 | `/session` bare, > 1 argument or non-integer (SES-03) | `Usage: /session <id> (see /sessions)` | — |
 | 12 | `/session <id>` unknown or foreign (SES-03) | `No session #<id>.` | active row unchanged |
 | 13 | `/delete #<id>` not owned, or `#` followed by non-digits (DOC-02) | `No document named <argument>.` (the existing shape, argument echoed, ≤ 120 chars) | nothing |
 | 14 | `/delete` bare (DOC-02) | `Usage: /delete <filename> \| /delete #<id>` | — |
-| 15 | stale or malformed `callback_data` (CBQ-02) | `answerCallbackQuery` `text = "Expired — send the command again."`; an intruder's callback: the acknowledgement with no text | no state change |
-| 16 | `/model <provider> <model>` with a model outside the catalogue (MOD-03); `/model` with an unknown token or > 2 arguments | `Unknown model for <provider>; see /model` / `Usage: /model [lmstudio\|openrouter\|auto] [<model>]` | no state change |
+| 15 | stale or malformed `callback_data` (CBQ-02) | `answerCallbackQuery` `text = "Expired — send the command again."`; an intruder's callback: the acknowledgement with no text | no state change beyond the cursor (CBQ-01) |
+| 16 | `/model <provider> <model>` with a model outside the catalogue (MOD-03); `/model` with an unknown token or > 2 arguments | `Unknown model for <provider>; see /model` / `Usage: /model [lmstudio\|openrouter\|auto] [<model>]` | no state change beyond the cursor |
 | 17 | `/cancel` once the job has entered its non-cancellable commit phase (`committing`, ING-04) | `Indexing is already finishing.`; the event is not set and the commit proceeds to the success reply | the document is stored; slot freed on completion |
 | 18 | a 400 from Telegram on the table path (OUT-04) | the same fitted body re-sent once as plain text; a second failure logged, no reply | — |
 
 `setMyCommands` failing at startup (EXT-01) and the dropped-entries
 warning of MOD-04 produce a log line and no reply — not rows. The matrix
 has **eighteen rows; rows 1–17 carry a string, row 18 has none**.
-`T-V1110-ERR-01` drives every row except row 10 — rows 1–9 and 11–17 —
+`T-V1110-ERR-01` drives every row that carries a string — rows 1–17, row
+10 through `shutdown()` with a queued job drained by `run_one` (ING-05) —
 through the fakes and asserts each string appears verbatim in README's
-`## Error behaviour` table (`README.md:839-874`, VER-02); row 10 is
-documentation-only and is asserted only when the SHOULD implementation
-lands (ING-05) — the v1.9.0 form at `tests/test_v190_agents.py:258-280`,
-which T0 inventories and T5/T6 amend for the five changed strings and the
-new row 17.
+`## Error behaviour` table (`README.md:839-874`, VER-02) — the v1.9.0
+form at `tests/test_v190_agents.py:258-280`, which T0 inventories and
+T5/T6 amend for the five changed strings and the new rows 10 and 17.
 
 ### 11.2 Security
 
 **REQ-V1110-SEC-01 (MUST) — nothing new is executed, written, reached or
 leaked.** (1) **Every user- or env-supplied string that reaches a `<pre>`
 body** — filenames (DOC-01), session titles built from user messages
-(SES-01), model ids from env (MOD-02, in their display form), the `/help`
+(SES-01), model ids from env (through `model_display`, MOD-04), the `/help`
 descriptions — is `redact()`-ed, fitted, then `html.escape`-d (OUT-01's
 order): a filename and a first message of `<script>&</script>` produce a
 payload containing `&lt;script&gt;&amp;` and never the raw bytes; the
@@ -1087,10 +1168,11 @@ unescaped inside the `<pre>` element; the only literal angle brackets are
 the single trusted `<pre>` and `</pre>` tags, and body ampersands occur
 only as generated HTML entities; a registered sentinel secret inside a
 session title is `***REDACTED***` in the payload. (1b) **`reply_markup`
-bypasses `_pre_text`, so it carries display forms only** (MOD-04): with a
-sentinel secret and a newline-bearing model id in the allowlist, neither
-raw value appears in `text` or in `reply_markup` of the `/model` menu —
-`T-V1110-MOD-09`. (2)
+bypasses `_pre_text`, so it carries `model_display` forms only** (MOD-04):
+with a sentinel secret and an id bearing `\n`, `\x00` and `\x07` in the
+allowlist, neither raw value and no `Cc`/`Cf` character appears in
+`text`, in `reply_markup` of the `/model` menu or in the post-selection
+edit `Provider: …, model: …` — `T-V1110-MOD-09`. (2)
 **`callback_data` is never interpreted as a filename, a path or SQL**: the
 handler parses `<ns>:<verb>:<arg>` with `str.split(":", 2)`, checks `ns`
 and `verb` against the closed table (CBQ-02), for `mod:model` splits
@@ -1099,7 +1181,8 @@ and `verb` against the closed table (CBQ-02), for `mod:model` splits
 index — a data of `ses:switch:../x` or `mod:model:1 OR 1=1` is stale
 (row 15). (3) **The intruder cost rule
 extends to callbacks** (CBQ-01): one acknowledgement, no log beyond the
-existing warning, no read. (4) **No new file writes**: document bytes stay
+existing warning, no application state read or written other than the
+cursor (`last_update_id`). (4) **No new file writes**: document bytes stay
 in memory on the worker as on the loop today (`bot.py:256-261`; 20 MB is
 acceptable); `T-V190-SEC-04b` (`tests/test_v190_commands.py:1306`) is kept
 and `T-V1110-SEC-01` repeats its `open`/`Path.write_*` monkeypatch around
@@ -1127,8 +1210,10 @@ and a `tmp_path` database — one file per group, `tests/test_v1110_<group>.py`
 EC-03). No test sleeps or asserts timing: the worker is driven by
 `run_one()` (ING-02), the cancel event is set from a `FakeEmbedder`
 hook, the commit-phase pause rides the `before_commit` callable (ING-04),
-and the one real `_run` thread (`T-V1110-ING-02`) is joined with a
-timeout as a hang guard, not a timing assertion. **Fifty-nine** test ids,
+the loop pause of `T-V1110-ING-10` rides a hook on the fake's send, and
+the two real `_run` threads (`T-V1110-ING-02`, `T-V1110-ING-11`) are
+joined with a timeout as a hang guard, not a timing assertion.
+**Sixty-two** test ids,
 each naming its `module::function` — the frozen list `T-V1110-INV-01`
 asserts against; "negative" marks a test whose main assertion is that
 something does **not** happen.
@@ -1137,7 +1222,7 @@ something does **not** happen.
 |---|---|---|---|
 | `T-V1110-OUT-01` | `tests/test_v1110_out.py::test_t_v1110_out_01_render_table_properties_and_width_ceiling` | `render_table` over 200 generated row sets (mixed `int`/`str`/`None`, wide cells, U+1F600 cells): every line has the same `utf16_length`; `None` → `n/a`; numeric columns right-aligned, text left; a cell over `max_width` is truncated so that `utf16_length(cell) <= max_width`, ends in `…`, and no U+1F600 is split (the astral-character property); every line is ≤ 72 UTF-16 units; the rule line is `-` only; the output has no trailing newline; `render_table` returns raw, unescaped text (escaping is `_pre_text`'s, OUT-01); a width over 72 raises `ValueError` | — |
 | `T-V1110-OUT-02` | `tests/test_v1110_out.py::test_t_v1110_out_02_send_pre_payload_and_escape` | `send_pre` over the real `TelegramClient` + `MockTransport`: one `sendMessage` body with key set exactly `{chat_id, text, parse_mode}` (+ `reply_markup` when given), `parse_mode == "HTML"`, `text` starts `<pre>` ends `</pre>`, `<script>&` in the body arrives as `&lt;script&gt;&amp;`; the payload invariant (OUT-03): no body-supplied literal `<`, `>` or `&` unescaped inside the `<pre>` element, the only literal angle brackets are the single `<pre>` and `</pre>` tags, every body `&` an entity | — |
-| `T-V1110-OUT-03` | `tests/test_v1110_out.py::test_t_v1110_out_03_redact_before_escape` | a registered sentinel secret containing `<` in the body is `***REDACTED***` in the payload and the raw secret is absent (redact before fit, fit before escape: the secret is redacted even when its line is the one the fit would drop) | yes |
+| `T-V1110-OUT-03` | `tests/test_v1110_out.py::test_t_v1110_out_03_redact_before_escape` | two cases: (a) a registered sentinel secret containing `<` on a line the fit retains → `***REDACTED***` (`config.REDACTION`, `config.py:23`) appears in the payload and the raw secret does not; (b) an over-limit body in which the sentinel's redacted length moves the retained-line boundary: `_pre_text` is called directly with the sentinel line and with a neutral line of the sentinel's raw length in its place, and the retained lines differ exactly as redact-before-fit predicts (the shorter redacted line lets one more line stay), proving `redact` runs before `fit_lines` | yes |
 | `T-V1110-OUT-04` | `tests/test_v1110_out.py::test_t_v1110_out_04_fit_lines_at_4096_units` | a body whose entity-parsed length is 4097 units (built with escaped `&` so the raw text is longer) is fitted: whole lines dropped from the end, a final `… N more` line, exactly one `sendMessage`; a body of exactly 4096 units is sent unfitted; a body with a trailing newline arrives without it (no trailing newline inside `<pre>`) | — |
 | `T-V1110-OUT-05` | `tests/test_v1110_out.py::test_t_v1110_out_05_plain_fallback_once_on_400` | `MockTransport` answers the first `sendMessage` with 400 `can't parse entities`: exactly two requests, the second without `parse_mode`/`reply_markup` and with the fitted plain body; a 4097-unit body whose first (HTML) request is forced to 400 → the second request's `text` is the fitted body: ≤ 4096 UTF-16 units, exactly the retained lines of the HTML request and the same `… N more` marker, never the original body; two 400s → exactly two requests, `send_pre` returns `None` | yes |
 | `T-V1110-OUT-06` | `tests/test_v1110_out.py::test_t_v1110_out_06_agent_reply_path_unchanged` | `inspect.signature(bot.TelegramClient.send_message).parameters` keys are `{self, chat_id, text}`; `_send` through `MockTransport` posts `{chat_id, text}`; `/status` and `/summary` through `process_update` leave no `parse_mode` in `FakeTelegram.sent_payloads`; `T-V1100-OUT-04`/`-05` still pass unamended (imported and called) | yes |
@@ -1146,45 +1231,48 @@ something does **not** happen.
 | `T-V1110-STA-01` | `tests/test_v1110_sta.py::test_t_v1110_sta_01_stats_table_labels_and_cells` | `/stats` through `process_update` over recorded `llm_calls` rows (the fixtures of `tests/test_v160_observability.py`): one table-path message; the ten paired-row labels and the four single-value labels present in order; `n/a`, `n/a (no pricing)`, `mixed` and the percent form present as cell content where the fixtures call for them | — |
 | `T-V1110-STA-02` | `tests/test_v1110_sta.py::test_t_v1110_sta_02_stats_fit_drops_whole_lines` | a `top tools` value of 5,000 characters is wrapped into ≈ 70 continuation lines indented by two spaces, each ≤ 72 UTF-16 units, no line broken inside a scalar; the body exceeds 3,500 → whole lines dropped from the end (continuation lines are lines), the header row kept, a final `… N more` marker, length ≤ 3,500 | — |
 | `T-V1110-STA-03` | `tests/test_v1110_sta.py::test_t_v1110_sta_03_readme_stats_sample_labels` | README's `### /stats` block (`README.md:127-140`) contains every label of STA-01 including `Errors:` and `Summaries:`, in the renderer's order | — |
-| `T-V1110-DOC-01` | `tests/test_v1110_doc.py::test_t_v1110_doc_01_documents_table_and_inflight_line` | two documents (one PDF with pages, one `.md`) → one table-path body whose first line is `Your documents (2 of 20):`, columns `#`, `file`, `type`, `size`, `chunks`, `pages`, `added`; sizes `12.3 KB` / `1.5 MB`; `n/a` pages for the `.md`; a 40-character filename truncated to 23 UTF-16 units + `…`; an in-flight job for the caller adds `⏳ indexing <name> — embedding: 1/3` as the last line (T5) | — |
+| `T-V1110-DOC-01` | `tests/test_v1110_doc.py::test_t_v1110_doc_01_documents_table` | two documents (one PDF with pages, one `.md`) → one table-path body whose first line is `Your documents (2 of 20):`, columns `#`, `file`, `type`, `size`, `chunks`, `pages`, `added`; sizes `12.3 KB` / `1.5 MB`; `n/a` pages for the `.md`; a 40-character filename truncated to 23 UTF-16 units + `…`; with no job in flight the table is the last thing in the body (T2; the in-flight line is `T-V1110-DOC-05`) | — |
 | `T-V1110-DOC-02` | `tests/test_v1110_doc.py::test_t_v1110_doc_02_documents_empty_reply_plain` | no documents → `DOCUMENTS_EMPTY_REPLY` on the plain path (no `parse_mode` in the payload) | — |
 | `T-V1110-DOC-03` | `tests/test_v1110_doc.py::test_t_v1110_doc_03_delete_by_id_owner_scoped` | `/delete #<own id>` → `Deleted #<id>.`, row and vectors gone; `/delete #<other user's id>` → `No document named #<id>.`, nothing deleted; `/delete #abc` → same shape; `/delete <filename>` unchanged; bare → the new usage string | yes |
 | `T-V1110-DOC-04` | `tests/test_v1110_doc.py::test_t_v1110_doc_04_refusal_wording_split` | `DocxArchiveTooLargeError` → `Document too large (DOCX archive bounds).`; `PdfTooManyPagesError` → `Document too large (over 2,000 pages).`; `ExtractedTextTooLargeError` → `Document too large (over 2,000,000 characters).`; the status message kept (edited) | — |
+| `T-V1110-DOC-05` | `tests/test_v1110_doc.py::test_t_v1110_doc_05_inflight_line_after_table` | with a job for the caller queued or running (a `FakeEmbedder` hook parks it at `embedding: 1/3`), `/documents` ends with one line `⏳ indexing <name> — embedding: 1/3` after the table (the stage is the job's last progress string without its `📄 ` prefix); another user's job adds no line; after `run_one` completes the line is gone (T5) | — |
 | `T-V1110-SES-01` | `tests/test_v1110_ses.py::test_t_v1110_ses_01_list_conversations_and_schema_6` | `list_conversations`: `id`, `created_at`, `active`, `message_count`, `last_activity`, `title` (first user message, whitespace-collapsed, 40 + `…`, `(empty)`); order `last_activity DESC`; `limit`; another user's rows absent; `SCHEMA_VERSION == 6`; `PRAGMA table_info(conversations)` has 4 columns; `count_conversations` | — |
 | `T-V1110-SES-02` | `tests/test_v1110_ses.py::test_t_v1110_ses_02_activate_conversation_ownership` | `activate_conversation` with caller id `4242` (never `0`, `1` or `None`): own id → `True`, exactly one `active = 1` row for the user, the target; foreign id → `False`, the caller's active row unchanged, the owner's unchanged (under `v1110-activate-ownership-dropped` the foreign row becomes active and this assertion fails); missing id → `False`; the unique index still holds after 50 alternating switches | yes |
 | `T-V1110-SES-03` | `tests/test_v1110_ses.py::test_t_v1110_ses_03_sessions_table` | `/sessions` with 12 conversations → one table-path body, 10 rows, columns `●`, `#`, `title`, `msgs`, `last` in that order, `●` on the active row, `msgs` and `last` (`YYYY-MM-DD HH:MM`, `n/a` for an empty one), trailing `2 older sessions not shown`; with 3 → no trailing line | — |
 | `T-V1110-SES-04` | `tests/test_v1110_ses.py::test_t_v1110_ses_04_session_switch_and_context` | `/session <own id>` → `Switched to session #<id>: <title>`; the next text turn's `FakeLLM` request carries that conversation's messages and not the previous one's; `/session <foreign id>` and `/session 999` → `No session #<id>.`; `/session`, `/session x`, `/session 1 2` → usage; `agent.summarize_conversation` is not called and `summaries` has no new row | yes |
 | `T-V1110-SES-05` | `tests/test_v1110_ses.py::test_t_v1110_ses_05_new_reply_names_id` | `/new` reply equals `New conversation started (#<id>).` with the id `active_conversation_id` then returns | — |
 | `T-V1110-CBQ-01` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_01_allowed_updates_and_callback_branch` | `get_updates` body over `MockTransport` is `{"timeout": 50, "allowed_updates": ["message", "callback_query"], "offset": 41}` (amends `tests/test_telegram.py:272`); a `callback_query` update reaches `_handle_callback` and the message-only guard is not hit | — |
-| `T-V1110-CBQ-02` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_02_intruder_callback_one_ack` | an intruder's callback: `callback_answers == [{"callback_query_id": …}]` (no `text`), `sent`/`edited_payloads` empty, `bot_state` unchanged, `FakeLLM.calls` empty, exactly one `unauthorized update` warning | yes |
-| `T-V1110-CBQ-03` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_03_callback_guards_and_cursor` | a group chat, a bot sender, `message.chat.id != from.id` → ignored without an answer; the rate limiter at zero tokens → acknowledged with `RATE_LIMIT_REPLY`, nothing else; the cursor (`last_update_id`) written before any of it | yes |
+| `T-V1110-CBQ-02` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_02_intruder_callback_one_ack` | an intruder's callback: `callback_answers == [{"callback_query_id": …}]` (no `text`), `sent`/`edited_payloads` empty, every `bot_state` row except the cursor key `last_update_id` unchanged and the cursor alone advanced (the at-most-once write precedes the guards), `FakeLLM.calls` empty, exactly one `unauthorized update` warning | yes |
+| `T-V1110-CBQ-03` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_03_callback_guards_and_cursor` | a group chat, a bot sender, `message.chat.id != from.id` → ignored without an answer; the rate limiter at zero tokens → acknowledged with `RATE_LIMIT_REPLY`, nothing else; the cursor (`last_update_id`) written before any of it and no other `bot_state` row changed | yes |
 | `T-V1110-CBQ-04` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_04_ack_once_first` | for `mod:prov:lmstudio` the fake's call log shows `answer_callback_query` first and exactly once, then one `edit_message_html` | — |
-| `T-V1110-CBQ-05` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_05_stale_and_malformed_data` | parametrised (with `<h>` = the hash of the rendered catalogue) over `zzz:prov:x`, `mod:zzz:1`, `mod:model:x:<h>`, `mod:model:99:<h>`, `mod:model:-1:<h>`, `mod:model:1` (no hash), `mod:model:1:zzzzzzzz` (wrong hash), `mod:prov:openrouter` with OpenRouter unconfigured, `ses:switch:1`, a 65-byte data, `mod:model:１:<h>` (non-ASCII digit), `mod:model:1 OR 1=1`, `ses:switch:../x`: answered with the Expired text; no `bot_state` write; no `set_provider` call; no edit | yes |
+| `T-V1110-CBQ-05` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_05_stale_and_malformed_data` | parametrised (with `<h>` = the first 8 hex digits of `sha256(json.dumps(catalogue, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()` over the rendered catalogue, CBQ-02) over `zzz:prov:x`, `mod:zzz:1`, `mod:model:x:<h>`, `mod:model:99:<h>`, `mod:model:-1:<h>`, `mod:model:1` (no hash), `mod:model:1:zzzzzzzz` (wrong hash), `mod:prov:openrouter` with OpenRouter unconfigured, `ses:switch:1`, a 65-byte data, `mod:model:１:<h>` (non-ASCII digit), `mod:model:1 OR 1=1`, `ses:switch:../x`: answered with the Expired text; no `bot_state` write beyond the cursor; no `set_provider` call; no edit | yes |
 | `T-V1110-CBQ-06` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_06_client_methods_and_same_message_edit` | `send_message_html`/`edit_message_html`/`answer_callback_query` over `MockTransport`: payload key sets exactly as CBQ-03; through the fake, a selection edits the `message_id` the menu was sent with and `sent` does not grow | — |
-| `T-V1110-CBQ-07` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_07_callback_data_grammar_and_64_bytes` | with a 200-character model id in `OPENROUTER_MODELS` every emitted `callback_data` matches `^(mod|ses):[a-z]+:[A-Za-z0-9_-]+(:[0-9a-f]{8})?$` (the fourth segment present exactly on `mod:model`), is ASCII and ≤ 64 bytes; button texts are display forms (MOD-04) of ≤ 32 UTF-16 units | — |
+| `T-V1110-CBQ-07` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_07_callback_data_grammar_and_64_bytes` | with a 200-character model id in `OPENROUTER_MODELS` every emitted `callback_data` matches `^(mod|ses):[a-z]+:[A-Za-z0-9_-]+(:[0-9a-f]{8})?$` (the fourth segment present exactly on `mod:model`), is ASCII and ≤ 64 bytes; button texts are `model_display` forms (MOD-04) of ≤ 32 UTF-16 units | — |
 | `T-V1110-CBQ-08` | `tests/test_v1110_cbq.py::test_t_v1110_cbq_08_callback_edits_ride_edit_pre` | through the fake: a `mod:prov:openrouter` whose catalogue carries `<script>&` ids edits a body containing `&lt;script&gt;&amp;`; a menu body built to 4097 units (monkeypatched catalogue rows) is fitted before `editMessageText`; `edited_payloads` carry `parse_mode` only from `edit_pre` (a spy on `edit_pre` counts every callback edit); no function of `bot.py` outside `send_pre`/`edit_pre` names `send_message_html` or `edit_message_html` (`inspect.getsource` over the module minus the two helpers and `TelegramClient`) | yes |
 | `T-V1110-MOD-01` | `tests/test_v1110_mod.py::test_t_v1110_mod_01_model_step_one` | bare `/model` → one table-path body with the `provider`, `override`, model and `failures` rows; keyboard = one button per configured provider + `auto` in one row; with LM Studio unconfigured its button is absent | — |
-| `T-V1110-MOD-02` | `tests/test_v1110_mod.py::test_t_v1110_mod_02_model_step_two_sets_two_keys` | `mod:prov:openrouter` → the same message edited to `Models for openrouter:` + the catalogue lines (`<idx>. <display>`) + one button per model (text = the display form) + `← back`; `mod:model:1:<h>` → `provider_override == "openrouter"`, `model_override:openrouter == <catalogue[1]>`, `set_provider` called with `"openrouter"`, the message edited to `Provider: openrouter, model: <m>` with no `reply_markup`; `mod:back:-` restores step 1 | — |
+| `T-V1110-MOD-02` | `tests/test_v1110_mod.py::test_t_v1110_mod_02_model_step_two_sets_two_keys` | `mod:prov:openrouter` → the same message edited to `Models for openrouter:` + the catalogue lines (`<idx>. <display>`) + one button per model (text = `model_display(id, limit=32)`) + `← back`; `mod:model:1:<h>` → `provider_override == "openrouter"`, `model_override:openrouter == <catalogue[1]>`, `set_provider` called with `"openrouter"`, the message edited to `Provider: openrouter, model: <model_display(m)>` with no `reply_markup`; `mod:back:-` restores step 1 | — |
 | `T-V1110-MOD-03` | `tests/test_v1110_mod.py::test_t_v1110_mod_03_auto_clears_both` | `mod:auto:-` and `/model auto` delete `provider_override` and every `model_override:*` row (two seeded), call `set_provider(None)`, and edit/reply `Provider override cleared.`; other `bot_state` keys untouched | — |
 | `T-V1110-MOD-04` | `tests/test_v1110_mod.py::test_t_v1110_mod_04_model_text_form` | `/model lmstudio` → today's strings, no `model_override` write; `/model openrouter <catalogue model>` → both keys and `Provider switched to openrouter, model: <m>.`; `/model openrouter nope` → `Unknown model for openrouter; see /model`; `/model bogus` and `/model a b c` → the new usage string | — |
 | `T-V1110-MOD-05` | `tests/test_v1110_mod.py::test_t_v1110_mod_05_catalogue_from_env` | `load_config` with `OPENROUTER_MODELS=" b, a ,b,"` and `OPENROUTER_MODEL=a` → `("a", "b")`; unset → `("a",)`; with `OPENROUTER_MODEL=c` and `OPENROUTER_MODELS=a,b` → `("c", "a", "b")`; an empty default → `()`; `.env.example` carries `LMSTUDIO_MODELS=` and `OPENROUTER_MODELS=` lines, commented | — |
 | `T-V1110-MOD-06` | `tests/test_v1110_mod.py::test_t_v1110_mod_06_override_reaches_client` | `model_override:openrouter = b` seeded → `build_llm_client(cfg, client=…, override="openrouter", model=load_model_override(conn, "openrouter")).describe() == ("openrouter", "b")`; through `agent` with a `FakeLLM` whose `describe()` is patched, `llm_calls.model` records `"b"`; a seeded `model_override:openrouter = nope` (not in the catalogue) → `describe()` reports the default | yes |
 | `T-V1110-MOD-07` | `tests/test_v1110_mod.py::test_t_v1110_mod_07_catalogue_bounded_at_20` | `load_config` with a 25-entry `OPENROUTER_MODELS` → a 20-tuple with the default first, exactly one warning record naming `5` and no model id; `mod:prov:openrouter` → 20 catalogue rows and 20 model buttons (one-to-one), the body ≤ 4096 units, no row dropped by the fit | — |
-| `T-V1110-MOD-08` | `tests/test_v1110_mod.py::test_t_v1110_mod_08_reordered_catalogue_is_stale` | the menu rendered under `OPENROUTER_MODELS=a,b,c`, then `cfg` reloaded as `c,b,a` before the click: `mod:model:1:<old h>` → the Expired text, no `bot_state` write, no `set_provider` call, no edit; the same data with the catalogue unchanged → accepted | yes |
-| `T-V1110-MOD-09` | `tests/test_v1110_mod.py::test_t_v1110_mod_09_display_form_in_rows_and_buttons` | `OPENROUTER_MODELS` carrying a registered sentinel secret and an id with an embedded `\n` and a control character: `mod:prov:openrouter` renders one catalogue row per model (the newline-bearing id on one line, whitespace-collapsed, control-free) and one button per row; neither raw value appears in `text` or anywhere in `reply_markup` (the secret is `***REDACTED***` in both); the stored ids stay exact (`cfg.openrouter_models` unchanged) and a selection writes the exact id | yes |
+| `T-V1110-MOD-08` | `tests/test_v1110_mod.py::test_t_v1110_mod_08_reordered_catalogue_is_stale` | the menu rendered under `OPENROUTER_MODELS=a,b,c`, then `cfg` reloaded as `c,b,a` before the click: `mod:model:1:<old h>` → the Expired text, no `bot_state` write beyond the cursor, no `set_provider` call, no edit; the same data with the catalogue unchanged → accepted; `<h>` is CBQ-02's JSON formula: the catalogues `["a\nb", "c"]` and `["a", "b\nc"]` yield different `<h>`, so a data rendered under one is stale under the other | yes |
+| `T-V1110-MOD-09` | `tests/test_v1110_mod.py::test_t_v1110_mod_09_display_form_in_rows_and_buttons` | `OPENROUTER_MODELS` carrying a registered sentinel secret and an id with an embedded `\n`, a `\x00` and a `\x07`: `mod:prov:openrouter` renders one catalogue row per model (the hostile id on one line, every `Cc`/`Cf` character replaced by a space, whitespace-collapsed) and one button per row; neither raw value and no character of category `Cc`/`Cf` appears in `text` or anywhere in `reply_markup` (the secret is `***REDACTED***` in both); selecting the hostile id edits the message to `Provider: openrouter, model: <model_display(id)>` — no raw secret, no control character, no `reply_markup` — while `model_override:openrouter` holds the exact id and `cfg.openrouter_models` is unchanged | yes |
 | `T-V1110-ING-01` | `tests/test_v1110_ing.py::test_t_v1110_ing_01_caps_and_find_line` | `bot.DOCUMENT_MAX_BYTES == 20_000_000`; `file_size` 20,000,001 → `File too large (over 20 MB).`, no `get_file_calls`; 20,000,000 → accepted (`getFile` called); a 20,000,001-byte stream → `DocumentTooLarge` → the same string; `MAX_EXTRACTED_TEXT_CHARS == 2_000_000`, `PDF_MAX_PAGES == 2_000`, `INDEX_BUDGET_S_DEFAULT == 1800.0`; the DOCX bounds and `DOCUMENT_LIMIT` as at `295b01f`; `bot.py`'s source contains the v190 `find` line exactly once | — |
-| `T-V1110-ING-02` | `tests/test_v1110_ing.py::test_t_v1110_ing_02_worker_split_and_thread_owned_connection` | `process_update` with a document returns with `status` sent (`📄 received`) and `index_document` not yet called (a spy); `worker.run_one()` then calls `getFile`, `download_file`, `index_document` and sends the success reply; the worker never receives the loop's `conn` (`IngestWorker(...)` is constructed with `db_path`; `storage.connect` monkeypatched to record `threading.get_ident()` and `close` spied: `run_one(conn=None)` in the test thread acquires the worker-owned connection on the test thread, inside `run_one` — after the job was dequeued — and `worker.close()` closes it; a real `_run` thread: enqueue two jobs, `queue.join()`, `shutdown()`, join the thread with a timeout → the thread has exited, the connection was acquired exactly once on the worker thread, never the test thread, and closed in `_run`'s `finally`; the sentinel consumed no user slot — the in-flight map is empty and the queue is empty); `submit` reserves the slot and enqueues under the lock; no `_TypingIndicator` constructed; `started_at` is still the handler's first action; the five pre-checks reply synchronously with no job enqueued | — |
+| `T-V1110-ING-02` | `tests/test_v1110_ing.py::test_t_v1110_ing_02_worker_split_and_thread_owned_connection` | `process_update` with a document returns with `status` sent (`📄 received`) and `index_document` not yet called (a spy); `worker.run_one()` then calls `getFile`, `download_file`, `index_document` and sends the success reply; the worker never receives the loop's `conn` (`IngestWorker(...)` is constructed with `db_path`; `storage.connect` monkeypatched to record `threading.get_ident()` and `close` spied: `run_one(conn=None)` in the test thread acquires the worker-owned connection on the test thread, inside `run_one` — after the job was dequeued — and `worker.close()` closes it; a real `_run` thread: enqueue two jobs, `queue.join()`, `shutdown()`, join the thread with a timeout → the thread has exited, the connection was acquired exactly once on the worker thread, never the test thread, and closed in `_run`'s `finally`; the sentinel consumed no user slot — the in-flight map is empty and the queue is empty); `reserve` takes the user slot and a capacity token and `enqueue` puts the job, both under the lock; the queue's `maxsize` is `INGEST_QUEUE_MAX + 1`; no `_TypingIndicator` constructed; `started_at` is still the handler's first action; the five pre-checks reply synchronously with no job enqueued | — |
 | `T-V1110-ING-03` | `tests/test_v1110_ing.py::test_t_v1110_ing_03_second_upload_refused` | a second document from the same user while the first is queued → `⏳ Still indexing <name>; wait for it to finish.`, queue length unchanged; another user's document is enqueued; after `run_one` the first user's next upload is accepted | yes |
-| `T-V1110-ING-04` | `tests/test_v1110_ing.py::test_t_v1110_ing_04_queue_full` | four queued jobs from four users → a fifth user's upload → `Indexing queue is full; try again later.`, no status message | yes |
+| `T-V1110-ING-04` | `tests/test_v1110_ing.py::test_t_v1110_ing_04_queue_full` | four queued jobs from four users → a fifth user's upload → `Indexing queue is full; try again later.`, no status message, no reservation (`reserve` returned `SubmitError.full`) while the physical queue still has its fifth slot | yes |
 | `T-V1110-ING-05` | `tests/test_v1110_ing.py::test_t_v1110_ing_05_cancel_mid_embedding` | a `FakeEmbedder` hook sets the job's cancel event after batch 1 of 3 → `IndexCancelled` at the next checkpoint, `documents` and `vec_chunks` unchanged, the status edited to `❌ Cancelled.`, the slot freed; `/cancel` with a job in phase `running` → `Cancelling <name>…`; with none → `Nothing to cancel.`; a `run_one` whose job raises `RuntimeError` → `DOC_HANDLER_FAILED_REPLY`, the slot is freed and `task_done` called (the outermost `finally`), and the worker still processes the next job | yes |
 | `T-V1110-ING-06` | `tests/test_v1110_ing.py::test_t_v1110_ing_06_queued_cancel_no_getfile` | `/cancel` while the job is still queued → `Cancelling <name>…`; `run_one` then edits `❌ Cancelled.` with `get_file_calls == []`, no `download_file` call, nothing stored, the slot freed | yes |
 | `T-V1110-ING-07` | `tests/test_v1110_ing.py::test_t_v1110_ing_07_cancel_during_download` | `MockTransport` streams the file in three chunks and the cancel event is set after chunk 1: `download_file` returns `None` at `should_stop()`, `IndexCancelled` is raised before `extract` (a spy on `documents.extract_text` never called), `documents`/`vec_chunks` unchanged, the status reads `❌ Cancelled.`; the budget exhausted at the same point → `Indexing timed out (over 1800 s). Nothing was saved.` with no extraction | yes |
 | `T-V1110-ING-08` | `tests/test_v1110_ing.py::test_t_v1110_ing_08_connect_failure_releases_slot` | `storage.connect` monkeypatched to raise `sqlite3.OperationalError` on its first call and succeed afterwards; two jobs from two users queued; `run_one()` twice: the first job ends with `DOC_HANDLER_FAILED_REPLY`, its slot is released (`in_flight` is `None`, the user's next upload is accepted) and `task_done` was called; no `getFile` for it; the second job acquires the connection and completes with the success reply; the worker-owned connection was acquired exactly twice (one failure, one success) and never before a job was dequeued | yes |
 | `T-V1110-ING-09` | `tests/test_v1110_ing.py::test_t_v1110_ing_09_cancel_in_commit_phase` | the worker's `before_commit` callable is wrapped so that, right after the job's phase becomes `committing` and before `BEGIN IMMEDIATE`, the test drives `/cancel` through `process_update`: the reply is `Indexing is already finishing.`, `job.cancel.is_set()` is `False`, `run_one` completes — `documents` and `vec_chunks` hold the new rows, the success reply is sent, the status is never `❌ Cancelled.`, the slot is freed; a `/cancel` while the phase is `running` still replies `Cancelling <name>…` and sets the event; the phase is read under the lock (the lock is held during `cancel`, asserted through a lock spy) | yes |
+| `T-V1110-ING-10` | `tests/test_v1110_ing.py::test_t_v1110_ing_10_reservation_race_before_status_send` | `FakeTelegram.send_message` is hooked so that user U's handler is paused after `reserve` and before the `📄 received` send; during the pause the test drives: a second document from U → `⏳ Still indexing <name>; wait for it to finish.` (`SubmitError.inflight` against the bare reservation); a document from user V → reserved and enqueued, two tokens taken; `run_one()` on V's job → V's token and slot freed, U's reservation intact; the paused handler then resumes: the status is sent and `enqueue` succeeds without a capacity error, queue length 1; a second run in which the status send raises `TelegramError` → `release` frees U's slot and token, nothing enqueued, `in_flight(U)` is `None`, U's next upload is accepted; no `📄 received` message exists without a queued job | yes |
+| `T-V1110-ING-11` | `tests/test_v1110_ing.py::test_t_v1110_ing_11_shutdown_drains_queued_jobs` | a real `_run` thread; four users' jobs queued and a fifth user's running (a `FakeEmbedder` hook parks it between batches until the test calls `shutdown()`); a sixth `reserve` is refused (`SubmitError.full`) while the physical queue still has its fifth slot; `shutdown()` returns without `queue.Full`; the thread is joined with a 10 s bound and has exited: four status edits `❌ Interrupted by restart.` (one per queued job, none of them called `getFile`), the running job's status `❌ Interrupted by restart.` with `documents`/`vec_chunks` unchanged, the sentinel consumed, the in-flight map and the queue empty, the connection closed; a second run parks the running job inside `before_commit` (phase `committing`) → `shutdown()` does not set its event, the commit finishes and the success reply is sent; a status edit that raises is logged and the drain continues | — |
 | `T-V1110-EXT-01` | `tests/test_v1110_ext.py::test_t_v1110_ext_01_commands_table_and_setmycommands` | `COMMANDS` names ≤ 32 chars without slash, descriptions ≤ 256 ASCII, every dispatched command except the documented `/start` alias appears exactly once in `COMMANDS` (a probe update per dispatched name reaches its handler, not the model), every `COMMANDS` entry is dispatched, `/start` dispatches to `_handle_help` and is absent from the `setMyCommands` payload; `main()`-level wiring: `set_my_commands` payload over `MockTransport` is `{"commands": [{"command", "description"}, …]}` in `COMMANDS` order; a 500 from `setMyCommands` → one warning and startup continues; `run_selftest()` leaves `commands_set` empty | — |
 | `T-V1110-EXT-02` | `tests/test_v1110_ext.py::test_t_v1110_ext_02_help_and_start` | `/help` and `/start` → one table-path body each with the header `command  what it does` and one row per `COMMANDS` entry; `messages` gains no row | — |
 | `T-V1110-EXT-03` | `tests/test_v1110_ext.py::test_t_v1110_ext_03_readme_commands_rows` | README's `## Commands` section has a row for every `COMMANDS` name and `/reload_skills` precedes `/documents` (the amended `tests/test_v190_agents.py:226-235` form) | — |
-| `T-V1110-PIN-01` | `tests/test_v1110_pin.py::test_t_v1110_pin_01_no_retired_literal_in_tests` | no file under `tests/` (this file and the `git show <tag>:` blob-reading version tests excepted) contains the retired literals `"New conversation started."`, `over 10 MiB`, `over 500,000 characters`, `over 300 s`, `Usage: /model [lmstudio\|openrouter\|auto]"`, `10,485,760`, `"500 pages"`, `"300 s"`, `allowed_updates": ["message"]`; `docs/spec/task-briefs/v1110-T0.md` exists and names every site this test scans | yes |
+| `T-V1110-PIN-01` | `tests/test_v1110_pin.py::test_t_v1110_pin_01_no_retired_literal_in_tests` | no file under `tests/` (this file and the `git show <tag>:` blob-reading version tests excepted) contains the retired literals `"New conversation started."`, `over 10 MiB`, `over 500,000 characters`, `over 300 s`, `Usage: /model [lmstudio\|openrouter\|auto]"`, `10,485,760`, `"500 pages"`, `"300 s"`, `allowed_updates": ["message"]`; `docs/spec/task-briefs/v1110-T0-pin-inventory.md` exists and names every site this test scans | yes |
 | `T-V1110-PIN-02` | `tests/test_v1110_pin.py::test_t_v1110_pin_02_readme_limits_and_error_rows` | README's `## Limits` rows carry `20,000,000`, `2,000,000`, `1800 s`, `2,000 pages`, `one job per user`, `/cancel`; the `## Error behaviour` rows carry ERR-01's seventeen strings (rows 1–17 of the eighteen-row matrix; row 18 has no string) — presence, never a frozen matrix | — |
 | `T-V1110-MUT-01` | `tests/test_v1110_mut.py::test_t_v1110_mut_01_eight_entries_in_mutations` | the eight `v1110-*` ids are in `MUTATIONS` in §13's order; each `find` occurs exactly once in its `path` at `HEAD`; each `why` names its killing `T-V1110-*` test and that test exists; `len(MUTATIONS) == 152`; no `mutation-v1110` gate in `config/quality_gates.yaml` | — |
 | `T-V1110-VER-01` | `tests/test_v1110_ver.py::test_t_v1110_ver_01_live_version_is_1_11_0` | the live tree's `pyproject.toml` `project.version == "1.11.0"` (the `v1.10.4` blob read is the repointed `tests/test_v1104_version.py`'s, not this test's) | — |
@@ -1192,8 +1280,8 @@ something does **not** happen.
 | `T-V1110-VER-03` | `tests/test_v1110_ver.py::test_t_v1110_ver_03_agents_md_and_release_row` | `AGENTS.md` carries T8's measured test count, `152 entries` and `as of spec-v1.11.0 T8`, not `2311`/`144 entries`; README's release table has a `v1.11.0 \| 1.11.0` row and the `v1.10.4` row no longer ends `; this release` | — |
 | `T-V1110-VER-04` | `tests/test_v1110_ver.py::test_t_v1110_ver_04_readme_deliverables` | README: the `/documents` sample block, a `## Sessions` section, the `## Switch provider` paragraph naming `LMSTUDIO_MODELS` and `OPENROUTER_MODELS`, the ingest diagram line reads `embed (batched, OpenRouter by default)`, the batch-size paragraph names both `documents.EMBED_BATCH_SIZE` and `llm.embeddings.BATCH_SIZE`, the Limits row `indexing runs in a worker thread`; `AGENTS.md:274-279`'s waiver paragraph carries the v1.11.0 sentence | — |
 | `T-V1110-SEC-01` | `tests/test_v1110_sec.py::test_t_v1110_sec_01_nothing_new_executed_written_reached_or_leaked` | SEC-01 clauses 1, 2, 4, 6, 7 (clause 1b is `T-V1110-MOD-09`): the `<script>&</script>` filename and first message, with OUT-03's payload invariant asserted on the `<pre>` element; the sentinel-secret title; the two hostile `callback_data` strings; no `open`/`Path.write_*` during `run_one`; `IngestWorker.__init__` signature `(cfg, tg, embedder, db_path)`; a worker log record with the sentinel is redacted by the root handler's formatter | yes |
-| `T-V1110-ERR-01` | `tests/test_v1110_err.py::test_t_v1110_err_01_error_matrix_strings` | parametrised over ERR-01 rows 1–9 and 11–17 (every row except row 10; row 10 is documentation-only and is asserted only when the SHOULD implementation lands; row 18 has no string): the trigger through the fakes produces the string verbatim; the string appears in README's `## Error behaviour` table | — |
-| `T-V1110-INV-01` | `tests/test_v1110_inventory.py::test_every_spec_test_function_exists` | the frozen list of the fifty-eight other `module::function` pairs of this table: each module imports and `hasattr(module, function)` holds; the list's length is 58 and it holds no duplicate function name | — |
+| `T-V1110-ERR-01` | `tests/test_v1110_err.py::test_t_v1110_err_01_error_matrix_strings` | parametrised over ERR-01 rows 1–17 (every row that carries a string; row 18 has none): the trigger through the fakes produces the string verbatim — row 10 through `shutdown()` with one queued job drained by `run_one`; the string appears in README's `## Error behaviour` table | — |
+| `T-V1110-INV-01` | `tests/test_v1110_inventory.py::test_every_spec_test_function_exists` | the frozen list of the sixty-one other `module::function` pairs of this table: each module imports and `hasattr(module, function)` holds; the list's length is 61 and it holds no duplicate function name | — |
 
 ---
 
@@ -1201,8 +1289,11 @@ something does **not** happen.
 
 **REQ-V1110-PIN-01 (MUST) — the frozen-pin inventory is T0, structural and
 fail-closed; a late pin is a disclosed amendment.** Three releases were
-stopped by pins the spec's list missed (`README.md:917`). T0 writes
-`docs/spec/task-briefs/v1110-T0.md` — a table `site (file:line) | literal |
+stopped by pins the spec's list missed (`README.md:917`). The orchestrator writes T0's pre-dispatch brief
+`docs/spec/task-briefs/v1110-T0.md` (EC-04); the delegated subagent
+writes the discovered inventory to a **distinct artefact**
+`docs/spec/task-briefs/v1110-T0-pin-inventory.md`, committed with T0 —
+a table `site (file:line) | literal |
 task that rewrites it | rewrite form`, plus the **rename mapping** `old
 node id → new node id` for every test a later task renames (EC-03 (b);
 known at authoring time: `tests/test_v170_bench.py:316-331` and
@@ -1218,8 +1309,8 @@ literal (SES-03); `MODEL_USAGE_REPLY` (MOD-03); `DELETE_USAGE_REPLY`
 saved.` (ING-01, DOC-03); the README limits literals `10,485,760` /
 `500,000` / `300 s` / `500 pages` and the error-table strings
 (`tests/test_v190_agents.py:238-280`, `README.md:828-833`, `:863-864`,
-`:511-517`; T5 also adds the new row 17 string `Indexing is already
-finishing.` to README's table, VER-02); every `/stats` line-shape assertion (`tests/test_observability.py`,
+`:511-517`; T5 also adds the new row 10 and row 17 strings `❌ Interrupted by
+restart.` and `Indexing is already finishing.` to README's table, VER-02); every `/stats` line-shape assertion (`tests/test_observability.py`,
 `tests/test_v160_observability.py`, `tests/test_pricing.py`; STA-01);
 `Your documents (2):` (`tests/test_v190_commands.py:592`; DOC-01); the
 `allowed_updates` body (`tests/test_telegram.py:272`; CBQ-01); the typing
@@ -1255,7 +1346,7 @@ in T7, in this order, each with a `find` that occurs exactly once in its
 | `v1110-activate-ownership-dropped` | `storage.py` | `activate_conversation`'s `WHERE id = ? AND tg_user_id = ?` → `WHERE id = ? AND (? IS NOT NULL)` — one site, both placeholders preserved, the bound user id still passed but no longer compared (the foreign row becomes switchable for any non-`None` caller) | `T-V1110-SES-02` (caller id `4242`; asserts the foreign row did **not** become active — under the mutant the switch succeeds and the test fails) |
 | `v1110-table-path-escape-dropped` | `bot.py` | `_pre_text`'s `html.escape(fitted, quote=False)` → `fitted` | `T-V1110-OUT-02` |
 | `v1110-agent-reply-gains-parse-mode` | `bot.py` | `{"chat_id": chat_id, "text": text})` in `send_message` → the same dict with `"parse_mode": "HTML"` | `T-V1110-OUT-06` |
-| `v1110-inflight-guard-dropped` | `bot.py` | the loop's `if worker.in_flight(from_id) is not None:` → `if False:` | `T-V1110-ING-03` |
+| `v1110-inflight-guard-dropped` | `bot.py` | `IngestWorker.reserve`'s in-flight test `if from_id in self._in_flight:` (the map's name as landed) → `if False:` — the user slot is no longer checked, the capacity token still is | `T-V1110-ING-03` |
 | `v1110-cancel-flag-ignored` | `documents.py` | `_check_budget`'s `if cancel is not None and cancel.is_set():` → `if False:` | `T-V1110-ING-05` |
 | `v1110-model-index-unbounded` | `bot.py` | the selection guard `if h != expected_h or not 0 <= idx < len(catalogue):` → `if False:` (one site; drops both the hash check and the bound) | `T-V1110-CBQ-05` (the out-of-range index), `T-V1110-MOD-08` (the stale hash) |
 | `v1110-document-cap-tenfold` | `bot.py` | `DOCUMENT_MAX_BYTES = 20_000_000` → `DOCUMENT_MAX_BYTES = 200_000_000` (its own line; the v190 `if` line untouched) | `T-V1110-ING-01` |
@@ -1291,15 +1382,20 @@ and body byte-unchanged; (2) `activate_conversation` is one
 `tg_user_id`; (3) every `<pre>` body passes `redact`, then `fit_lines`,
 then `html.escape` — in that order — and the plain fallback sends the
 `fitted` half of `_pre_text`'s return, never the original body; (3b)
-model ids reach rows and buttons only in their display form (MOD-04) and
-`reply_markup` carries nothing `redact` would strip; (4)
+model ids reach rows, buttons and the selection body only through
+`model_display` (MOD-04) and `reply_markup` carries nothing `redact`
+would strip and no `Cc`/`Cf` character; (4)
 `_handle_callback` acknowledges once, first; every stale branch returns
 before any write; (5) the worker acquires its connection lazily inside
 `run_one`'s `try` after the dequeue, keeps it across jobs, closes it in
 `_run`'s `finally`, takes no `conn`, releases the slot and calls
 `task_done()` in an outermost `finally` that a `storage.connect` failure
-cannot escape, `shutdown()` enqueues the sentinel and `_run` exits on it,
-and every ERR-01 clause of `bot.py:1405-1468` reappears in `run_one` in
+cannot escape, admission is `reserve` → status send → `enqueue` with
+`release` on a failed send (ING-03), the queue has `INGEST_QUEUE_MAX + 1`
+slots, `shutdown()` cancels `queued`/`running` jobs with reason
+`shutdown` and `put_nowait`s the sentinel, `_run` drains them as `❌
+Interrupted by restart.` ahead of the sentinel and exits on it, `main()`
+joins with a 10 s bound, and every ERR-01 clause of `bot.py:1405-1468` reappears in `run_one` in
 the same order; (5b) the ING-04 checkpoints sit before and after
 `getFile`, download and extraction, `download_file`'s `should_stop` is
 wired, the `committing` transition is the `before_commit` callable
@@ -1460,7 +1556,9 @@ override is global" [T4] — the `:75-91` table is not touched; `## Documents
 (RAG)` limits (`:806-837`): `20 MB (DOCUMENT_MAX_BYTES = 20,000,000
 bytes)`, `2,000,000 characters`, `1800 s … indexing runs in a worker
 thread; one job per user; /cancel`, `2,000 pages`; `### Limitations`
-(`:494-517`): the worker paragraph and NG-07's BM25 note; `## Error
+(`:494-517`): the worker paragraph (with ING-05's shutdown sentence: a
+bounded 10 s join, termination before it relies on SQLite transaction
+atomicity) and NG-07's BM25 note; `## Error
 behaviour` (`:839-874`): ERR-01's rows [T5]; the embeddings diagram line
 (`:400`, "LM Studio" → "OpenRouter by default") and the batch-constant
 sentence (`:436-437`: both `documents.EMBED_BATCH_SIZE` and
@@ -1478,12 +1576,12 @@ eight-gate table `| # | Gate | Exit | Wall |` recorded for T0, T7 (with
 gate-6 wall `W` and the 152/152 line, the gate-8 capture in full) and T8
 (gates 1–6 fresh; 7 and 8 reused with the printed manifest and the
 `dependency_diff_is_version_only` verdict); (2) the collection check
-(EC-03: floor, final count, the ≥ floor + 59 verdict, the
+(EC-03: floor, final count, the ≥ floor + 62 verdict, the
 `T-V1110-INV-01` result, the `comm -23` output against
 `v1110-T0-nodeids.txt` and the rename mapping it was reconciled with); (3) the delegation
 record — a table `task | delegated? | to what` naming, for every `no`,
 one of the four §5.1 exemptions verbatim, and map-versus-actual per task
-(EC-04); (4) the pin record — T0's inventory table and every disclosed
+(EC-04); (4) the pin record — `v1110-T0-pin-inventory.md`'s table and every disclosed
 amendment (PIN-01, EC-02) with `file:line`; (5) each task's "failed
 first" record (EC-02); (6) the review's findings and their disposition
 (REV-01); (7) the `--no-verify` attestation and the "no push" line; (8)
@@ -1511,15 +1609,15 @@ task rewrites the pins T0 assigns to it (PIN-01) and runs gates 1–4.
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preconditions (EC-05: tree, `.env` by exit status, the `sed` only when `go` names an address, the override count), gates 1–5 on the unchanged tree, the measurements (collected count = floor, the baseline node-id list `v1110-T0-nodeids.txt`, `len(MUTATIONS)` 144, the v190 `find` once), **the pin inventory brief `v1110-T0.md`** with the rename mapping (PIN-01; delegated, EC-04), `docs/prompts/236-go-spec-v1.11.0.md`, the `report-v1.11.0.md` skeleton with the ledger block | every item recorded; gate 5 green (else blocked); `git diff --exit-code` clean afterwards |
+| **T0** | Preconditions (EC-05: tree, `.env` by exit status, the `sed` only when `go` names an address, the override count), gates 1–5 on the unchanged tree, the measurements (collected count = floor, the baseline node-id list `v1110-T0-nodeids.txt`, `len(MUTATIONS)` 144, the v190 `find` once), the pre-dispatch brief `v1110-T0.md` (written by the orchestrator, EC-04), **the pin inventory `v1110-T0-pin-inventory.md`** with the rename mapping (PIN-01; written by the delegated subagent, committed with T0), `docs/prompts/236-go-spec-v1.11.0.md`, the `report-v1.11.0.md` skeleton with the ledger block | every item recorded; gate 5 green (else blocked); `git diff --exit-code` clean afterwards |
 | **T1** | §3: `tables.py` (`render_table`, `fit_lines`, `utf16_length`), `_pre_text` (redact → fit → escape; returns `(text, fitted)`), `send_pre`, `edit_pre`, the three `TelegramClient` methods (CBQ-03), OUT-04's fallbacks, OUT-05's fakes. `T-V1110-OUT-01…08` | green; `T-V1100-OUT-04`/`-05` unamended and green; `bot.py --selftest` green |
-| **T2** | §4, §5: `/stats` table, `/documents` table (without the in-flight line), `/delete #<id>`, DOC-03's wording; README `/stats` and `/documents` samples. `T-V1110-STA-01…03`, `T-V1110-DOC-01…04` (DOC-01's in-flight clause deferred to T5) | green; the 43 `/stats` pins rewritten |
+| **T2** | §4, §5: `/stats` table, `/documents` table (without the in-flight line), `/delete #<id>`, DOC-03's wording; README `/stats` and `/documents` samples. `T-V1110-STA-01…03`, `T-V1110-DOC-01…04` (the in-flight line is `T-V1110-DOC-05`, T5's) | green; the 43 `/stats` pins rewritten |
 | **T3** | §6: the storage helpers, `/sessions`, `/session`, `/new`'s reply; README `## Sessions`. `T-V1110-SES-01…05` | green; `SCHEMA_VERSION` 6; the five `NEW_CONVERSATION_REPLY` pins rewritten |
-| **T4** | §7, §8: `allowed_updates`, the callback branch and guards, `_handle_callback`, the `/model` menu (the 20-entry bound, the `<h>` hash, the display form in rows and buttons), the text form, `config.py`'s two fields and `MODEL_CATALOGUE_MAX`, `load_model_override`, `build_llm_client(model=)`, `set_provider`; `.env.example`, README's `## Switch provider` paragraph, `AGENTS.md`'s env paragraph. `T-V1110-CBQ-01…08`, `T-V1110-MOD-01…09` | green; `tests/test_telegram.py:272` rewritten; `/model lmstudio`'s strings unchanged |
-| **T5** | §9: the caps and strings, `IngestWorker` (the worker-owned connection acquired inside `run_one`, the lock, the outermost `finally`, `shutdown()`'s sentinel, `close()`), the loop split, `/cancel` and the job phase (`before_commit` → `committing`), `IndexCancelled`, `_check_cancel_budget` and `download_file(should_stop=)`, DOC-01's in-flight line, the typing-indicator pin; README limits/error/limitations rows (ERR-01 row 17 included), the diagram and batch-constant fixes. `T-V1110-ING-01…09`, `T-V1110-ERR-01`, `T-V1110-SEC-01` (its worker clauses) | green; the v190 `find` line untouched and once; `T-V190-SEC-04b` green |
+| **T4** | §7, §8: `allowed_updates`, the callback branch and guards, `_handle_callback`, the `/model` menu (the 20-entry bound, the `<h>` hash, `model_display` in rows, buttons and the selection body), the text form, `config.py`'s two fields and `MODEL_CATALOGUE_MAX`, `load_model_override`, `build_llm_client(model=)`, `set_provider`; `.env.example`, README's `## Switch provider` paragraph, `AGENTS.md`'s env paragraph. `T-V1110-CBQ-01…08`, `T-V1110-MOD-01…09` | green; `tests/test_telegram.py:272` rewritten; `/model lmstudio`'s strings unchanged |
+| **T5** | §9: the caps and strings, `IngestWorker` (the worker-owned connection acquired inside `run_one`, the lock, the two-phase `reserve`/`enqueue`/`release` admission, the five-slot queue, the outermost `finally`, `shutdown()`'s drain and sentinel, `main()`'s bounded join, `close()`), the loop split, `/cancel` and the job phase (`before_commit` → `committing`), `IndexCancelled`, `_check_cancel_budget` and `download_file(should_stop=)`, DOC-01's in-flight line, the typing-indicator pin; README limits/error/limitations rows (ERR-01 row 17 included), the diagram and batch-constant fixes. `T-V1110-ING-01…11`, `T-V1110-DOC-05`, `T-V1110-ERR-01`, `T-V1110-SEC-01` (its worker clauses) | green; the v190 `find` line untouched and once; `T-V190-SEC-04b` green |
 | **T6** | §10, §11.2's remaining clauses, §13's docs: `COMMANDS`, `setMyCommands`, `/help`, `/start`; README Commands table; the waiver sentence; `report_path` repoint and its pins; the matrix reader repoint; `T-V1110-PIN-01`, `-02`, `T-V1110-EXT-01…03`, the rest of `T-V1110-SEC-01` | green; `lint-docs` green against the skeleton; `doctor` green |
 | **T7** | §12: the eight `v1110-*` entries (each verified in isolation), `T-V1110-MUT-01`; **the review (REV-01)** and its fixes; the source commit; then `tested_tree`, gates 1–7 (gate 6 alone, `W` recorded, the timeout hunk if `W > 1300`), `doctor`, `lint-docs`, **gate 8 once**; the report-only commit | 152/152 killed with `W`; review findings closed or waived; gate 8 exit 0 with floors met, recorded against `tested_tree`; exit 1 → the stop route |
-| **T8** | §13: the bump commit (VER-01: `pyproject.toml`, `uv lock`, `tests/test_v1110_ver.py`, `tests/test_v1104_version.py`'s live-tree read alone repointed to `git show v1.10.4:pyproject.toml` == `"1.10.4"` (its `v1.9.5` assertion kept), `tests/test_v190_agents.py:134-152` rewritten in place under its existing name, `tests/test_v1110_inventory.py`, README release row, `AGENTS.md` lines), gates 1–6 fresh, gate 5 fresh, the identity check for 7/8, the collection check with `T-V1110-INV-01` and the `comm -23` node-id check, `replay --range <base>..HEAD`, Appendix B replayed; then the evidence-only commit, `lint-docs`, `gitleaks-tree`, the tag; **no push** | `T-V1110-VER-01` and `T-V1110-VER-03` red before the T8 edits, green after; `T-V1110-VER-02`, `T-V1110-VER-04` and `T-V1110-INV-01` (structural regression checks) green after, their initial result recorded, never a fabricated failure; verdict `True` (a `False` is a T8 repair cycle — revert or correct the hunk, rerun gates 1–6 and the check, never gate 7 or 8); count ≥ floor + 59; no baseline node id lost outside the rename mapping; the evidence commit's `git show --stat` names `docs/reports/*` only; `git tag -l v1.11.0` non-empty; `git status -sb` `ahead` |
+| **T8** | §13: the bump commit (VER-01: `pyproject.toml`, `uv lock`, `tests/test_v1110_ver.py`, `tests/test_v1104_version.py`'s live-tree read alone repointed to `git show v1.10.4:pyproject.toml` == `"1.10.4"` (its `v1.9.5` assertion kept), `tests/test_v190_agents.py:134-152` rewritten in place under its existing name, `tests/test_v1110_inventory.py`, README release row, `AGENTS.md` lines), gates 1–6 fresh, gate 5 fresh, the identity check for 7/8, the collection check with `T-V1110-INV-01` and the `comm -23` node-id check, `replay --range <base>..HEAD`, Appendix B replayed; then the evidence-only commit, `lint-docs`, `gitleaks-tree`, the tag; **no push** | `T-V1110-VER-01` and `T-V1110-VER-03` red before the T8 edits, green after; `T-V1110-VER-02`, `T-V1110-VER-04` and `T-V1110-INV-01` (structural regression checks) green after, their initial result recorded, never a fabricated failure; verdict `True` (a `False` is a T8 repair cycle — revert or correct the hunk, rerun gates 1–6 and the check, never gate 7 or 8); count ≥ floor + 62; no baseline node id lost outside the rename mapping; the evidence commit's `git show --stat` names `docs/reports/*` only; `git tag -l v1.11.0` non-empty; `git status -sb` `ahead` |
 
 ### 14.1 Per-task reading map
 
@@ -1529,12 +1627,12 @@ forces delegation; the report records map versus actual.
 
 | T | spec sections | repository files and ranges | delegate? |
 |---|---|---|---|
-| **T0** | §1, §12 (PIN-01), §14 | `AGENTS.md:148-175`, `:256-279`; `config/quality_gates.yaml:7-31`, `:737-746`, `:790`; `tests/test_v190_agents.py:134-152`, `:226-280`; the grep hits PIN-01 lists (line context only); `docs/prompts/TEMPLATE.md`; `pyproject.toml:1-21` | **yes** for the pin-inventory reading and the construction of `v1110-T0.md` (a subagent reads the tests and sources PIN-01 names and writes the brief, EC-04); **no** — *commands only* — solely for the precondition checks and the measurements (the collection and node-id list, the mutation count, the `find`-string grep, the `bot_state` count); **no** — *artefacts only* — for the prompt file and the report skeleton (prose no gate compiles, imports or runs) |
+| **T0** | §1, §12 (PIN-01), §14 | `AGENTS.md:148-175`, `:256-279`; `config/quality_gates.yaml:7-31`, `:737-746`, `:790`; `tests/test_v190_agents.py:134-152`, `:226-280`; the grep hits PIN-01 lists (line context only); `docs/prompts/TEMPLATE.md`; `pyproject.toml:1-21` | **yes** for the pin-inventory reading and the construction of `v1110-T0-pin-inventory.md` (the orchestrator writes the brief `v1110-T0.md`; the subagent it dispatches reads the tests and sources PIN-01 names and writes the inventory, EC-04); **no** — *commands only* — solely for the precondition checks and the measurements (the collection and node-id list, the mutation count, the `find`-string grep, the `bot_state` count); **no** — *artefacts only* — for the prompt file and the report skeleton (prose no gate compiles, imports or runs) |
 | **T1** | §3, §11 | `bot.py:44-58`, `:142-269`, `:287-312`, `:1500-1511`; `tests/fakes.py:143-202`; `tests/test_v1100_sanitization.py:293-323`; `tests/test_telegram.py:20-75`; `tables.py`, `tests/test_v1110_out.py` (created) | **yes** — brief `v1110-T1.md` |
-| **T2** | §4, §5, §11 | `bot.py:58`, `:81-97`, `:926-928`, `:947-953`, `:1132-1241`, `:1425-1497`; `documents.py:378-381`; `storage.py:1081-1119`; `tests/test_observability.py`, `tests/test_v160_observability.py`, `tests/test_pricing.py` (the inventoried lines ±5); `tests/test_v190_commands.py:555-720`; `README.md:106-140`; `tests/test_v1110_{sta,doc}.py` (created) | **yes** — brief `v1110-T2.md` (T0's `/stats` pin rows copied in) |
+| **T2** | §4, §5, §11 | `bot.py:58`, `:81-97`, `:926-928`, `:947-953`, `:1132-1241`, `:1425-1497`; `documents.py:378-381`; `storage.py:1081-1119`; `tests/test_observability.py`, `tests/test_v160_observability.py`, `tests/test_pricing.py` (the inventoried lines ±5); `tests/test_v190_commands.py:555-720`; `README.md:106-140`; `tests/test_v1110_{sta,doc}.py` (created) | **yes** — brief `v1110-T2.md` (the `/stats` pin rows of `v1110-T0-pin-inventory.md` copied in) |
 | **T3** | §6, §11 | `storage.py:21`, `:238-276`, `:632-662`, `:721-768`, `:1218-1245`; `bot.py:66`, `:896-956`, `:1019-1048`; `tests/test_telegram.py`, `tests/test_summary.py`, `tests/test_v1100_red_team.py` (the five inventoried lines ±5); `README.md:106-125`; `tests/test_v1110_ses.py` (created) | **yes** — brief `v1110-T3.md` |
 | **T4** | §7, §8, §11 | `bot.py:56`, `:71`, `:220-224`, `:813-861`, `:891-953`, `:1248-1283`, `:759-761`, `:1565-1566`, `:2058`, `:2077-2081`; `config.py:26`, `:108-110`, `:355-366`, `:525-540`; `llm/__init__.py:22-110`; `agent.py:1047-1100`; `storage.py:1425-1439`; `.env.example:1-20`; `README.md:237-266`; `tests/test_telegram.py:265-282`; `tests/test_failover.py`, `tests/test_v1_guardrails.py` (the `/model` hits ±5); `tests/test_v1110_{cbq,mod}.py` (created) | **yes** — brief `v1110-T4.md` (the grammar table and the verb list copied in) |
-| **T5** | §9, §5 (DOC-01's line), §11 | `bot.py:76-97`, `:243-269` (`download_file`, the `should_stop` keyword), `:345-431`, `:433-470`, `:863-881`, `:1311-1468`, `:1514-1591`, `:1669-1716`, `:1996-2010`, `:2130-2145`; `documents.py:104-110`, `:378-381`, `:404-436`, `:453-563` (`:528` is the `BEGIN IMMEDIATE` site the `before_commit` callable precedes); `storage.py:455` (`connect`, the acquisition inside `run_one`'s `try`), `:1051-1070`; `llm/embeddings.py:31-135`; `tracing.py:260-290`; `tests/test_v190_commands.py:167-180`, `:336-372`, `:454-520`, `:827-900`, `:976-1010`, `:1178-1200`, `:1306-1312`; `tests/test_v190_agents.py:238-280`; `README.md:391-410`, `:428-440`, `:494-517`, `:806-874`; `tests/test_v1110_{ing,err,sec}.py` (created) | **yes** — brief `v1110-T5.md` (the thread-safety reading, the connection-acquisition boundary and sentinel rules of ING-02, the phase table of ING-04 and the ERR-01 rows copied in) |
+| **T5** | §9, §5 (DOC-01's line), §11 | `bot.py:76-97`, `:243-269` (`download_file`, the `should_stop` keyword), `:345-431`, `:433-470`, `:863-881`, `:1311-1468`, `:1514-1591`, `:1669-1716`, `:1996-2010`, `:2130-2145`; `documents.py:104-110`, `:378-381`, `:404-436`, `:453-563` (`:528` is the `BEGIN IMMEDIATE` site the `before_commit` callable precedes); `storage.py:455` (`connect`, the acquisition inside `run_one`'s `try`), `:1051-1070`; `llm/embeddings.py:31-135`; `tracing.py:260-290`; `tests/test_v190_commands.py:167-180`, `:336-372`, `:454-520`, `:827-900`, `:976-1010`, `:1178-1200`, `:1306-1312`; `tests/test_v190_agents.py:238-280`; `README.md:391-410`, `:428-440`, `:494-517`, `:806-874`; `tests/test_v1110_{ing,err,sec}.py` (created) | **yes** — brief `v1110-T5.md` (the thread-safety reading, the two-phase admission, the connection-acquisition boundary and the shutdown/sentinel rules of ING-02, the phase table of ING-04 and the ERR-01 rows copied in) |
 | **T6** | §10, §11.2, §12 (PIN-01, REV-02's matrix), §13 (VER-02, VER-03) | `bot.py:896-956`, `:2054-2062`; `tests/test_v190_agents.py:226-235`; `tests/test_v15_standards.py:1820-1830`; `tests/test_v170_bench.py:316-331`; `tests/test_v1104_gates.py:206-215`; `config/quality_gates.yaml:785-792`; `README.md:106-121`; `AGENTS.md:266-279`; `tests/test_v1110_{ext,pin}.py` (created) | **yes** — brief `v1110-T6.md` |
 | **T7** | §12 (MUT-01, REV-01, REV-02) | `devtools/mutation_check.py:40-61` and its tail (`main()`); the eight landed lines the `find` strings target; `config/quality_gates.yaml:737-746` (the timeout hunk only); the review's own reading map; `tests/test_v1110_mut.py` (created) | **yes** for the entries and any review fix — brief `v1110-T7.md`; **no** for the review half — *the task is itself the clean-context review*; **no** for the gate run and the report-only commit — *commands only* |
 | **T8** | §13, §12 (REV-02's T8 half) | `pyproject.toml:3`; `tests/test_v1104_version.py`, `tests/test_v190_agents.py:134-152`; `README.md:897-918`; `AGENTS.md:92-97`, `:159-172`; `tests/test_v1110_ver.py`, `tests/test_v1110_inventory.py` (created); `docs/spec/task-briefs/v1110-T0-nodeids.txt` and the §11 table (the frozen `module::function` list is copied into `v1110-T8.md`); this run's artefacts | **yes** for the bump commit — brief `v1110-T8.md`; **no** for the evidence commit — *artefacts only* |
@@ -1552,7 +1650,7 @@ recorded artefact — never "by inspection".
 |---|---|
 | `REQ-V1110-EC-01` — boundary, zero dependencies, the network list, the repair budget | `T-V1110-VER-02`; the report's gate tables and `.env` exit-status record |
 | `REQ-V1110-EC-02` — test-first, with the structural-check carve-out by id; the ≤ 5-line drift rule | the report's per-task "failed first" records (the recorded initial result for `T-V1110-VER-02`, `-04`, `T-V1110-INV-01`) and amendment records |
-| `REQ-V1110-EC-03` — the floor; ≥ floor + 59 at T8; the `module::function` inventory; the node-id list; no deletions | the T0 and T8 collection counts in the report; `T-V1110-INV-01`; the committed `v1110-T0-nodeids.txt` and T8's `comm -23` record; `T-V1110-VER-03` |
+| `REQ-V1110-EC-03` — the floor; ≥ floor + 62 at T8; the `module::function` inventory; the node-id list; no deletions | the T0 and T8 collection counts in the report; `T-V1110-INV-01`; the committed `v1110-T0-nodeids.txt` and T8's `comm -23` record; `T-V1110-VER-03` |
 | `REQ-V1110-EC-04` — delegation by brief file; the map; verbatim exemptions | §14.1; the committed `v1110-T<n>.md` briefs; the delegation record |
 | `REQ-V1110-EC-05` — preconditions, the override count, the address `sed`, prompts from 236, the two-commit exceptions | the report's precondition section; `replay --range`; the attestation |
 | `REQ-V1110-EC-06` — secrets: names only, redacting loggers | `T-V1110-SEC-01` (clause 7); `gitleaks-tree` on the evidence commit |
@@ -1563,7 +1661,7 @@ recorded artefact — never "by inspection".
 | `REQ-V1110-OUT-04` — one plain resend (or re-edit) of the fitted body on a 400 | `T-V1110-OUT-05`, `T-V1110-OUT-08`; `E1` |
 | `REQ-V1110-OUT-05` — the fakes grow, compatibly | `T-V1110-OUT-07` |
 | `REQ-V1110-STA-01` — `/stats` as a table; the single-value rows wrapped; content semantics preserved | `T-V1110-STA-01`, `T-V1110-STA-02`, `T-V1110-STA-03`; `E11` |
-| `REQ-V1110-DOC-01` — the `/documents` table; the in-flight line | `T-V1110-DOC-01`, `T-V1110-DOC-02`; `T-V1110-SEC-01` |
+| `REQ-V1110-DOC-01` — the `/documents` table; the in-flight line | `T-V1110-DOC-01`, `T-V1110-DOC-02`, `T-V1110-DOC-05`; `T-V1110-SEC-01` |
 | `REQ-V1110-DOC-02` — `/delete #<id>` | `T-V1110-DOC-03`; `E4` |
 | `REQ-V1110-DOC-03` — the refusal wording split | `T-V1110-DOC-04`; `T-V1110-ERR-01` |
 | `REQ-V1110-SES-01` — the helpers; derived titles; schema 6 | `T-V1110-SES-01`, `T-V1110-SES-02`; `v1110-activate-ownership-dropped` |
@@ -1573,20 +1671,20 @@ recorded artefact — never "by inspection".
 | `REQ-V1110-CBQ-02` — ack once, first; the grammar with `<h>`; stale data | `T-V1110-CBQ-04`, `T-V1110-CBQ-05`, `T-V1110-CBQ-07`, `T-V1110-MOD-08`; `v1110-model-index-unbounded`; `E6` |
 | `REQ-V1110-CBQ-03` — keyboards on the table path; edit the same message through `edit_pre`; the client methods | `T-V1110-CBQ-06`, `T-V1110-CBQ-08` |
 | `REQ-V1110-MOD-01` — step 1 | `T-V1110-MOD-01`; `E7` |
-| `REQ-V1110-MOD-02` — step 2; display forms in rows and buttons; the 20-row invariant; the hash; two keys; `auto` clears both | `T-V1110-MOD-02`, `T-V1110-MOD-03`, `T-V1110-MOD-07`, `T-V1110-MOD-08`, `T-V1110-MOD-09`; `v1110-model-index-unbounded`; `E7` |
+| `REQ-V1110-MOD-02` — step 2; `model_display` in rows, buttons and the selection body; the 20-row invariant; the hash; two keys; `auto` clears both | `T-V1110-MOD-02`, `T-V1110-MOD-03`, `T-V1110-MOD-07`, `T-V1110-MOD-08`, `T-V1110-MOD-09`; `v1110-model-index-unbounded`; `E7` |
 | `REQ-V1110-MOD-03` — the text form; the usage string | `T-V1110-MOD-04`; `E8` |
-| `REQ-V1110-MOD-04` — the env allowlist catalogue; the exact stored id and its display form; at most 20 entries | `T-V1110-MOD-05`, `T-V1110-MOD-07`, `T-V1110-MOD-09` |
+| `REQ-V1110-MOD-04` — the env allowlist catalogue; the exact stored id and `model_display`; at most 20 entries | `T-V1110-MOD-05`, `T-V1110-MOD-07`, `T-V1110-MOD-09` |
 | `REQ-V1110-MOD-05` — the override reaches the client; `llm_calls.model`; the gate precondition | `T-V1110-MOD-06`; the T0/T7 override counts in the report |
 | `REQ-V1110-ING-01` — the caps; the `find` line survives | `T-V1110-ING-01`; `v1110-document-cap-tenfold`; `E9` |
-| `REQ-V1110-ING-02` — `IngestWorker`; the worker-owned connection acquired inside `run_one`; the sentinel; the lock; the outermost `finally`; `run_one` | `T-V1110-ING-02`, `T-V1110-ING-05`, `T-V1110-ING-08`; `E10` |
-| `REQ-V1110-ING-03` — one job per user; the bounded queue; the slot freed on every path | `T-V1110-ING-03`, `T-V1110-ING-04`, `T-V1110-ING-08`; `v1110-inflight-guard-dropped`; `E13` |
+| `REQ-V1110-ING-02` — `IngestWorker`; the worker-owned connection acquired inside `run_one`; the two-phase admission; the five-slot queue; the sentinel and the drain; the lock; the outermost `finally`; `run_one` | `T-V1110-ING-02`, `T-V1110-ING-05`, `T-V1110-ING-08`, `T-V1110-ING-10`, `T-V1110-ING-11`; `E10` |
+| `REQ-V1110-ING-03` — one job per user; the bounded queue; the slot freed on every path | `T-V1110-ING-03`, `T-V1110-ING-04`, `T-V1110-ING-08`, `T-V1110-ING-10`; `v1110-inflight-guard-dropped`; `E13` |
 | `REQ-V1110-ING-04` — cooperative cancel at every stage; the job phase; the non-cancellable commit phase | `T-V1110-ING-05`, `T-V1110-ING-06`, `T-V1110-ING-07`, `T-V1110-ING-09`; `v1110-cancel-flag-ignored`; `E11`, `E14` |
-| `REQ-V1110-ING-05` — the budget at every checkpoint; no typing indicator; vectors; shutdown | `T-V1110-ING-01`, `T-V1110-ING-02`, `T-V1110-ING-07`; the report's shutdown note |
+| `REQ-V1110-ING-05` — the budget at every checkpoint; no typing indicator; vectors; shutdown | `T-V1110-ING-01`, `T-V1110-ING-02`, `T-V1110-ING-07`, `T-V1110-ING-11`; `T-V1110-ERR-01` (row 10); `E10` |
 | `REQ-V1110-EXT-01` — `COMMANDS`; completeness minus the `/start` alias; `setMyCommands` non-fatal | `T-V1110-EXT-01`, `T-V1110-EXT-03`; `E12` |
 | `REQ-V1110-EXT-02` — `/help`, `/start` | `T-V1110-EXT-02` |
-| `REQ-V1110-ERR-01` — the eighteen-row matrix (row 10 documentation-only) | `T-V1110-ERR-01` |
-| `REQ-V1110-SEC-01` — escape, display forms in `reply_markup`, callbacks, no writes, no new hosts, the worker's isolation, redacting logs | `T-V1110-SEC-01`, `T-V1110-MOD-09`; `v1110-table-path-escape-dropped` |
-| `REQ-V1110-PIN-01` — the T0 inventory; disclosed amendments; the rewrite form | `T-V1110-PIN-01`, `T-V1110-PIN-02`; the brief `v1110-T0.md`; the report's pin record |
+| `REQ-V1110-ERR-01` — the eighteen-row matrix (rows 1–17 carry a string, every one tested) | `T-V1110-ERR-01` |
+| `REQ-V1110-SEC-01` — escape, `model_display` in `reply_markup`, callbacks, no writes, no new hosts, the worker's isolation, redacting logs | `T-V1110-SEC-01`, `T-V1110-MOD-09`; `v1110-table-path-escape-dropped` |
+| `REQ-V1110-PIN-01` — the T0 inventory; disclosed amendments; the rewrite form | `T-V1110-PIN-01`, `T-V1110-PIN-02`; the committed `v1110-T0-pin-inventory.md`; the report's pin record |
 | `REQ-V1110-MUT-01` — eight entries; 152; the wall | `T-V1110-MUT-01`; the 152/152 line and `W` in the report |
 | `REQ-V1110-REV-01` — the clean-context review | the logged review prompt; the findings table |
 | `REQ-V1110-REV-02` — all eight gates; gate 8 once, never rerun; the identity check as a T8 repair cycle; the matrix | the T0/T7/T8 gate tables; the printed manifest and verdict; `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table` |
@@ -1631,19 +1729,20 @@ Feature: callbacks
     Given a callback_query from an id outside ALLOWED_TG_IDS
     When process_update handles it
     Then callback_answers holds one entry with no text, nothing else was sent or edited
-    And bot_state and llm.calls are unchanged
+    And bot_state is unchanged except the cursor last_update_id, which alone advanced; llm.calls is unchanged
   Scenario: E6 a stale callback is acknowledged and ignored
     Given a callback "mod:model:99:<h>" (a valid hash, an out-of-range index) on a menu showing two models
-    Then the answer text is "Expired — send the command again." and no key was written
+    Then the answer text is "Expired — send the command again." and no key other than the cursor was written
 
 Feature: the /model menu
   Scenario: E7 the two-step menu sets both overrides
     When U sends "/model", then "mod:prov:openrouter", then "mod:model:1:<h>" with the rendered hash
     Then the same message_id was edited twice and sent holds one message
-    And bot_state has provider_override=openrouter and model_override:openrouter=<catalogue[1]>
+    And bot_state has provider_override=openrouter and model_override:openrouter=<catalogue[1]> (the exact id)
+    And the last edit's body is "Provider: openrouter, model: <model_display(catalogue[1])>" with no reply_markup
   Scenario: E8 the text form validates the model
     When U sends "/model openrouter nope"
-    Then the reply is "Unknown model for openrouter; see /model" and no key was written
+    Then the reply is "Unknown model for openrouter; see /model" and no key other than the cursor was written
 
 Feature: large documents
   Scenario: E9 the cap is the Bot API ceiling
@@ -1657,6 +1756,7 @@ Feature: large documents
     And the worker's connection was acquired inside run_one after the dequeue, on the worker thread, never handed in from the loop
     And when storage.connect fails for a job, that job ends with DOC_HANDLER_FAILED_REPLY, its slot is released and the next job runs
     And shutdown() wakes an idle _run through the sentinel, which exits and closes the connection
+    And shutdown() with jobs queued cancels them with reason shutdown, drains each as "❌ Interrupted by restart." ahead of the sentinel, lets a committing job finish, and main() joins the thread within 10 s
   Scenario: E11 /cancel mid-embedding stores nothing; in the commit phase it is too late (also STA-01's fit: a 5,000-char top-tools value wraps and is cut by rows)
     Given the FakeEmbedder sets the cancel event after batch 1 of 3
     When worker.run_one() runs
@@ -1684,6 +1784,7 @@ Feature: the ingest guards
     When U sends another document
     Then the reply is exactly "⏳ Still indexing <name>; wait for it to finish."
     And nothing is enqueued and the queue length is unchanged
+    And with the loop paused between reserve and the status send, U's second upload is refused, another user's upload takes its own token, a dequeue frees only its own token, and a failed status send releases U's reservation without enqueueing
     And the first job completes normally under worker.run_one()
 ```
 
@@ -1691,9 +1792,15 @@ Feature: the ingest guards
 
 ## Appendix C — cross-review log
 
-**Rounds so far: 2** — termination pending; challenger **OpenAI Codex
-`gpt-5.6-sol`**, called through the lab's cross-review seam with the plan
-passed by file. The opening paragraph is finalised after the last round.
+**Rounds 1–3 of 3, termination: `round_limit`** — the lab's stop
+criterion (a round without Critical or High findings) was not reached
+within the round budget (round 3 still returned 6 High, all applied
+here); challenger **OpenAI Codex `gpt-5.6-sol`**, called through the
+lab's cross-review seam with the plan passed by file (the loop wrapper's
+argv form cannot carry a plan above 128 KB). Totals across the three
+rounds: 27 challenger findings, 27 accepted (5 adapted: R1-4, R1-6,
+R2-8, R3-3, R3-6), 0 rejected; plus 3 lab items (L2-1…L2-3). Residual
+findings may exist; a fourth round was not run.
 
 ### Round 1 of at most 3 — against the committed draft (`d56ae70`); 10 findings, 10 accepted (2 adapted), 0 rejected
 
@@ -1736,3 +1843,21 @@ New requirements: none. New test ids: `T-V1110-OUT-08`, `T-V1110-CBQ-08`,
 items applied.** New requirements: none. New ERR-01 string: `Indexing is
 already finishing.` (row 17; 17 → 18 rows). New test ids: `T-V1110-MOD-09`,
 `T-V1110-ING-08`, `T-V1110-ING-09` (56 → 59); Gherkin unchanged (14).
+
+### Round 3 of at most 3 — against the round-2 draft (`f55bfc7`); 8 findings, 8 accepted (2 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R3-1 | High | EC-03, EC-04, EC-07, PIN-01, VER-03, §14 T0, §14.1 T0/T2/T5, `T-V1110-PIN-01` | accepted | `docs/spec/task-briefs/v1110-T0.md` is the pre-dispatch brief the orchestrator writes; the delegated subagent writes the discovered pin table and the rename mapping to the distinct artefact `docs/spec/task-briefs/v1110-T0-pin-inventory.md`, committed with T0, which EC-03, EC-07, PIN-01, `T-V1110-PIN-01`, VER-03's pin record, the T0 row, the reading map and the header now name. |
+| R3-2 | High | ING-02, ING-03, ING-04, ERR-01 rows 6–7, MUT-01, REV-01, `T-V1110-ING-02`, `T-V1110-ING-04`, `E13` | accepted | Admission is two-phase: `reserve(from_id, filename) -> Reservation \| SubmitError` atomically takes the user slot and one of four capacity tokens under the lock; only then is `📄 received` sent; `enqueue(reservation, job)` cannot fail for capacity reasons; a failed status send calls `release(reservation)`; the in-flight mutation targets `reserve`'s user-slot test; new negative test `T-V1110-ING-10` pauses between reservation and status send while a same-user submit, another user's submit and a dequeue occur. |
+| R3-3 | High | ING-02, ING-04, ING-05, ERR-01 row 10, REV-01, VER-02, `T-V1110-ERR-01`, `E10` | accepted, adapted | The physical queue has `INGEST_QUEUE_MAX + 1` slots and `reserve` admits at most four jobs, so the sentinel always has a slot; `shutdown()` sets `cancel_reason = "shutdown"` on every `queued`/`running` job (never `committing`) and `put_nowait`s the sentinel; `_run` drains the cancelled jobs ahead of the sentinel through the outermost `finally`, each edited to `❌ Interrupted by restart.` (a failed edit logged); a `committing` job finishes; `main()` joins with a 10 s bound and README states that earlier termination relies on SQLite transaction atomicity; row 10 is promoted from SHOULD to MUST, reversing R2-8's carve-out — `T-V1110-ERR-01` drives rows 1–17 and the new `T-V1110-ING-11` covers four queued jobs plus one running — adapted from the finding's sketch to the lab's full policy with the join bound and the reason field. |
+| R3-4 | High | MOD-02, MOD-03, MOD-04, SEC-01, REV-01, `T-V1110-MOD-09`, `E7` | accepted | One helper `model_display(model_id, *, limit)` — `redact` first, every Unicode `Cc`/`Cf` character replaced by a space, whitespace collapsed, UTF-16-safe truncation to the surface (rows ≤ 64, buttons ≤ 32) — is the only form in `<pre>` bodies, plain replies and `reply_markup`; the selection body is `Provider: <provider>, model: <model_display(model)>`; exact ids serve only catalogue validation, hashing, storage and client construction; `T-V1110-MOD-09` adds `\x00` and `\x07` and asserts over the post-selection edit. |
+| R3-5 | High | CBQ-01, CBQ-02, SEC-01, ERR-01 rows 15–16, `T-V1110-CBQ-02`, `T-V1110-CBQ-03`, `T-V1110-CBQ-05`, `T-V1110-MOD-08`, `E5`, `E6`, `E8` | accepted | The mandatory cursor read/write may occur before authorization and no application state other than the cursor is read or written; `T-V1110-CBQ-02` compares every `bot_state` row except `last_update_id` and asserts the cursor alone advanced; `T-V1110-CBQ-03` and every "no `bot_state` write" clause read "beyond the cursor". |
+| R3-6 | High | DOC-01, EC-03, VER-03, §14 T2/T5, Appendix A, `T-V1110-DOC-01`, `T-V1110-DOC-05`, `T-V1110-INV-01` | accepted, adapted | `T-V1110-DOC-01` (`tests/test_v1110_doc.py::test_t_v1110_doc_01_documents_table`, T2) loses its in-flight clause; the new `T-V1110-DOC-05` (`tests/test_v1110_doc.py::test_t_v1110_doc_05_inflight_line_after_table`, T5) asserts the `⏳ indexing <name> — <stage>` line after the table; the floor is floor + 62 and the frozen inventory list holds 61 other pairs — the lab chose the finding's first option (a separate test) over the planned-amendment wording. |
+| R3-7 | Med | CBQ-02, MOD-02, `T-V1110-CBQ-05`, `T-V1110-MOD-08` | accepted | `<h>` is the first 8 hex digits of `sha256(json.dumps(catalogue, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()` over the catalogue of exact ids, a framed representation under which `["a\nb", "c"]` and `["a", "b\nc"]` differ; the grammar table, MOD-02 and the two tests that compute it carry the same formula. |
+| R3-8 | Med | OUT-01, `T-V1110-OUT-03` | accepted | `T-V1110-OUT-03` has two cases: (a) a retained sentinel line shows `***REDACTED***` (`config.REDACTION` at `295b01f`) in the payload and no raw sentinel; (b) an over-limit body whose sentinel's redacted length moves the retained-line boundary, checked by calling `_pre_text` directly with and without the sentinel, proves redaction precedes fitting. |
+
+**Round 3: 8 findings, 8 accepted (2 adapted: R3-3, R3-6), 0 rejected.**
+New requirements: none. ERR-01 row 10 promoted from SHOULD to MUST
+(eighteen rows unchanged). New test ids: `T-V1110-DOC-05`,
+`T-V1110-ING-10`, `T-V1110-ING-11` (59 → 62); Gherkin unchanged (14).
