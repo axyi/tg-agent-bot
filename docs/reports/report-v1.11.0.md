@@ -124,11 +124,28 @@ baseline 2311 lines — all match T0's own direct measurements above.
 
 ## T1 — the outbound table path
 
-Delegated (brief `docs/spec/task-briefs/v1110-T1.md`, EC-04), test-first
-(EC-02): `tests/test_v1110_out.py` written first and watched red
-(`AttributeError` on the not-yet-existing `bot.send_pre`/`edit_pre`,
-`tables` module and `FakeTelegram.send_message_html`) before any
-production code landed.
+Delegated (brief `docs/spec/task-briefs/v1110-T1.md`, EC-04).
+
+**EC-02 correction** (disclosed by the subagent's own hand-back, not by a
+later audit): the task was **not** run fully test-first as originally
+claimed. `tables.py` was written *before* `tests/test_v1110_out.py`, so
+`T-V1110-OUT-01` (`render_table`) never went red for the right reason — it
+ran against the already-built implementation and only caught a bug in the
+test's own rule-line assertion (fixed; not a production-code defect). The
+two fatal-401 negative cases added to `T-V1110-OUT-05`/`-08` (see the
+mid-task correction below) were written *after* the `exc.fatal` fix
+landed and never ran red at all. What genuinely went red for the right
+reason first — `AttributeError` on the not-yet-existing
+`bot.send_pre`/`edit_pre`, the `tables` module or
+`FakeTelegram.send_message_html` — before its own production code landed:
+`T-V1110-OUT-02`, `-03`, `-04`, `-05` (minus the 401 case), `-06`, `-07`,
+`-08` (minus the 401 case). This is an EC-02 process deviation on one test
+and two sub-cases, not a correctness defect — all eight tests are green
+and match the spec's assertions; recorded accurately here rather than left
+as the original overstated claim in this section and in
+`docs/prompts/237-v1110-t1-table-path.md`'s `## Goal` and
+`docs/llm-usage.md` row 148 (both corrected alongside this section, same
+pass, docs-only).
 
 **Built**: `tables.py` (new, repository root) — `utf16_length` (moved
 from `bot.py`, `bot.py` re-imports it so `bot.utf16_length` keeps its name
@@ -171,6 +188,24 @@ Two new negative cases were added, one in `T-V1110-OUT-05` and one in
 `T-V1110-OUT-08`: a 401 through the real `TelegramClient` + `MockTransport`
 produces exactly one request and a `None` result.
 
+**Fallback scope note (for T7's reviewer)**: `TelegramError` carries no
+status code, only `.fatal`/`.retry_after`/`.transport`. So the one-time
+plain-text fallback fires on *any* non-fatal `TelegramError` from the HTML
+attempt — not literally only a 400; a 500, or an exhausted-retries 429 or
+transport error, would also fall back once. This is the correct reading of
+OUT-04's rule (a payload-shaped resend is worth trying whenever the failure
+isn't a fatal token/chat problem) and is not a change to
+`TelegramClient.call`'s own 401/404/429 classification.
+
+**Hook episode**: the first commit attempt failed pre-commit's
+`ruff-format-all` (a `send_pre` signature wrapped across 3 lines where
+ruff wants 1); `ruff format` itself was denied by the sandbox's
+destructive-action classifier (this repo's `feedback_ruff_format_whole_file_risk`
+caution — a whole-file reformat is a real risk to review), so the
+signature was collapsed by hand and verified with `ruff format --check
+--diff` before re-committing. No `--no-verify` used; the failed attempt
+produced no commit, so nothing needed reverting.
+
 **Tests**: `T-V1110-OUT-01`..`-08` in `tests/test_v1110_out.py`, all
 green — `-01` (`render_table` properties over 200 generated row sets
 against an independent reference implementation, plus explicit
@@ -195,7 +230,13 @@ untouched.
 section; the second function's last assert is actually at `:324` (a
 1-line overshoot) — used the actual location, no repair cycle. Every
 other cited range in the brief's reading map matched the live tree
-exactly, including `_fit` at `bot.py:1190-1197`.
+exactly, including `_fit` at `bot.py:1190-1197`. Process note: the
+brief asked for this `cited → actual` line in the **commit body** too,
+not only here — commit `239bd13`'s body does not carry it; recorded here
+instead as the durable record, no amendment made (this project creates a
+new commit rather than rewriting one, and a commit-message content gap
+that doesn't affect correctness doesn't warrant a follow-up commit of its
+own).
 
 **Map vs actual**: read beyond the brief's stated map to understand the
 surrounding contract before writing the fallback and the `/status`/

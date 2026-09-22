@@ -23,10 +23,16 @@ wrappers `send_pre`/`edit_pre`, the two new `TelegramClient` methods
 (`send_message_html`, `edit_message_html`), the one-time plain-text
 fallback on a non-fatal table-path failure, and `tests/fakes.py`'s
 `FakeTelegram` growth (`sent_payloads`, `edited_payloads`,
-`callback_answers`, `commands_set`, `fail_html_with`). Test-first (EC-02):
-`tests/test_v1110_out.py` written and watched red (`AttributeError` on the
-not-yet-existing `bot.send_pre`/`edit_pre`/`tables` module and
-`FakeTelegram.send_message_html`) before any production code landed.
+`callback_answers`, `commands_set`, `fail_html_with`).
+
+**Correction (post-execution, see the report's `## T1` section for the
+full account)**: this goal called for test-first (EC-02) work, but
+`tables.py` was in fact written before `tests/test_v1110_out.py`, so
+`T-V1110-OUT-01` never ran red for the right reason, and the two fatal-401
+negative cases (see `## Stop` below) were added after their fix landed and
+never ran red at all. The other six tests did go red first, on the
+expected `AttributeError`. All eight are green now and match the spec;
+`docs/reports/report-v1.11.0.md`'s `## T1` section is the accurate record.
 
 ## Constraints
 
