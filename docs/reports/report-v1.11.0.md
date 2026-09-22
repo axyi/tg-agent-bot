@@ -273,26 +273,47 @@ task's changes too, via `git stash`).
 
 Delegated (brief `docs/spec/task-briefs/v1110-T2.md`, EC-04).
 
-**EC-02, stated at the granularity that actually happened**: both new test
-files (`tests/test_v1110_sta.py`, `tests/test_v1110_doc.py`) were written
-in full and run before any `bot.py` change. `T-V1110-STA-01`, `-02` and
-`T-V1110-DOC-01` share a helper that asserts the table path first
-(`parse_mode == "HTML"`); all three went red on that same first assertion
-(`assert None == 'HTML'` — `/stats` and `/documents` still used the plain
-`_send`/`reply_parts` path), so the label-order, wrap-width, fit-marker,
-size-formatting and truncation assertions later in those same test bodies
-never themselves executed red before the fix — the test *file* ran red for
-the right reason, not every assertion inside it individually.
-`T-V1110-STA-03` went red on a missing README label. `T-V1110-DOC-03` went
-red on the still-old `DELETE_USAGE_REPLY` text, so its `#<id>` assertions
-never ran on their own before the fix either. `T-V1110-DOC-04`'s three
-parametrized cases: the DOCX-bounds and PDF-pages variants went red on
-`AttributeError` (the two new reply constants did not exist yet); the
-extracted-text variant went red on an `AssertionError` (the old "500,000"
-wording, not "2,000,000"). `T-V1110-DOC-02` (`DOCUMENTS_EMPTY_REPLY` on the
-plain path) **never ran red at all** — that behaviour is unchanged by this
-task; it is a regression guard, not a red-then-green test, and is recorded
-as such rather than folded into the test-first claim.
+**EC-02, stated at the granularity that actually happened, an explicit
+"no" named where it applies**: both new test files (`tests/test_v1110_sta.py`,
+`tests/test_v1110_doc.py`) were written in full and run before any `bot.py`
+change — but "written in full" at that first run did **not** yet include
+`T-V1110-DOC-03`'s two `#`-guard sub-cases (see below); those were added
+later, post-implementation. `T-V1110-STA-01`, `-02` and `T-V1110-DOC-01`
+share a helper that asserts the table path first (`parse_mode == "HTML"`);
+all three went red on that same first assertion (`assert None == 'HTML'` —
+`/stats` and `/documents` still used the plain `_send`/`reply_parts` path),
+so the label-order, wrap-width, fit-marker, size-formatting and truncation
+assertions later in those same test bodies never themselves executed red
+before the fix — the test *file* ran red for the right reason, not every
+assertion inside it individually. `T-V1110-STA-03` went red on a missing
+README label. `T-V1110-DOC-03` (its original own/foreign/non-digit/
+filename/bare-usage cases) went red on the still-old `DELETE_USAGE_REPLY`
+text, so its `#<id>` assertions never ran on their own before the fix
+either. `T-V1110-DOC-04`'s three parametrized cases: the DOCX-bounds and
+PDF-pages variants went red on `AttributeError` (the two new reply
+constants did not exist yet); the extracted-text variant went red on an
+`AssertionError` (the old "500,000" wording, not "2,000,000").
+`T-V1110-DOC-02` (`DOCUMENTS_EMPTY_REPLY` on the plain path) **never ran
+red at all** — that behaviour is unchanged by this task; it is a
+regression guard, not a red-then-green test.
+
+**`T-V1110-DOC-03`'s two `#`-guard sub-cases (`#²`, a 25-digit id) are
+also not red-then-green tests.** A second advisor review (see below, after
+gates 1-4 had already gone green on the first implementation) pointed out
+that `_handle_delete`'s `#<id>` guards had no dedicated test coverage.
+Both guards (`id_part.isascii()`, `_DELETE_MAX_ID`) were already present
+in `bot.py` at that point — they came from a *first* advisor review, held
+before any test or implementation code existed, and were built into
+`_handle_delete` from its first version, so the shipped code never ran
+with these crash paths unguarded. Adding the two test cases against the
+already-correct implementation meant they passed immediately, never red.
+Their ability to actually catch a regression was verified separately, not
+through EC-02's red-before-green sequence: each guard was temporarily
+reverted in `bot.py`, the corresponding new assertion watched fail
+(`ValueError`/`OverflowError`, uncaught, propagating out of
+`_handle_delete`), then the guard restored and the full suite re-confirmed
+green. This is the same verification shape as a mutation-kill proof, not
+test-first implementation.
 
 **Built**: `_render_stats` (`bot.py`) now builds a three-column
 `metric`/`this conv`/`all time` table via `tables.render_table` (`max_width`
@@ -340,11 +361,14 @@ as orphans once their one caller (the old flat `/stats` body) was gone —
 confirmed via grep before deletion.
 
 **Tests**: `T-V1110-STA-01`…`-03` in `tests/test_v1110_sta.py` (3
-functions), `T-V1110-DOC-01`…`-04` in `tests/test_v1110_doc.py` (6
-collected items — `-04` parametrized ×3), all green; see the EC-02 note
-above for which assertions genuinely ran red first. Eight pre-existing
-`/stats`-rendering test functions rewritten from whole-line equality to
-presence/contiguity (REQ-V1110-PIN-01), against T0's pin inventory:
+functions, 3 collected items), `T-V1110-DOC-01`…`-04` in
+`tests/test_v1110_doc.py` (4 functions, 6 collected items — `-04`
+parametrized ×3): 7 functions, 9 collected items total, all green; see the
+EC-02 note above for which assertions genuinely ran red first, which
+never ran red at all, and which two are post-implementation regression
+guards rather than red-then-green tests. Nine pre-existing `/stats`-rendering
+test functions rewritten from whole-line equality to presence/contiguity
+(REQ-V1110-PIN-01), against T0's pin inventory:
 `tests/test_observability.py`'s `stats_text` helper (now passes a real
 `FakeTelegram` — the file's default `RecordingTelegram` has no
 `send_message_html` — and strips/unescapes the `<pre>` wrapper) plus
@@ -357,10 +381,11 @@ presence/contiguity (REQ-V1110-PIN-01), against T0's pin inventory:
 `test_prc03_every_basis_form_is_stored_and_rendered`. T0's inventory also
 named two `/status`-line sites (`test_obs07_status_carries_the_token_line`,
 `test_obs07_status_token_line_without_a_conversation`) — checked and left
-unchanged, `/status` is untouched by this task. This is 8 functions, not
+unchanged, `/status` is untouched by this task. This is 9 functions, not
 "43 pins" — the spec's 43 count is individual assertion sites (T0's own
 inventory located 24 of those, grouped into the rows above); every located
-site was rewritten.
+`/stats`-rendering site was rewritten (the two `/status`-line sites were
+left alone, out of scope).
 
 **Amendments beyond T0's pin inventory** (the brief's own staging list
 also omitted the five test files these touch — `test_observability.py`,
@@ -374,61 +399,87 @@ acceptance criteria regardless):
   presence checks on the table's cell content instead.
 - `tests/test_v190_commands.py`'s row_5b test
   (`test_t_v190_err_01_row_5b_variants_map_to_the_same_reply`): needed a
-  reply-mapping split for REQ-V1110-DOC-03, but renaming the function or
-  adding a second parametrize column would have silently dropped three
-  node ids from T0's committed baseline list
-  (`docs/spec/task-briefs/v1110-T0-nodeids.txt`, reconciled by T8's
-  `comm -23` check — not this task's, but a downstream requirement this
-  task must not break). Kept the original name and the original
-  single-`exc` parametrize (identical `[exc0]`/`[exc1]`/`[exc2]` ids), with
-  a `type(exc) -> bot attribute name` lookup dict instead — the same
-  name-preserved-despite-content-change pattern
+  reply-mapping split for REQ-V1110-DOC-03. Found while sweeping every
+  test file that references the three exception classes/reply constants
+  (own initiative, not advisor-prompted). A second advisor review (see
+  below) then flagged that renaming the function or adding a second
+  parametrize column would have silently dropped three node ids from T0's
+  committed baseline list (`docs/spec/task-briefs/v1110-T0-nodeids.txt`,
+  reconciled by T8's `comm -23` check — not this task's, but a downstream
+  requirement this task must not break). Kept the original name and the
+  original single-`exc` parametrize (identical `[exc0]`/`[exc1]`/`[exc2]`
+  ids), with a `type(exc) -> bot attribute name` lookup dict instead — the
+  same name-preserved-despite-content-change pattern
   `test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path` already
   uses elsewhere in the same file.
 - `tests/test_v1100_sanitization.py::test_t_v1100_out_03_split_message_used_only_inside_reply_parts`
   asserted `reply_parts(` appears at 5+ call sites outside its own `def`.
-  Moving `/stats` and `/documents` off `reply_parts` onto the table path
-  drops that to 3 (`/status`, the agent-turn reply, `/summary`) — the
-  direct, foreseeable consequence of REQ-V1110-STA-01/DOC-01, not a defect.
-  Floor lowered to 3, with a comment naming which three call sites remain
-  and why the number moved.
+  Found by a full, whole-suite `pytest -q` run (own initiative, after
+  gates 1-4 had passed on the targeted files, to catch anything missed —
+  not an advisor finding). Moving `/stats` and `/documents` off
+  `reply_parts` onto the table path drops that to 3 (`/status`, the
+  agent-turn reply, `/summary`) — the direct, foreseeable consequence of
+  REQ-V1110-STA-01/DOC-01, not a defect. Floor lowered to 3, with a
+  comment naming which three call sites remain and why the number moved.
 
-**Advisor-review fixes** (all applied in this same prompt, before the
-commit, none discovered by a later audit):
+**Two advisor reviews, at different points, and what each actually
+changed** (correcting an earlier draft of this section, which attributed
+all four items below to one review "called after gates 1-4 first went
+green" — untrue for the first two):
 
-1. A long `cost_basis` now truncates at the "cost basis" column's 16-unit
-   `max_width` like any other cell, so `test_prc03_every_basis_form_is_stored_and_rendered`'s
-   equality assertion needed the same truncation (`tables._truncate_cell`,
-   reused rather than reimplemented) applied to its own expected value —
-   "content preserved verbatim" (REQ-V13-OBS-07) still holds as *cell
-   content*, but a value wider than the column now truncates like any
-   other long cell, which is new, disclosed behaviour, not a bug.
+*First review, called after reading the brief/spec/existing code, before
+any test or implementation code existed.* Flagged two design risks, both
+incorporated directly into the *first* version of the implementation and
+tests, so neither ever shipped broken and neither needed a later fix:
+
+1. `test_pricing.py`'s `basis` parametrize list includes values wider than
+   the "cost basis" table column's 16-unit `max_width`
+   (`"openrouter-list-stale"`, `f"reference:{REF}"`,
+   `f"reference-stale:{REF}"`) — a long `cost_basis` truncates there like
+   any other cell. `test_prc03_every_basis_form_is_stored_and_rendered`
+   was written from the start comparing against `tables._truncate_cell`'s
+   own truncation (reused, not reimplemented) rather than the raw
+   `basis` string. "Content preserved verbatim" (REQ-V13-OBS-07) still
+   holds as *cell content*; a value wider than the column truncating like
+   any other long cell is new, disclosed behaviour, not a bug.
    `test_obs07_stats_drops_whole_lines_before_it_cuts_one`'s premise (a
    4000-character `cost_basis` forcing the whole-body overflow) no longer
-   holds for the same reason — rewritten to a presence/no-crash check with
-   a docstring noting `T-V1110-STA-02` (a 5000-character `top tools`
-   value) owns the whole-line-drop overflow case now.
-2. `/delete #<id>` had two unguarded crash paths: a non-ASCII decimal
-   digit (`"²".isdigit()` is `True` but `int("²")` raises `ValueError`,
-   since Python's `int()` only accepts decimal-category digits, and
-   U+00B2 SUPERSCRIPT TWO is a digit but not decimal) and an id past
-   sqlite3's signed 64-bit `INTEGER` ceiling (`OverflowError` from the
-   underlying C binding). Fixed with `id_part.isascii() and
-   id_part.isdigit()` and a `_DELETE_MAX_ID = 2**63 - 1` bound, both
-   short-circuiting to the ordinary "not found" reply rather than
-   crashing. Both additions to `T-V1110-DOC-03` were confirmed to
-   actually catch the regression, not just exercise a code path: each
-   guard was temporarily reverted, the test watched fail
-   (`ValueError`/`OverflowError` respectively, both uncaught, propagating
-   out of `_handle_delete`), then the guard restored and the full suite
-   re-confirmed green.
-3. Grepped `devtools/mutation_check.py`'s `MUTATIONS` list for any `find`
-   string touching `_fit`, `_pair`, `_render_document_line`,
-   `_handle_delete`, `DELETE_USAGE_REPLY`, the two refusal `except`
-   clauses, the `/stats` dispatch line, or `_render_stats`'s body — none
-   found (18 entries touch `bot.py` at all; none overlap this task's
-   edits). Gate 6 itself was not run (out of scope), so this is a static
-   check, not a proof, but it rules out a silent gate-6 break.
+   holds for the same reason — written from the start as a
+   presence/no-crash check with a docstring noting `T-V1110-STA-02` (a
+   5000-character `top tools` value) owns the whole-line-drop overflow
+   case now.
+2. `/delete #<id>` needed guards against two crash paths: a non-ASCII
+   decimal digit (`"²".isdigit()` is `True` but `int("²")` raises
+   `ValueError`, since Python's `int()` only accepts decimal-category
+   digits, and U+00B2 SUPERSCRIPT TWO is a digit but not decimal) and an
+   id past sqlite3's signed 64-bit `INTEGER` ceiling (`OverflowError`
+   from the underlying C binding). Built into `_handle_delete`'s first
+   version as `id_part.isascii() and id_part.isdigit()` and a
+   `_DELETE_MAX_ID = 2**63 - 1` bound, both short-circuiting to the
+   ordinary "not found" reply. The shipped `bot.py` never had an unguarded
+   version of either path.
+
+Also from this first review: checking `devtools/mutation_check.py`'s
+`MUTATIONS` list for any `find` string touching `_fit`, `_pair`,
+`_render_document_line`, `_handle_delete`, `DELETE_USAGE_REPLY`, the two
+refusal `except` clauses, the `/stats` dispatch line, or `_render_stats`'s
+body — none found (18 entries touch `bot.py` at all; none overlap this
+task's edits; grepped for `obs07`/`prc03`/`stats_gains`/`cmd_05_documents`/
+`row_5b`/`split_message_used` too — no mutation's `why` field names a test
+this task weakened). Gate 6 itself was not run (out of scope), so this is
+a static check, not a proof, but it rules out a silent gate-6 break.
+
+*Second review, called after gates 1-4 first went green on that
+implementation, before the first commit.* Flagged two more things, both
+applied afterward:
+
+3. The row_5b node-id-preservation fix described above.
+4. The `isascii()`/`_DELETE_MAX_ID` guards, though present and correct
+   from the first version, had no dedicated regression-guard test. Two
+   cases added to `T-V1110-DOC-03` (`#²`, a 25-digit id) — see the EC-02
+   section above for why these are not red-then-green tests and how their
+   ability to catch a regression was verified instead (temporary revert,
+   watch the new assertion fail, restore).
 
 **Drift (EC-02)**: two disclosed, both well under the 5-line stop
 threshold, no repair cycle. `STATS_MAX_CHARS` cited `bot.py:58`, actual
@@ -441,25 +492,54 @@ removal), `_cell`/`_render_cost`/`_render_share` (`:1227`/`:1231`/`:1237`),
 `_render_document_line` (`:1493`, before removal), `_handle_documents`
 (`:1500`), `_handle_delete` (`:1509`), the refusal-wording block
 (`:1451-1461`), `storage.list_documents`/`document_id_for`/`delete_document`,
-`documents.DOCUMENT_LIMIT` (`:381`), and `README.md:106-140`.
+`documents.DOCUMENT_LIMIT` (`:381`), and `README.md:106-140`. These are
+measured against the brief's own re-grepped locations, as the brief
+instructs — not against the spec's `295b01f` citations, which T1 already
+shifted and which are not drift.
 
-- T2 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) |
-  brief: docs/spec/task-briefs/v1110-T2.md | map vs actual: matches the
-  reading map, two disclosed drifts ≤3 lines each (`STATS_MAX_CHARS`,
-  `DELETE_USAGE_REPLY`/`DOCUMENTS_EMPTY_REPLY`), plus the additional test
-  files listed above under "amendments beyond T0's pin inventory"
+**Further disclosures** (not drift, not amendments to a pin — things worth
+recording for a later reviewer):
+
+- README's `## Error behaviour` table still shows `Document too large
+  (over 500,000 characters).` and has no DOCX-archive-bounds or
+  PDF-pages-over-limit rows; `bot.py` now sends different wording for all
+  three. This split is correct per T0's pin inventory
+  (`README.md:864` → T5, not T2) and per the brief's own explicit
+  instruction for DOC-03, but it means README and the live bot disagree on
+  these three strings until T5 lands.
+- No `/documents` sample block existed anywhere in README before this
+  task (only the one-line `## Commands` table description). This was
+  disclosed as a possibility in the brief and considered here, then
+  dropped rather than adding a new sample block from scratch — only the
+  `## Commands` table rows for `/documents`/`/delete` were updated to
+  match the new table output.
+- `/documents`' `#` column is pinned at width 3 by the spec. An id ≥1000
+  renders truncated (e.g. `12…`), which both looks like a real 2-digit id
+  and can't be typed back into `/delete #<id>` as shown. This is a
+  spec-level property of the pinned column width, not something this task
+  changed or should change — flagged here for a later reviewer (T7).
+- The full-suite `pytest -q` run's final "N passed in Xs" summary line did
+  not render in this session's non-TTY `pytest-xdist -n auto` environment,
+  on every attempt including `rtk proxy`. **Not investigated** — the cause
+  was not isolated to rtk's own output filtering versus xdist/pytest
+  itself; T1's own usage row quoted a normal collected-and-passed count
+  without mentioning this, so rtk is the likelier explanation, but that is
+  a guess, not a finding. The 2331-collected/0-failed/exit-0 figures below
+  come from `--collect-only` runs (with and without this task's changes)
+  and the run's own exit code, not from a printed summary.
+
+- T2 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T2.md | map vs actual: matches the reading map, two disclosed drifts ≤3 lines each (`STATS_MAX_CHARS`, `DELETE_USAGE_REPLY`/`DOCUMENTS_EMPTY_REPLY`), plus the additional test files and further disclosures listed above
 
 **Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
 brief): `uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run
 --locked ruff check .` — all checks passed, exit 0. `uv run --locked
 pytest` — 2331 collected (2322 at T1's `2b2dd4e` + 9 new this task: 3 in
 `tests/test_v1110_sta.py`, 6 in `tests/test_v1110_doc.py`), 0 failed, exit
-0 (pytest's own final summary line does not render under this
-environment's non-TTY `pytest-xdist -n auto`, a pre-existing quirk unrelated
-to this task — the 2331/0-failed figures come from `--collect-only`
-against both trees plus the full run's exit code, not from a printed
-summary). `uv run --locked python bot.py --selftest` — `selftest: OK`,
-exit 0.
+0 (see the "further disclosures" note above — pytest's final summary line
+did not render in this session, cause not investigated; the 2331/0-failed
+figures come from `--collect-only` against both trees plus the full run's
+exit code, not from a printed summary). `uv run --locked python bot.py
+--selftest` — `selftest: OK`, exit 0.
 
 ## T3 — not reached
 
