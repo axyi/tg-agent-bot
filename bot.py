@@ -5,6 +5,7 @@ at a time. The only threads are the two output readers created per `exec` call.
 """
 
 import functools
+import html
 import json
 import logging
 import os
@@ -35,11 +36,13 @@ import documents
 import metrics
 import rag
 import storage
+import tables
 import tools
 from config import PROJECT_ROOT, PROVIDERS, Config, ConfigError, load_config, redact
 from llm import build_llm_client, pricing, provider_is_configured
 from llm.base import REASONING_DEFAULT, CostResolver, LLMResponse, ReasoningRequest, ToolCall
 from llm.embeddings import EmbeddingError, EmbeddingsClient, EmbeddingTimeoutError
+from tables import utf16_length
 
 TELEGRAM_API_HOST = "https://api.telegram.org"
 LONG_POLL_TIMEOUT_S = 50
@@ -226,11 +229,35 @@ class TelegramClient:
     def send_message(self, chat_id: int, text: str) -> dict:
         return self._call_with_retry("sendMessage", {"chat_id": chat_id, "text": text})
 
+    def send_message_html(
+        self, chat_id: int, text: str, *, reply_markup: dict | None = None
+    ) -> dict:
+        """REQ-V1110-OUT-01/CBQ-03: the table path's `sendMessage`. Payload is
+        exactly `{chat_id, text, parse_mode: "HTML"}` plus `reply_markup` when
+        given -- no other tag, no MarkdownV2, no `entities`. `send_pre` is the
+        only production caller; command/callback handlers never call this
+        directly."""
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        return self._call_with_retry("sendMessage", payload)
+
     def edit_message_text(self, chat_id: int, message_id: int, text: str) -> dict:
         return self._call_with_retry(
             "editMessageText",
             {"chat_id": chat_id, "message_id": message_id, "text": text},
         )
+
+    def edit_message_html(
+        self, chat_id: int, message_id: int, text: str, *, reply_markup: dict | None = None
+    ) -> dict:
+        """REQ-V1110-OUT-01/CBQ-03: the table path's `editMessageText`, same
+        payload rule as `send_message_html` plus `message_id`. `edit_pre` is
+        the only production caller."""
+        payload = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML"}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        return self._call_with_retry("editMessageText", payload)
 
     def delete_message(self, chat_id: int, message_id: int) -> bool:
         return self._call_with_retry(
@@ -300,11 +327,6 @@ def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
     if current:
         parts.append("".join(current))
     return parts
-
-
-def utf16_length(text: str) -> int:
-    """Telegram counts UTF-16 code units, exactly as `split_message` does."""
-    return sum(2 if ord(char) > 0xFFFF else 1 for char in text)
 
 
 def reply_parts(text: str) -> list[str]:
@@ -1509,6 +1531,66 @@ def _send(tg, chat_id: int, parts: list[str]) -> bool:
             log.error("sending the reply failed: %s", redact(str(exc)))  # noqa: TRY400
             return False
     return True
+
+
+def _pre_text(body: str) -> tuple[str, str]:
+    """REQ-V1110-OUT-01: the table path's shared construction. Redact before
+    fit, fit before escape, escape before wrapping -- in that order and no
+    other. Returns both the HTML `text` (one `<pre>` block) and the fitted,
+    redacted plain body (`fitted`), so the HTML request and OUT-04's plain
+    fallback send the exact same body."""
+    redacted = redact(body)
+    fitted = tables.fit_lines(redacted.splitlines(), limit=MESSAGE_LIMIT)
+    text = "<pre>" + html.escape(fitted, quote=False) + "</pre>"
+    return text, fitted
+
+
+def send_pre(tg, chat_id: int, body: str, *, reply_markup: dict | None = None) -> dict | None:
+    """REQ-V1110-OUT-01/-04: the table path. The only production caller of
+    `TelegramClient.send_message_html` -- command and callback handlers call
+    this, never the client method directly. Never splits: `_pre_text` already
+    fit `body` to 4096 entity-parsed UTF-16 units. On a non-fatal table-path
+    failure (the Bot API's "can't parse entities" 400 family, primarily),
+    resend the same fitted body once more through the plain `send_message`;
+    a fatal failure (401/404, `bot.py:154-198`'s classification) skips the
+    fallback entirely -- a bad token or an unreachable chat is not a payload
+    problem a plain resend could fix. Either way, a second failure is logged
+    and `None` returned, never a third attempt."""
+    text, fitted = _pre_text(body)
+    try:
+        return tg.send_message_html(chat_id, text, reply_markup=reply_markup)
+    except TelegramError as exc:
+        # TRY400: TelegramError is an already-classified failure, the same
+        # pattern as `_send` above.
+        if exc.fatal:
+            log.error("sending the reply failed: %s", redact(str(exc)))  # noqa: TRY400
+            return None
+        try:
+            return tg.send_message(chat_id, fitted)
+        except TelegramError as exc2:
+            log.error("sending the reply failed: %s", redact(str(exc2)))  # noqa: TRY400
+            return None
+
+
+def edit_pre(
+    tg, chat_id: int, message_id: int, body: str, *, reply_markup: dict | None = None
+) -> dict | None:
+    """REQ-V1110-OUT-01/-04: `send_pre`'s edit counterpart -- same
+    `_pre_text` construction, the same fatal-skips-the-fallback rule, and the
+    same one-time plain fallback (`edit_message_text`, no tags, no
+    `parse_mode`, no `reply_markup`) on a non-fatal table-path failure."""
+    text, fitted = _pre_text(body)
+    try:
+        return tg.edit_message_html(chat_id, message_id, text, reply_markup=reply_markup)
+    except TelegramError as exc:
+        if exc.fatal:
+            log.error("editing the reply failed: %s", redact(str(exc)))  # noqa: TRY400
+            return None
+        try:
+            return tg.edit_message_text(chat_id, message_id, fitted)
+        except TelegramError as exc2:
+            log.error("editing the reply failed: %s", redact(str(exc2)))  # noqa: TRY400
+            return None
 
 
 def poll_loop(

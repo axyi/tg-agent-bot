@@ -122,7 +122,111 @@ Independently reconfirmed the measurements during this pass: `len(MUTATIONS)
 == 144`; the v190 `find` string exactly once, at `bot.py:1355`; node-id
 baseline 2311 lines — all match T0's own direct measurements above.
 
-## T1 — not reached
+## T1 — the outbound table path
+
+Delegated (brief `docs/spec/task-briefs/v1110-T1.md`, EC-04), test-first
+(EC-02): `tests/test_v1110_out.py` written first and watched red
+(`AttributeError` on the not-yet-existing `bot.send_pre`/`edit_pre`,
+`tables` module and `FakeTelegram.send_message_html`) before any
+production code landed.
+
+**Built**: `tables.py` (new, repository root) — `utf16_length` (moved
+from `bot.py`, `bot.py` re-imports it so `bot.utf16_length` keeps its name
+and its one existing caller, `bot.py:909`), `render_table` (cells
+`str()`-ed with `None` -> `n/a`; alignment `"r"` when `align` says so or
+every non-`n/a` cell is `int`/`float`, else `"l"`; astral-safe truncation
+to `max_width` reserving one UTF-16 unit for `…`; header + ASCII `-` rule
+line + rows, joined by two spaces, no trailing newline; `ValueError` over
+the 72-unit ceiling; returns raw, unescaped text), `fit_lines` (whole
+lines dropped from the end plus a final `… N more` line, the `_fit`
+pattern over lines rather than characters, never a hard slice inside a
+line). `bot.py` gains `_pre_text` (redact -> fit -> escape -> wrap, in
+that order, returning both the HTML `text` and the fitted plain `fitted`
+body), `send_pre`/`edit_pre` (the only production callers of the two new
+`TelegramClient` methods `send_message_html`/`edit_message_html`, payload
+exactly `{chat_id, text, parse_mode: "HTML"}` / `{chat_id, message_id,
+text, parse_mode: "HTML"}` plus `reply_markup` when given), and the
+one-time plain-text fallback on a non-fatal table-path failure (a fatal
+401/404 skips the fallback entirely and returns `None` directly — see the
+mid-task correction below). `reply_parts`/`_send`/`TelegramClient.send_message`
+are byte-unchanged; `send_message`'s signature still takes only
+`{self, chat_id, text}`. `tests/fakes.py`'s `FakeTelegram` grows
+`sent_payloads`, `edited_payloads`, `callback_answers`, `commands_set` and
+`fail_html_with` (fake recorders only for `answer_callback_query`/
+`set_my_commands` — T4/T6 implement the production callers); `sent` still
+holds `(chat_id, text)` for both send methods, unchanged for the hundreds
+of existing tests that read it.
+
+**Mid-task correction (advisor review)**: the first implementation of
+`send_pre`/`edit_pre` caught every `TelegramError` from the HTML attempt
+uniformly and always tried the plain fallback once. An advisor review
+before declaring done flagged that REQ-V1110-OUT-04's parenthetical — "the
+existing 401/404 fatal classification stands unchanged" — is a real
+constraint, not a reassurance: a fatal error (a bad token or an
+unreachable chat) is not a payload problem a differently-shaped resend
+could fix, so the fallback must not fire for it. Fixed before the gate run
+recorded below: both helpers now check `exc.fatal` first and return `None`
+immediately (logged, same pattern as `_send`) without a second request.
+Two new negative cases were added, one in `T-V1110-OUT-05` and one in
+`T-V1110-OUT-08`: a 401 through the real `TelegramClient` + `MockTransport`
+produces exactly one request and a `None` result.
+
+**Tests**: `T-V1110-OUT-01`..`-08` in `tests/test_v1110_out.py`, all
+green — `-01` (`render_table` properties over 200 generated row sets
+against an independent reference implementation, plus explicit
+truncation/`ValueError`/raw-text edge cases), `-02` (payload shape and
+escape through the real client), `-03` (redact-before-fit/escape,
+negative, including the sentinel-secret-shifts-the-retained-line-boundary
+case), `-04` (`fit_lines` at the 4096-unit boundary, built with `&` so the
+raw entity-parsed length — not the escaped-HTML-string length — governs
+the fit), `-05`/`-08` (the one-time plain fallback on 400, the fatal-401
+skip, two-400s-returns-`None`, for send and edit respectively), `-06`
+(the agent-reply path unchanged, negative — including
+`test_t_v1100_out_04_send_payload_is_exactly_chat_id_and_text`,
+`test_t_v1100_out_04_send_message_source_has_no_parse_mode_or_entities`
+and `test_t_v1100_out_05_markdownv2_specials_delivered_verbatim` imported
+from `tests/test_v1100_sanitization.py` and called directly, matching
+`tests/test_v1103_gates.py`'s own precedent for that pattern), `-07`
+(`FakeTelegram` growth). `tests/test_v1100_sanitization.py:293-323`
+untouched.
+
+**Drift (EC-02)**: one disclosed, ≤5 lines. The brief cites
+`tests/test_v1100_sanitization.py:293-323` for the `T-V1100-OUT-04`
+section; the second function's last assert is actually at `:324` (a
+1-line overshoot) — used the actual location, no repair cycle. Every
+other cited range in the brief's reading map matched the live tree
+exactly, including `_fit` at `bot.py:1190-1197`.
+
+**Map vs actual**: read beyond the brief's stated map to understand the
+surrounding contract before writing the fallback and the `/status`/
+`/summary` assertions: `bot.py:111-140` (`TelegramError`'s fields, no
+`status` attribute — settled how a 400 vs. a fatal 401/404 is
+distinguished), `bot.py:813-940` (`process_update`'s command dispatch, for
+`T-V1110-OUT-06`'s `/status`/`/summary` calls), `bot.py:1051-1076`
+(`_handle_summary`, to confirm an empty conversation short-circuits
+without an LLM call), `bot.py:1100-1200` (`_render_stats`/`_fit`, the
+pattern `fit_lines` follows), `config.py:190-260` (`register_secret`/
+`redact`/`RedactingFormatter`, `REDACTION`/`MIN_SECRET_LENGTH`),
+`devtools/checks.py` and `config/quality_gates.yaml` (confirmed
+`lint-docs`'s `report_path`/`delegation_record` gate still points at
+`report-v1.10.4.md` this release, not this file, until T6), spec sec.7/
+sec.11/sec.14/Appendix A (CBQ-03's three-method list, the T1 reading-map
+row, the traceability table), `tests/test_v1100_sanitization.py:1-260`
+and `tests/conftest.py` (existing `make_cfg`/`update`/`process` helper
+conventions and fixtures).
+
+- T1 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T1.md | map vs actual: matches the reading map, plus one disclosed 1-line EC-02 drift (`tests/test_v1100_sanitization.py:293-323`'s cited range, actual last assert `:324`) and the additional reads listed above (`bot.py:111-140`, `:813-940`, `:1051-1076`, `:1100-1200`; `config.py:190-260`; `devtools/checks.py`; `config/quality_gates.yaml`; spec sec.7/11/14/Appendix A; `tests/test_v1100_sanitization.py:1-260`; `tests/conftest.py`)
+
+**Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
+brief): `uv sync --locked` — 25 resolved, 23 checked, exit 0. `uv run
+--locked ruff check .` — all checks passed, exit 0. `uv run --locked
+pytest` — 2322 collected (2311 baseline + 8 new `test_v1110_out.py`
+functions + 3 pytest-recollected imported `test_*` functions, the same
+double-collection pattern `tests/test_v1103_gates.py` already uses), 0
+failed, exit 0. `uv run --locked python bot.py --selftest` — `selftest:
+OK`, exit 0 (a pre-existing, unrelated warning — `'_SelftestTelegram'
+object has no attribute 'call'` — was confirmed present before this
+task's changes too, via `git stash`).
 
 ## T2 — not reached
 

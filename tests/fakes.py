@@ -150,6 +150,17 @@ class FakeTelegram:
     seeded by the test (`file_path -> bytes`); `download_errors` scripts a
     raise for a given `file_path` (checked before `files`, so a timeout or
     transport failure can be simulated without seeding any bytes at all).
+
+    Extended per REQ-V1110-OUT-05: `sent_payloads`/`edited_payloads` record
+    every `send_message`/`send_message_html` and `edit_message_text`/
+    `edit_message_html` call as the payload dict the real `TelegramClient`
+    would post (`parse_mode`/`reply_markup` included only when given);
+    `callback_answers`/`commands_set` record `answer_callback_query`/
+    `set_my_commands` calls (T4/T6 implement the production callers -- these
+    are fake recorders only); `fail_html_with` scripts a one-time raise on
+    the next `send_message_html` or `edit_message_html` call, for OUT-04's
+    fallback tests through the fake. `send_message_html` also appends to
+    `sent` so existing assertions over `sent` keep counting messages.
     """
 
     def __init__(self, fail_on=None, error=None):
@@ -163,17 +174,62 @@ class FakeTelegram:
         self.downloads = []
         self.files: dict[str, bytes] = {}
         self.download_errors: dict[str, Exception] = {}
+        self.sent_payloads: list[dict] = []
+        self.edited_payloads: list[dict] = []
+        self.callback_answers: list[dict] = []
+        self.commands_set: list[list[dict]] = []
+        self.fail_html_with: Exception | None = None
 
     def send_message(self, chat_id, text):
         self.send_calls += 1
         if self._fail_on is not None and self.send_calls == self._fail_on:
             raise self._error
         self.sent.append((chat_id, text))
+        self.sent_payloads.append({"chat_id": chat_id, "text": text})
         return {"message_id": 100 + self.send_calls}
+
+    def send_message_html(self, chat_id, text, *, reply_markup=None):
+        if self.fail_html_with is not None:
+            exc, self.fail_html_with = self.fail_html_with, None
+            raise exc
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        self.sent_payloads.append(payload)
+        self.sent.append((chat_id, text))
+        return {"message_id": 100 + len(self.sent)}
 
     def edit_message_text(self, chat_id, message_id, text):
         self.edited.append((chat_id, message_id, text))
+        self.edited_payloads.append({"chat_id": chat_id, "message_id": message_id, "text": text})
         return {"message_id": message_id}
+
+    def edit_message_html(self, chat_id, message_id, text, *, reply_markup=None):
+        if self.fail_html_with is not None:
+            exc, self.fail_html_with = self.fail_html_with, None
+            raise exc
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        self.edited_payloads.append(payload)
+        self.edited.append((chat_id, message_id, text))
+        return {"message_id": message_id}
+
+    def answer_callback_query(self, callback_query_id, *, text=None):
+        payload = {"callback_query_id": callback_query_id}
+        if text is not None:
+            payload["text"] = text
+        self.callback_answers.append(payload)
+        return True
+
+    def set_my_commands(self, commands):
+        self.commands_set.append(list(commands))
+        return True
 
     def delete_message(self, chat_id, message_id):
         self.deleted.append((chat_id, message_id))
