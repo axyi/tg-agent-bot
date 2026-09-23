@@ -1805,6 +1805,70 @@ chased further). gate 4 (`bot.py --selftest`) — `selftest: OK`.
 **Secrets:** the two secret values at `config.py:351`,`:379` were never
 read, printed or quoted by this task.
 
+### T8 — README follow-up, fresh gates, identity check, evidence commit (orchestrator, commands-only)
+
+**README follow-up** (`44c34b0`, docs-only): three factual corrections
+found by T8's own post-commit advisor review, independently re-verified
+by the orchestrator against the actual source before fixing —
+`/documents` is ordered oldest first (`storage.list_documents`'s `ORDER
+BY created_at, id` is ascending), not newest; the false claim that its
+filename truncation matches `/sessions`' title truncation removed
+(23 vs 40 UTF-16 units, different limits); the `v1.11.0` release row's
+"signed `callback_data` grammar" reworded to "a `callback_data` grammar
+carrying a catalogue hash (stale-menu detection)" — `_catalogue_hash` is
+an unkeyed SHA-256 fingerprint, not a cryptographic signature.
+
+**Fresh gates 1-6 + gate 5**, on `44c34b0`:
+- Gate 1: 25 resolved, 23 checked. Gate 2: clean. Gate 3: 2381 passed, 1
+  skipped, 2 xfailed. Gate 4: `selftest: OK`.
+- Gate 5: `OK config`/`db`/`docker (29.8.1)`/`telegram`/`embeddings`/
+  `openrouter`; `SKIP lmstudio (no route uses it)` — disclosed,
+  non-blocking.
+- Gate 6, fresh, alone: **152/152 killed, 0 survived/errored/drifted**,
+  real **16m5.249s (965.2s)** — consistent with T7's own 961.6s
+  measurement, both comfortably under the 1300s recalibration threshold.
+- `doctor`: all tools at pin, hooks installed. `lint-docs`: green.
+
+**Gate 7/8 identity check** (REQ-V1110-REV-02): `tested_tree =
+2c3c5aab5370d6ce951009766b879a8e7ef4b116` (T7's fix commit, where gate 8
+last ran). `git diff 2c3c5aa HEAD -- $(uv run --locked python
+devtools/agent_eval.py --print-dependencies)` touches exactly two paths,
+`pyproject.toml` and `uv.lock`, both version-literal-only (`1.10.4` →
+`1.11.0`). `devtools.agent_eval.dependency_diff_is_version_only(diff_text)
+== True` — **verdict: reused**. Gates 7 and 8 are **not** rerun; T7's
+results (gate 7 `hybrid recall@5=1.000`; gate 8 injection 5/5,
+hallucination 4/4, memory 3/3, judge mean 0.913, all floors met) stand,
+recorded against `tested_tree`.
+
+**Node-id floor check** (EC-03(b)): `uv run --locked pytest
+--collect-only -q -o addopts="" | grep '::' | LC_ALL=C sort` against
+`docs/spec/task-briefs/v1110-T0-nodeids.txt` via `LC_ALL=C comm -23
+<baseline> <after>` — exactly **two** node ids missing, both named in
+T0's pin inventory's rename mapping (`tests/test_v170_bench.py::
+test_t_v1103_rpt_01_…` → `…_v1110_rpt_01_…`; `tests/test_v1104_gates.py::
+test_t_v1104_rpt_01_…` → `…_v1110_rpt_01_…`), both confirmed present
+under their new names in the current collection. **No baseline test lost
+outside the declared mapping.** Final collected count **2384** ≥ floor
+(2311) + 62 = 2373.
+
+**`checks.py replay --range 295b01f..HEAD`**: 24 commits (the full run,
+spec authoring through T8's README follow-up) — **24/24 `[PASS] …:
+clean`**, no working-tree change (`git status --porcelain` empty before
+and after).
+
+**Appendix B, replayed**: all 14 Gherkin scenarios (E1-E14) map to
+already-landed `T-V1110-*` tests — E1→OUT-05, E2/E3→SES-04 (+SES-02),
+E4→DOC-03, E5→CBQ-02, E6→CBQ-05, E7→MOD-02, E8→MOD-04, E9→ING-01,
+E10→ING-02/-08/-11, E11→ING-05/-09 (shared with STA-02's fit-wrap),
+E12→EXT-01, E13→ING-03/-10, E14→ING-06/-07. Run explicitly: `uv run
+--locked pytest tests/test_v1110_*.py` — **73 passed** (every v1.11.0
+spec test in one file glob, all 14 scenarios' implementing tests included).
+
+**Secrets**: `.env` never read beyond `test -f`/the one T0 `sed -i`;
+`config.py:351`,`:379`'s two secret values never printed or quoted by
+any orchestrator command this phase. `--no-verify` never used, any
+release.
+
 ## Operator inputs
 
 - **Run configuration (EC-05), source `.env`** (operator-prepared ahead of
@@ -1819,21 +1883,21 @@ read, printed or quoted by this task.
 
 | task | attempt | exit | outcome |
 | --- | --- | --- | --- |
-| not reached | | | |
+| T7 | 1 | 0 | PASS, clean on the first attempt — injection 5/5, hallucination 4/4, memory 3/3, judge mean 0.913, all floors met; no re-invoke needed |
+| T8 | reused | n/a | not rerun — `dependency_diff_is_version_only` verdict `True` against `tested_tree=2c3c5aa`; T7's result stands |
 
 ## `docs/reports/tg-post-v1.11.0.md`
 
-Not written yet — written at T8 (or at the stop route, if triggered).
+Written at T8, final (not provisional — every gate had completed by the
+time this was written): Russian, 1453 characters by `wc -m`, naming
+`claude-sonnet-5`, linking `https://github.com/axyi/tg-agent-bot`.
 
 ## Ledger row (paste into `economics.md`)
 
-Provisional, not the run's final row — every cell below is a placeholder,
-filled for real at T8 once every gate has run to completion on the final
-tree. Present only so `lint-docs`'s ledger-row check (a fenced block with
-the header's cell count) can run clean against this still-in-progress
-report from T6 on, per this task's brief ("`lint-docs` green against the
-(still in-progress) report skeleton").
+**Final** — gates 1-8 green on `44c34b0`, gate 8 reused from T7's single
+green execution via the identity check, `replay` clean over all 24
+commits, count 2384 ≥ floor + 62:
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.11.0 (provisional) | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.11.0 | 2026-09-23 | ~1.45M subagent aggregate (spec-v1.11.0 authoring, prompt 235, per docs/llm-usage.md row 146) | 17 (236-252) | yes -- all eight gates green on this run, gate 8 exactly once (T7, reused at T8 via the identity check), zero repair cycles spent on gate failures; one must-fix review finding found and fixed (a cancel-before-commit race in IngestWorker), not a stop | T7 clean-context review: 1 must-fix (the cancel race, fixed and empirically bite-checked both ways -- confirmed to fail without the fix, confirmed to pass with it), 2 should-fix waived with reason (unlocked `cancel_reason` reads -- safe via `threading.Event`'s own internal synchronization; the plain-text fallback's broader-than-400 scope -- already disclosed by T1 as a deliberate reading), 2 informational notes | harness does not expose per-request tokens for this session; subagent aggregates per docs/llm-usage.md rows 147-163 (T0 pin-inventory 132,226 + T1 301,171 + T2 480,577 + T3 313,416 + T4 524,206 + T5 771,524 + T6 514,046 + T7 entries 138,450 + T7 review 177,394 + T7 review-fix 223,427 + T8 310,930 = 3,887,367 aggregate as reported by the harness) | live gate spend: gate 5 probes at T0/T7/T8, gate 7's rerank + advisory smoke at T7, gate 8's 12 red-team/memory cases + 5 judge calls at T7 (reused at T8, no repeat spend) -- well under $1 aggregate at public list price for `openai/gpt-4.1` / `anthropic/claude-sonnet-5` / `openai/text-embedding-3-small`; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
 ```
