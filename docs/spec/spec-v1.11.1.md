@@ -4,7 +4,8 @@ Status: draft — cross-review pending (Appendix C); the header reads
 `` ready for `go` `` only once the rounds are applied.
 Base: `main` at `2431034` (`24310349ee95d703bb3b256443a4b5e1dd22b415`) =
 tag `v1.11.0`, both on `origin`, tree clean (prompt 255 is committed
-with this file). No handoff exists: the lab's defect inventory of
+with this file; round 1 of the cross-review applied on top,
+Appendix C). No handoff exists: the lab's defect inventory of
 2026-09-23 (A1…A4, B1…B4, C1…C16, E1…E9, F1…F5, G1…G6, each mapped in
 Appendix A's tails table) is the scope. Earlier mechanisms are
 referenced by `REQ-V1110-*` id and `file:line` of `2431034`, never
@@ -19,8 +20,10 @@ Ids: `REQ-V1111-<GROUP>-NN`, `(MUST)` or `(NON-GOAL)`; tests
 `T-V1111-<GROUP>-NN` named `tests/test_v1111_<group>.py::test_t_v1111_<group>_<nn>_<slug>`;
 **no `v1111-*` mutation id** (NG-02); tasks T0…T6; task-brief files
 `docs/spec/task-briefs/v1111-T<n>.md`. Authoring prompt **255**; run
-prompts from **256** (T0 256, T1 257, T2 258, T3 259, T4 260 and 261, T5
-262, T6 263, one more per repair cycle); `docs/llm-usage.md` from row
+prompts from **256** (T0 256, T1 257, T2 258, T3 259, T4 260 — the
+report/post corrections, `docs/reports/*` only — and 261 — README,
+`docs/plan.md`, `AGENTS.md` and `tests/test_v1111_doc.py`, delegated;
+T5 262, T6 263, one more per repair cycle); `docs/llm-usage.md` from row
 **167** (166 is authoring; 165 is the last at `2431034`, `:315`).
 Executor `claude-sonnet-5`; reviewer the pinned `code-reviewer`
 (`.claude/agents/code-reviewer.md:4`, `model: sonnet`), clean context.
@@ -39,7 +42,10 @@ reaches a socket (`tests/conftest.py:10-28`); **the filesystem
 boundary** — `.env`, `data/`, `bot.db`, `sandbox/`, `exec_audit.jsonl`,
 `docs/assets/bench/*.json` never opened, the one programmatic
 `bot_state` count of `REQ-V1110-EC-05` (`spec-v1.11.0.md:188-197`) the
-only exception; rerank stays on OpenRouter; **the repair budget is ≤ 3
+only read exception. **The sole `.env` exception is EC-04's one
+non-printing `sed -i` replacement of `LMSTUDIO_BASE_URL`; no command
+may print, copy, diff, grep, or otherwise inspect `.env`.** Rerank
+stays on OpenRouter; **the repair budget is ≤ 3
 cycles per task** (one red gate of construction → one `fix:` commit
 under its own prompt); exhausted → the stop route (REV-03); gates 7 and
 8 are never rerun (GATE-01). **No push**: the operator pushes later.
@@ -53,15 +59,21 @@ group's tests (§6), watch them fail for the right reason, then implement
 in §10's order. **Carve-out by id** (`REQ-V1110-VER-01`'s form,
 `spec-v1.11.0.md:1512-1518`): `T-V1111-VER-02`, `T-V1111-PIN-01` and
 `T-V1111-PIN-02` are structural and may be green on first execution;
-the report records their initial result. Every `MUST` in §§1–10 has a
+`T-V1111-DOC-03` is green on first execution **by T4's ordering** (its
+artefacts-only report commit lands before the test's commit, EC-04);
+the report records the initial result of all four. Every `MUST` in §§1–10 has a
 named test, a Gherkin scenario or a recorded artefact; Appendix A is
 the map. Every `file:line` cites `2431034`; a drift of ≤ 5 lines is a
 disclosed amendment (`cited → actual`), a larger drift or an absent
 mechanism is a spec ambiguity → the stop route (`REQ-V1110-EC-02`,
 `:97-111`). **The floor**: `2431034` collects
 **2384** tests by `uv run --locked pytest --collect-only -q -o addopts="" |
-grep -c '::'` (`AGENTS.md:161`); T0 re-measures and the measured number
-is the floor; T6 asserts count ≥ floor + **27** (§6.1's 27 functions;
+grep -c '::'` (`AGENTS.md:161`); T0 re-measures **on the unchanged
+tree, before `tests/test_v1111_pin.py` exists** (PIN-01: the delegated
+T0 subagent writes that module only after the floor and the node-id
+list are measured), and the measured number is the floor; T6 asserts
+count ≥ floor + **27** (§6.1's 27 functions, `T-V1111-PIN-01` and
+`-PIN-02` among them — excluded from the floor by construction;
 `T-V1111-TST-08` is a command). `[[VERIFY: the collected-test floor — 2384 at
 authoring (`AGENTS.md:161`, `tests/test_v1110_ver.py:57`); decision
 rule: T0's re-measured number is the floor whatever it reads; T6 asserts
@@ -86,8 +98,13 @@ A `no` cell in §10.1 carries one of the four §5.1 exemptions
 every threshold*; *the task is itself the clean-context review*);
 crossing the map live forces delegation from that point. T0's pin
 inventory is delegated: the orchestrator writes `v1111-T0.md`, the
-subagent the **distinct** `v1111-T0-pin-inventory.md`
-(`REQ-V1110-EC-04`, `:157-165`). **The report's delegation record**
+subagent the **distinct** `v1111-T0-pin-inventory.md` **and
+`tests/test_v1111_pin.py`** (PIN-01; `REQ-V1110-EC-04`, `:157-165`).
+**T4 is two commits by artefact class**: the first (prompt 260) is
+*artefacts only* — DOC-03's five edits, `docs/reports/*` exclusively,
+no test; the second (prompt 261) is `delegate: yes`, brief
+`v1111-T4.md` — README, `docs/plan.md`, `AGENTS.md` **and**
+`tests/test_v1111_doc.py` (all three DOC tests). **The report's delegation record**
 (lint-enforced: `_lint_report_delegation`, `devtools/checks.py:1672-1716`)
 names, **for every commit**, the brief path or one exemption verbatim;
 **a commit that bundles an orchestrator edit into a delegated commit
@@ -105,16 +122,23 @@ docs/spec/spec-v1.11.1.md` exits 0) and its `Status:` reads `` ready
 for `go` ``. **Gate 5 needs a reachable LM Studio**: `REQ-V1110-EC-05`'s
 address rule (`spec-v1.11.0.md:180-187`) by reference — the `go` text
 may carry the address, T0 writes it into `.env`'s `LMSTUDIO_BASE_URL`
-line with one `sed -i` only then, the file never printed; unreachable
+line with one `sed -i` only then — **the sole `.env` exception: one
+non-printing `sed -i` replacement of `LMSTUDIO_BASE_URL`; no command
+may print, copy, diff, grep, or otherwise inspect `.env`** (EC-01,
+NG-12, SEC-01); unreachable
 at gate 5 is a **blocked run** (no task proceeds, no stop route; the
 operator re-issues `go`). **The override precondition**: the `bot_state`
 count (`:188-197`) prints `0` at T0 and just before gate 8 at T5;
 non-zero is a blocked run. **Prompts**: one prompt → one commit, never
 mixed, with **two exceptions by id**: T5's prompt 262 carries at most
-two commits (the review's fix commit on a must-fix, then the report-only
-gate commit — REV-02) and T6's prompt 263 carries two (the bump, then
-the evidence-only commit — VER-01); T4 carries **two prompts and two
-commits** (260 the paperwork, 261 the v1.11.0 corrections — DOC-03).
+three commits (the review's fix commit on a must-fix, ERR-01 row 7's
+timeout hunk if `W > 1300 s`, then the report-only gate commit —
+REV-02) and T6's prompt 263 carries two (the bump, then the
+evidence-only commit — VER-01); T4 carries **two prompts and two
+commits**, ordered by artefact class: **260 first** — DOC-03's five
+report/post corrections, `docs/reports/*` only, *artefacts only*; **261
+second** — DOC-01, DOC-02 and `tests/test_v1111_doc.py`, delegated
+(EC-03).
 Commit header ≤ 72 characters, conventional type, body names the prompt
 file (`AGENTS.md:115-127`); `--no-verify` never; the report attests it.
 **Secrets**: only two values are ever registered (`config.py:370`,
@@ -140,7 +164,7 @@ or any other gate (`REQ-V1110-EC-07`, `:215-223`).
 | `REQ-V1111-NG-09` | Changing `mutation-all.timeout_seconds` (1640, `config/quality_gates.yaml:752`) except by `REQ-V1110-MUT-01`'s rule when T5's `W` exceeds 1300 s (GATE-01). |
 | `REQ-V1111-NG-10` | A fourth cross-review round on `spec-v1.11.0.md` (closed at `round_limit`, `:1795`); every accepted R3 change is in the code. |
 | `REQ-V1111-NG-11` | A benchmark run, a fresh baseline, or any edit to `AGENTS.md:266-272`'s rule; the waiver paragraph (`:274-282`) gains exactly one sentence at T6: "v1.11.1 changes nothing token-bearing either; the rule does not fire." |
-| `REQ-V1111-NG-12` | Any new dependency; any direct read of `.env`, `data/`, `bot.db`, `sandbox/` or `exec_audit.jsonl` (EC-01's exception aside); rerank off OpenRouter; touching `docs/assets/bench/*.json`. |
+| `REQ-V1111-NG-12` | Any new dependency; any direct read of `.env`, `data/`, `bot.db`, `sandbox/` or `exec_audit.jsonl` (EC-01's `bot_state` count aside). The sole `.env` exception is EC-04's one non-printing `sed -i` replacement of `LMSTUDIO_BASE_URL`; no command may print, copy, diff, grep, or otherwise inspect `.env`. Rerank off OpenRouter; touching `docs/assets/bench/*.json`. |
 | `REQ-V1111-NG-13` | Any `git push`; any change to a gate's `argv`, `result_mode`, `blocking`, `severity` or profile membership; invoking `checks.py run --profile full` at any point (the eight gates run as `AGENTS.md:150-158`'s commands; `REQ-V1110-REV-02`'s "never invoked as a whole" carries — C1). |
 | `REQ-V1111-NG-14` | Editing mutation entry `v1110-table-path-escape-dropped`'s `why` (B4): the named killer `T-V1110-OUT-02` is correct; collection order is not a defect. |
 | `REQ-V1111-NG-15` | Editing any earlier report, handoff, prompt or `docs/llm-usage.md` row **except** DOC-03's five named edits (the v1.10.4 prompt-234 precedent). |
@@ -291,7 +315,13 @@ budget/cancel checkpoint, and `EmbeddingsClient.embed` uses it for its
 per-request chunking, so the progress counter and the HTTP batch can
 never diverge."; the pin `tests/test_v1110_ver.py:135` is rewritten in
 place to assert `documents.EMBED_BATCH_SIZE` **absent**; `:136` stays.
-`T-V1111-TAB-06`; `E5`.
+**The HTTP-call invariant is tested, not inferred**: `T-V1111-TAB-06`
+also drives a real `EmbeddingsClient` over `httpx.MockTransport`
+(`tests/test_v1110_out.py:94-95`'s shape) with 65 inputs through the
+ingest path and asserts exactly three embedding requests whose body
+`input` sizes are `[32, 32, 1]`, alongside the progress edits
+`1/3 … 3/3` — a request chunking that drifts from the progress counter
+fails it. `T-V1111-TAB-06`; `E5`.
 
 ### 3.3 TST — the six rows and the flake
 
@@ -338,7 +368,28 @@ config.py tests/conftest.py tests/test_v11_patch.py`) finds the registry
 under another name or as a rebound object, the fixture snapshots and
 restores **that** object in place and `v1111-T3.md` records `cited →
 actual`; a registry that is not a mutable container is a spec ambiguity
-→ the stop route]]`. Verification **by command, recorded in the report**
+→ the stop route]]`. **The autouse fixture itself is what
+`T-V1111-TST-07` proves**, not only the context manager: the test
+writes a two-test module to `tmp_path` (test A registers a sentinel
+secret and does not clean up; test B asserts the sentinel is absent
+from `config._secrets` and that the registry is the same object as
+before) plus a `conftest.py` in `tmp_path` that loads the project's
+fixture by import (`from tests.conftest import restore_secrets_registry`
+— `[[VERIFY: `tests` is importable as a package at 2431034
+(`tests/__init__.py` present or `rootdir` on `sys.path` under the
+project's pytest config); confirmation = the nested run collects both
+tests and passes; fallback = the nested `conftest.py` uses
+`pytest_plugins = ("tests.conftest",)` and, if neither form imports,
+TST-07 falls back to the two permanent ordered tests in
+`tests/test_v1111_tst.py` under
+`@pytest.mark.xdist_group("secrets_registry")` run with `--dist
+loadgroup`, recorded as a disclosed amendment]]`), runs
+`subprocess.run([sys.executable, "-m", "pytest", "-p",
+"no:cacheprovider", "-p", "no:xdist", "-q", str(tmp_path)])` and asserts
+exit code 0. The nested module never calls `secrets_registry_snapshot()`
+itself — a fixture that is absent, misspelled or not `autouse=True`
+fails the nested run. The direct context-manager assertions stay as
+additional checks. Verification **by command, recorded in the report**
 (`T-V1111-TST-08`): (1) `uv run --locked pytest
 "tests/test_v1103_red_team.py::test_t_v1103_rt_06_leak_shape_fixture_still_fails_on_clause_c_only"
 -o addopts=""` alone → passed; (2) `uv run --locked pytest -p xdist -n 4
@@ -367,7 +418,8 @@ on send` row (`:967`) stays. (c) `## Versioning` (`:1008-1011`): "so a
 lands." becomes "so a release's tag — `v1.6.0` included — was created
 only after that release's own final commit had landed." TAB-01's sample,
 TAB-03's sentence, TAB-04's row and TAB-05's paragraph land in **T2**
-with their code; (a)–(c) in **T4** (prompt 260). `T-V1111-DOC-01`.
+with their code; (a)–(c) in **T4's second commit** (prompt 261, brief
+`v1111-T4.md`). `T-V1111-DOC-01`.
 
 **REQ-V1111-DOC-02 (MUST) — `docs/plan.md`'s banner; `AGENTS.md`'s
 ruling.** (C9/E7, A3/G1.) `docs/plan.md` gets exactly these seven lines
@@ -397,12 +449,15 @@ box (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) in reports,
 prompts, task briefs and handoffs are operator input, not secrets: the
 lab's `/verify-run` secrets scan treats them as out of scope, and no
 historical artefact is redacted for them (ruled at spec-v1.11.1). New
-paperwork writes `<addr>` anyway." Both in T4 (prompt 260).
-`T-V1111-DOC-02`.
+paperwork writes `<addr>` anyway." Both in T4's second commit (prompt
+261, brief `v1111-T4.md`). `T-V1111-DOC-02`.
 
 **REQ-V1111-DOC-03 (MUST) — the v1.11.0 report and post corrected, in
-their own prompt.** (A1, A2, A4, G6, B1; contradictions 1–3.) T4's second
-prompt (261) and commit, *artefacts only*, edits exactly five sites: (1)
+their own prompt.** (A1, A2, A4, G6, B1; contradictions 1–3.) T4's
+**first** prompt (260) and commit, *artefacts only* — `docs/reports/*`
+exclusively, no test file — edits exactly five sites; `T-V1111-DOC-03`
+lands with the other DOC tests in T4's second commit (261) and is green
+by then (EC-02): (1)
 `docs/reports/report-v1.11.0.md:1945` `| 17 (236-252) |` → `| 19
 (236-254) |`; (2) `docs/reports/tg-post-v1.11.0.md:23` `промпты 236–252`
 → `промпты 236–254`; (3) one paragraph appended to `## T2` after its
@@ -453,7 +508,11 @@ T6's `comm -23 v1111-T0-nodeids.txt <after>` prints nothing
 (`REQ-V1110-EC-03` (b), `spec-v1.11.0.md:127-134`); a line is a T6
 repair cycle. Rewrite form: presence, contiguity, order; counts read
 from the live tree; never a "nothing follows" assertion
-(`REQ-V1104-NG-10`). `T-V1111-PIN-01`, `T-V1111-PIN-02`.
+(`REQ-V1104-NG-10`). **The module is T0's**: after measuring the
+unchanged-tree floor and node IDs, the delegated T0 subagent writes
+`tests/test_v1111_pin.py`; run PIN-01/-02 after the inventory artefacts
+exist. These two tests are excluded from the T0 floor by construction
+(EC-02). `T-V1111-PIN-01`, `T-V1111-PIN-02`.
 
 ---
 
@@ -473,10 +532,10 @@ by row 2 below. Rows 1–4 are user-visible; rows 5–12 the executor's.
 | 4 | `send_pre`/`edit_pre` (OUT-01) | any other `TelegramError` (fatal; 429 after `SEND_ATTEMPT_LIMIT`; 5xx; `status is None`) | logged, `None` returned, no resend | nothing (the plain path's own outcome) |
 | 5 | after T0 (EC-02) | a test red on a pin the inventory missed | rewritten in place, intent kept, disclosed in the commit body and bullet | **no cycle, no stop** |
 | 6 | T0, gate 5 (EC-04) | LM Studio unreachable, or the `bot_state` count ≠ 0 | the redacted probe line / the count recorded; no task proceeds | **blocked run** |
-| 7 | T5, gate 6 (GATE-01) | `W > 1300 s` | `REQ-V1110-MUT-01`'s timeout hunk, gate 6 once more on that tree | recorded; `W > 2400 s` reported, not a stop |
+| 7 | T5, gate 6 (GATE-01) | `W > 1300 s` | `REQ-V1110-MUT-01`'s timeout hunk committed, gate 6 once more on that tree — all **before** `tested_tree` is set | recorded; `W > 2400 s` reported, not a stop |
 | 8 | T5, review (REV-01) | a must-fix finding | fixed under brief `v1111-T5.md` as T5's first commit; the review prompt logged | closed or waived with a reason |
 | 9 | T5, gate 8 | exit 1 (a floor or the judge mean) | the stop route; the capture quoted in full; never a rerun | stop, no bump, no tag |
-| 10 | T6, identity check (GATE-01) | `dependency_diff_is_version_only` `False` | gate 8 **not** invoked; the hunk reverted or corrected; gates 1–6 and the check rerun | a repair cycle; not restorable → the stop route |
+| 10 | T6, identity check (GATE-01) | `dependency_diff_is_version_only` `False` — preliminary (bump commit) or definitive (post-evidence, pre-tag) | gate 8 **not** invoked; preliminary: the hunk reverted or corrected, gates 1–6 and the check rerun; definitive: the tag withheld | preliminary: a repair cycle, not restorable → the stop route; definitive: the stop route |
 | 11 | T6, the collection check (EC-02) | count < floor + 27, a `comm -23` line, or a `v1110` inventory pair missing | the owning task's defect, one repair cycle | then the stop route |
 | 12 | any task (NG-13, C1) | `--profile full` invoked, or a live gate started while gate 6/7/8 runs | disclosed as a process deviation; a gate that completed before the overlap keeps its result, another is rerun — **never gate 7 or 8** (a compromised record of theirs is the stop route) | recorded |
 
@@ -494,9 +553,12 @@ credential-shaped live value appears in this spec, the tests, fixtures,
 briefs, reports, command output or commits; key **names** and the fake
 `VALUE-abcdefgh12` are allowed; LAN addresses are `<addr>` in every
 artefact this run writes (NG-06 for the historical ones); `gitleaks-tree`
-green on every commit by GATE-01's standalone command; the executor
-never opens `.env`, `data/`, `bot.db`, `sandbox/`, `exec_audit.jsonl`
-(EC-01). Nothing new is executed, written, reached or leaked
+green on every commit by GATE-01's standalone command, judged by its
+process exit status; the executor never opens `.env`, `data/`,
+`bot.db`, `sandbox/`, `exec_audit.jsonl` (EC-01) — the sole `.env`
+exception is EC-04's one non-printing `sed -i` replacement of
+`LMSTUDIO_BASE_URL`; no command may print, copy, diff, grep, or
+otherwise inspect `.env`. Nothing new is executed, written, reached or leaked
 (`REQ-V1110-SEC-01`, `spec-v1.11.0.md:1159-1200`, carries): the `<pre>`
 order redact → fit → escape is untouched (OUT-01 changes only the
 exception predicate); the two new strings pass `redact()` through
@@ -516,7 +578,8 @@ offline against `FakeTelegram`, `FakeEmbedder`, `httpx.MockTransport`
 (`tests/test_v1110_out.py:94-95`'s `tg_client`) and `tmp_path`
 databases; **27** new collected functions (T6: count ≥ floor + 27) plus
 one verification by command; every id below appears in Appendix A;
-`-VER-02`, `-PIN-01`, `-PIN-02` are EC-02's carve-out.
+`-VER-02`, `-PIN-01`, `-PIN-02` are EC-02's carve-out and `-DOC-03` is
+green first by T4's ordering (EC-02).
 
 ### 6.1 The test table
 
@@ -532,14 +595,14 @@ one verification by command; every id below appears in Appendix A;
 | `T-V1111-TAB-03` | `tests/test_v1111_tab.py::test_t_v1111_tab_03_model_status_label_whole` | bare `/model`, both providers configured: the body has `openrouter model` and `lmstudio model` whole, no `…` in the `field` column; a 45-unit `openrouter_model` truncates to 40 with `…`; every line ≤ 72 units | — |
 | `T-V1111-TAB-04` | `tests/test_v1111_tab.py::test_t_v1111_tab_04_sessions_empty_plain` | no `conversations` row: `tg.sent == [(USER_ID, bot.SESSIONS_EMPTY_REPLY)]`, no `parse_mode`; the constant equals TAB-03's string; after one message `/sessions` is a `<pre>` table with one data row; README's error section carries the string | — |
 | `T-V1111-TAB-05` | `tests/test_v1111_tab.py::test_t_v1111_tab_05_doc_limit_reply_names_both_forms` | `bot.DOC_LIMIT_REPLY` equals TAB-04's string; a caller at 20 documents uploading a 21st receives it (`bot.py:2292`'s site); README's row carries it | — |
-| `T-V1111-TAB-06` | `tests/test_v1111_tab.py::test_t_v1111_tab_06_single_batch_constant` | `not hasattr(documents, "EMBED_BATCH_SIZE")`; `documents.BATCH_SIZE is llm.embeddings.BATCH_SIZE == 32`; a size-recording `FakeEmbedder` over 65 chunks through `IngestWorker.run_one` saw `[32, 32, 1]` and the edits `📄 embedding: 1/3` … `3/3`; README names `llm.embeddings.BATCH_SIZE`, not `documents.EMBED_BATCH_SIZE` | — |
+| `T-V1111-TAB-06` | `tests/test_v1111_tab.py::test_t_v1111_tab_06_single_batch_constant` | `not hasattr(documents, "EMBED_BATCH_SIZE")`; `documents.BATCH_SIZE is llm.embeddings.BATCH_SIZE == 32`; a size-recording `FakeEmbedder` over 65 chunks through `IngestWorker.run_one` saw `[32, 32, 1]` and the edits `📄 embedding: 1/3` … `3/3`; **and** a real `EmbeddingsClient` over `httpx.MockTransport` fed 65 inputs through the ingest path made exactly three embedding requests with body `input` sizes `[32, 32, 1]`, the same `1/3 … 3/3` edits alongside; README names `llm.embeddings.BATCH_SIZE`, not `documents.EMBED_BATCH_SIZE` | — |
 | `T-V1111-TST-01` | `tests/test_v1111_tst.py::test_t_v1111_tst_01_err_row_11_session_usage` | TST-01 row 11, byte-equal, present in README | — |
 | `T-V1111-TST-02` | `tests/test_v1111_tst.py::test_t_v1111_tst_02_err_row_12_session_unknown` | row 12 (`999999`); the active row unchanged | — |
 | `T-V1111-TST-03` | `tests/test_v1111_tst.py::test_t_v1111_tst_03_err_row_13_delete_not_found` | row 13 (`#999`); `document_count` unchanged | — |
 | `T-V1111-TST-04` | `tests/test_v1111_tst.py::test_t_v1111_tst_04_err_row_14_delete_usage` | row 14; README's `\|`-escaped form | — |
 | `T-V1111-TST-05` | `tests/test_v1111_tst.py::test_t_v1111_tst_05_err_row_15_stale_callback` | row 15: `callback_answers[-1]["text"]`; nothing sent or edited; the cursor advanced | — |
 | `T-V1111-TST-06` | `tests/test_v1111_tst.py::test_t_v1111_tst_06_err_row_16_model_unknown_and_usage` | row 16's two strings; no `bot_state` override row written | — |
-| `T-V1111-TST-07` | `tests/test_v1111_tst.py::test_t_v1111_tst_07_secrets_registry_restored` | inside `conftest.secrets_registry_snapshot()` `register_secret("VALUE-abcdefgh12")` makes `redact` mask it; after the block the sentinel is gone, `redact` returns it unchanged, and `config._secrets` is the same object (`is`) | yes |
+| `T-V1111-TST-07` | `tests/test_v1111_tst.py::test_t_v1111_tst_07_secrets_registry_restored` | **the nested run**: a two-test module in `tmp_path` (A registers a sentinel and does not clean up; B asserts it absent from `config._secrets` and the registry `is` the same object) plus a `tmp_path` `conftest.py` importing `restore_secrets_registry` from `tests.conftest` (TST-02's VERIFY), never calling `secrets_registry_snapshot()`; `subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-p", "no:xdist", "-q", str(tmp_path)])` exits 0; **plus the direct checks**: inside `conftest.secrets_registry_snapshot()` `register_secret("VALUE-abcdefgh12")` makes `redact` mask it; after the block the sentinel is gone, `redact` returns it unchanged, and `config._secrets` is the same object (`is`) | yes |
 | `T-V1111-TST-08` | by command (no function): TST-02's two commands, recorded in T3's section | rt_06 alone passes; the suite under `-p xdist -n 4` passes twice | — |
 | `T-V1111-DOC-01` | `tests/test_v1111_doc.py::test_t_v1111_doc_01_readme_limits_error_rows_versioning` | `## Limits` has the catalogue-cap row (`MODEL_CATALOGUE_MAX`) and the decimal/binary note; `## Error behaviour` has the `/documents` empty row (`DOCUMENTS_EMPTY_REPLY` verbatim), the `/sessions` row and the `Telegram 400 on a table-path send` row; `## Versioning` has DOC-01 (c)'s new clause and not the old one | — |
 | `T-V1111-DOC-02` | `tests/test_v1111_doc.py::test_t_v1111_doc_02_plan_banner_and_agents_ruling` | `docs/plan.md` starts with the seven banner lines (the `go`-session handoff clause, `## v1.6.0 (in progress)`, `spec-v1.7.0.md`) and a blank line and the remainder equals `git show v1.11.0:docs/plan.md`; `AGENTS.md`'s `## Secrets` has `operator input, not secrets` and `treats them as out of scope` | — |
@@ -563,28 +626,38 @@ full`** (NG-13). **Schedule**: **T0** gates 1–5 on the unchanged tree
 (gate 5 proves the address; unreachable → blocked, ERR-01 row 6);
 **T1–T4**: gates 1–4 at each commit, plus `checks.py lint-docs` and the
 standalone `gitleaks-tree` below; **T5**, after the review and its fix
-commit (if any): `tested_tree=$(git rev-parse HEAD)` and an empty `git
-status --porcelain` recorded; gates 1–5; **gate 6 once, alone on the
-box** (EC-04), its direct wall `W` recorded with the `152/152` line —
+commit (if any): run gates 1–6 and complete any timeout repair first
+— gates 1–5, then **gate 6 once, alone on the box** (EC-04), its
+direct wall `W` recorded with the `152/152` line —
 `[[VERIFY: the gate-6 wall — v1.11.0's direct runs took 961.6 s (T7,
 `report-v1.11.0.md:1669`) and 965.2 s (T8, `:1828`) at 152 entries
 against `timeout_seconds: 1640`; decision rule: `W ≤ 1300 s` → the
 value stays (NG-09); `W > 1300 s` → `REQ-V1110-MUT-01`'s hunk
 (`ceil_to_100(1.25 × W)`, dated comment, brief `v1111-T5.md`) and gate 6
 once more on that tree (ERR-01 row 7); `W > 2400 s` is reported, not a
-stop]]`; gate 7; `doctor`; `lint-docs`; the `bot_state` count re-read
-(`0`); then **gate 8 exactly once in the entire run**, the task's last
-live action, its capture quoted in full; then the report-only commit.
+stop]]`. **After all resulting commits, require a clean worktree
+(empty `git status --porcelain`, recorded), set
+`tested_tree=$(git rev-parse HEAD)`, then run gate 7, `doctor`,
+`lint-docs`, the `bot_state` count re-read (`0`), and gate 8. No commit
+or tracked change may occur between setting `tested_tree` and gate 8.**
+Gate 8 runs **exactly once in the entire run**, the task's last live
+action, its capture quoted in full; then the report-only commit.
 T1–T2's `bot.py` changes are inside `GATE8_DEPENDENCIES`
-(`devtools/agent_eval.py:1234-1242`), hence gate 8 at T5, never before. **T6**: gates 1–4 and 6 fresh on the bump
-commit, gate 5 fresh (no tokens); **gates 7 and 8 reused** under the
-identity check `git diff <tested_tree> HEAD -- $(uv run --locked python
-devtools/agent_eval.py --print-dependencies)` classified by
-`dependency_diff_is_version_only` (`devtools/agent_eval.py:1279`):
-`True` → reused, recorded against `tested_tree`; **`False` → gate 8 is
-not invoked: a T6 repair cycle that reverts or corrects the hunk, reruns
-gates 1–6 and the check, never gate 7 or 8** (`REQ-V1110-REV-02`,
-`spec-v1.11.0.md:1424-1435`; ERR-01 row 10). **The standalone
+(`devtools/agent_eval.py:1234-1242`), hence gate 8 at T5, never before. **T6**: run gates 1, 2, 3, 4, 5 and 6
+once each, in that order, on the bump commit (gate 5 spends no tokens);
+reuse gates 7 and 8 only after the identity check `git diff
+<tested_tree> HEAD -- $(uv run --locked python devtools/agent_eval.py
+--print-dependencies)` classified by `dependency_diff_is_version_only`
+(`devtools/agent_eval.py:1279`): `True` → reused, recorded against
+`tested_tree`; **`False` → gate 8 is not invoked: a T6 repair cycle
+that reverts or corrects the hunk, reruns gates 1–6 and the check,
+never gate 7 or 8** (`REQ-V1110-REV-02`, `spec-v1.11.0.md:1424-1435`;
+ERR-01 row 10). **That T6 check on the bump commit is preliminary.
+After T6's evidence-only commit and before the tag: re-run
+`dependency_diff_is_version_only` from the gate-8 `tested_tree` to the
+current `HEAD`; it MUST return `True`. This post-evidence check is the
+definitive reuse verdict for the shipping tree; `False` withholds the
+tag and enters REV-03** (E7; REV-02). **The standalone
 `gitleaks-tree` command** (C1): `devtools/checks.py`'s CLI has **no
 single-gate form** — `run` accepts only `--profile
 {pre-commit,pre-push,full}` (`devtools/checks.py:1876-1879`; `--only`
@@ -594,11 +667,22 @@ directly against a tracked-only export, prompt 254's corrective form
 (`docs/llm-usage.md:315`); verbatim, from the repository root:
 
 ```bash
-tree_dir="$(mktemp -d)" && git archive HEAD | tar -x -C "$tree_dir" && gitleaks dir --no-banner --redact --config .gitleaks.toml --report-format json --report-path "$tree_dir/gitleaks-tree.json" "$tree_dir"; rc=$?; rm -rf "$tree_dir"; echo "gitleaks-tree exit=$rc"
+tree_dir="$(mktemp -d)" &&
+git archive HEAD | tar -x -C "$tree_dir" &&
+gitleaks dir --no-banner --redact --config .gitleaks.toml \
+  --report-format json --report-path "$tree_dir/gitleaks-tree.json" "$tree_dir"
+rc=$?
+rm -rf "$tree_dir"
+echo "gitleaks-tree exit=$rc"
+exit "$rc"
 ```
 
 exit 0 = green, 1 = findings (`config/quality_gates.yaml:145-146`);
-the `echo` line is what the report quotes. `[[VERIFY: the single-gate
+the block is run as one `bash` invocation (a script file or `bash -c`),
+so `exit "$rc"` is the status its caller sees; the `echo` line is what
+the report quotes, **but every gate invocation — this block and the
+eight `AGENTS.md` commands alike — is judged by the process exit
+status, never by parsing the echoed line.** `[[VERIFY: the single-gate
 CLI form — absent at `2431034` (`grep -n "add_argument\|--only\|--gate\|--profile"
 devtools/checks.py` shows `--profile` with three choices, no gate
 selector); decision rule: a single-gate form found by T0's grep is
@@ -653,15 +737,17 @@ run's last action — **local, never pushed** (`git status -sb` shows
 **REQ-V1111-RPT-01 (MUST) — the report, the post, the usage rows, the
 ledger.** `docs/reports/report-v1.11.1.md` carries `REQ-V1110-VER-03`'s
 ten items (`spec-v1.11.0.md:1572-1600`) with this release's names — the
-gate tables for T0, T5 (`tested_tree`, the empty porcelain, the override
-count, `W` and `152/152`, the gate-8 capture in full) and T6 (1–6
-fresh; 7 and 8 reused with the manifest and verdict); the collection
+gate tables for T0, T5 (`W` and `152/152` and any timeout-hunk commit
+first, then `tested_tree`, the empty porcelain, the override count, the
+gate-8 capture in full) and T6 (gates 1–6 once each in order; 7 and 8
+reused with the manifest, the preliminary verdict and the post-evidence
+verdict); the collection
 check (floor, final count, ≥ floor + 27, the empty `comm -23`); **the
 delegation record per commit** (EC-03; every bundled orchestrator edit
 named); the pin record (the inventory and every post-T0 amendment);
 each task's "failed first" record; the review's dispositions;
 `T-V1111-TST-08`'s two commands and summary lines; **the standalone
-`gitleaks-tree` line per commit**; the `--no-verify` and "no push"
+`gitleaks-tree` line and exit status per commit**; the `--no-verify` and "no push"
 lines; the executor named in the report, in every `docs/llm-usage.md`
 row (167 upward, one per prompt, the shape of rows 164–165) and in the
 tg-post; **`## Operator inputs`** (the address as `<addr>`); **the
@@ -706,24 +792,32 @@ secret value or LAN literal in anything this run wrote; (9) the three
 docstrings match the code.
 
 **REQ-V1111-REV-02 (MUST) — acceptance, the freeze, regression, the two
-two-commit tasks, no push.** **T5 is one prompt (262)** and at most two
-commits: the review's fix commit (only on a must-fix; brief
-`v1111-T5.md`), then — after `tested_tree`, GATE-01's T5 sequence and
-gate 8 — the **report-only** commit (`docs/reports/report-v1.11.1.md`,
-`docs/prompts/262-*.md`, `docs/llm-usage.md`). **T6 is one prompt (263)
-and two commits**: the first (brief `v1111-T6.md`: `pyproject.toml`,
-`uv.lock`, the yaml's one line, the tests, the documentation) lands
-VER-01; then gates 1–6 and 5, the identity check, the collection and
-node-id checks, `checks.py replay --range v1.11.0..HEAD`, Appendix B's
-E1–E6 via `pytest tests/test_v1111_*.py`, all recorded **before the
-evidence commit**; **T6's second commit is evidence-only**, its path set
-exactly four: `docs/reports/report-v1.11.1.md`,
+two-commit tasks, no push.** **T5 is one prompt (262)** and at most
+three commits: the review's fix commit (only on a must-fix; brief
+`v1111-T5.md`), ERR-01 row 7's timeout hunk (only if `W > 1300 s`),
+then — after gates 1–6 and any timeout repair, a clean worktree,
+`tested_tree`, gate 7, `doctor`/`lint-docs`/the count, and gate 8
+(GATE-01's T5 sequence) — the **report-only** commit
+(`docs/reports/report-v1.11.1.md`, `docs/prompts/262-*.md`,
+`docs/llm-usage.md`). **T6 is one prompt (263) and two commits**: the
+first (brief `v1111-T6.md`: `pyproject.toml`, `uv.lock`, the yaml's one
+line, the tests, the documentation) lands VER-01; then run gates 1, 2,
+3, 4, 5 and 6 once each, in that order; the preliminary identity check
+(reuse gates 7 and 8 only after it); the collection and node-id checks;
+`checks.py replay --range v1.11.0..HEAD`; Appendix B's E1–E6 via
+`pytest tests/test_v1111_*.py`, all recorded **before the evidence
+commit**; **T6's second commit is evidence-only**, its path set exactly
+four: `docs/reports/report-v1.11.1.md`,
 `docs/reports/tg-post-v1.11.1.md`, the single `docs/prompts/263-*.md`,
-`docs/llm-usage.md` — **no other path may differ**. After it, `E7`,
-`lint-docs` and the standalone `gitleaks-tree` run against that commit;
-all green, the annotated tag `v1.11.1` is created on it — **locally;
-`git push` is not a command this run issues**; a finding withholds the
-tag. **Regression, no weakened posture**: every earlier release's
+`docs/llm-usage.md` — **no other path may differ**. After it and before
+the tag: re-run `dependency_diff_is_version_only` from the gate-8
+`tested_tree` to the current `HEAD`; it MUST return `True` — **the
+definitive reuse verdict for the shipping tree; `False` withholds the
+tag and enters REV-03** (the earlier T6 check is preliminary); then
+`E7`, `lint-docs` and the standalone `gitleaks-tree` run against that
+commit; all green, the annotated tag `v1.11.1` is created on it —
+**locally; `git push` is not a command this run issues**; a finding
+withholds the tag. **Regression, no weakened posture**: every earlier release's
 acceptance properties hold; every `T-V1110-*` test green with only
 PIN-01's in-place rewrites; failures are fixed inside the 3-cycle
 budget, never by a relaxed gate, a deleted test, a lowered floor, an
@@ -731,12 +825,15 @@ edited case or a model switch.
 
 **REQ-V1111-REV-03 (MUST) — the stop route.** A stop at any task (an
 exhausted repair budget, gate 8 exit 1, a spec ambiguity under EC-02,
-the identity check not restorable at T6): (1) the artefacts finalised
+the preliminary identity check not restorable at T6, the post-evidence
+identity check `False`): (1) the artefacts finalised
 with the stop stated (stage, task, cause, the gate capture quoted); (2)
 gates 1–4 re-run on the stopped tree; gates 5–8 not touched (recorded
-results reused or `N/A`; **gate 8 never rerun**); (3) no bump
-(`pyproject.toml` `1.11.0` — `1.11.1` without revert if the stop follows
-T6's first commit), no tag (`git tag -l v1.11.1` empty); (4) README's
+results reused or `N/A`; **gate 8 never rerun**); (3) if the stop
+occurs before T6's first commit, `pyproject.toml` remains `1.11.0`; if
+it occurs after that commit, leave `1.11.1` in place rather than
+rewriting history, but create no tag (`git tag -l v1.11.1` empty) and
+use the stopped-release README row of (4); (4) README's
 release table gains `| v1.11.1 | — | run stopped at T<n> … |` in the
 form of `README.md:1044-1045`'s precedents; (5) the usage rows and the
 ledger block filled (`Ver` = whatever `pyproject.toml` reads); (6) the
@@ -757,13 +854,13 @@ task.
 
 | T | task | acceptance |
 |---|---|---|
-| **T0** | Preflight: EC-04's preconditions (*commands only*); gates 1–5; the measurements (the floor, `v1111-T0-nodeids.txt`, `len(MUTATIONS)` 152, the `bot_state` count `0`); **the pin inventory delegated** (brief `v1111-T0.md` → `v1111-T0-pin-inventory.md`, PIN-01); `docs/prompts/256-go-spec-v1.11.1.md`; the report skeleton (*artefacts only*) | every item recorded; the inventory complete, the rename mapping empty; no key value or address literal anywhere |
+| **T0** | Preflight: EC-04's preconditions (*commands only*); gates 1–5; the measurements first (the floor, `v1111-T0-nodeids.txt`, `len(MUTATIONS)` 152, the `bot_state` count `0`); **the pin inventory delegated** (brief `v1111-T0.md` → `v1111-T0-pin-inventory.md`, PIN-01), **then the same subagent writes `tests/test_v1111_pin.py`** and runs PIN-01/-02 once the inventory artefacts exist; `docs/prompts/256-go-spec-v1.11.1.md`; the report skeleton (*artefacts only*) | every item recorded; the floor measured before `tests/test_v1111_pin.py` existed (stated); the inventory complete, the rename mapping empty; `T-V1111-PIN-01`, `-02` green; no key value or address literal anywhere |
 | **T1** | OUT-01, OUT-02 (brief `v1111-T1.md`): `tests/test_v1111_out.py` first (red for the right reason), then `TelegramError.status`, the `call` raises, the 400-only predicate, the three docstrings; gates 1–4, `lint-docs`, `gitleaks-tree` | `T-V1111-OUT-01…05` green; `T-V1110-OUT-05` green unamended; `_call_with_retry` byte-equal to `2431034` |
 | **T2** | TAB-01…05 (brief `v1111-T2.md`, the T2 pin rows copied in): `tests/test_v1111_tab.py` first; the widths, the two strings, the batch import; README's sample regenerated, the `:217` and `:153-154` sentences, the `:993` row, the embeddings paragraph, TAB-03/TAB-04's error rows; PIN-01's five T2 pin rewrites in place; gates 1–4, `lint-docs`, `gitleaks-tree` | `T-V1111-TAB-01…06` green; the amendment table's two rows in the report; `documents.EMBED_BATCH_SIZE` absent |
 | **T3** | TST-01, TST-02 (brief `v1111-T3.md`): `tests/test_v1111_tst.py` (six rows + `TST-07`); `tests/conftest.py`'s context manager and autouse fixture; `T-V1111-TST-08`; gates 1–4, `lint-docs`, `gitleaks-tree` | the six rows byte-equal at dispatch and in README; rt_06 alone green; the xdist suite green twice, summaries quoted; no test file but `conftest.py` and the new module changed |
-| **T4** | DOC-01 (a)–(c), DOC-02 — prompt **260**, one commit (*artefacts only*; `T-V1111-DOC-01`, `-02` written first); then DOC-03's five edits — prompt **261**, one commit (*artefacts only*; `T-V1111-DOC-03` written first); gates 1–4, `lint-docs`, `gitleaks-tree` after each | `T-V1111-DOC-01…03` green; `docs/plan.md` differs from `v1.11.0` by the banner only; `lint-docs` green against `report-v1.11.0.md` (the T7 bullet parses) |
-| **T5** | **Review (REV-01) in a clean context**; a must-fix → the fix commit (brief `v1111-T5.md`); then `tested_tree` and GATE-01's T5 sequence ending in **gate 8 once**; the report-only commit (prompt 262) | findings closed or waived; `152/152` with `W`; gate 8 exit 0, floors met, recorded against `tested_tree`; exit 1 → REV-03 |
-| **T6** | VER-01 (brief `v1111-T6.md`): the bump, `uv lock`, `tests/test_v1111_ver.py`, the eleven in-place repoints VER-01 lists, `report_path`, README's row and the `v1.11.0` clause, AGENTS.md's count lines, token and NG-11 sentence; gates 1–6 and 5, the identity check (reuse 7/8), the collection and node-id checks, `replay`, E1–E6; the evidence commit (*artefacts only*); E7, `lint-docs`, `gitleaks-tree`; the tag; **no push** | `T-V1111-VER-01…04` (01/03 red before, green after); `dependency_diff_is_version_only` `True`, gate 8 executed once; count ≥ floor + 27; `comm -23` empty; the evidence commit's `git show --stat` names exactly the four paths; no push in the command record |
+| **T4** | **First** DOC-03's five edits — prompt **260**, one commit (*artefacts only*: `docs/reports/report-v1.11.0.md` and `docs/reports/tg-post-v1.11.0.md` exclusively, no test); **then** DOC-01 (a)–(c), DOC-02 **and** `tests/test_v1111_doc.py` (all three DOC tests, written first; `-DOC-01`, `-02` red before their edits, `-DOC-03` green by the first commit, EC-02) — prompt **261**, one commit, delegated (brief `v1111-T4.md`); gates 1–4, `lint-docs`, `gitleaks-tree` after each | `T-V1111-DOC-01…03` green; `docs/plan.md` differs from `v1.11.0` by the banner only; `lint-docs` green against `report-v1.11.0.md` (the T7 bullet parses); the first commit's `git show --stat` names only `docs/reports/*` |
+| **T5** | **Review (REV-01) in a clean context**; a must-fix → the fix commit (brief `v1111-T5.md`); then gates 1–6 and any timeout repair (row 7's hunk committed, gate 6 once more); after all resulting commits a clean worktree, `tested_tree=$(git rev-parse HEAD)`, then gate 7, `doctor`/`lint-docs`/the count and **gate 8 once** — no commit or tracked change in between; the report-only commit (prompt 262) | findings closed or waived; `152/152` with `W`; `tested_tree` set after the last T5 source commit; gate 8 exit 0, floors met, recorded against `tested_tree`; exit 1 → REV-03 |
+| **T6** | VER-01 (brief `v1111-T6.md`): the bump, `uv lock`, `tests/test_v1111_ver.py`, the eleven in-place repoints VER-01 lists, `report_path`, README's row and the `v1.11.0` clause, AGENTS.md's count lines, token and NG-11 sentence; gates 1, 2, 3, 4, 5 and 6 once each, in that order; the preliminary identity check (reuse 7 and 8 only after it), the collection and node-id checks, `replay`, E1–E6; the evidence commit (*artefacts only*); **the post-evidence identity check** (`dependency_diff_is_version_only` from the gate-8 `tested_tree` to `HEAD`, the definitive verdict), E7, `lint-docs`, `gitleaks-tree`; the tag; **no push** | `T-V1111-VER-01…04` (01/03 red before, green after); `dependency_diff_is_version_only` `True` on the bump commit **and** `True` again from `tested_tree` to the evidence commit before the tag (`False` → no tag, REV-03); gate 8 executed once; count ≥ floor + 27; `comm -23` empty; the evidence commit's `git show --stat` names exactly the four paths; no push in the command record |
 
 ### 10.1 Per-task reading map
 
@@ -773,13 +870,13 @@ actual per commit.
 
 | T | spec sections | repository files and ranges | delegate? |
 |---|---|---|---|
-| **T0** | §1, §3.5, §7 (the T0 gates), §9 (the blocked-run clause) | `AGENTS.md:146-175`; `config/quality_gates.yaml:137-151`, `:738-752`, `:797-799`; `pyproject.toml:1-21`; `docs/prompts/TEMPLATE.md`; the grep hits PIN-01 lists (line context only) | **yes** for the pin inventory — brief `v1111-T0.md`; **no** — *commands only* — for the preconditions, gates and measurements; **no** — *artefacts only* — for the prompt file and the report skeleton |
+| **T0** | §1, §3.5, §7 (the T0 gates), §9 (the blocked-run clause), §6.1 (PIN) | `AGENTS.md:146-175`; `config/quality_gates.yaml:137-151`, `:738-752`, `:797-799`; `pyproject.toml:1-21`; `docs/prompts/TEMPLATE.md`; the grep hits PIN-01 lists (line context only); `tests/test_v1110_inventory.py` (the frozen list, read only); `tests/test_v1111_pin.py` (created, after the measurements) | **yes** for the pin inventory and `tests/test_v1111_pin.py` — brief `v1111-T0.md`; **no** — *commands only* — for the preconditions, gates and measurements (the floor measured before the module exists); **no** — *artefacts only* — for the prompt file and the report skeleton |
 | **T1** | §3.1, §4 (rows 3–4), §6.1 (OUT) | `bot.py:176-188`, `:219-263`, `:265-280`, `:1917-1928`, `:2512-2585`; `tables.py:134-139`; `tests/test_v1110_out.py:94-95`, `:359-422`; `tests/test_v1111_out.py` (created) | **yes** — brief `v1111-T1.md` (OUT-02's docstring texts copied in) |
-| **T2** | §3.2, §4 (rows 1–2), §6.1 (TAB) | `bot.py:109`, `:128-141`, `:1530-1546`, `:2333-2380`, `:2445-2471`; `tables.py:17`, `:82-131`; `documents.py:386`, `:548-562`; `llm/embeddings.py:8-15`, `:55-67`; `README.md:150-155`, `:213-232`, `:538-547`, `:953-1002`; the T2 pin sites (±5); `tests/test_v1111_tab.py` (created) | **yes** — brief `v1111-T2.md` (the widths, the strings, the README paragraph, the pin rows copied in) |
-| **T3** | §3.3, §6.1 (TST) | `config.py:98`, `:230-241`, `:290-306`; `tests/conftest.py`; `tests/test_v1110_err.py:50-116`; `tests/fakes.py:150-200`; `tests/test_v1103_red_team.py:340-353`; `bot.py:88-92`, `:1636`, `:1815-1826`, `:2405-2416`, `:2472-2490`; `tests/test_v1111_tst.py` (created) | **yes** — brief `v1111-T3.md` (the six rows and the fixture shape copied in) |
-| **T4** | §3.4, §4 (README rows), §6.1 (DOC) | `README.md:918-1012`; `docs/plan.md:1-8`, `:25`, `:215`; `AGENTS.md:325-328`; `docs/reports/report-v1.11.0.md:274-280`, `:1529-1541`, `:1698-1700`, `:1945`; `docs/reports/tg-post-v1.11.0.md:23`; `tests/test_v1111_doc.py` (created) | **no** — *artefacts only* — for both prompts (260, 261): prose no gate compiles, imports or runs beyond the three new tests reading it; crossing a §5.1 trigger delegates from that point (brief `v1111-T4.md`) |
-| **T5** | §9 (REV-01, REV-02), §7, §4 (rows 7–9, 12) | the review's own reading map; otherwise only commands; `config/quality_gates.yaml:738-752` on row 7's branch only | **no** — *the task is itself the clean-context review*; **yes** for a source-writing fix or row 7's hunk — brief `v1111-T5.md`; **no** — *commands only* — for the gates; **no** — *artefacts only* — for the report-only commit |
-| **T6** | §8, §9 (REV-02), §7 (the identity check), §1 (the floor), §4 (rows 10–11) | `pyproject.toml:3`; VER-01's eleven pin sites (±5 lines) and `tests/test_v1104_version.py:55-67` (the shape); `config/quality_gates.yaml:790`; `README.md:1044-1047`; `AGENTS.md:92-97`, `:159-172`, `:274-282`; `tests/test_v1111_ver.py` (created); `v1111-T0-nodeids.txt` | **yes** for the bump commit — brief `v1111-T6.md`; **no** — *artefacts only* — for the evidence commit |
+| **T2** | §3.2, §4 (rows 1–2), §6.1 (TAB) | `bot.py:109`, `:128-141`, `:1530-1546`, `:2333-2380`, `:2445-2471`; `tables.py:17`, `:82-131`; `documents.py:386`, `:548-562`; `llm/embeddings.py:8-15`, `:55-67`; `README.md:150-155`, `:213-232`, `:538-547`, `:953-1002`; the T2 pin sites (±5); `tests/test_v1110_out.py:94-95` (the `MockTransport` shape for TAB-06); `tests/test_v1111_tab.py` (created) | **yes** — brief `v1111-T2.md` (the widths, the strings, the README paragraph, the pin rows copied in) |
+| **T3** | §3.3, §6.1 (TST) | `config.py:98`, `:230-241`, `:290-306`; `tests/conftest.py`; `tests/__init__.py` (presence) and `pyproject.toml`'s `[tool.pytest.ini_options]` (TST-07's VERIFY); `tests/test_v1110_err.py:50-116`; `tests/fakes.py:150-200`; `tests/test_v1103_red_team.py:340-353`; `bot.py:88-92`, `:1636`, `:1815-1826`, `:2405-2416`, `:2472-2490`; `tests/test_v1111_tst.py` (created) | **yes** — brief `v1111-T3.md` (the six rows and the fixture shape copied in) |
+| **T4** | §3.4, §4 (README rows), §6.1 (DOC) | `README.md:918-1012`; `docs/plan.md:1-8`, `:25`, `:215`; `AGENTS.md:325-328`; `docs/reports/report-v1.11.0.md:274-280`, `:1529-1541`, `:1698-1700`, `:1945`; `docs/reports/tg-post-v1.11.0.md:23`; `tests/test_v1111_doc.py` (created) | **yes** — brief `v1111-T4.md` (second commit); **no — artefacts only** (first commit, documentation paths exclusively) |
+| **T5** | §9 (REV-01, REV-02), §7, §4 (rows 7–9, 12) | the review's own reading map; otherwise only commands; `config/quality_gates.yaml:738-752` on row 7's branch only (its hunk committed before `tested_tree` is set) | **no** — *the task is itself the clean-context review*; **yes** for a source-writing fix or row 7's hunk — brief `v1111-T5.md`; **no** — *commands only* — for the gates (`tested_tree` set after the last source commit, nothing committed until gate 8 has run); **no** — *artefacts only* — for the report-only commit |
+| **T6** | §8, §9 (REV-02), §7 (the identity check), §1 (the floor), §4 (rows 10–11) | `pyproject.toml:3`; VER-01's eleven pin sites (±5 lines) and `tests/test_v1104_version.py:55-67` (the shape); `config/quality_gates.yaml:790`; `README.md:1044-1047`; `AGENTS.md:92-97`, `:159-172`, `:274-282`; `tests/test_v1111_ver.py` (created); `v1111-T0-nodeids.txt` | **yes** for the bump commit — brief `v1111-T6.md`; **no** — *artefacts only* — for the evidence commit; **no** — *commands only* — for the gates in order, the preliminary and the post-evidence identity checks and the tag |
 
 ---
 
@@ -792,8 +889,8 @@ at least once.
 | Requirement | Verified by |
 |---|---|
 | `REQ-V1111-EC-01` | `T-V1111-VER-02`; the gate tables and command record (no live gate outside GATE-01's schedule; no push); `T-V1111-VER-03` (the NG-11 sentence) |
-| `REQ-V1111-EC-02` | the T0 count and T6 check; the carve-out ids' initial results; `T-V1111-PIN-01`, `T-V1111-PIN-02`; every post-T0 amendment in its bullet |
-| `REQ-V1111-EC-03` | §10.1; the briefs `v1111-T0.md`, `-T1`, `-T2`, `-T3`, `-T6`, `-T5` iff a fix; the per-commit record under `lint-docs` (`T-V1111-VER-04`) |
+| `REQ-V1111-EC-02` | the T0 count (measured before `tests/test_v1111_pin.py` exists) and T6 check; the carve-out ids' initial results and `T-V1111-DOC-03`'s; `T-V1111-PIN-01`, `T-V1111-PIN-02`; every post-T0 amendment in its bullet |
+| `REQ-V1111-EC-03` | §10.1; the briefs `v1111-T0.md`, `-T1`, `-T2`, `-T3`, `-T4` (the second commit), `-T6`, `-T5` iff a fix or a timeout hunk; T4's first commit `docs/reports/*` only; the per-commit record under `lint-docs` (`T-V1111-VER-04`) |
 | `REQ-V1111-EC-04` | T0's precondition outputs; the `bot_state` count at T0 and T5; the report's prompt/commit table; `gitleaks-tree` per commit; `E7` |
 | `REQ-V1111-OUT-01` | `T-V1111-OUT-01`, `T-V1111-OUT-02`, `T-V1111-OUT-03`, `T-V1111-OUT-04`; `T-V1110-OUT-05` unamended; `E1` |
 | `REQ-V1111-OUT-02` | `T-V1111-OUT-05`; REV-01 item 9 |
@@ -801,22 +898,22 @@ at least once.
 | `REQ-V1111-TAB-02` | `T-V1111-TAB-03`; the amendment table; `E4` |
 | `REQ-V1111-TAB-03` | `T-V1111-TAB-04`; `E3` |
 | `REQ-V1111-TAB-04` | `T-V1111-TAB-05` |
-| `REQ-V1111-TAB-05` | `T-V1111-TAB-06`; `E5` |
+| `REQ-V1111-TAB-05` | `T-V1111-TAB-06` (the `FakeEmbedder` cadence and the `MockTransport` request count); `E5` |
 | `REQ-V1111-TST-01` | `T-V1111-TST-01`, `T-V1111-TST-02`, `T-V1111-TST-03`, `T-V1111-TST-04`, `T-V1111-TST-05`, `T-V1111-TST-06` |
-| `REQ-V1111-TST-02` | `T-V1111-TST-07`; `T-V1111-TST-08` (quoted in T3's record); `E6` |
-| `REQ-V1111-DOC-01` | `T-V1111-DOC-01`; `T-V1111-TAB-02`, `T-V1111-TAB-04`, `T-V1111-TAB-05`, `T-V1111-TAB-06` (the T2 hunks) |
-| `REQ-V1111-DOC-02` | `T-V1111-DOC-02` |
-| `REQ-V1111-DOC-03` | `T-V1111-DOC-03` (the five edits, `:2229` included); `lint-docs` green against `report-v1.11.0.md` at T4 |
-| `REQ-V1111-PIN-01` | `T-V1111-PIN-01`, `T-V1111-PIN-02`; the inventory artefact; the T6 `comm -23` line |
+| `REQ-V1111-TST-02` | `T-V1111-TST-07` (the nested run proves the autouse fixture; the direct checks the context manager); `T-V1111-TST-08` (quoted in T3's record); `E6` |
+| `REQ-V1111-DOC-01` | `T-V1111-DOC-01` (T4's second commit, brief `v1111-T4.md`); `T-V1111-TAB-02`, `T-V1111-TAB-04`, `T-V1111-TAB-05`, `T-V1111-TAB-06` (the T2 hunks) |
+| `REQ-V1111-DOC-02` | `T-V1111-DOC-02` (T4's second commit, brief `v1111-T4.md`) |
+| `REQ-V1111-DOC-03` | `T-V1111-DOC-03` (the five edits, `:2229` included; lands in T4's second commit, green by the first — EC-02); the first commit's `git show --stat` (`docs/reports/*` only, *artefacts only*); `lint-docs` green against `report-v1.11.0.md` at T4 |
+| `REQ-V1111-PIN-01` | `T-V1111-PIN-01`, `T-V1111-PIN-02` (`tests/test_v1111_pin.py`, written by the delegated T0 subagent after the measurements, in T0's commit); the inventory artefact; the T6 `comm -23` line |
 | `REQ-V1111-ERR-01` | `T-V1111-TAB-04`, `T-V1111-TAB-05`, `T-V1111-OUT-02`, `T-V1111-OUT-03`, `T-V1111-OUT-04`, `T-V1111-DOC-01` (rows 1–4); the task records (rows 5–12) |
-| `REQ-V1111-SEC-01` | `gitleaks-tree` at every commit; the command record; `T-V1111-TST-07`; `E1`, `E7` |
+| `REQ-V1111-SEC-01` | `gitleaks-tree` at every commit, judged by exit status; the command record (no `.env` inspection beyond EC-04's one `sed -i`); `T-V1111-TST-07`; `E1`, `E7` |
 | `REQ-V1111-TST-03` | the T6 collection check; `tests/test_v1111_*.py` present; Appendix A complete |
-| `REQ-V1111-GATE-01` | the gate tables at T0, T5, T6; `tested_tree` and the clean-tree proof; the gate-6 wall; the reuse record; the `gitleaks-tree` lines; `E7` |
+| `REQ-V1111-GATE-01` | the gate tables at T0, T5, T6; `tested_tree` set after the last T5 commit and the clean-tree proof; the gate-6 wall; the reuse record with the preliminary and the post-evidence identity verdicts; the `gitleaks-tree` lines and exit statuses; `E7` |
 | `REQ-V1111-VER-01` | `T-V1111-VER-01`, `T-V1111-VER-02`, `T-V1111-VER-03`, `T-V1111-VER-04`; `E7` |
 | `REQ-V1111-RPT-01` | the report under `lint-docs` (`T-V1111-VER-04`); `wc -m` quoted; the usage rows; the fenced ledger row; `T-V1111-DOC-03` |
 | `REQ-V1111-REV-01` | the logged review prompt; findings closed or waived; `v1111-T5.md` iff a fix |
-| `REQ-V1111-REV-02` | `git show --stat` on the evidence commit; E1–E6 before it; `E7` after it; the full suite green |
-| `REQ-V1111-REV-03` | the stage named in the report; the negative proofs (`pyproject.toml`, `git tag -l v1.11.1` empty, `git status -sb` ahead); the reused gate-8 record |
+| `REQ-V1111-REV-02` | `git show --stat` on the evidence commit; E1–E6 before it; the post-evidence identity check and `E7` after it, before the tag; the full suite green |
+| `REQ-V1111-REV-03` | the stage named in the report; the negative proofs (`pyproject.toml` `1.11.0` before T6's first commit or `1.11.1` after it, `git tag -l v1.11.1` empty, `git status -sb` ahead); the reused gate-8 record |
 
 ### Tails traceability
 
@@ -905,8 +1002,14 @@ Feature: E4 — the /model status label is never truncated
 Feature: E5 — one embedding batch constant
   Scenario: 65 chunks through IngestWorker.run_one with a size-recording FakeEmbedder
     Then batches of [32, 32, 1], edits embedding: 1/3 … 3/3, documents has no EMBED_BATCH_SIZE and documents.BATCH_SIZE is llm.embeddings.BATCH_SIZE
+  Scenario: 65 inputs through the ingest path with a real EmbeddingsClient over httpx.MockTransport
+    Then exactly three embedding requests were made, their body input sizes [32, 32, 1], the edits 1/3 … 3/3 alongside
 
 Feature: E6 — rt_06 is order-independent
+  Scenario: a nested pytest run of two ordered tests under the project's autouse fixture
+    Given a tmp_path module where test A registers a sentinel and never cleans up and test B asserts it absent and the registry the same object, and a tmp_path conftest.py importing restore_secrets_registry from tests.conftest
+    When the module runs under python -m pytest -p no:cacheprovider -p no:xdist -q, never calling secrets_registry_snapshot()
+    Then the nested run exits 0
   Scenario: a secret registered inside conftest.secrets_registry_snapshot()
     Then after the block the sentinel is gone, redact returns it unchanged, the registry is the same set object
   Scenario: the suite under pytest-xdist
@@ -916,14 +1019,34 @@ Feature: E7 — the version, the freeze and the local tag
   Scenario: T6's first commit
     Then pyproject.toml reads 1.11.1, git show v1.11.0:pyproject.toml reads 1.11.0, the pyproject.toml/uv.lock diff is version-only, dependency_diff_is_version_only is True on tested_tree..HEAD, AGENTS.md reads "as of spec-v1.11.1 T6", the v1.11.1 row ends "this release" and the v1.11.0 row does not
   Scenario: run before the tag on T6's evidence commit
-    Then its name-only diff is exactly the four REV-02 paths; git tag -l lists no v1.11.1 yet; git status -sb shows main ahead; gitleaks-tree exit=0
+    Then dependency_diff_is_version_only from the gate-8 tested_tree to HEAD is True (the definitive reuse verdict; False withholds the tag, REV-03); its name-only diff is exactly the four REV-02 paths; git tag -l lists no v1.11.1 yet; git status -sb shows main ahead; gitleaks-tree exits 0 (the process status, not the echoed line)
 ```
 
 ---
 
 ## Appendix C — cross-review log
 
-Placeholder: filled by the spec-authoring pipeline's rounds (at most
-three, challenger OpenAI Codex), every finding ruled on before it is
-applied; the termination reason and per-round counts recorded. Until
-then, `Status:` stays `draft`.
+**Rounds so far: 1** — termination pending. Placeholder: finalised by
+the spec-authoring pipeline after the last round (at most three,
+challenger OpenAI Codex), every finding ruled on before it is applied;
+the termination reason and per-round counts recorded. Until then,
+`Status:` stays `draft`.
+
+### Round 1 of at most 3 — against the authoring draft (`8de5485`); 10 findings, 10 accepted (2 adapted), 0 rejected
+
+| # | sev | REQ(s) | verdict | change |
+|---|---|---|---|---|
+| R1-1 | Crit | GATE-01, REV-02, REV-03, ERR-01 row 10, `E7` | accepted | After T6's evidence-only commit and before the tag, `dependency_diff_is_version_only` is re-run from the gate-8 `tested_tree` to `HEAD` and MUST be `True` — the definitive reuse verdict for the shipping tree; `False` withholds the tag and enters REV-03; the bump-commit check is preliminary. |
+| R1-2 | Crit | GATE-01, EC-04, REV-02, ERR-01 row 7, §10 T5 | accepted | T5 runs gates 1–6 and completes any timeout repair first; after all resulting commits a clean worktree is required, `tested_tree=$(git rev-parse HEAD)` is set, then gate 7, doctor/lint/count and gate 8 run with no commit or tracked change in between (T5 is therefore at most three commits). |
+| R1-3 | High | GATE-01, SEC-01, RPT-01 | accepted | The standalone `gitleaks-tree` block ends with `exit "$rc"` and is run as one `bash` invocation; every gate invocation is judged by its process exit status, never by parsing the echoed line. |
+| R1-4 | High | EC-01, EC-04, NG-12, SEC-01 | accepted | The sole `.env` exception is EC-04's one non-printing `sed -i` replacement of `LMSTUDIO_BASE_URL`; no command may print, copy, diff, grep, or otherwise inspect `.env` — stated in all four places. |
+| R1-5 | High | EC-02, EC-03, EC-04, DOC-01…03, §10 T4, §10.1, Appendix A | accepted, adapted | T4 keeps two prompts/commits but re-split by artefact class and ordered: 260 first, *artefacts only*, DOC-03's five report/post edits under `docs/reports/*` exclusively; 261 second, delegated under brief `v1111-T4.md`, README/plan/AGENTS edits and `tests/test_v1111_doc.py` with all three DOC tests (`T-V1111-DOC-03` green by then, recorded with the carve-out ids' initial results) — the finding's "either delegate T4 or split" became this fixed split. |
+| R1-6 | High | PIN-01, EC-02, EC-03, §10 T0, §10.1, Appendix A | accepted | The delegated T0 subagent writes `tests/test_v1111_pin.py` after measuring the unchanged-tree floor and node IDs and runs PIN-01/-02 once the inventory artefacts exist; the two tests are excluded from the floor by construction, so floor + 27 stands. |
+| R1-7 | Med | GATE-01, REV-02, §10 T6 | accepted | Every T6 occurrence reads "run gates 1, 2, 3, 4, 5 and 6 once each, in that order; reuse gates 7 and 8 only after the identity check". |
+| R1-8 | Med | TST-02, `T-V1111-TST-07`, `E6`, §10.1 T3 | accepted, adapted | TST-07 gains a nested pytest run (a `tmp_path` two-test module — A registers a sentinel without cleanup, B asserts it absent and the registry the same object — plus a `tmp_path` `conftest.py` importing `restore_secrets_registry` from `tests.conftest`, run with `-p no:cacheprovider -p no:xdist`, exit 0, never calling `secrets_registry_snapshot()`), keeping the direct context-manager checks; the import form carries a new `[[VERIFY]]` with a `pytest_plugins` fallback and, failing both, two permanent ordered tests under `xdist_group` as a disclosed amendment — the fifth marker. |
+| R1-9 | Med | TAB-05, `T-V1111-TAB-06`, `E5`, §10.1 T2 | accepted | TAB-06 also drives a real `EmbeddingsClient` over `httpx.MockTransport` with 65 inputs through the ingest path and asserts exactly three embedding requests with body input sizes `[32, 32, 1]` alongside the `1/3 … 3/3` edits. |
+| R1-10 | Med | REV-03, Appendix A | accepted | A stop before T6's first commit leaves `pyproject.toml` at `1.11.0`; after it, `1.11.1` stays in place rather than rewriting history, no tag is created and the stopped-release README row is used. |
+
+**Round 1: 10 findings, 10 accepted (2 adapted), 0 rejected.** New
+requirements: none; new test ids: none (`T-V1111-TST-07` and
+`T-V1111-TAB-06` extended in place); `[[VERIFY]]` markers 4 → 5.
