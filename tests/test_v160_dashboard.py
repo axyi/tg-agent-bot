@@ -1178,6 +1178,7 @@ def make_cfg_for_bot(tmp_path, **overrides):
 def _stub_bot_startup(monkeypatch):
     monkeypatch.setattr(bot_module.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot_module.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot_module.TelegramClient, "set_my_commands", lambda self, commands: True)
 
     def _fake_build(cfg, *, client, override=None, purpose=None, model=None):
         return object()

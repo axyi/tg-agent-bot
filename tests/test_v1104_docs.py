@@ -113,6 +113,13 @@ def test_t_v1104_doc_02_v1104_release_and_gate8_rows_landed_at_t5():
 
 
 def test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchanged():
+    """v1.11.0 T6 (REQ-V1110-NG-11) legitimately appends one sentence to
+    this paragraph (the release's own waiver-rule disclosure), so the
+    v1.10.4-era exact-equality check against the `f3ce1a5` baseline is
+    rewritten to a prefix check (PIN-01's rewrite form: presence/
+    contiguity, never frozen equality) -- proving the v1.10.4-and-earlier
+    text is undisturbed while allowing later releases to append their own
+    sentence, same as every prior "carries the waiver again" addition."""
     text = _read_agents_md()
     assert "docs/spec/task-briefs/v1104-T<N>.md" in text
 
@@ -131,4 +138,4 @@ def test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchange
     baseline_end = baseline.index("## go protocol", baseline_start)
     baseline_waiver = baseline[baseline_start:baseline_end].strip()
 
-    assert waiver == baseline_waiver
+    assert waiver.startswith(baseline_waiver)

@@ -313,18 +313,20 @@ def test_t_v170_ver_01_version_matches_independent_tomllib_read(capsys):
     assert capsys.readouterr().out == f"tg-agent-bot {expected}\n"
 
 
-def test_t_v1103_rpt_01_lint_docs_repointed_to_this_release():
+def test_t_v1110_rpt_01_lint_docs_repointed_to_this_release():
     """Superseded by spec-v1.9.0 REQ-V190-RPT-01, v1.10.3 T3
-    (REQ-V1103-LINT-01): lint-docs' report_path tracks the current release
-    and is repointed again at each one -- this test's own name and assertion
-    move with it (v1.10.3 T3: the v1.10.2-named predecessor asserted the
-    v1.10.2 path, which T3's own required repoint made stale the same way
-    v1.10.2 T3 made the v1.10.1-named one stale)."""
+    (REQ-V1103-LINT-01), v1.11.0 T6 (REQ-V1110-VER-03): lint-docs'
+    report_path tracks the current release and is repointed again at each
+    one -- this test's own name and assertion move with it (v1.11.0 T6:
+    the v1.10.4-named predecessor asserted the v1.10.4 path, which T6's
+    own required repoint made stale the same way each prior release's
+    repoint made its predecessor stale; see the rename mapping in
+    `docs/spec/task-briefs/v1110-T0-pin-inventory.md`)."""
     from devtools.checks import DEFAULT_CONFIG_PATH, load_gate_config
 
     raw = load_gate_config(DEFAULT_CONFIG_PATH)
     lint_docs = raw["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.10.4.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.11.0.md"
     assert lint_docs["ledger_header"] == (
         "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | "
         "Tokens ↑/↓ | Cost | Model | Harness |"

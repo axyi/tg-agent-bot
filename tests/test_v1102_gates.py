@@ -42,8 +42,11 @@ def _v1102_mutations() -> list[dict]:
 
 
 def test_t_v1102_rpt_01_lint_docs_repointed_to_this_release():
+    # v1.11.0 T6 (REQ-V1110-VER-03): repointed again, disclosed amendment
+    # (not in T0's pin inventory) -- function name kept stable, matching
+    # every other "report_path tracks the current release" site.
     config = checks.load_gate_config()
-    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.10.4.md"
+    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.11.0.md"
 
 
 def test_t_v1102_gate_03_gate_matrix_label_dict_matches_spec_v1102_table():

@@ -203,13 +203,16 @@ def test_t_v1104_pin_08_future_label_passes_dropped_or_swapped_v1103_label_fails
         t1103.test_t_v1103_gate_03_gate_matrix_label_dict_matches_spec_v1103_table()
 
 
-def test_t_v1104_rpt_01_lint_docs_config_and_own_report_are_green():
+def test_t_v1110_rpt_01_lint_docs_config_and_own_report_are_green():
+    # v1.11.0 T6 (REQ-V1110-VER-03): renamed from
+    # test_t_v1104_rpt_01_lint_docs_config_and_own_report_are_green -- see
+    # the rename mapping in docs/spec/task-briefs/v1110-T0-pin-inventory.md.
     config = checks.load_gate_config()
     lint_docs = config["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.10.4.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.11.0.md"
     assert lint_docs["delegation_record"] is True
 
-    report = _REPO_ROOT / "docs" / "reports" / "report-v1.10.4.md"
+    report = _REPO_ROOT / "docs" / "reports" / "report-v1.11.0.md"
     assert checks._lint_report_delegation(report) == []
 
 

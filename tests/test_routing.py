@@ -282,6 +282,10 @@ def _stub_startup(monkeypatch, cfg, captured, built):
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": BOT_USERNAME})
+    # v1.11.0 T6 (REQ-V1110-EXT-01): main() now calls set_my_commands right
+    # after get_me -- stubbed alongside it so this offline startup test
+    # never reaches a real socket.
+    monkeypatch.setattr(bot.TelegramClient, "set_my_commands", lambda self, commands: True)
     monkeypatch.setattr(bot, "exec_backend_status", lambda: ("27.1.2", True))
     monkeypatch.setattr(bot, "_startup_docker_wiring", lambda cfg, docker_ok: (True, None))
     # The price snapshot is a startup HTTP call and is not what these tests pin.

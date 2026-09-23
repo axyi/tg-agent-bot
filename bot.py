@@ -140,6 +140,27 @@ DOC_INTERRUPTED_REPLY = "❌ Interrupted by restart."
 SESSIONS_LIST_LIMIT = 10
 SESSION_USAGE_REPLY = "Usage: /session <id> (see /sessions)"
 
+# v1.11.0 T6 (REQ-V1110-EXT-01): the Bot API command menu, registered once
+# at startup by `main()` through `TelegramClient.set_my_commands`. Names
+# without the leading slash (<= 32 chars), ASCII descriptions (<= 256
+# chars), in the same order as README's Commands table. `/start` is the
+# documented alias for `/help` (EXT-02) and is deliberately absent here --
+# only a dispatched command gets a `COMMANDS` row.
+COMMANDS: tuple[tuple[str, str], ...] = (
+    ("new", "Summarize this conversation and start a fresh one"),
+    ("status", "Uptime, provider, exec backend, database, skills"),
+    ("stats", "Token, cost and tool counters"),
+    ("summary", "Summarize this conversation on demand"),
+    ("model", "Show or switch the LLM provider and model"),
+    ("reload_skills", "Re-read skills/ without restarting the bot"),
+    ("documents", "List your uploaded documents"),
+    ("delete", "Delete one of your documents"),
+    ("sessions", "List your recent sessions"),
+    ("session", "Switch your active session"),
+    ("cancel", "Cancel your in-progress document indexing"),
+    ("help", "Show this command list"),
+)
+
 log = logging.getLogger("bot")
 
 # httpx logs every request URL at INFO. The Telegram URL embeds the bot token,
@@ -322,6 +343,13 @@ class TelegramClient:
 
     def get_file(self, file_id: str) -> dict:
         return self.call("getFile", {"file_id": file_id}, read_timeout=DEFAULT_READ_TIMEOUT_S)
+
+    def set_my_commands(self, commands: list[dict]) -> bool:
+        """REQ-V1110-EXT-01: `setMyCommands`, `main()`'s one caller --
+        `commands` arrives already shaped as `[{"command": ...,
+        "description": ...}, ...]` in `COMMANDS` order; this method does no
+        validation or reshaping of its own."""
+        return self._call_with_retry("setMyCommands", {"commands": commands})
 
     def download_file(
         self,
@@ -1082,6 +1110,12 @@ def process_update(
         if name == "/session":
             argument = stripped[len(token) :].strip()
             _handle_session(conn, tg, chat_id, from_id, argument)
+            return
+        if name == "/help":
+            _handle_help(tg, chat_id)
+            return
+        if name == "/start":
+            _handle_help(tg, chat_id)
             return
 
     conv_id = storage.get_or_create_active_conversation(conn, from_id)
@@ -2457,6 +2491,19 @@ def _handle_session(conn, tg, chat_id: int, from_id: int, argument: str) -> None
     _send(tg, chat_id, [f"Switched to session #{conv_id}: {title}"])
 
 
+def _handle_help(tg, chat_id: int) -> None:
+    """REQ-V1110-EXT-02: `/help` and `/start`'s shared handler -- one
+    table-path body over `COMMANDS` (16 + 52 = 68, plus the two-space
+    separator = 70 <= 72 units, OUT-03). Neither command is stored in the
+    conversation -- both dispatch branches `return` before the fallback
+    path that would store one."""
+    send_pre(
+        tg,
+        chat_id,
+        tables.render_table(("command", "what it does"), COMMANDS, max_width=(16, 52)),
+    )
+
+
 def _send(tg, chat_id: int, parts: list[str]) -> bool:
     """Send the parts in order; stop at the first failure (at-most-once)."""
     for part in parts:
@@ -3083,6 +3130,14 @@ def main(argv: list[str] | None = None) -> int:
         client.close()
         conn.close()
         return 2
+
+    try:
+        # REQ-V1110-EXT-01: registered once, right after `getMe` -- logged
+        # and swallowed on failure, never fatal, since a stale or missing
+        # command menu never stops the bot from serving updates.
+        tg.set_my_commands([{"command": name, "description": desc} for name, desc in COMMANDS])
+    except Exception as exc:
+        log.warning("setMyCommands failed: %s", redact(str(exc)))
 
     docker_version, docker_ok = exec_backend_status()
     try:

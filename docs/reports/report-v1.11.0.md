@@ -122,6 +122,8 @@ Independently reconfirmed the measurements during this pass: `len(MUTATIONS)
 == 144`; the v190 `find` string exactly once, at `bot.py:1355`; node-id
 baseline 2311 lines — all match T0's own direct measurements above.
 
+- T0 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T0.md | map vs actual: the pin inventory (PIN-01) was delegated via EC-04 as described above; preconditions, gates 1-5 and the measurements were run directly by the orchestrator, not delegated (added retroactively by T6, which found this section had no delegation-record bullet at all -- a pre-existing gap `lint-docs`'s delegation check was never run against until this task)
+
 ## T1 — the outbound table path
 
 Delegated (brief `docs/spec/task-briefs/v1110-T1.md`, EC-04).
@@ -1156,21 +1158,7 @@ overlaps this diff, and its `find` line was never touched.
 `documents.py` has zero mutation entries today, so no `_check_budget`/
 `index_document` edit needed similar auditing.
 
-- T5 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) |
-  brief: docs/spec/task-briefs/v1110-T5.md | map vs actual: matches the
-  reading map closely, no drift beyond a few lines; seven deliberate
-  amendments beyond the brief's literal text, all disclosed above and in
-  the prompt file, each because the literal instruction would have left
-  something unspecified (two data-model fields, the token/slot
-  bookkeeping, the `worker is None` fallback) or missed a direct,
-  foreseeable consequence of the split itself (the ~30 test call sites,
-  the pin-table needles, one fake-clock value, the two fakes.py
-  signature-parity additions); EC-02 test-first was **not** followed for
-  this task's 18 new tests, disclosed plainly above, not described as
-  partial compliance; a pre-commit advisor review found several of those
-  tests asserted less than intended, all fixed and each fix's bite
-  confirmed (bug injected, test watched fail, bug reverted, diff
-  unchanged) before this commit
+- T5 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T5.md | map vs actual: matches the reading map closely, no drift beyond a few lines; seven deliberate amendments beyond the brief's literal text, all disclosed above and in the prompt file, each because the literal instruction would have left something unspecified (two data-model fields, the token/slot bookkeeping, the `worker is None` fallback) or missed a direct, foreseeable consequence of the split itself (the ~30 test call sites, the pin-table needles, one fake-clock value, the two fakes.py signature-parity additions); EC-02 test-first was **not** followed for this task's 18 new tests, disclosed plainly above, not described as partial compliance; a pre-commit advisor review found several of those tests asserted less than intended, all fixed and each fix's bite confirmed (bug injected, test watched fail, bug reverted, diff unchanged) before this commit
 
 **Gates 1-4** (gate 5/6/7/8 intentionally not run this task, per the
 brief), each run verbatim as AGENTS.md lists it, no added flags:
@@ -1193,11 +1181,274 @@ python bot.py --selftest` — `selftest: OK`, exit 0 (`run_selftest`
 constructs no
 worker, confirmed still true).
 
-## T6 — not reached
+## T6 — commands, setMyCommands, /help, /start, pin repoints
 
-## T7 — not reached
+REQ-V1110-EXT-01, REQ-V1110-EXT-02, the rest of REQ-V1110-SEC-01 (clauses
+1, 2), REQ-V1110-PIN-01, REQ-V1110-VER-02, REQ-V1110-VER-03,
+REQ-V1110-NG-11. (`T-V1110-EXT-03` and `T-V1110-PIN-02` are test ids, not
+separate requirements — REQ-V1110-PIN-01's own §12 definition names both
+`T-V1110-PIN-01` and `T-V1110-PIN-02` as its tests; §14's requirement
+table additionally cross-lists both `T-V1110-PIN-02` and `T-V1110-EXT-03`
+under REQ-V1110-VER-02's documentation-deliverables row, since they also
+check README content; both test ids are satisfied by the work below.)
 
-## T8 — not reached
+### EXT-01/-02 — `COMMANDS`, `setMyCommands`, `/help`/`/start`
+
+`bot.py` gains a module-level `COMMANDS: tuple[tuple[str, str], ...]`
+(12 entries, `new`/`status`/`stats`/`summary`/`model`/`reload_skills`/
+`documents`/`delete`/`sessions`/`session`/`cancel`/`help`, README order,
+`/start` deliberately excluded as the documented alias) and
+`TelegramClient.set_my_commands(commands: list[dict]) -> bool`, posting
+`setMyCommands` through `_call_with_retry` like every other client method.
+`main()` calls it once, immediately after `get_me()`'s try/except block,
+wrapped in its own broad `except Exception` — logged
+(`log.warning("setMyCommands failed: %s", redact(...))`) and never fatal.
+Neither `run_selftest()` nor `run_selftest_live()` calls it (confirmed by
+a spy on `_SelftestTelegram.set_my_commands`, added via `raising=False`
+since the class never defines the method at all). A new `_handle_help`
+sends one table-path body (`render_table(("command", "what it does"),
+COMMANDS, max_width=(16, 52))`, 70 of 72 units); `/help` and `/start` both
+dispatch to it and both `return` before the fallback path that stores a
+conversation message.
+
+New `tests/test_v1110_ext.py` (not in this task's brief's own file list —
+disclosed amendment; created to match spec-v1.11.0.md sec.11.3's own
+frozen test-table names so `T-V1110-INV-01`'s eventual inventory finds
+them): `test_t_v1110_ext_01_commands_table_and_setmycommands` (shape
+checks; a structural completeness check via
+`re.findall(r'name == "/(\w+)"', inspect.getsource(bot.process_update))`
+compared against `COMMANDS` names plus `{"start"}`; a behavioural probe —
+one `/<name>` update per `COMMANDS` entry through the real
+`process_update`, asserting the probe LLM's `.calls` stays empty and no
+`messages` row is stored; `/start`'s dispatch and its absence from
+`COMMANDS`; `main()`-level wiring through a real `httpx.MockTransport`
+(not a monkeypatched `get_me`/`set_my_commands`) proving the `setMyCommands`
+payload is exactly `{"commands": [...]}` in `COMMANDS` order and strictly
+after `getMe`; a 500 response proving one warning and `main()` still
+returning 0; the `run_selftest()` spy), `test_t_v1110_ext_02_help_and_start`
+(both commands render the identical table, no `messages` row),
+`test_t_v1110_ext_03_readme_commands_rows` (every `COMMANDS` name has a
+README row, `/reload_skills` precedes `/documents`).
+`tests/test_v190_agents.py:226-235` extended in place (not replaced) with
+the same every-`COMMANDS`-name-has-a-row check.
+
+**Test-first, honestly, per test** — a real departure from this run's
+EC-02 practice for part of this task, disclosed plainly, not described as
+partial compliance:
+
+- **Never red** (implementation-first): `test_t_v1110_ext_01_commands_table_and_setmycommands`
+  and `test_t_v1110_ext_02_help_and_start` — `COMMANDS`/`set_my_commands`/
+  `_handle_help`/the dispatch wiring were written first, while reading the
+  existing dispatch chain and `TelegramClient` methods to match their
+  conventions; both tests were then written against already-working code.
+  Their first actual failures were test bugs, not spec-level gaps: EXT-01's
+  `_stub_main_startup` helper recursively rebound `httpx.Client` to itself
+  (fixed by capturing the real class in a module-level constant before any
+  patch); EXT-02 asserted a hand-guessed, wrong header-padding string
+  (fixed by comparing against `render_table`'s own real output instead).
+  SEC-01's two new clauses, same story: clause 1's first run failed because
+  the CANARY secret was long enough to be truncated by `render_table`
+  before `redact()` ever saw the whole string (fixed by shortening it);
+  clause 2 passed on its first run (CBQ-05's stale-callback behaviour was
+  already correct, nothing to fix).
+- **Red for the right reason** (test-first): `test_t_v1110_ext_03_readme_commands_rows`
+  (red on `/cancel` missing from README's Commands table, fixed by adding
+  the row); `test_t_v1110_pin_02_readme_limits_and_error_rows` (red on
+  `Usage: /session <id> (see /sessions)` missing from README's Error
+  behaviour section, fixed by adding six new rows); the three renamed/
+  repointed `report_path` tests
+  (`tests/test_v170_bench.py::test_t_v1110_rpt_01_lint_docs_repointed_to_this_release`,
+  `tests/test_v1104_gates.py::test_t_v1110_rpt_01_lint_docs_config_and_own_report_are_green`,
+  `tests/test_v190_agents.py::test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path`)
+  — each edited to assert the new `report-v1.11.0.md` path and run red
+  against the still-unedited `config/quality_gates.yaml` before that
+  file's own edit made them green.
+- **Never red, because the check was written after it was already true**:
+  `test_t_v1110_pin_01_no_retired_literal_in_tests` passed on its very
+  first run — the one genuine trip it found
+  (`tests/test_v190_agents.py`'s docstring naming the four retired RAG-cap
+  numbers in prose) was reworded *before* the pin test file was written,
+  not discovered by watching the test go red. `tests/test_v190_agents.py:226-235`'s
+  extension (every `COMMANDS` name has a README row) was also written
+  after README already had every row, so it never ran red either.
+- **Stale after this task's own edit, not test-first** (a different
+  category from either of the above — these are pre-existing tests this
+  task's own config/doc edits broke as a foreseeable side effect,
+  discovered via a full `pytest` run, then fixed to match): the
+  `test_t_v1102_rpt_01_lint_docs_repointed_to_this_release`-family
+  functions in `tests/test_v1101_gates.py`/`test_v1102_gates.py` and
+  `tests/test_v1103_gates.py::test_t_v1103_rpt_01_quality_gates_yaml_repoints_and_enables_the_key`
+  (broken by this task's own `config/quality_gates.yaml` edit);
+  `tests/test_v1104_docs.py::test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchanged`
+  (broken by this task's own `AGENTS.md` sentence addition, per
+  REQ-V1110-NG-11).
+
+### The rest of SEC-01
+
+`tests/test_v1110_sec.py`'s single frozen test function extended with two
+more clauses (not a new function — `T-V1110-INV-01`'s frozen
+`module::function` id): clause 1's `/help` angle (`bot.COMMANDS`
+monkeypatched to include a row carrying `<script>&</script>` plus a
+registered `CANARY` secret short enough to survive `render_table`'s
+52-unit truncation before `redact()` runs; the rendered payload contains
+neither the raw script tag nor the raw secret, contains
+`&lt;script&gt;&amp;`, and contains `config.REDACTION`) and clause 2 (a
+light cross-reference, not a re-derivation of CBQ-05's full parametrised
+case list: `ses:switch:../x` and `mod:model:1 OR 1=1` through the real
+`process_update` dispatch, both landing as `CALLBACK_EXPIRED_REPLY` with
+no state change). Clauses 1b, 3, 5 and 8 are not covered by this function
+(1b lives in `T-V1110-MOD-09`; 3, 5 and 8 remain open for a later task —
+the module docstring's stale "T4's/T6's own additions" attribution is
+corrected to name this task's actual two clauses).
+
+### PIN-01/PIN-02 — new `tests/test_v1110_pin.py`
+
+`test_t_v1110_pin_01_no_retired_literal_in_tests`: scans every
+`tests/**/*.py` file except itself and any `git show <tag>:`-reading
+version test for nine retired literals (`"New conversation started."`,
+`over 10 MiB`, `over 500,000 characters`, `over 300 s`,
+`"Usage: /model [lmstudio|openrouter|auto]"`, `10,485,760`, `"500 pages"`,
+`"300 s"`, `"allowed_updates": ["message"]`) — quote-wrapped where the
+bare fragment would otherwise match either the *current* live string it
+is a retired prefix of, or unrelated prose that merely names the old
+figure for context; bare otherwise. One genuine trip found and fixed, not
+loosened around: `tests/test_v190_agents.py`'s own docstring named the
+four retired RAG-cap numbers in prose (`10,485,760`/`500,000`/`300 s`/
+`500 pages`) to explain what T5 replaced — reworded to drop the literal
+numbers rather than weakening the scan. Also asserts
+`docs/spec/task-briefs/v1110-T0-pin-inventory.md` exists and mentions
+(bare substring) every one of the nine retired literals — a light
+cross-check, not a full re-parse.
+`test_t_v1110_pin_02_readme_limits_and_error_rows`: README's `## Limits`
+section carries `20,000,000`, `2,000,000`, `1800 s`, `2,000 pages`,
+`one in flight per user`, `/cancel`; `## Error behaviour` carries all
+seventeen ERR-01 row strings (rows 1-17; row 18 has none) — six of these
+(rows 11-16: `/session` usage/unknown, `/delete` usage/not-found, stale
+callback, `/model` usage/unknown) were never in README at all, added by
+this task; presence only, never a frozen matrix or exact order.
+
+### Pin repoints (VER-03) and further amendments
+
+`config/quality_gates.yaml:790`'s `report_path` → `report-v1.11.0.md`.
+Renamed (per T0's rename mapping):
+`tests/test_v170_bench.py::test_t_v1103_rpt_01_lint_docs_repointed_to_this_release`
+→ `..._v1110_rpt_01...`;
+`tests/test_v1104_gates.py::test_t_v1104_rpt_01_lint_docs_config_and_own_report_are_green`
+→ `..._v1110_rpt_01...` (its own `report_path`/report-path assertions
+repointed too; `:149,160,169`'s unrelated fixture strings for the generic
+lint-docs mechanism test left untouched, confirmed by line number before
+editing). Repointed without renaming (its own docstring says the name
+stays stable): `tests/test_v190_agents.py`'s
+`test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path`.
+`tests/test_v15_standards.py`'s `test_v15_gate_04_profile_matrix_agrees_with_the_spec_table`
+repointed from `spec-v1.10.4.md` to `spec-v1.11.0.md` and run standalone
+to confirm the parse — the two files' gate-matrix tables are byte-
+identical (`diff` empty), so nothing else needed adjusting.
+
+Six further amendments, none of them in T0's pin inventory or this
+task's own brief file list, found while running gates rather than by
+inspection, none a repair cycle:
+
+1. Three more `report_path` sites T0's inventory missed entirely —
+   `tests/test_v1101_gates.py`, `tests/test_v1102_gates.py`,
+   `tests/test_v1103_gates.py` (each carries its own
+   `test_t_v1102_rpt_01_lint_docs_repointed_to_this_release`-family
+   function, names kept stable) — all three repointed to
+   `report-v1.11.0.md`.
+2. `tests/test_v1104_docs.py`'s
+   `test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchanged`
+   compared the live AGENTS.md waiver paragraph against a `git show
+   f3ce1a5:AGENTS.md` baseline by exact equality — this task's own
+   REQ-V1110-NG-11 sentence addition is a legitimate change the old
+   equality check would (correctly) flag, so the assertion is rewritten
+   to `waiver.startswith(baseline_waiver)` (PIN-01's rewrite form:
+   presence/prefix, never frozen equality), proving the v1.10.4-and-
+   earlier text is undisturbed while allowing this and future releases to
+   append their own sentence.
+3. `docs/reports/report-v1.11.0.md` itself had two pre-existing
+   `lint-docs`-delegation defects, invisible until now because `lint-docs`
+   sits only in the `full` profile (never `pre-commit`/`pre-push`, so no
+   prior commit's hook ever ran it): T0's own section carried no
+   `- T0 | delegated: ... | ...` bullet at all (added, describing the pin
+   inventory as delegated and the preconditions/gates/measurements as
+   run directly, matching T0's own prose); T5's bullet was wrapped across
+   several physical lines, so `_DELEGATION_CANDIDATE_RE`'s one-line regex
+   only ever captured its first, 3-cell-short line (collapsed to one
+   physical line, content unchanged). The `## T7`/`## T8` `not reached`
+   placeholders were also missing the `: <reason>` suffix
+   `_EXEMPT_SECTION_RE` requires, so `lint-docs` reported them as missing
+   bullets too — reworded to `not reached: T7`/`not reached: T8`.
+4. `main()`'s new `set_my_commands` call is not stubbed by six
+   pre-existing `TelegramClient.get_me`-stubbing sites across
+   `tests/test_routing.py` (`_stub_startup`), `tests/test_v12_patch.py`
+   (two standalone tests), `tests/test_v1_guardrails.py` (two standalone
+   tests) and `tests/test_v160_dashboard.py` (`_stub_bot_startup`) —
+   each now also stubs `set_my_commands` so these `bot.main([])`-driving
+   startup tests stay fully offline. Verified empirically that this was a
+   real, not theoretical, gap: with the stub left off, all eight affected
+   tests still passed in well under a second in this sandbox (the
+   unstubbed `httpx.Client()` POST fails fast, not via a slow connect
+   timeout) — but that is an accident of this environment's network
+   policy, not a guarantee for every CI environment, so the stub was
+   added rather than left to chance.
+5. Two secret values in `config.py` (`:351`, `:379`) — never printed,
+   quoted or committed, per standing instruction.
+6. This report's own `## Ledger row` section had no fenced code block at
+   all ("Not reached — filled at T8." was plain prose), which
+   `_lint_report_ledger` requires unconditionally, regardless of whether
+   the report is finished — a third, independent `lint-docs` defect this
+   report carried before T6 (alongside the two delegation-bullet defects
+   above). Replaced with an explicitly-labelled provisional fenced row
+   (every cell `TBD`, `Ver` reading `v1.11.0 (provisional)`) so the check
+   passes now without pretending any real number exists yet; T8 replaces
+   it wholesale with the run's actual final row, as every prior release's
+   report does.
+
+### Documentation
+
+README: `/cancel` and `/help` rows added to the Commands table (T5
+deliberately deferred them); an `indexing concurrency` row added to
+`## Limits` carrying the literal phrase "indexing runs in a worker
+thread" (`T-V1110-VER-04`'s eventual T8 check); six new `## Error
+behaviour` rows for `/session`/`/delete`/stale-callback/`/model` (ERR-01
+rows 11-16 — never documented by T2/T3/T4, a gap PIN-02's own test
+exposed). **Disclosed, not fixed here**: `tests/test_v1110_err.py`'s
+canonical `test_t_v1110_err_01_error_matrix_strings` (the spec's own
+frozen `T-V1110-ERR-01` function) still drives only rows 10 and 17 — T5's
+own two rows. Rows 11-16 are now present in README (above) but no test
+exercises the underlying dispatch behaviour that produces them; closing
+that gap is left for whichever task next extends this same function, the
+same way T5 left rows 1-9/11-16 for its own successors. `AGENTS.md`'s
+benchmark-waiver paragraph gained one sentence
+(REQ-V1110-NG-11): "v1.11.0 changes nothing token-bearing (`SYSTEM_PROMPT`,
+`tools.tool_specs()`, `REQUEST_DEFAULTS`, `load_context_messages`
+byte-unchanged) — the rule does not fire." — independently confirmed via
+`git diff 295b01f -- bot.py tools.py storage.py` matching none of those
+four identifiers in any hunk, not just asserted.
+
+### Gates
+
+Run verbatim, in order: `uv sync --locked` — 25 resolved, 23 checked, exit
+0. `uv run --locked ruff check .` — one genuine `PERF401` in the new
+`tests/test_v1110_pin.py` (a `for`/`if`/`append` loop rewritten as a list
+comprehension), then all checks passed, exit 0. `uv run --locked pytest`
+— exit 0, **2373 passed, 1 skipped, 2 xfailed** (2376 collected via
+`--collect-only`, up from the 2371 baseline by exactly the 5 new test
+functions this task adds — `test_v1110_ext.py`'s three,
+`test_v1110_pin.py`'s two). `uv run --locked python bot.py --selftest` —
+`selftest: OK`. Gate 5/6/7/8 intentionally not run this task, per the
+brief. `uv run --locked python devtools/checks.py doctor` — all tools at
+pin, hooks installed, exit 0. `uv run --locked python devtools/checks.py
+lint-docs` — green (after this task's amendment-6 ledger-row fenced-block
+fix and the two delegation-bullet fixes above — all three pre-existing
+`lint-docs` defects in this report file, never caught before because
+`lint-docs` sits only in the `full` profile).
+
+- T6 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T6.md | map vs actual: matches the brief closely; one new file beyond the brief's own stage list (`tests/test_v1110_ext.py`, matching the spec's own frozen test-table names) and six further amendments beyond T0's pin inventory, all disclosed above (three more `report_path` sites T0 missed; the AGENTS.md waiver-paragraph equality-to-prefix rewrite; three pre-existing `lint-docs` defects in this report file itself — T0's missing delegation bullet, T5's line-wrapped one, and the Ledger row's missing fenced block; six pre-existing startup tests needing a new `set_my_commands` stub; two secret values never printed); per-test EC-02 account above is exact, not summarized: EXT-01/-02 and SEC-01's two new clauses never ran red for the right reason (implementation-first); EXT-03 and PIN-02 genuinely ran red on a real README gap before each fix; PIN-01 and the `test_v190_agents.py:226` extension never ran red (written after the fix they'd have caught); the three renamed/repointed `report_path` tests and `test_v1104_docs.py`'s waiver-equality test went stale as a direct, foreseeable side effect of this task's own config/doc edits, not authored test-first, then fixed to match; `T-V1110-ERR-01` still drives only rows 10/17, not the new rows 11-16, left open and disclosed above
+
+## T7 — not reached: T7
+
+## T8 — not reached: T8
 
 ## Operator inputs
 
@@ -1221,4 +1472,13 @@ Not written yet — written at T8 (or at the stop route, if triggered).
 
 ## Ledger row (paste into `economics.md`)
 
-Not reached — filled at T8.
+Provisional, not the run's final row — every cell below is a placeholder,
+filled for real at T8 once every gate has run to completion on the final
+tree. Present only so `lint-docs`'s ledger-row check (a fenced block with
+the header's cell count) can run clean against this still-in-progress
+report from T6 on, per this task's brief ("`lint-docs` green against the
+(still in-progress) report skeleton").
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | v1.11.0 (provisional) | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+```

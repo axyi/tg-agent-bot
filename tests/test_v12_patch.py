@@ -745,6 +745,7 @@ def test_t_v12_err_01_config_error_from_seam_is_caught(tmp_path, monkeypatch, ca
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot.TelegramClient, "set_my_commands", lambda self, commands: True)
     monkeypatch.setattr(
         bot, "build_llm_client", lambda cfg, *, client, override=None, model=None: object()
     )
@@ -882,6 +883,7 @@ def test_t_v12_cov_06_empty_resolv_reaches_the_runner_partial(tmp_path, monkeypa
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot.TelegramClient, "set_my_commands", lambda self, commands: True)
     monkeypatch.setattr(
         bot, "build_llm_client", lambda cfg, *, client, override=None, model=None: object()
     )

@@ -117,6 +117,8 @@ suppressed — see [Dashboard](#dashboard)) and `--version` (prints
 | `/delete <filename>` \| `/delete #<id>` | delete one of the caller's documents, its chunks and its vectors; exact filename match, or the `#`-prefixed id shown by `/documents` — a filename that itself starts with `#` is only reachable by id after this |
 | `/sessions` | list the caller's 10 most recent sessions as a table (`●`, `#`, `title`, `msgs`, `last`) — see [Sessions](#sessions) |
 | `/session <id>` | switch the caller's active session to `#<id>` |
+| `/cancel` | cancel the caller's in-progress document indexing job, if any |
+| `/help` | show the command list as a table (`/start` is the same handler, for a fresh chat) |
 
 Any other `/…` text is passed to the model as an ordinary message. Commands are
 reachable only by allowlisted senders and are never stored in the conversation.
@@ -918,6 +920,7 @@ delivery is not provided and is not claimed.
 | documents per user | 20 (`DOCUMENT_LIMIT`) |
 | document indexing budget | 1800 s (`INDEX_BUDGET_S_DEFAULT`), checked between stages (extract/chunk/embed/store), between PDF pages, and around `getFile`/download — cooperatively cancellable (`/cancel`) up to commit, on `IngestWorker`'s own thread |
 | ingest queue | 4 concurrent jobs (`INGEST_QUEUE_MAX`), one in flight per user; a 5th user's upload is refused, a 2nd from an in-flight user is refused |
+| indexing concurrency | indexing runs in a worker thread (`IngestWorker`), never inline with update handling — the poller stays responsive to every other command while a document is being indexed |
 | DOCX archive bounds | 2,000 members / 50 MiB total uncompressed / 20 MiB per member / compression ratio 100 |
 | PDF page ceiling | 2,000 pages |
 | chunk size / overlap | target 1000 chars, hard max 1200, overlap 200, minimum 50 (tail-merge threshold) |
@@ -945,6 +948,12 @@ delivery is not provided and is not claimed.
 | SIGTERM mid-run | the current round finishes, then the run is interrupted | the "shutting down" fallback, best-effort |
 | rate limit exceeded | rejected before storage | the fixed rate-limit message |
 | message too long | rejected before storage, no bucket token spent | the fixed too-long message |
+| `/session` bare, more than one argument, or a non-integer argument | active session unchanged | `Usage: /session <id> (see /sessions)` |
+| `/session <id>` unknown or belonging to another user | active session unchanged | `No session #<id>.` |
+| `/delete` bare (no argument) | nothing deleted | `Usage: /delete <filename> \| /delete #<id>` |
+| `/delete <filename>` or `/delete #<id>` not found, or not owned by the caller | nothing deleted | `No document named <argument>.` |
+| stale or malformed `callback_data` | `answerCallbackQuery` acknowledges, no state change beyond the polling cursor | `Expired — send the command again.` |
+| `/model` with a model outside the provider's catalogue, an unrecognized provider/token, or more than two arguments | no state change beyond the polling cursor | `Unknown model for <provider>; see /model` / `Usage: /model [lmstudio\|openrouter\|auto] [<model>]` |
 | document: unsupported extension, or no filename | refused before download, nothing stored | `Unsupported file type. Supported: .txt .md .docx .pdf` |
 | document: corrupted PDF (`PdfReader`/page enumeration/`extract_text()`, not a budget or size limit) | refused, nothing stored | `Could not read this PDF file.` |
 | document: corrupted DOCX (`BadZipFile`/`PackageNotFoundError`/`KeyError`) | refused, nothing stored | `Could not read this DOCX file.` |

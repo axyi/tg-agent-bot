@@ -1544,6 +1544,7 @@ def test_main_binds_the_container_runner_not_the_host_runner(tmp_path, monkeypat
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot.TelegramClient, "set_my_commands", lambda self, commands: True)
     monkeypatch.setattr(
         bot, "build_llm_client", lambda cfg, *, client, override=None, model=None: object()
     )
@@ -1594,6 +1595,7 @@ def test_main_disables_exec_when_the_backend_is_down(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "load_config", lambda: cfg)
     monkeypatch.setattr(bot.tools, "load_skills", lambda path: {})
     monkeypatch.setattr(bot.TelegramClient, "get_me", lambda self: {"username": "ThisBot"})
+    monkeypatch.setattr(bot.TelegramClient, "set_my_commands", lambda self, commands: True)
     monkeypatch.setattr(
         bot, "build_llm_client", lambda cfg, *, client, override=None, model=None: object()
     )

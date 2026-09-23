@@ -233,12 +233,22 @@ def test_t_v190_ec_01_readme_commands_table_gains_documents_and_delete():
     assert "/reload_skills" in section
     # /reload_skills must still precede the two new rows (appended after it).
     assert section.index("/reload_skills") < section.index("/documents")
+    # v1.11.0 T6 (REQ-V1110-EXT-01/-03): every `COMMANDS` name has a README
+    # row -- import here, not at module level, so this file never needs
+    # `bot` as a hard dependency for its other, bot.py-agnostic tests.
+    import bot as bot_module
+
+    for name, _desc in bot_module.COMMANDS:
+        assert f"/{name}" in section, f"README Commands table missing a row for /{name}"
 
 
 def test_t_v190_ec_01_readme_limits_table_gains_rag_rows():
     """v1.11.0 T5 (REQ-V1110-ING-01/DOC-03) rewrote the four needles the
     caps rise touches: 20,000,000 bytes / 2,000,000 chars / 1800 s / 2,000
-    pages, replacing 10,485,760 / 500,000 / 300 s / 500 pages."""
+    pages, replacing the prior (v1.10.4 and earlier) byte/character/budget/
+    page-count ceilings -- spelled out as prose here, not as the retired
+    literal values themselves, so this docstring doesn't trip v1.11.0 T6's
+    own `tests/test_v1110_pin.py::test_t_v1110_pin_01_no_retired_literal_in_tests`."""
     text = _read_readme()
     limits_idx = text.index("## Limits")
     error_idx = text.index("## Error behaviour")
@@ -303,14 +313,17 @@ def test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path():
     # each one (T10 did 1.8.0 -> 1.9.0; v1.9.1 T2 did 1.9.0 -> 1.9.1;
     # v1.9.2 T3 did 1.9.1 -> 1.9.2; v1.9.3 T4 did 1.9.2 -> 1.9.3; v1.9.4 T5
     # did 1.9.3 -> 1.9.4; v1.9.5 T2 did 1.9.4 -> 1.9.5; v1.10.0 T6 did
-    # 1.9.5 -> 1.10.0; this task's literal repoint, v1.10.1 T2, does
-    # 1.10.0 -> 1.10.1 -- not in spec-v1.10.1.md's own §14 file list for
-    # this test, bumped here only because T2's yaml edit would otherwise
-    # leave this assertion stale and pytest red; the function name is left
-    # for whichever task owns this file's renames next).
+    # 1.9.5 -> 1.10.0; v1.10.1 T2 did 1.10.0 -> 1.10.1; v1.11.0 T6's own
+    # repoint does 1.10.4 -> 1.11.0 -- not in this task's own file list
+    # either (T0's pin inventory names it as a disclosed amendment, not
+    # in the brief's starting list), bumped here only because T6's yaml
+    # edit would otherwise leave this assertion stale and pytest red; the
+    # function name is deliberately left stable across releases (its own
+    # docstring/comment says so) for whichever task owns this repoint
+    # next).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.10.4.md" in text
-    assert "report_path: docs/reports/report-v1.10.3.md" not in text
+    assert "report_path: docs/reports/report-v1.11.0.md" in text
+    assert "report_path: docs/reports/report-v1.10.4.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:
