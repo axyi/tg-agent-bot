@@ -1450,7 +1450,47 @@ fix and the two delegation-bullet fixes above — all three pre-existing
 
 - T6 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T6.md | map vs actual: matches the brief closely; one new file beyond the brief's own stage list (`tests/test_v1110_ext.py`, matching the spec's own frozen test-table names) and six further amendments beyond T0's pin inventory, all disclosed above (three more `report_path` sites T0 missed; the AGENTS.md waiver-paragraph equality-to-prefix rewrite; three pre-existing `lint-docs` defects in this report file itself — T0's missing delegation bullet, T5's line-wrapped one, and the Ledger row's missing fenced block; six pre-existing startup tests needing a new `set_my_commands` stub; two secret values never printed); per-test EC-02 account above is exact, not summarized: EXT-01/-02 and SEC-01's two new clauses never ran red for the right reason (implementation-first); EXT-03 and PIN-02 genuinely ran red on a real README gap before each fix; PIN-01 and the `test_v190_agents.py:226` extension never ran red (written after the fix they'd have caught); the three renamed/repointed `report_path` tests and `test_v1104_docs.py`'s waiver-equality test went stale as a direct, foreseeable side effect of this task's own config/doc edits, not authored test-first, then fixed to match; `T-V1110-ERR-01` still drives only rows 10/17, not the new rows 11-16, left open and disclosed above
 
-## T7 — not reached: T7
+## T7 — mutation entries, review, gates 1-8 (in progress)
+
+### Phase A — the eight `v1110-*` entries
+
+Delegated (brief `docs/spec/task-briefs/v1110-T7.md`, EC-04), landed in
+`devtools/mutation_check.py`'s `MUTATIONS` list (144 → 152), each entry's
+`find`/`replace` pre-verified unique against the live tree by the
+orchestrator before the brief was written. New `tests/test_v1110_mut.py`
+(`T-V1110-MUT-01`) green.
+
+**Procedural deviation, disclosed (not a spec ambiguity — established
+precedent)**: the v1.9.3 dirty-tree guard
+(`devtools/mutation_check.py:2229`, `_dirty_mutation_paths`)
+unconditionally refuses any `--only`/`--select` run while
+`devtools/mutation_check.py` (itself a mutation-target path of seven
+pre-existing entries) differs from the committed `HEAD` blob — which it
+must, to hold eight new entries at all. `docs/reports/report-v1.10.2.md`
+T5 and `docs/reports/report-v1.10.1.md` T6a hit the identical conflict
+and resolved it the same way: commit the entries first, verify
+`--only`/`--select` against the clean tree next. Applied unchanged here —
+every `why` field is honestly marked "NOT YET empirically verified via
+`--only`" rather than a fabricated observed failure; isolation
+verification is the orchestrator's own next commands-only step.
+
+Also fixed `config/quality_gates.yaml`'s `mutation-all` dated-comment
+block (the "is now 144" sentence retired to "closed at 144", a new
+paragraph added reading "is now 152") so gate 3's five comment-parity
+tests (`test_v1101_gates.py`, `test_v1102_gates.py`,
+`test_v1104_gates.py`) stayed green at this commit —
+`timeout_seconds` itself is untouched pending the actual gate-6 wall `W`.
+
+Gates 1-4: `pytest` 2374 passed, 1 skipped, 2 xfailed; `ruff check .`
+clean; `bot.py --selftest` OK.
+
+### Phase B — isolation verification: not reached
+### Phase C — clean-context review (REV-01): not reached
+### Phase D — review fixes, if any: not reached
+### Phase E — gates 1-7, doctor, lint-docs, gate 8: not reached
+### Phase F — report-only commit: not reached
+
+- T7 | delegated: yes | to: general-purpose subagent (claude-sonnet-5), Phase A only | brief: docs/spec/task-briefs/v1110-T7.md | map vs actual: matches the brief exactly (all 8 find/replace pairs pre-verified by the orchestrator, landed verbatim bar one ruff-driven line-split in entry 4, disclosed); the `--only`/`--select` isolation verification the brief asked for could not run (dirty-tree guard conflict, disclosed above and in the brief itself) — orchestrator's own commands-only follow-up covers it next; the `quality_gates.yaml` comment fix and this commit are the orchestrator's own commands-only work, not delegated; later T7 phases (review, gates) get their own bullets as they land
 
 ## T8 — not reached: T8
 

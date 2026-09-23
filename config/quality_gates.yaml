@@ -733,7 +733,14 @@ gates:
   # will confirm (or refute) 1640s still covers the larger table.
   #
   # spec-v1.10.4 T2 appended the five `v1103-*` entries authored by the
-  # v1.10.3 run; `len(devtools.mutation_check.MUTATIONS)` is now 144.
+  # v1.10.3 run; `len(devtools.mutation_check.MUTATIONS)` closed at 144.
+  #
+  # spec-v1.11.0 T7 appended the eight `v1110-*` entries; `len(devtools.
+  # mutation_check.MUTATIONS)` is now 152. This task does not touch this
+  # gate's own `argv` or `timeout_seconds` unless the measured wall `W`
+  # exceeds 1300s (REQ-V1110-MUT-01) -- the orchestrator's own
+  # authoritative all-152 run immediately after this task's commit is
+  # what will confirm (or refute) 1640s still covers the larger table.
   mutation-all:
     kind: command
     result_mode: exit_status

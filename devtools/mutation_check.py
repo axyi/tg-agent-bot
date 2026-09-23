@@ -2020,6 +2020,167 @@ MUTATIONS = [
         "(T-V1103-RT-08, IndexError on the pinned HAL_MARKERS[17] index, "
         "the list's own last-index pin) -- matches, no discrepancy.",
     },
+    {
+        "id": "v1110-callback-allowlist-dropped",
+        "path": "bot.py",
+        "find": (
+            "    if from_id not in cfg.allowed_tg_ids:\n"
+            "        # Nothing below this line can spend a resource on an intruder --\n"
+            "        # the one acknowledgement is what stops Telegram's spinner.\n"
+            '        log.warning("unauthorized update from tg_id=%s", from_id)\n'
+        ),
+        "replace": (
+            "    if False:\n"
+            "        # Nothing below this line can spend a resource on an intruder --\n"
+            "        # the one acknowledgement is what stops Telegram's spinner.\n"
+            '        log.warning("unauthorized update from tg_id=%s", from_id)\n'
+        ),
+        "why": "REQ-V1110-MUT-01: the callback-query handler's allowlist guard "
+        "-- forcing it to False lets an intruder's callback fall through past "
+        "the one-ack-and-stop branch, spending resources (state writes, LLM "
+        "calls) it must not reach. Spec table names T-V1110-CBQ-02 as the "
+        "killer (asserts exactly one bare ack, no sends/edits, no state "
+        "change, no LLM call, exactly one 'unauthorized update' log line for "
+        "an intruder id). NOT YET empirically verified via --only -- blocked "
+        "by the v1.9.3 dirty-tree guard (devtools/mutation_check.py:2229, "
+        "_dirty_mutation_paths): devtools/mutation_check.py is itself the "
+        "path of seven pre-existing entries, so any --only/--select refuses "
+        "to start while this file (which must hold the new entries) differs "
+        "from the committed HEAD blob. See T7 Phase A handback for the "
+        "verification-ordering conflict this creates against the 'do not "
+        "commit' instruction.",
+    },
+    {
+        "id": "v1110-activate-ownership-dropped",
+        "path": "storage.py",
+        "find": (
+            '            "UPDATE conversations SET active = 1 WHERE id = ? AND tg_user_id = ?",\n'
+        ),
+        "replace": (
+            '            "UPDATE conversations SET active = 1 WHERE id = ? AND (? IS NOT NULL)",\n'
+        ),
+        "why": "REQ-V1110-MUT-01: activate_conversation's ownership predicate "
+        "-- both placeholders are preserved (the bound tg_user_id is still "
+        "passed positionally, unchanged at the call site) but the SQL no "
+        "longer compares it, so the UPDATE's WHERE clause degrades to id = ? "
+        "AND (? IS NOT NULL), true for any non-None caller id regardless of "
+        "whose conversation it is -- a foreign row becomes switchable. Spec "
+        "table names T-V1110-SES-02 as the killer (caller id 4242; asserts a "
+        "foreign row does NOT become active -- under the mutant the switch "
+        "would succeed and the assertion would fail). NOT YET empirically "
+        "verified via --only -- blocked by the same dirty-tree guard "
+        "conflict as entry 1 above (devtools/mutation_check.py must be dirty "
+        "to hold these entries at all).",
+    },
+    {
+        "id": "v1110-table-path-escape-dropped",
+        "path": "bot.py",
+        "find": '    text = "<pre>" + html.escape(fitted, quote=False) + "</pre>"\n',
+        "replace": '    text = "<pre>" + fitted + "</pre>"\n',
+        "why": "REQ-V1110-MUT-01: the monospace-table render path's HTML "
+        "escape -- dropping html.escape means a fitted payload containing "
+        "<, >, or & renders unescaped inside the <pre> block, breaking "
+        "Telegram's HTML parse mode (or worse, injecting markup) for any "
+        "table cell holding those characters. Spec table names "
+        "T-V1110-OUT-02 as the killer (the payload-invariant test -- a "
+        "<script>& body would arrive unescaped under the mutant). NOT YET "
+        "empirically verified via --only -- blocked by the same dirty-tree "
+        "guard conflict as entry 1 above.",
+    },
+    {
+        "id": "v1110-agent-reply-gains-parse-mode",
+        "path": "bot.py",
+        "find": (
+            '        return self._call_with_retry("sendMessage", '
+            '{"chat_id": chat_id, "text": text})\n'
+        ),
+        "replace": (
+            "        return self._call_with_retry(\n"
+            '            "sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}\n'
+            "        )\n"
+        ),
+        "why": "REQ-V1110-MUT-01: send_message's plain-text sendMessage call "
+        "-- adding an unwanted parse_mode: HTML key changes the payload "
+        "shape for the ordinary agent-reply path, which must stay plain "
+        "text (no HTML escaping is applied to arbitrary LLM output on this "
+        "path, so parse_mode HTML would risk a parse error or unintended "
+        "markup on ordinary replies). Spec table names T-V1110-OUT-06 as "
+        "the killer (the agent-reply-path-unchanged test -- "
+        "inspect.signature/payload-shape assertions on the sendMessage "
+        "call). NOT YET empirically verified via --only -- blocked by the "
+        "same dirty-tree guard conflict as entry 1 above.",
+    },
+    {
+        "id": "v1110-inflight-guard-dropped",
+        "path": "bot.py",
+        "find": "            if from_id in self._in_flight:\n",
+        "replace": "            if False:\n",
+        "why": "REQ-V1110-MUT-01: IngestWorker.reserve's per-user in-flight "
+        "check (inside its with self._lock: block) -- forcing it to False "
+        "means a second upload from the same user is no longer refused "
+        "while their first ingest is still running; only the capacity "
+        "token still gates admission. Spec table names T-V1110-ING-03 as "
+        "the killer (second-upload-refused). NOT YET empirically verified "
+        "via --only -- blocked by the same dirty-tree guard conflict as "
+        "entry 1 above.",
+    },
+    {
+        "id": "v1110-cancel-flag-ignored",
+        "path": "documents.py",
+        "find": "    if cancel is not None and cancel.is_set():\n",
+        "replace": "    if False:\n",
+        "why": "REQ-V1110-MUT-01: _check_budget's cancellation check -- "
+        "forcing it to False means an in-progress embed/ingest never "
+        "notices a cancel event mid-embedding and runs to completion "
+        "regardless. Spec table names T-V1110-ING-05 as the killer "
+        "(cancel mid-embedding). NOT YET empirically verified via --only "
+        "-- blocked by the same dirty-tree guard conflict as entry 1 "
+        "above.",
+    },
+    {
+        "id": "v1110-model-index-unbounded",
+        "path": "bot.py",
+        "find": (
+            "        if digest != _catalogue_hash(catalogue):\n"
+            "            return None\n"
+            "        idx = int(idx_raw)\n"
+            "        if not (0 <= idx < len(catalogue)):\n"
+            "            return None\n"
+        ),
+        "replace": "        idx = int(idx_raw)\n",
+        "why": "REQ-V1110-MUT-01: the /model callback's selection guard -- "
+        "the landed code holds this as two separate if statements (a "
+        "catalogue-hash staleness check, then a bounds check) rather than "
+        "the spec pseudocode's single combined condition; this entry drops "
+        "both guards in one mutation to match the spec's intent, since it "
+        "cannot force one-if syntax onto already-committed code. Without "
+        "both guards, a stale-hash callback (catalogue reordered since the "
+        "keyboard was rendered) and an out-of-range index both fall through "
+        "to indexing catalogue[idx] unchecked. Spec table names both "
+        "T-V1110-CBQ-05 (out-of-range index, e.g. mod:model:99:<hash>) and "
+        "T-V1110-MOD-08 (stale hash after reorder) as killers -- two "
+        "different halves of what this one mutation disables, each meant "
+        "to be confirmed as a killer in isolation. NOT YET empirically "
+        "verified via --only -- blocked by the same dirty-tree guard "
+        "conflict as entry 1 above.",
+    },
+    {
+        "id": "v1110-document-cap-tenfold",
+        "path": "bot.py",
+        "find": "DOCUMENT_MAX_BYTES = 20_000_000\n",
+        "replace": "DOCUMENT_MAX_BYTES = 200_000_000\n",
+        "why": "REQ-V1110-MUT-01: the module-level document size cap -- "
+        "multiplying it tenfold (20MB to 200MB) lets an upload ten times "
+        "over the intended limit pass the size precheck. Its own line at "
+        "module level; the pre-existing v190-size-precheck-disabled entry's "
+        "find line (`    if isinstance(file_size, int) and file_size > "
+        "DOCUMENT_MAX_BYTES:`) stays untouched and still occurs exactly "
+        "once in bot.py after this entry -- verified directly (both "
+        "strings are disjoint, on different lines). Spec table names "
+        "T-V1110-ING-01 as the killer (caps-and-find-line). NOT YET "
+        "empirically verified via --only -- blocked by the same dirty-tree "
+        "guard conflict as entry 1 above.",
+    },
 ]
 
 _IDS = [m["id"] for m in MUTATIONS]
