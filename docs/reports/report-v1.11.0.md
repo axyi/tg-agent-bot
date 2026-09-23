@@ -1507,8 +1507,62 @@ its "NOT YET empirically verified" placeholder to the actual observed
 failure (one line-length fix applied by hand afterward, `ruff format
 --check` clean). `T-V1110-MUT-01` still green. No source file touched —
 `ruff check .` clean, gates 1-4 unaffected.
-### Phase C — clean-context review (REV-01): not reached
-### Phase D — review fixes, if any: not reached
+### Phase C — clean-context review (REV-01)
+
+`code-reviewer` subagent, clean context, scope `git diff dc317d8..HEAD`
+(T0 through T7 Phase B) against `docs/spec/spec-v1.11.0.md`, the nine
+REV-01 checklist items plus the standard/test-independence checklists.
+**Verdict: request changes** — one 🔴 must-fix, two 🟡 should-fix, two 🟢
+notes; every REV-01 checklist item 1-9 otherwise confirmed clean (each
+independently verified by the reviewer, not just asserted).
+
+🔴 **Finding 1 (must-fix)** — a `/cancel` landing in the gap between the
+last cancellation checkpoint (end of the embedding-batch loop) and
+`IngestWorker._mark_committing` (the `before_commit` callable, which
+unconditionally transitioned to `"committing"` with no cancel check) is
+silently lost: the job commits and sends a success reply despite the
+user having been told `Cancelling <name>…`. Violates ING-04's "exclusive
+by phase" invariant and ERR-01 row 8. No existing test covered this
+timing window (`T-V1110-ING-09` only covers `/cancel` *after* the
+`committing` transition, not before it). **Fixed — see Phase D.**
+
+🟡 **Finding 2 (should-fix, waived)** — `job.cancel_reason` is read at
+three sites (`bot.py:1959,1969,2123`) without holding `self._lock`,
+which doesn't literally match the docstring's "read and written only
+under the lock" claim. **Waived**: every write sets `cancel_reason`
+*before* `cancel.set()` (confirmed at the two write sites, `bot.py:2047`
+and `:2222`), and every unlocked read only happens after the reader has
+already observed `cancel.is_set()` — `threading.Event.set()`/`.is_set()`
+carry their own internal `Condition`/`Lock` and therefore their own
+happens-before edge, so this is standard-library-mediated safe
+publication, not an actual data race, on CPython with the GIL (this
+project's target). Re-review if this project ever targets free-threaded
+Python (`PYTHON_GIL=0`) — noted here for that future reader, not acted
+on now.
+
+🟡 **Finding 3 (should-fix, waived)** — the plain-text fallback
+(`send_pre`/`edit_pre`) fires on any non-fatal `TelegramError`, not only
+an HTTP 400, since `TelegramError` itself carries no status code.
+**Waived**: already disclosed by T1's own report section (`## T1`, the
+"Fallback scope note") as a deliberate reading of OUT-04's rule — a
+payload-shaped resend is worth trying whenever the failure isn't a fatal
+token/chat problem — not a change to `TelegramClient.call`'s own
+401/404/429 classification. The reviewer's independent finding confirms
+the scope is real and untested at the exact 429/5xx/transport boundary,
+but does not contradict T1's rationale; broader-than-literal-"400"
+coverage is more robust, not observed incorrect. No behavior change.
+
+🟢 **Findings 4-5 (notes, no action)** — MOD-01's `field` column
+genuinely truncates the label `openrouter model`, a pre-existing
+self-inconsistency in the spec's own MOD-01 text (both disclosed already,
+`## T4`); the `v1110-table-path-escape-dropped` entry's named killer
+(`T-V1110-OUT-02`) is correct even though this run's own `--only`
+observed a different test (`CBQ-08`) failing first, due to collection
+order — independently reconfirmed by the reviewer.
+
+- T7 | delegated: no | to: the task is itself the clean-context review — `code-reviewer` subagent, its own clean context, per REV-01 | brief: — | map vs actual: scope `git diff dc317d8..HEAD`, all nine REV-01 checklist items covered, one 🔴 and two 🟡 findings, two 🟢 notes
+
+### Phase D — review fixes: not reached
 ### Phase E — gates 1-7, doctor, lint-docs, gate 8: not reached
 ### Phase F — report-only commit: not reached
 
