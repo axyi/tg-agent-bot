@@ -72,7 +72,7 @@ _V1104_ROW = (
     "test pin rewritten to presence, contiguity and order; model under test "
     "openai/gpt-4.1; shipped judge default anthropic/claude-sonnet-5; gate 8 "
     "judged by anthropic/claude-sonnet-5 (another vendor); gate 8 green on "
-    "this run; this release |"
+    "this run |"
 )
 
 _V195_ROW_NO_THIS_RELEASE = (
@@ -95,9 +95,19 @@ _GATE8_FILLED_ROWS = (
 
 
 def test_t_v1104_doc_02_v1104_release_and_gate8_rows_landed_at_t5():
-    """T-V1104-DOC-02: T5, red before, green after -- a `v1.10.4` row ending
-    "this release", the `v1.9.5` row (`README.md:913`) without it, no
-    "pending" left in the gate-8 results table (`README.md:594-600`)."""
+    """T-V1104-DOC-02: T5, red before, green after -- a `v1.10.4` row, the
+    `v1.9.5` row (`README.md:913`) without an "; this release" clause, no
+    "pending" left in the gate-8 results table (`README.md:594-600`).
+
+    Disclosed amendment (EC-02, spec-v1.11.0 T8, a site not in the T8
+    brief's starting list): `_V1104_ROW` originally ended "; this release"
+    -- true only while v1.10.4 was the current release. T8's own
+    `README.md`'s `## Versioning` table work (REQ-V1110-VER-01) moves that
+    clause onto the new `v1.11.0` row, so `_V1104_ROW` drops it here. The
+    property this test actually proves (the v1.10.4 row's content landed
+    verbatim, the v1.9.5 row still lacks the clause, the gate-8 table is
+    filled) is unaffected by which row currently carries "; this
+    release"."""
     text = _read_readme()
 
     assert _V1104_ROW in text
@@ -119,9 +129,17 @@ def test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchange
     rewritten to a prefix check (PIN-01's rewrite form: presence/
     contiguity, never frozen equality) -- proving the v1.10.4-and-earlier
     text is undisturbed while allowing later releases to append their own
-    sentence, same as every prior "carries the waiver again" addition."""
+    sentence, same as every prior "carries the waiver again" addition.
+
+    Disclosed amendment (EC-02, spec-v1.11.0 T8, a site not in the T8
+    brief's starting list): the brief-path token check is repointed from
+    v1104 to v1110, mirroring AGENTS.md:95's own T8 repoint (REQ-V1110-
+    VER-01) -- the function name stays as-is (PIN-01: rewritten in place,
+    never renamed); the waiver-paragraph prefix check below, this
+    function's actual subject, is untouched by this repoint."""
     text = _read_agents_md()
-    assert "docs/spec/task-briefs/v1104-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1110-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1104-T<N>.md" not in text
 
     waiver_start = text.index("v1.10.1 waived this rule by operator decision")
     waiver_end = text.index("## go protocol", waiver_start)

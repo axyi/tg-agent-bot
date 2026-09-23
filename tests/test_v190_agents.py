@@ -90,9 +90,13 @@ def test_t_v1102_ec_01_agents_md_eight_gate_block_present():
 
 
 def test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104():
+    # Disclosed amendment (EC-02, spec-v1.11.0 T8, a site not in the T8
+    # brief's starting list): repointed from v1104 to v1110, mirroring
+    # AGENTS.md:95's own T8 repoint (REQ-V1110-VER-01). Function name stays
+    # as-is (PIN-01: rewritten in place, never renamed).
     text = _read_agents_md()
-    assert "docs/spec/task-briefs/v1104-T<N>.md" in text
-    assert "docs/spec/task-briefs/v1103-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1110-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1104-T<N>.md" not in text
 
 
 def test_t_v190_ec_01_agents_md_brief_path_sentence_unchanged_besides_token():
@@ -142,18 +146,20 @@ def test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5():
     # landed_at_t2) pinned those figures and named T2 as their landing
     # point. v1.10.0-v1.10.3 were stopped runs that never bumped
     # pyproject.toml or landed this paperwork (Stage B'/Stage B, no T5
-    # equivalent reached). spec-v1.10.4 T5 (this task) lands the real,
-    # final post-run figures: 2311 tests (measured via `pytest
-    # --collect-only -q -o addopts="" | grep -c '::'` on the tree after
-    # every other T5 edit, including this task's own new
-    # tests/test_v1104_version.py and the T-V1104-DOC-02 gate-8/release-row
-    # test) and 144 mutation entries, dated "as of spec-v1.10.4 T5".
+    # equivalent reached). spec-v1.10.4 T5 landed 2311 tests and 144
+    # mutation entries, dated "as of spec-v1.10.4 T5". spec-v1.11.0 T8
+    # (this task, REQ-V1110-VER-01) lands the real, final post-run
+    # figures: 2384 tests (measured via `pytest --collect-only -q
+    # -o addopts="" | grep -c '::'` on the tree after every other T8 edit,
+    # including this task's own new tests/test_v1110_ver.py and
+    # tests/test_v1110_inventory.py) and 152 mutation entries, dated "as of
+    # spec-v1.11.0 T8".
     text = _read_agents_md()
-    assert "2311" in text
-    assert "144 entries" in text
-    assert "as of spec-v1.10.4 T5" in text
-    assert "1638 tests as of spec-v1.9.5 T2" not in text
-    assert "120 entries as of v1.9.5 T2" not in text
+    assert "2384" in text
+    assert "152 entries" in text
+    assert "as of spec-v1.11.0 T8" in text
+    assert "2311 tests as of spec-v1.10.4 T5" not in text
+    assert "144 entries as of spec-v1.10.4 T5" not in text
 
 
 def test_t_v190_ec_01_readme_documents_rag_heading_present():

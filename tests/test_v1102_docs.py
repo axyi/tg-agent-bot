@@ -148,6 +148,12 @@ def test_t_v1102_rpt_02_stopped_release_rows_landed_at_t3():
 
 
 def test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104():
+    # Disclosed amendment (EC-02, spec-v1.11.0 T8, a site not in the T8
+    # brief's starting list): the brief-path token check is repointed from
+    # v1104 to v1110, mirroring AGENTS.md:95's own T8 repoint (REQ-V1110-
+    # VER-01). Function name stays as-is (PIN-01: rewritten in place,
+    # never renamed) -- every other assertion here (the eight-gate count,
+    # the benchmark-waiver prose) is untouched by this repoint.
     text = _read_agents_md()
     normalized = _normalize(text)
     assert "All eight MUST exit 0" in text
@@ -158,8 +164,8 @@ def test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104():
         "comparable to the LM Studio baseline"
     ) in normalized
     assert "v1.10.2 carries the waiver: its prompt change moves the hash again" in normalized
-    assert "docs/spec/task-briefs/v1104-T<N>.md" in text
-    assert "docs/spec/task-briefs/v1103-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1110-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1104-T<N>.md" not in text
 
 
 # ---------------------------------------------------------------------------

@@ -1699,7 +1699,111 @@ commit itself for the exact path list.
 
 - T7 | delegated: yes | to: general-purpose subagent (claude-sonnet-5), Phase A only | brief: docs/spec/task-briefs/v1110-T7.md | map vs actual: matches the brief exactly (all 8 find/replace pairs pre-verified by the orchestrator, landed verbatim bar one ruff-driven line-split in entry 4, disclosed); the `--only`/`--select` isolation verification the brief asked for could not run (dirty-tree guard conflict, disclosed above and in the brief itself) — orchestrator's own commands-only follow-up covers it next; the `quality_gates.yaml` comment fix and this commit are the orchestrator's own commands-only work, not delegated; later T7 phases (review, gates) get their own bullets as they land
 
-## T8 — not reached: T8
+## T8 — version bump (first commit)
+
+- T8 | delegated: yes | to: general-purpose subagent (claude-sonnet-5) | brief: docs/spec/task-briefs/v1110-T8.md | map vs actual: the bump, the two new test files (`test_v1110_ver.py`, `test_v1110_inventory.py`) and the `test_v1104_version.py`/`test_v190_agents.py` repoints the brief named all match; one brief-described deliverable (the `/documents` sample) turned out missing rather than already-landed, and three more pin sites surfaced beyond the brief's own list — both disclosed as EC-02/EC-03 amendments, not a widening of scope
+
+Delegated (EC-04), brief `docs/spec/task-briefs/v1110-T8.md`. This section
+covers only T8's **first** commit, the bump — the orchestrator's fresh
+gates 1-6, gate 5, the gate 7/8 identity-reuse check, the node-id floor
+check, `checks.py replay`, the evidence-only second commit and the local
+tag are its own separate next step, not covered here.
+
+**What landed:** `pyproject.toml:3` 1.10.4 -> 1.11.0; `uv lock`
+regenerated online (the one network call this task is permitted) —
+`git diff -- pyproject.toml uv.lock` touches only the `tg-agent-bot`
+package's own `version` line in each file, no dependency drift.
+`tests/test_v1110_ver.py` (new, `T-V1110-VER-01..04`).
+`tests/test_v1110_inventory.py` (new, `T-V1110-INV-01`, the frozen
+61-pair spec-test inventory). `tests/test_v1104_version.py` repointed:
+`test_t_v1104_ver_01_...`'s live-tree read replaced by a frozen
+`v1.10.4` tag-blob read (its `v1.9.5` half untouched);
+`test_t_v1104_ver_02_...`'s diff-shape assertion kept as the historical
+fact it is, its trailing live-tree literal bumped `"1.10.4"` ->
+`"1.11.0"`. `tests/test_v190_agents.py`'s count-lines pin
+(`test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5`) rewritten in
+place to T8's measured figures. `README.md`: the `## Versioning` table
+gains a `v1.11.0` row and the `v1.10.4` row drops `; this release`; a
+`### `/documents`` sample added (see disclosed amendments below).
+`AGENTS.md`: the gate-3/gate-6 count lines and the brief-path token
+(`:95`) repointed to T8's numbers.
+
+**Disclosed amendments (EC-02):**
+
+1. `tests/test_v1104_version.py::test_t_v1104_ver_02_pyproject_and_uv_lock_diff_from_f3ce1a5_is_version_only`
+   (line 108, was 78) — the spec's own T8 text described only the sibling
+   function's repoint, not this one's trailing `assert live_version ==
+   "1.10.4"`. Read before editing (per the brief's instruction): the
+   assertion reads the *live* tree, not a frozen blob, so T8's own bump
+   broke it. The property the test actually proves (a version delta from
+   `f3ce1a5` exists) is unaffected by which version number is live — the
+   literal is bumped to `"1.11.0"`, not the assertion's shape.
+2. REQ-V1110-VER-02 names "a `/documents` sample after [the `/stats`
+   sample]" as a T2 deliverable; T2's own report (`## T2`, "Further
+   disclosures") explicitly disclosed dropping it. `T-V1110-VER-04`'s
+   plain reading (README carries the sample) was therefore genuinely red
+   on first execution — not a rewrite-the-test situation. T8 completes
+   the missing deliverable instead: a `### `/documents`` subsection added
+   to `README.md` right after the `### `/stats`` sample (inside
+   `## Observability`, out of `## Commands`' `test_t_v1110_ext_03`-parsed
+   section), its table generated from a real run of
+   `test_t_v1110_doc_01_documents_table`'s own two-document fixture
+   (`report.pdf`, 42 pages, and a 40-character `.md` filename), not
+   hand-drawn.
+3. Three more sites, found by a full `pytest` run after the bump and the
+   README/AGENTS.md edits (none named in the T8 brief's starting file
+   list, permitted under REQ-V1110-EC-03: "a site discovered later is a
+   disclosed amendment (PIN-01), not a stop"): `AGENTS.md:95`'s
+   brief-path token repoint (`v1104-T<N>.md` -> `v1110-T<N>.md`) is
+   independently pinned, live-tree, by two more tests of the same name
+   `test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104` in
+   `tests/test_v1102_docs.py` and `tests/test_v190_agents.py` (a
+   different function than the count-lines pin the brief named), and by
+   `tests/test_v1104_docs.py::test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchanged`
+   (its first assertion only — the waiver-paragraph prefix check that is
+   this function's actual subject is untouched); README's v1.10.4 row
+   dropping `; this release` similarly broke
+   `tests/test_v1104_docs.py::test_t_v1104_doc_02_v1104_release_and_gate8_rows_landed_at_t5`'s
+   `_V1104_ROW` literal. All four repointed in place, none renamed, each
+   with an inline comment recording the amendment.
+
+**Test-first record:** `T-V1110-VER-01` and `T-V1110-VER-03` confirmed
+red against the unbumped tree (`live_version == "1.10.4"` vs the asserted
+`"1.11.0"`; `AGENTS.md` still carrying `2311`/`144 entries`/`as of
+spec-v1.10.4 T5`), green after the bump and doc edits.
+`tests/test_v1104_version.py`'s two functions confirmed red immediately
+after the bump (`assert '1.11.0' == '1.10.4'` on both), green after the
+repoint. `T-V1110-VER-02` and `T-V1110-INV-01` were green on first
+execution (structural, EC-02 carve-out — `VER-02`'s diff against the
+`v1.10.4` tag was empty pre-bump, `INV-01`'s list was written directly
+against the already-landed T1-T7 functions). `T-V1110-VER-04` was
+genuinely **red** on first execution, not structural as the brief
+expected — see disclosed amendment 2 above; green once the `/documents`
+sample was added. The three cascading disclosed-amendment sites
+(amendment 3) were caught red by a full-suite `pytest` run (not
+individually test-first, since they were not anticipated); each
+confirmed green after its own one-literal repoint, with no other
+assertion in the same function touched.
+
+**Measured count:** `uv run --locked pytest --collect-only -q
+-o addopts="" | grep -c '::'` on the fully-edited tree: **2384**
+(>= floor 2311 + 62 = 2373). `pytest`'s own summary agrees: 2381 passed,
+1 skipped, 2 xfailed = 2384.
+
+**Gates 1-4 (this commit only; 5-8 are the orchestrator's next step):**
+gate 1 (`uv sync --locked`) — 25 resolved, 23 checked. gate 2
+(`ruff check .`) — clean (two lint findings in the new test files fixed
+first: an unused `pathlib.Path` import and an unused `normalized` local
+in `test_v1110_ver.py`, one over-length comment line in
+`test_v1110_inventory.py`). gate 3 (`pytest`) — 2381 passed, 1 skipped,
+2 xfailed, 0 failed (one unrelated flake,
+`tests/test_v1103_red_team.py::test_t_v1103_rt_06_leak_shape_fixture_still_fails_on_clause_c_only`,
+observed once under full-suite `pytest-xdist` parallelism and not on a
+second run or in isolation — pre-existing, untouched by this task, not
+chased further). gate 4 (`bot.py --selftest`) — `selftest: OK`.
+
+**Secrets:** the two secret values at `config.py:351`,`:379` were never
+read, printed or quoted by this task.
 
 ## Operator inputs
 
