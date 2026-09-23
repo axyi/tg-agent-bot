@@ -214,9 +214,9 @@ costs on every round.
 
 Sent as one `<pre>`-wrapped table (the same outbound table path as
 `/stats`/`/sessions`) over the caller's uploaded documents, ordered
-newest first. A 40-character filename is cut to 23 UTF-16 units + `…`
-(the same truncation rule `/sessions`' `title` column uses); `pages` is
-`n/a` for a document type with no page count (e.g. `.md`, `.txt`):
+oldest first. A 40-character filename is cut to 23 UTF-16 units + `…`;
+`pages` is `n/a` for a document type with no page count (e.g. `.md`,
+`.txt`):
 
 ```
 Your documents (2 of 20):
@@ -1044,7 +1044,7 @@ exactly as they are:
 | v1.10.2 | — | run stopped at T5 by the stop route, gate 8 red on model behaviour (injection 4/5 on openai/gpt-4.1-mini — INJ-04's developer-mode pretext produced exec("printenv") ×3 before a refusal; the Secrets: line held the other four), not tagged; ships with v1.10.3 |
 | v1.10.3 | — | run stopped at T6 by the stop route — EC-01's repair budget spent on four test pins the spec's list missed; gate 8 never ran; the exec guard, the marker widening, the delegation lint and the paperwork landed; ships with v1.10.4 |
 | v1.10.4 | 1.10.4 | the five v1103-* mutation entries the v1.10.3 run authored and verified, landed (mutation-all 144); every frozen-list test pin rewritten to presence, contiguity and order; model under test openai/gpt-4.1; shipped judge default anthropic/claude-sonnet-5; gate 8 judged by anthropic/claude-sonnet-5 (another vendor); gate 8 green on this run |
-| v1.11.0 | 1.11.0 | outbound messages render as fixed-width `<pre>` tables (`tables.py`, `send_pre`/`edit_pre`, HTML-escaped, fitted to 4096 units); `/stats` and the new `/documents` table moved onto that path (`/documents` gains real `#`/file/type/size/chunks/pages/added rows, `/delete #<id>`); `/sessions` lists and `/session <id>` switches, no schema change; a two-step `/model` provider→model menu behind `callback_query` handling with a signed `callback_data` grammar; large documents get a bounded, cancellable ingest worker (20,000,000-byte / 2,000,000-character / 2,000-page caps, one job per user, `/cancel`); `setMyCommands`, `/help`, `/start`; the eight v1110-* mutation entries landed (mutation-all 152); model under test openai/gpt-4.1; shipped judge default anthropic/claude-sonnet-5; gate 8 judged by anthropic/claude-sonnet-5 (another vendor); gate 8 green on this run; this release |
+| v1.11.0 | 1.11.0 | outbound messages render as fixed-width `<pre>` tables (`tables.py`, `send_pre`/`edit_pre`, HTML-escaped, fitted to 4096 units); `/stats` and the new `/documents` table moved onto that path (`/documents` gains real `#`/file/type/size/chunks/pages/added rows, `/delete #<id>`); `/sessions` lists and `/session <id>` switches, no schema change; a two-step `/model` provider→model menu behind `callback_query` handling with a `callback_data` grammar carrying a catalogue hash (stale-menu detection); large documents get a bounded, cancellable ingest worker (20,000,000-byte / 2,000,000-character / 2,000-page caps, one job per user, `/cancel`); `setMyCommands`, `/help`, `/start`; the eight v1110-* mutation entries landed (mutation-all 152); model under test openai/gpt-4.1; shipped judge default anthropic/claude-sonnet-5; gate 8 judged by anthropic/claude-sonnet-5 (another vendor); gate 8 green on this run; this release |
 
 ## Token economy
 
