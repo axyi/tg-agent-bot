@@ -18,6 +18,7 @@ timeout as a hang guard, never a timing assertion.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
@@ -1226,3 +1227,138 @@ def test_t_v1110_ing_11_shutdown_lets_a_committing_job_finish(tmp_path):
     verify_conn.close()
     assert any(text.startswith("✅ notes.txt:") for _c, text in tg.sent)
     conn.close()
+
+
+# ----------------------------------------------------------------------------
+# T-V1110-ING-12 -- REQ-V1110-REV-01 finding 1: `/cancel` landing in the gap
+# after `index_document`'s last checkpoint and before `before_commit()` is
+# caught, not lost. The reverse timing of `T-V1110-ING-09` (which cancels
+# *after* `before_commit` has already run).
+# ----------------------------------------------------------------------------
+
+
+def test_t_v1110_ing_12_cancel_in_the_gap_before_before_commit(tmp_path, monkeypatch):
+    """The review's exact race (`documents.py:560-571` + `bot.py`'s
+    `_mark_committing`): `index_document`'s last checkpoint is the
+    embedding loop's own trailing `_check_budget`, right after the last
+    batch; after the loop, `page_count`/`size_bytes`/`hashlib.sha256(data)`
+    (up to 20 MB) run with no checkpoint of their own, then `before_commit`
+    is called. A `/cancel` landing anywhere in that gap must still end the
+    job as cancelled, never as a silent commit.
+
+    Deviation from the brief's suggested mechanism, disclosed: a
+    `FakeEmbedder` hook cannot place `/cancel` *in* this gap. The hook runs
+    from inside `embed()`, strictly *before* that same batch's own trailing
+    `_check_budget` -- setting `cancel` there is caught by that checkpoint
+    instead (`IndexCancelled` raised from inside the loop, the same
+    mechanism `T-V1110-ING-05` already covers), and `before_commit` is
+    never reached either way -- on unfixed code just as much as fixed, so
+    that design cannot fail before the fix. This test instead hooks the one
+    production callable that genuinely sits in the gap: `hashlib.sha256`,
+    the last thing `index_document` runs before `before_commit()` (`grep -n
+    hashlib documents.py` shows `documents.py:566` is its only call in this
+    module, so patching the module's own `hashlib` name is exact, not
+    overbroad).
+    """
+    conn = new_conn(tmp_path)
+    cfg = make_cfg(tmp_path)
+    tg = FakeTelegram()
+    tg.files["documents/f1"] = _GOOD_TEXT
+    embedder = FakeEmbedder(dim=16)
+    worker = bot.IngestWorker(cfg, tg, embedder, cfg.db_path)
+    bot._handle_document(
+        _doc(),
+        conn=conn,
+        tg=tg,
+        cfg=cfg,
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        embedder=embedder,
+        worker=worker,
+    )
+    job = worker.in_flight(USER_ID)
+    assert job is not None
+
+    fired = {"value": False}
+
+    class _HashlibProxy:
+        """Forwards everything except `sha256` to the real module; `data`
+        (`_GOOD_TEXT`) is one chunk, so exactly one `embed()` call precedes
+        this point -- its own trailing `_check_budget` already ran and
+        found `cancel` unset, or `index_document` would never have reached
+        `hashlib.sha256` at all."""
+
+        def sha256(self, data):
+            assert len(embedder.calls) == 1
+            assert job.phase == "running"
+            process(conn, cfg, text_update("/cancel"), tg=tg, worker=worker)
+            fired["value"] = True
+            return hashlib.sha256(data)
+
+        def __getattr__(self, name):
+            return getattr(hashlib, name)
+
+    monkeypatch.setattr(documents, "hashlib", _HashlibProxy())
+
+    worker.run_one(conn=conn)
+
+    assert fired["value"] is True
+    # `/cancel`'s reply: phase was still "running" when it ran (the gap,
+    # not yet "committing") -- REQ-V1110-ING-04's plain "still running"
+    # outcome, not row 8's "Indexing is already finishing." (that's
+    # `T-V1110-ING-09`'s outcome, the other half of this boundary).
+    assert (USER_ID, "Cancelling notes.txt…") in tg.sent
+    assert not any(text.startswith("✅") for _chat_id, text in tg.sent)
+    assert tg.edited and tg.edited[-1][2] == "❌ Cancelled."
+    assert storage.document_count(conn, user_id=USER_ID) == 0
+    assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == 0
+    assert worker.in_flight(USER_ID) is None
+
+
+# ----------------------------------------------------------------------------
+# T-V1110-ING-13 -- unit-level: `_mark_committing` itself, both branches
+# (REQ-V1110-REV-01 finding 1's fix, isolated from the rest of the
+# pipeline).
+# ----------------------------------------------------------------------------
+
+
+def test_t_v1110_ing_13_mark_committing_checks_cancel_under_lock(tmp_path):
+    """`_mark_committing` is `index_document`'s `before_commit` callable
+    (`bot.py`'s `IngestWorker`): with `job.cancel` already set, it must
+    raise `documents.IndexCancelled` and leave `phase` at `"running"`
+    (never transition to `"committing"`); with `job.cancel` unset, it must
+    transition normally and raise nothing. No queue, no thread, no
+    `run_one` -- just the one method under test."""
+    cfg = make_cfg(tmp_path)
+    tg = FakeTelegram()
+    worker = bot.IngestWorker(cfg, tg, FakeEmbedder(dim=16), cfg.db_path)
+
+    cancelled_job = bot.IngestJob(
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        document={},
+        filename="notes.txt",
+        status=bot._StatusMessage(tg, USER_ID),
+        started_at=0.0,
+        cancel=threading.Event(),
+        cancel_reason="user",
+        phase="running",
+    )
+    cancelled_job.cancel.set()
+    with pytest.raises(documents.IndexCancelled):
+        worker._mark_committing(cancelled_job)
+    assert cancelled_job.phase == "running"
+
+    running_job = bot.IngestJob(
+        chat_id=USER_ID,
+        from_id=USER_ID,
+        document={},
+        filename="notes.txt",
+        status=bot._StatusMessage(tg, USER_ID),
+        started_at=0.0,
+        cancel=threading.Event(),
+        phase="running",
+    )
+    worker._mark_committing(running_job)  # raises nothing
+    assert running_job.phase == "committing"

@@ -1562,7 +1562,94 @@ order — independently reconfirmed by the reviewer.
 
 - T7 | delegated: no | to: the task is itself the clean-context review — `code-reviewer` subagent, its own clean context, per REV-01 | brief: — | map vs actual: scope `git diff dc317d8..HEAD`, all nine REV-01 checklist items covered, one 🔴 and two 🟡 findings, two 🟢 notes
 
-### Phase D — review fixes: not reached
+### Phase D — review fix (finding 1)
+
+Delegated (brief `docs/spec/task-briefs/v1110-T7-review-fix.md`, EC-04 —
+REV-01's own "yes for the entries and any review fix"). Test-first
+(EC-02).
+
+**The fix.** `IngestWorker._mark_committing` (`bot.py:2190`, the
+`before_commit` callable `documents.index_document` calls immediately
+before `BEGIN IMMEDIATE`) now checks `job.cancel.is_set()` *inside* the
+same locked block it already used to transition the phase, and raises
+`documents.IndexCancelled(f"cancelled before commit ({job.cancel_reason})")`
+instead of transitioning when it's already set. `documents.py:568-569`'s
+`before_commit()` call still has no `try`/`except` around it (confirmed
+unchanged), so the exception propagates straight out of `index_document`
+to `_process`'s existing `except documents.IndexCancelled:` clause
+(`bot.py:2122-2125`) — the same "nothing stored, status → `❌ Cancelled.`"
+ending every other cancellation checkpoint already uses. No other
+production code changed.
+
+**New tests, `tests/test_v1110_ing.py`.**
+`T-V1110-ING-12` (`test_t_v1110_ing_12_cancel_in_the_gap_before_before_commit`)
+drives the finding's exact race end-to-end through `run_one`: `/cancel`
+fires from inside `hashlib.sha256`, the one production call
+(`documents.py:566`, confirmed the module's only `hashlib` use by `grep -n
+hashlib documents.py`) that genuinely sits in the gap after the embedding
+loop's last `_check_budget` and before `before_commit()`. `T-V1110-ING-13`
+(`test_t_v1110_ing_13_mark_committing_checks_cancel_under_lock`) checks
+`_mark_committing` directly and fast (no queue, no thread): with
+`job.cancel` set it must raise `IndexCancelled` and leave `phase`
+`"running"`; with it unset, transition normally and raise nothing.
+
+**Disclosed deviation from the brief's suggested test mechanism.** The
+brief suggested driving `T-V1110-ING-12` via a `FakeEmbedder` hook timed on
+the last embedding batch. That mechanism cannot reach this gap: `tests.
+fakes.FakeEmbedder`'s `_hook` runs *inside* `embed()`, strictly before that
+same batch's own trailing `_check_budget` runs — setting `cancel` from the
+hook is caught by that pre-existing checkpoint instead (`IndexCancelled`
+raised from inside the embedding loop, `T-V1110-ING-05`'s own mechanism,
+one batch later), and `before_commit` is never reached either way, on
+unfixed code exactly as much as fixed. A test built that way cannot fail
+before the fix, contradicting EC-02. Verified empirically (see below) before
+switching mechanism: patching `documents.hashlib` (the module's own name,
+not the global `hashlib` module) so its `sha256` fires `/cancel` through
+`process_update` and then delegates to the real implementation. This is
+still a real production callable in the real gap, not a hook on
+`_mark_committing` itself (which the brief explicitly ruled out as "not how
+you inject the timing").
+
+**Fail-before/pass-after, observed.** Before the fix: `T-V1110-ING-13`
+failed with `Failed: DID NOT RAISE IndexCancelled` (`_mark_committing`
+transitioned unconditionally). `T-V1110-ING-12` failed at
+`assert not any(text.startswith("✅") for _chat_id, text in tg.sent)` with
+`assert not True` — a `✅ notes.txt: …` success reply was sent to a user who
+had already been told `Cancelling notes.txt…`, `documents`/`chunks`/
+`vec_chunks` each gained a row, exactly the finding's failure mode. After
+the fix: both pass; `T-V1110-ING-12` observes the `Cancelling notes.txt…`
+reply, then `❌ Cancelled.` on the status message, zero rows in
+`documents`/`chunks`/`vec_chunks`, no `✅` reply ever sent, and
+`worker.in_flight(USER_ID) is None`. `T-V1110-ING-09` (the other half of
+this boundary — `/cancel` arriving *after* `before_commit` has already run,
+phase already `"committing"`) passes unamended, both before and after this
+change: its own `/cancel` only ever fires once phase already reads
+`"committing"`, a state this fix's new check never observes as cancelled
+(`job.cancel` is never set on that path).
+
+Gates 1-4: `uv run --locked ruff check .` clean; `uv run --locked pytest`
+2376 passed, 1 skipped, 2 xfailed (full `tests/test_v1110_ing.py`: 16/16,
+up from 14); `uv run --locked python bot.py --selftest` OK. Gate 5,
+`mutation_check.py`, `rag_eval.py`, `agent_eval.py`, `bench.py` not run
+(out of this fix's scope per the brief).
+
+Delegated to a general-purpose subagent (claude-sonnet-5) against
+`docs/spec/task-briefs/v1110-T7-review-fix.md`; matches the brief's fix
+exactly (the `_mark_committing` change is verbatim the brief's suggested
+patch) and the unit-level test exactly, with the end-to-end test's
+mechanism deviation disclosed above. No separate `- T7 | …`
+delegation-record bullet for this phase: `_lint_report_delegation`'s cell
+4 regex (`devtools/checks.py:1679`, spec-v1.10.3.md Sec.6) only accepts
+the one canonical `docs/spec/task-briefs/<prefix>-T<n>.md` path per task
+number — it has no form for a same-task sub-fix brief under a different
+name, so a bullet naming this brief's actual path
+(`v1110-T7-review-fix.md`) would fail lint-docs on a literal path
+mismatch, not a real defect. Phase A's existing bullet (below) already
+gives `## T7` its required >=1 valid candidate; a checker limitation, not
+touched (out of this fix's `bot.py`/`tests/test_v1110_ing.py` scope) —
+flagged here for a future task to either extend the regex or fold
+sub-fix briefs into the canonical one.
+
 ### Phase E — gates 1-7, doctor, lint-docs, gate 8: not reached
 ### Phase F — report-only commit: not reached
 

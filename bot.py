@@ -2189,10 +2189,17 @@ class IngestWorker:
 
     def _mark_committing(self, job: IngestJob) -> None:
         """`documents.index_document`'s `before_commit` callable (REQ-1110-
-        ING-04): moves the job to `committing` under the lock, immediately
-        before `BEGIN IMMEDIATE` -- so the transition is atomic with respect
-        to `/cancel`'s own lock-protected read; no checkpoint follows it."""
+        ING-04): under the lock, either raises `IndexCancelled` -- when a
+        `/cancel` already landed while this job was still `running`, in the
+        gap after the last checkpoint and before this callable runs -- or
+        moves the job to `committing`, atomically with respect to
+        `/cancel`'s own lock-protected read. Checking cancel here is what
+        closes that gap: it is the last point before `BEGIN IMMEDIATE`, so a
+        job cancelled anywhere before it is caught here instead of
+        committing anyway."""
         with self._lock:
+            if job.cancel.is_set():
+                raise documents.IndexCancelled(f"cancelled before commit ({job.cancel_reason})")
             job.phase = "committing"
 
     # -- wake-up and shutdown (REQ-V1110-ING-02/-05) -------------------------
