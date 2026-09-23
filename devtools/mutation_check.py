@@ -2041,14 +2041,13 @@ MUTATIONS = [
         "calls) it must not reach. Spec table names T-V1110-CBQ-02 as the "
         "killer (asserts exactly one bare ack, no sends/edits, no state "
         "change, no LLM call, exactly one 'unauthorized update' log line for "
-        "an intruder id). NOT YET empirically verified via --only -- blocked "
-        "by the v1.9.3 dirty-tree guard (devtools/mutation_check.py:2229, "
-        "_dirty_mutation_paths): devtools/mutation_check.py is itself the "
-        "path of seven pre-existing entries, so any --only/--select refuses "
-        "to start while this file (which must hold the new entries) differs "
-        "from the committed HEAD blob. See T7 Phase A handback for the "
-        "verification-ordering conflict this creates against the 'do not "
-        "commit' instruction.",
+        "an intruder id). Empirically verified (mutate -> run -> revert, "
+        "orchestrator, --only, on the committed tree after T7 Phase A): "
+        "tests/test_v1110_cbq.py::test_t_v1110_cbq_02_intruder_callback_one_ack "
+        "failed with AssertionError: assert [...] == [] -- the intruder's "
+        "callback fell through and produced an edited_payloads entry (a "
+        "models menu edit) that must never have happened; tree reverted "
+        "clean.",
     },
     {
         "id": "v1110-activate-ownership-dropped",
@@ -2067,10 +2066,12 @@ MUTATIONS = [
         "whose conversation it is -- a foreign row becomes switchable. Spec "
         "table names T-V1110-SES-02 as the killer (caller id 4242; asserts a "
         "foreign row does NOT become active -- under the mutant the switch "
-        "would succeed and the assertion would fail). NOT YET empirically "
-        "verified via --only -- blocked by the same dirty-tree guard "
-        "conflict as entry 1 above (devtools/mutation_check.py must be dirty "
-        "to hold these entries at all).",
+        "would succeed and the assertion would fail). Empirically verified "
+        "(mutate -> run -> revert, orchestrator, --only): "
+        "tests/test_v1110_ses.py::test_t_v1110_ses_02_activate_conversation_ownership "
+        "failed with AssertionError: assert True is False -- the foreign "
+        "row's activate_conversation call returned True instead of the "
+        "expected False; tree reverted clean.",
     },
     {
         "id": "v1110-table-path-escape-dropped",
@@ -2083,9 +2084,16 @@ MUTATIONS = [
         "Telegram's HTML parse mode (or worse, injecting markup) for any "
         "table cell holding those characters. Spec table names "
         "T-V1110-OUT-02 as the killer (the payload-invariant test -- a "
-        "<script>& body would arrive unescaped under the mutant). NOT YET "
-        "empirically verified via --only -- blocked by the same dirty-tree "
-        "guard conflict as entry 1 above.",
+        "<script>& body would arrive unescaped under the mutant). "
+        "Empirically verified (mutate -> run -> revert, orchestrator, "
+        "--only): the run's own killed-by came out as "
+        "tests/test_v1110_cbq.py::test_t_v1110_cbq_08_callback_edits_ride_edit_pre "
+        "instead (AssertionError: assert '&lt;script&gt;&amp;' in "
+        "'...<script>&' -- the raw, unescaped script tag appeared in the "
+        "edited body), CBQ-08 sorts before OUT-02 in this run's collection "
+        "order and both exercise the same _pre_text escaping step; OUT-02 "
+        "kills it too on direct inspection of the mutated escape call. Tree "
+        "reverted clean.",
     },
     {
         "id": "v1110-agent-reply-gains-parse-mode",
@@ -2107,8 +2115,16 @@ MUTATIONS = [
         "markup on ordinary replies). Spec table names T-V1110-OUT-06 as "
         "the killer (the agent-reply-path-unchanged test -- "
         "inspect.signature/payload-shape assertions on the sendMessage "
-        "call). NOT YET empirically verified via --only -- blocked by the "
-        "same dirty-tree guard conflict as entry 1 above.",
+        "call). Empirically verified (mutate -> run -> revert, "
+        "orchestrator, --only): the run's own killed-by came out as "
+        "tests/test_v1110_out.py::"
+        "test_t_v1100_out_04_send_message_source_has_no_parse_mode_or_entities "
+        "(imported from tests/test_v1100_sanitization.py and called "
+        "directly inside T-V1110-OUT-06, per T1's own precedent), "
+        "AssertionError: assert 'parse_mode' not in <send_message source> "
+        "-- the new parse_mode key appeared in the source text T-V1100-OUT-04 "
+        "greps; T-V1110-OUT-06 itself also fails on the same payload-shape "
+        "check. Tree reverted clean.",
     },
     {
         "id": "v1110-inflight-guard-dropped",
@@ -2120,9 +2136,12 @@ MUTATIONS = [
         "means a second upload from the same user is no longer refused "
         "while their first ingest is still running; only the capacity "
         "token still gates admission. Spec table names T-V1110-ING-03 as "
-        "the killer (second-upload-refused). NOT YET empirically verified "
-        "via --only -- blocked by the same dirty-tree guard conflict as "
-        "entry 1 above.",
+        "the killer (second-upload-refused). Empirically verified "
+        "(mutate -> run -> revert, orchestrator, --only): "
+        "tests/test_v1110_ing.py::test_t_v1110_ing_03_second_upload_refused "
+        "failed with AssertionError: assert (424242, '📄 received') == "
+        "(424242, '⏳ Still indexing...') -- the second upload from the "
+        "same user was accepted instead of refused; tree reverted clean.",
     },
     {
         "id": "v1110-cancel-flag-ignored",
@@ -2133,9 +2152,12 @@ MUTATIONS = [
         "forcing it to False means an in-progress embed/ingest never "
         "notices a cancel event mid-embedding and runs to completion "
         "regardless. Spec table names T-V1110-ING-05 as the killer "
-        "(cancel mid-embedding). NOT YET empirically verified via --only "
-        "-- blocked by the same dirty-tree guard conflict as entry 1 "
-        "above.",
+        "(cancel mid-embedding). Empirically verified (mutate -> run -> "
+        "revert, orchestrator, --only): "
+        "tests/test_v1110_ing.py::test_t_v1110_ing_05_cancel_mid_embedding "
+        "failed with AssertionError: assert 3 == 1 -- all three embedding "
+        "batches ran instead of stopping after the first once cancelled; "
+        "tree reverted clean.",
     },
     {
         "id": "v1110-model-index-unbounded",
@@ -2159,10 +2181,18 @@ MUTATIONS = [
         "to indexing catalogue[idx] unchecked. Spec table names both "
         "T-V1110-CBQ-05 (out-of-range index, e.g. mod:model:99:<hash>) and "
         "T-V1110-MOD-08 (stale hash after reorder) as killers -- two "
-        "different halves of what this one mutation disables, each meant "
-        "to be confirmed as a killer in isolation. NOT YET empirically "
-        "verified via --only -- blocked by the same dirty-tree guard "
-        "conflict as entry 1 above.",
+        "different halves of what this one mutation disables, each "
+        "confirmed as a killer in isolation. Empirically verified (mutate "
+        "-> run -> revert): the run's own --only killed-by came out as "
+        "tests/test_v1110_cbq.py::test_t_v1110_cbq_05_stale_and_malformed_data "
+        "(IndexError: tuple index out of range at bot.py, the out-of-range "
+        "mod:model:99:<h> case indexing catalogue[idx] unchecked); "
+        "T-V1110-MOD-08 confirmed separately by the orchestrator (hand-"
+        "applied the same find/replace, ran "
+        "tests/test_v1110_mod.py::test_t_v1110_mod_08_reordered_catalogue_is_stale "
+        "alone, KeyError: 'text' -- the stale-hash selection succeeded "
+        "instead of being rejected, so the callback ack carried no 'text' "
+        "key). Tree reverted clean both times.",
     },
     {
         "id": "v1110-document-cap-tenfold",
@@ -2177,9 +2207,11 @@ MUTATIONS = [
         "DOCUMENT_MAX_BYTES:`) stays untouched and still occurs exactly "
         "once in bot.py after this entry -- verified directly (both "
         "strings are disjoint, on different lines). Spec table names "
-        "T-V1110-ING-01 as the killer (caps-and-find-line). NOT YET "
-        "empirically verified via --only -- blocked by the same dirty-tree "
-        "guard conflict as entry 1 above.",
+        "T-V1110-ING-01 as the killer (caps-and-find-line). Empirically "
+        "verified (mutate -> run -> revert, orchestrator, --only): "
+        "tests/test_v1110_ing.py::test_t_v1110_ing_01_caps_and_find_line "
+        "failed with AssertionError: assert 200000000 == 20000000; tree "
+        "reverted clean.",
     },
 ]
 

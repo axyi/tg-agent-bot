@@ -1484,7 +1484,29 @@ tests (`test_v1101_gates.py`, `test_v1102_gates.py`,
 Gates 1-4: `pytest` 2374 passed, 1 skipped, 2 xfailed; `ruff check .`
 clean; `bot.py --selftest` OK.
 
-### Phase B — isolation verification: not reached
+### Phase B — isolation verification (commands-only, orchestrator)
+
+Ran on the clean tree committed at `33729eb`. Each of the 8 entries via
+`--only <id>`: all killed 1/1, tree reverted clean after every run
+(`git status --porcelain` empty). Observed failures:
+
+| entry | killed by | observed |
+|---|---|---|
+| `v1110-callback-allowlist-dropped` | `T-V1110-CBQ-02` | intruder callback produced an unwanted edited-message payload |
+| `v1110-activate-ownership-dropped` | `T-V1110-SES-02` | `assert True is False` — foreign row became active |
+| `v1110-table-path-escape-dropped` | `T-V1110-CBQ-08` (also kills `T-V1110-OUT-02`, same escaping step) | raw `<script>&` in the edited body |
+| `v1110-agent-reply-gains-parse-mode` | `T-V1100-OUT-04` (imported into `T-V1110-OUT-06`) | `parse_mode` key present in the send_message source/payload |
+| `v1110-inflight-guard-dropped` | `T-V1110-ING-03` | second upload from the same user accepted instead of refused |
+| `v1110-cancel-flag-ignored` | `T-V1110-ING-05` | `assert 3 == 1` — all embedding batches ran despite cancellation |
+| `v1110-model-index-unbounded` | `T-V1110-CBQ-05` (`--only`) **and** `T-V1110-MOD-08` (confirmed separately by hand: mutate → run the one test → restore, `KeyError: 'text'`) | `IndexError: tuple index out of range` / stale-hash selection wrongly accepted |
+| `v1110-document-cap-tenfold` | `T-V1110-ING-01` | `assert 200000000 == 20000000` |
+
+`--select v1110-` once, all eight together: **8/8 killed, 0
+survived/errored/drifted, real 26.4s**. Every `why` field rewritten from
+its "NOT YET empirically verified" placeholder to the actual observed
+failure (one line-length fix applied by hand afterward, `ruff format
+--check` clean). `T-V1110-MUT-01` still green. No source file touched —
+`ruff check .` clean, gates 1-4 unaffected.
 ### Phase C — clean-context review (REV-01): not reached
 ### Phase D — review fixes, if any: not reached
 ### Phase E — gates 1-7, doctor, lint-docs, gate 8: not reached
