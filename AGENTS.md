@@ -277,9 +277,9 @@ Studio baseline; **v1.10.2 carries the waiver: its prompt change moves the
 hash again**; a fresh OpenRouter baseline is a candidate for a later
 release. v1.10.3 carries the waiver again: the model under test and the
 judge changed, so no run is comparable to the LM Studio baseline. v1.11.0
-changes nothing token-bearing (`SYSTEM_PROMPT`, `tools.tool_specs()`,
-`REQUEST_DEFAULTS`, `load_context_messages` byte-unchanged) — the rule
-does not fire.
+changes nothing token-bearing; the rule does not fire. (`SYSTEM_PROMPT`,
+`tools.tool_specs()`, `REQUEST_DEFAULTS`, `load_context_messages`
+byte-unchanged.)
 
 ## go protocol
 

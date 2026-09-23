@@ -1419,12 +1419,16 @@ own two rows. Rows 11-16 are now present in README (above) but no test
 exercises the underlying dispatch behaviour that produces them; closing
 that gap is left for whichever task next extends this same function, the
 same way T5 left rows 1-9/11-16 for its own successors. `AGENTS.md`'s
-benchmark-waiver paragraph gained one sentence
-(REQ-V1110-NG-11): "v1.11.0 changes nothing token-bearing (`SYSTEM_PROMPT`,
-`tools.tool_specs()`, `REQUEST_DEFAULTS`, `load_context_messages`
-byte-unchanged) — the rule does not fire." — independently confirmed via
-`git diff 295b01f -- bot.py tools.py storage.py` matching none of those
-four identifiers in any hunk, not just asserted.
+benchmark-waiver paragraph gained the spec's own literal sentence
+(REQ-V1110-NG-11, spec-v1.11.0.md:244): "v1.11.0 changes nothing
+token-bearing; the rule does not fire." — landed byte-for-byte (not the
+brief's own paraphrase, which added a parenthetical and would not have
+satisfied a substring check against the spec's exact quote), plus one
+clarifying follow-up sentence naming the four identifiers
+(`SYSTEM_PROMPT`, `tools.tool_specs()`, `REQUEST_DEFAULTS`,
+`load_context_messages`, all byte-unchanged) — independently confirmed
+via `git diff 295b01f -- bot.py tools.py storage.py` matching none of
+them in any hunk, not just asserted.
 
 ### Gates
 
