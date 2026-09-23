@@ -1650,8 +1650,52 @@ touched (out of this fix's `bot.py`/`tests/test_v1110_ing.py` scope) —
 flagged here for a future task to either extend the regex or fold
 sub-fix briefs into the canonical one.
 
-### Phase E — gates 1-7, doctor, lint-docs, gate 8: not reached
-### Phase F — report-only commit: not reached
+### Phase E — gates 1-7, doctor, lint-docs, gate 8 (commands-only, orchestrator)
+
+`tested_tree = 2c3c5aab5370d6ce951009766b879a8e7ef4b116` (T7's fix
+commit), `git status --porcelain` empty, recorded before any gate ran.
+Every gate run alone, nothing else touching the tree, per EC-07.
+
+- Gate 1 (`uv sync --locked`): 25 resolved, 23 checked.
+- Gate 2 (`ruff check .`): clean.
+- Gate 3 (`pytest`): 2376 passed, 1 skipped, 2 xfailed.
+- Gate 4 (`bot.py --selftest`): OK.
+- MOD-05 override precondition re-read: `0`.
+- Gate 5 (`bot.py --selftest-live`): `OK config`/`db`/`docker
+  (29.8.1)`/`telegram`/`embeddings`/`openrouter`; `SKIP lmstudio (no
+  route uses it)` — disclosed, non-blocking.
+- Gate 6 (`mutation_check.py`, the direct `mutation-all` run, alone):
+  **152/152 killed, 0 survived, 0 errored, 0 drifted.** Wall `W` = **real
+  16m1.604s (961.6s)** — under the 1300s threshold (MUT-01), so
+  `config/quality_gates.yaml`'s `timeout_seconds: 1640` is **not**
+  raised; no calibration hunk needed.
+- `doctor`: all tools at pin, hooks installed.
+- `lint-docs`: all prompts and the report ledger row pass.
+- MOD-05 override precondition re-read again, immediately before gate 8
+  (EC-05): `0`.
+- Gate 7 (`rag_eval.py`): `hybrid: recall@5=1.000 mrr=1.000
+  page_hit_rate=1.000` (≥0.8 floor met); every answerable item's rerank
+  flags both `True`; the two advisory conversation-aware smoke checks
+  failed (TOOL-06 pin, context-proof) — disclosed, non-blocking per
+  AGENTS.md's standing rule for this advisory. **gate-7: PASS.**
+- Gate 8 (`agent_eval.py`, the run's one and only invocation, against
+  `tested_tree`): injection 5/5 (floor 5), hallucination 4/4 (floor 3),
+  memory 3/3 (floor 3), judge mean **0.913** (floor 0.8), latency
+  advisory PASS (max 2.56s vs 4.0s). **gate-8: PASS.** `git status
+  --porcelain` empty and `HEAD` unchanged after — gate 8 wrote nothing
+  to the tracked tree.
+
+**All eight gates green in this run, in order, none rerun.** No stop
+route triggered.
+
+### Phase F — report-only commit
+
+This section (Phase E's results) plus the ledger-row/tg-post work below
+are the report-only commit's content — `docs/reports/*` and
+`docs/llm-usage.md` only, no source, no test, no config file. See the
+commit itself for the exact path list.
+
+- T7 (Phase E/F) | delegated: no | to: commands only — the gate run and the report-only commit | brief: — | map vs actual: all eight gates run verbatim in order, gate 6 alone (W=961.6s, under threshold, no timeout hunk needed), gate 8 exactly once against tested_tree=2c3c5aab5370d6ce951009766b879a8e7ef4b116, tree unchanged by any gate
 
 - T7 | delegated: yes | to: general-purpose subagent (claude-sonnet-5), Phase A only | brief: docs/spec/task-briefs/v1110-T7.md | map vs actual: matches the brief exactly (all 8 find/replace pairs pre-verified by the orchestrator, landed verbatim bar one ruff-driven line-split in entry 4, disclosed); the `--only`/`--select` isolation verification the brief asked for could not run (dirty-tree guard conflict, disclosed above and in the brief itself) — orchestrator's own commands-only follow-up covers it next; the `quality_gates.yaml` comment fix and this commit are the orchestrator's own commands-only work, not delegated; later T7 phases (review, gates) get their own bullets as they land
 
