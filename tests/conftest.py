@@ -1,3 +1,4 @@
+import contextlib
 import socket
 
 import httpx
@@ -47,6 +48,33 @@ def no_real_bind(monkeypatch):
         raise RuntimeError(f"unexpected bind: {address!r}")
 
     monkeypatch.setattr(socket.socket, "bind", _guarded_bind)
+
+
+@contextlib.contextmanager
+def secrets_registry_snapshot():
+    """REQ-V1111-TST-02: save `config._secrets` (`config.py:98`), yield, then
+    clear and update that *same* set object -- never rebind `_secrets` to a
+    new object, since `redact`/`max_secret_length`/`strip_secret_fragment`
+    (`config.py:239`, `:294-296`, `:305`) all read the module attribute
+    fresh at call time, not a copy taken at import time."""
+    saved = set(config_module._secrets)
+    try:
+        yield
+    finally:
+        config_module._secrets.clear()
+        config_module._secrets.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def restore_secrets_registry():
+    """REQ-V1111-TST-02: wraps every test in `secrets_registry_snapshot()`
+    so a test that registers a secret and never cleans up (previously an
+    xdist worker-order-dependent flake -- REQ-V1111-TST-02, C11/F4) can no
+    longer leak into the next test on the same worker. Ordered after
+    `no_real_bind` so the bind guard is already active; ordering relative
+    to the other autouse fixtures above does not matter for this one."""
+    with secrets_registry_snapshot():
+        yield
 
 
 @pytest.fixture

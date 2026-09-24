@@ -344,6 +344,7 @@ tests/test_v1110_out.py -q` → all green (no failures).
 | --- | --- | --- |
 | `7b910fd` | 0 | `gitleaks-tree exit=0`, no leaks found |
 | `bf9f2ec` | 0 | recorded at T2 (this commit) -- the T1 follow-up's own docs-only commit, already scanned by the orchestrator before T2 started; T0's table shape reused here since T1 previously carried only the single-line form above |
+| `ebc2822` | 0 | recorded at T3 (this commit) -- T2's own landing commit, already scanned by the orchestrator before T3 started, same lag pattern as `5780562`/`bf9f2ec` |
 
 ### Delegation record (EC-03, §10.1)
 
@@ -521,7 +522,235 @@ own lag pattern.
 
 - T2 | delegated: yes | to: general-purpose subagent, TAB-01…05 (table widths, the /sessions empty state, DOC_LIMIT_REPLY, one batch constant) and tests/test_v1111_tab.py | brief: docs/spec/task-briefs/v1111-T2.md | map vs actual: matches §10.1's yes cell for T2 -- touched bot.py:109, :141, :1528-1534, :1555, :2391, :2463-2472; documents.py:31, :386 (removed), :551-559; README.md:147-151 (the /sessions "same property" sentence, in the reading map's :150-155 region but not separately named by any REQ-V1111-TAB-* id), :154-156, :215-233, :532-548, :954-1004 region, plus the amendment table in this report; tests/test_v1110_doc.py:200-202, :378; tests/test_v1110_ing.py:548; tests/test_v190_agents.py:300; tests/test_v1110_ver.py:135; tests/test_v1111_tab.py created (6 functions) -- the reading map's file/line ranges match, no unplanned file touched
 
-## T3 — not reached: TST-01…08 not yet implemented
+## T3 — TST-01…08: dispatch-level error-row tests, the secrets-registry restore fixture
+
+Delegated to one subagent, brief `docs/spec/task-briefs/v1111-T3.md`.
+
+### Prompt-numbering disclosure (see also the commit body)
+
+The brief's static per-task map (§10, originally `256=T0, 257=T1,
+258=T2, 259=T3, 260+261=T4, 262=T5, 263=T6`) broke once T0's
+resume/follow-up consumed `264`/`265` out of order and T1's follow-up
+took `258`. This task's own prompt is **260** (confirmed free and used
+here). Flagged forward: **T4 now takes 261+262** for its two commits
+(was 260+261, matching spec `:1022`'s own table), **T5 takes 263** (was
+262), and **T6 must skip 264/265** (already used by the T0
+resume/follow-up) **and take 266** (was 263) -- whoever writes
+`v1111-T4.md`'s brief should use 261/262, and `v1111-T6.md`'s brief
+should use 266.
+
+### TST-01 -- six new dispatch-level tests, v1.11.0 ERR-01 rows 11-16
+
+New module `tests/test_v1111_tst.py`; the frozen
+`tests/test_v1110_err.py::test_t_v1110_err_01_error_matrix_strings` stays
+byte-unchanged, per the spec's own drafter's choice
+(`spec-v1.11.1.md:404-426`). Each of the six tests imports
+`process`/`text_update`/`make_cfg`/`new_conn`/`_error_section` (all
+within `tests/test_v1110_err.py:50-116`) and `USER_ID` (that file's
+`:29`, outside that range -- not retyping any of them either way) rather
+than retyping them, and drives `bot.process_update` with a hand-written
+update dict (row 15 gets its own `_callback_update` builder, local to
+the new module, since `text_update` only builds `message` updates): row
+11 `/session` bare -> `SESSION_USAGE_REPLY`; row 12 `/session 999999`,
+with the caller's own active session seeded first via
+`storage.get_or_create_active_conversation` -> `"No session #999999."`,
+`storage.active_conversation_id` still that seeded id (seeding matters:
+`activate_conversation` deactivates the current row *before*
+conditionally reactivating the target and only rolls back on a
+missing/foreign id, so an unseeded, already-`None` caller would pass
+this assertion even if that rollback were broken -- confirmed by
+temporarily breaking the rollback in `storage.py` and watching this test
+fail, then restoring it unmodified); row 13 `/delete #999` (no documents
+at all) -> `"No document named #999."`, `document_count` unchanged (0
+before and after); row 14 `/delete` bare -> `DELETE_USAGE_REPLY`; row 15
+a `callback_query` with data `"zzz"` -> `CALLBACK_EXPIRED_REPLY` read
+from `FakeTelegram.callback_answers[-1]["text"]`, nothing sent or
+edited, the polling cursor (`storage.get_state(conn, "last_update_id")`)
+still advances; row 16 two triggers, `/model openrouter nope` (a
+configured provider -- `openrouter_api_key="k"`, the same
+non-credential-shaped placeholder `tests/test_v160_bench.py:464` already
+uses for this field, not a `sk-`-prefixed key-shaped literal -- unknown
+model) -> `"Unknown model for openrouter; see /model"`, `/model a b c`
+(three arguments) -> `MODEL_USAGE_REPLY`, neither writes a `bot_state`
+row (`PROVIDER_OVERRIDE_KEY` or `model_override:*`). Every reply is
+asserted byte-equal against the row's own string; every row's string
+(the exact one `bot.py` emits, or its generic
+`<id>`/`<argument>`/`\|`-escaped template where the reply is dynamic) is
+also asserted present in `_error_section()`.
+
+Four stale `bot.py` line citations found and corrected in this
+report/prompt (the spec's own table at `:417-424` cites an earlier
+tree): `SESSION_USAGE_REPLY` is at `bot.py:142`, not `:141`;
+`_no_session_reply`'s f-string is at `bot.py:2497`, not `:2477`;
+`_no_document_named_reply`'s f-string is at `bot.py:2426`, not `:2411`;
+the row-16 `f"Unknown model for {choice}; see /model"` site is at
+`bot.py:1646`, not `:1636`. (`DELETE_USAGE_REPLY` `:129`,
+`CALLBACK_EXPIRED_REPLY` `:92` and `MODEL_USAGE_REPLY` `:88` all
+confirmed exact, no drift.) Also stale: spec sec.3.3's own sentence
+citing README's rows 14 and 16 "in the `\|`-escaped form of `:975,
+:978`" -- the two rows are now at `README.md:977` and `:980` (T2
+inserted two new `## Error behaviour` rows, TAB-03/TAB-04, ahead of
+them).
+
+### TST-02 -- `secrets_registry_snapshot()` + the autouse `restore_secrets_registry` fixture
+
+The spec's own `[[VERIFY]]` grep (`grep -n "_secrets" config.py
+tests/conftest.py tests/test_v11_patch.py`) run first, per the brief:
+the registry is exactly what spec `:428-448` names -- the module-level
+set `config._secrets` (`config.py:98`), touched only through
+`register_secret` (`config.py:230-233`), `redact` (`:236-239`),
+`max_secret_length` (`:292-296`) and `strip_secret_fragment`
+(`:299-305`); no rename, no rebind found. `cited -> actual`: none --
+every one of these citations matched the live tree exactly, so the
+decision rule at spec `:444-448` was not invoked;
+`tests/test_v11_patch.py:50-57`'s own pre-existing clear/restore fixture
+(a sibling of the new one, not replaced) confirmed unaffected.
+
+`tests/conftest.py` gains `secrets_registry_snapshot()` (a
+`contextlib.contextmanager`: `saved = set(config_module._secrets)`,
+yield, `config_module._secrets.clear();
+config_module._secrets.update(saved)` -- mutating the same set object,
+never rebinding `_secrets`) and the autouse `restore_secrets_registry`
+fixture that wraps every test in it, placed immediately after
+`no_real_bind` (`tests/conftest.py:37 ±5` pre-edit per the brief,
+`:38-50` post-edit; the new lines land at `:53-77`, one `import
+contextlib` line added at the top).
+
+`T-V1111-TST-07` proves the fixture itself, not only the context
+manager: a two-test module written to `tmp_path` (test A registers
+`"VALUE-abcdefgh12"` -- the repo's existing fake sentinel, the same
+literal `tests/test_v1103_exec.py:176` and others already use -- and
+never cleans up; test B asserts it is absent from `config._secrets` and
+that the registry `is` the same object captured at the nested module's
+own import time) plus a `tmp_path/conftest.py` containing exactly `from
+tests.conftest import restore_secrets_registry`, never calling
+`secrets_registry_snapshot()` itself. `[[VERIFY :456-464]]`: the plain
+import path worked on the first try (`tests/__init__.py` exists;
+`python -m pytest`'s cwd -- the repo root, passed explicitly as
+`subprocess.run`'s `cwd=` -- lands on `sys.path[0]`); the nested run
+collected and passed both tests. Neither the `pytest_plugins =
+("tests.conftest",)` fallback nor the permanent `xdist_group`-marked
+pair was needed; no disclosed amendment on this axis. The direct
+context-manager checks stay as an additional assertion in the same
+test: inside `secrets_registry_snapshot()`,
+`register_secret("VALUE-abcdefgh12")` makes `redact` mask it; after the
+block, the sentinel is gone, `redact` is a no-op again, and
+`config._secrets is registry_before`.
+
+`T-V1111-TST-07` itself was also shown genuinely red, for the exact
+case spec `:449` names ("a fixture that is ... not `autouse=True` fails
+the nested run"): `restore_secrets_registry`'s decorator was temporarily
+changed from `@pytest.fixture(autouse=True)` to `@pytest.fixture` (no
+other line touched), and running only
+`tests/test_v1111_tst.py::test_t_v1111_tst_07_secrets_registry_restored
+-o addopts=""` failed as `assert result.returncode == 0` with the
+captured nested output showing `test_b_sees_restored_registry` itself
+failing (`AssertionError: assert 'VALUE-abcdefgh12' not in
+{'VALUE-abcdefgh12'}`, `1 failed, 1 passed`) -- the sentinel leaked from
+nested test A into nested test B because the fixture was never applied
+without `autouse`. The decorator was then restored to
+`@pytest.fixture(autouse=True)` (confirmed byte-identical to the
+pre-probe version by `git diff tests/conftest.py`) and the full module
+re-run green (`7 passed`).
+
+### Test-first (EC-02)
+
+TST-01's six row tests exercise dispatch behaviour v1.11.0 already
+shipped (T0/T1/T2 touched table widths and the outbound fallback, never
+these six strings or code paths) -- there is no source change for them
+to red-check against, so they are not comparable to T2's genuinely
+test-first TAB tests or to T1's `T-V1111-OUT-02` carve-out disclosure
+(both had a source edit to be red against; these do not). Each was
+confirmed to pass once written.
+
+TST-02/-07 are genuine new code (the fixture did not exist before), and
+here the ordering is **not** as clean as T2's: `tests/conftest.py`'s
+`secrets_registry_snapshot()`/`restore_secrets_registry` were written
+before `tests/test_v1111_tst.py`, after a manual prototype (outside any
+test file, in a scratch `/tmp` directory) confirmed the nested-run
+mechanics would work once the fixture existed. This is disclosed rather
+than overstated (T1's mistake), and backed by three checks rather than
+asserted: (1) the manual `/tmp` prototype, run *before* touching
+`tests/conftest.py`, hit `ImportError: cannot import name
+'restore_secrets_registry' from 'tests.conftest'` when its own
+`tmp_path/conftest.py` tried to import a fixture that did not exist yet
+-- the same mechanism `T-V1111-TST-07` later encodes as a real test; (2)
+after both files were written and all seven tests passed on the first
+run, `tests/conftest.py`'s new lines were `git stash`ed and
+`tests/test_v1111_tst.py` re-run -- collection itself failed with a
+*different* error, `ImportError: cannot import name
+'secrets_registry_snapshot' from 'tests.conftest'` (this one from the
+outer module's own top-level import, `tests/test_v1111_tst.py:31`, not
+from the nested `tmp_path/conftest.py` mechanism check (1) exercised)
+-- confirming the whole module depends on the fixture existing; the
+stash was then popped and all seven passed again; (3) after both files
+were finished, `restore_secrets_registry`'s `autouse=True` was removed
+and restored as its own dedicated check (above, under TST-02) -- this
+one **is** genuine red/green against the finished tree, for the specific
+failure mode spec `:449` names. None of the three is genuine
+file-authorship-order test-first for TST-02/-07 as a whole; disclosed as
+the closest available substitute, honestly short of T2's standard on
+this one item.
+
+### TST-08 -- by command
+
+(1) `uv run --locked pytest
+"tests/test_v1103_red_team.py::test_t_v1103_rt_06_leak_shape_fixture_still_fails_on_clause_c_only"
+-o addopts=""` alone -> `1 passed in 0.24s`.
+(2) `uv run --locked pytest -p xdist -n 4 -o addopts="" -q`, twice ->
+`2401 passed, 1 skipped, 2 xfailed in 35.85s`, then `2401 passed, 1
+skipped, 2 xfailed in 44.39s`.
+
+### Gates 1-4 and `lint-docs` (T3)
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | `Resolved 25 packages`, `Checked 23 packages`, exit 0 |
+| 2 | `uv run --locked ruff check .` | `All checks passed!`, exit 0 |
+| 3 | `uv run --locked pytest` | `2401 passed, 1 skipped, 2 xfailed in 25.01s` (2404 collected -- the 2397 T2 count plus this task's 7 new `test_v1111_tst.py` functions), exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
+| -- | `uv run --locked python devtools/checks.py lint-docs` | `[PASS] lint-docs: all prompts and the report ledger row pass` |
+
+`ruff format --check tests/test_v1111_tst.py tests/conftest.py` also
+run (not a named gate, but flagged during the pre-commit self-check
+below): `2 files already formatted`, after one triple-quote style fix
+(`'''` -> `"""` for the nested-module source string, no content change).
+
+`gitleaks-tree` on this task's own commit: not run by this subagent (the
+orchestrator runs the standalone block after the commit lands, per the
+brief); recorded in a later task's follow-up once it has, same lag
+pattern as T0/T1/T2.
+
+### Pre-commit self-check (`advisor`)
+
+Called before committing, per the brief. It caught six real gaps, all
+fixed before commit: (1) the prompt-renumbering disclosure the brief
+asked for was missing from both this section and the usage row -- added
+above and in `docs/llm-usage.md` row 173; (2) row 12's test could not
+actually fail on a broken rollback (`None` before and after would pass
+even with `activate_conversation`'s rollback removed) -- fixed by
+seeding an active session first, then verified red by temporarily
+breaking the rollback in `storage.py` and restoring it, as described
+under TST-01 above; (3) `openrouter_api_key="sk-or-sentinel-key-value"`
+in the row-16 test has the shape of a real API key, against the brief's
+own constraint -- replaced with `"k"`, the non-credential-shaped
+placeholder `tests/test_v160_bench.py:464` already uses for the same
+field; (4) `T-V1111-TST-07` had never actually been run red for the
+case it exists to catch (only a manual `/tmp` reproduction and a
+different, module-import-level `git stash` check) -- added the direct
+`autouse` removal/restoration check described under TST-02 above; (5)
+the TST-02 write-up conflated two different `ImportError` messages from
+two different checks -- separated and quoted each accurately, as
+written under Test-first above; (6) a stale `tests/test_v1110_cbq.py`
+citation (`:78-101`, actual `:78-102`) in `tests/test_v1111_tst.py`'s
+own `_callback_update` docstring -- corrected in the source file. Also
+flagged, applied proactively rather than reported as a finding: `ruff
+format --check` on the two touched files caught one quote-style
+mismatch, fixed as noted above.
+
+### Delegation record (EC-03, §10.1)
+
+- T3 | delegated: yes | to: general-purpose subagent, TST-01/TST-02 (six dispatch-level ERR-01 tests, the secrets-registry snapshot/restore fixture, TST-07's nested-pytest proof plus its own autouse-removal red/green check, TST-08's two by-command verifications) and tests/test_v1111_tst.py | brief: docs/spec/task-briefs/v1111-T3.md | map vs actual: matches §10.1's yes cell for T3 -- touched tests/conftest.py:1, :53-77 (new fixture, placed after no_real_bind); tests/test_v1111_tst.py created (7 functions); no bot.py/config.py edit (both REQ ids are test-only); storage.py touched only transiently for the row-12 mutation check, restored byte-identical (confirmed via git diff before commit); four stale bot.py citations, one stale README-line-pair citation and one stale tests/test_v1110_cbq.py citation found and corrected; test-first ordering disclosed as imperfect on TST-02/-07 (conftest.py written before the test file), unlike TST-01's six row tests which needed no source change at all; the prompt-renumbering disclosure (T4 to 261+262, T5 to 263, T6 to 266) recorded above and in the commit body
 
 ## T4 — not reached: DOC-01…03 not yet implemented
 
