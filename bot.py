@@ -181,11 +181,13 @@ class TelegramError(Exception):
         retry_after: float | None = None,
         fatal: bool = False,
         transport: bool = False,
+        status: int | None = None,
     ) -> None:
         super().__init__(message)
         self.retry_after = retry_after
         self.fatal = fatal
         self.transport = transport
+        self.status = status
 
 
 class TelegramDownloadTimeout(TelegramError):
@@ -241,24 +243,31 @@ class TelegramClient:
 
         status = response.status_code
         if status in (401, 404):
-            raise TelegramError(redact(f"telegram {method} rejected the bot token"), fatal=True)
+            raise TelegramError(
+                redact(f"telegram {method} rejected the bot token"), fatal=True, status=status
+            )
         if status == 429:
             raise TelegramError(
-                redact(f"telegram {method} rate limited"), retry_after=_retry_after(response)
+                redact(f"telegram {method} rate limited"),
+                retry_after=_retry_after(response),
+                status=status,
             )
         if status != 200:
-            raise TelegramError(redact(f"telegram {method} http {status}"))
+            raise TelegramError(redact(f"telegram {method} http {status}"), status=status)
 
         try:
             data = response.json()
         except ValueError:
-            raise TelegramError(redact(f"telegram {method} returned non-json")) from None
+            raise TelegramError(
+                redact(f"telegram {method} returned non-json"), status=status
+            ) from None
         if not isinstance(data, dict) or data.get("ok") is not True:
             code = data.get("error_code") if isinstance(data, dict) else None
             description = data.get("description") if isinstance(data, dict) else ""
             raise TelegramError(
                 redact(f"telegram {method} api error {code}: {description}"),
                 retry_after=_retry_after(response) if code == 429 else None,
+                status=status,
             )
         return data["result"]
 
@@ -1915,10 +1924,15 @@ class Reservation:
 
 @dataclass
 class IngestJob:
-    """One admitted document upload, lock-protected `phase`/`cancel_reason`
-    fields aside (REQ-V1110-ING-04) -- both are read and written only
-    through `IngestWorker`'s own lock, never touched directly. `monotonic`
-    is a T5 addition beyond the spec's own constructor prose: it is not
+    """One admitted document upload. `phase` and `cancel_reason` are written
+    only under `IngestWorker`'s lock (REQ-V1110-ING-04); `cancel_reason` may
+    be read without it, because every writer sets it once **before** setting
+    the `threading.Event` `cancel` and every unlocked reader reads it only
+    **after** `cancel.is_set()` — the Event's own happens-before edge
+    publishes it (the v1.11.0 T7 review's finding-2 waiver,
+    `docs/reports/report-v1.11.0.md:1529-1541`; re-review under
+    free-threaded Python). `monotonic` is a T5 addition beyond the spec's
+    own constructor prose: it is not
     part of any frozen signature, and carrying the loop thread's own clock
     (real or, in a test, a fake one) is what lets `started_at`'s clock and
     the worker's own budget/cancel checks agree -- without it a test using a
@@ -2538,23 +2552,25 @@ def _pre_text(body: str) -> tuple[str, str]:
 
 
 def send_pre(tg, chat_id: int, body: str, *, reply_markup: dict | None = None) -> dict | None:
-    """REQ-V1110-OUT-01/-04: the table path. The only production caller of
-    `TelegramClient.send_message_html` -- command and callback handlers call
-    this, never the client method directly. Never splits: `_pre_text` already
-    fit `body` to 4096 entity-parsed UTF-16 units. On a non-fatal table-path
-    failure (the Bot API's "can't parse entities" 400 family, primarily),
-    resend the same fitted body once more through the plain `send_message`;
-    a fatal failure (401/404, `bot.py:154-198`'s classification) skips the
-    fallback entirely -- a bad token or an unreachable chat is not a payload
-    problem a plain resend could fix. Either way, a second failure is logged
-    and `None` returned, never a third attempt."""
+    """REQ-V1110-OUT-01/-04, narrowed by REQ-V1111-OUT-01: the table path, the
+    only production caller of `TelegramClient.send_message_html`. Never
+    splits: `_pre_text` already fit `body` to 4096 UTF-16 units. Exactly one
+    failure class gets the plain fallback: a `TelegramError` whose `status`
+    is 400 (the Bot API's "can't parse entities" family) -- the same fitted
+    body is resent once through the plain `send_message`. Every other
+    `TelegramError` -- fatal (401/404), a 429 that outlived
+    `_call_with_retry`'s budget, a 5xx, a transport error (`status is None`)
+    -- is logged and `None` returned, as `_send` treats the plain path; a
+    failure of the fallback itself (after `_call_with_retry`'s own attempt
+    budget) is logged once, never a second fallback. The classification is
+    `TelegramError`'s own fields, not a line range."""
     text, fitted = _pre_text(body)
     try:
         return tg.send_message_html(chat_id, text, reply_markup=reply_markup)
     except TelegramError as exc:
         # TRY400: TelegramError is an already-classified failure, the same
         # pattern as `_send` above.
-        if exc.fatal:
+        if exc.status != 400:
             log.error("sending the reply failed: %s", redact(str(exc)))  # noqa: TRY400
             return None
         try:
@@ -2568,14 +2584,14 @@ def edit_pre(
     tg, chat_id: int, message_id: int, body: str, *, reply_markup: dict | None = None
 ) -> dict | None:
     """REQ-V1110-OUT-01/-04: `send_pre`'s edit counterpart -- same
-    `_pre_text` construction, the same fatal-skips-the-fallback rule, and the
+    `_pre_text` construction, the same 400-only rule, and the
     same one-time plain fallback (`edit_message_text`, no tags, no
-    `parse_mode`, no `reply_markup`) on a non-fatal table-path failure."""
+    `parse_mode`, no `reply_markup`)."""
     text, fitted = _pre_text(body)
     try:
         return tg.edit_message_html(chat_id, message_id, text, reply_markup=reply_markup)
     except TelegramError as exc:
-        if exc.fatal:
+        if exc.status != 400:
             log.error("editing the reply failed: %s", redact(str(exc)))  # noqa: TRY400
             return None
         try:

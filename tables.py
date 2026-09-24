@@ -134,9 +134,8 @@ def render_table(
 def fit_lines(lines: Sequence[str], *, limit: int) -> str:
     """REQ-V1110-OUT-01. Fit `lines` to `limit` UTF-16 units, joined by
     `"\\n"` with no trailing newline. Whole lines are dropped from the end
-    and a final `"... N more"` line appended until it fits -- the `_fit`
-    pattern (`bot.py:1190-1197`) but over lines, never a hard slice inside a
-    line."""
+    and a final `"... N more"` line appended until it fits -- over lines,
+    never a hard slice inside a line."""
     all_lines = list(lines)
     joined = "\n".join(all_lines)
     if utf16_length(joined) <= limit:

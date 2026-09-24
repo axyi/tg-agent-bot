@@ -247,8 +247,90 @@ forward-flagged disclosed amendment (the three extra VER-01 pin sites).
 | --- | --- | --- |
 | `5780562` | 0 | recorded late, at T0-resume (prompt 264) — the "before another commit" window had already closed when `07522f4` landed; ran the spec's standalone block with `git archive 5780562` in place of `HEAD`, disclosed as a process deviation (no leak found, no compliance impact) |
 | `07522f4` | 0 | `gitleaks-tree exit=0`, no leaks found |
+| `ffdca15` | 0 | recorded at T1 (this commit) — the same lag pattern as 5780562's late record |
 
-## T1 — not reached
+## T1 — OUT-01, OUT-02: the plain fallback narrowed to HTTP 400, three docstrings
+
+Delegated to one subagent, brief `docs/spec/task-briefs/v1111-T1.md`.
+
+### OUT-01 — `TelegramError.status`, `call`'s status-tagging, the 400-only predicate
+
+`TelegramError` (`bot.py:176-190`) gained a keyword field
+`status: int | None = None`, stored as `self.status`. `TelegramClient.call`
+(`bot.py:221-274`) now sets `status=status` on every raise that follows a
+response — the 401/404 fatal branch, the 429 branch, the other non-200
+branch, the non-JSON branch, and the `data.get("ok") is not True` branch —
+and leaves it `None` on the transport raise (the only raise before a
+response exists). `_call_with_retry` (`bot.py:277-292` on this tree)
+confirmed byte-identical to `2431034`
+(`git show 2431034:bot.py | sed -n '265,280p'` diffed against the live
+range, no hunk). `send_pre` and `edit_pre` (`bot.py:2554-2598`) switched
+their fallback predicate from `if exc.fatal:` to `if exc.status != 400:`
+— 401/404 never equal 400, so the old fatal check is subsumed and was
+replaced rather than kept alongside the new one; all fallback attempts
+still omit `parse_mode`, at-most-once semantics and the `_pre_text` order
+are unchanged.
+
+### OUT-02 — three docstrings
+
+(a) `send_pre`'s docstring replaced verbatim by the spec `:278-291` block
+(narrowed to the `status == 400` classification, no line-range reference).
+`edit_pre`'s docstring: "the same fatal-skips-the-fallback rule … on a
+non-fatal table-path failure" collapsed to "the same 400-only rule",
+keeping the `edit_message_text` mechanics parenthetical (no tags, no
+`parse_mode`, no `reply_markup`) that follows it. (b) `tables.fit_lines`'s
+docstring (`tables.py:134-139`) drops the `` `_fit` ``/`bot.py:1190-1197`
+parenthetical; it now reads "… appended until it fits -- over lines, never
+a hard slice inside a line." (c) `IngestJob`'s docstring (`bot.py:1926-`)
+first sentence replaced with the `cancel.is_set()` happens-before waiver
+text (the v1.11.0 T7 review's finding-2 waiver); the `monotonic` paragraph
+and every read/write site (`bot.py:1959`, `:1969`, `:2123`, `:2047`,
+`:2229`, all shifted by this task's own insertions but otherwise
+untouched) are unchanged.
+
+### Test-first (EC-02)
+
+`tests/test_v1111_out.py` (5 tests) written before any source change. A
+temporary `git stash push -- bot.py tables.py` reverted the source edits
+to confirm each test's failure reason against the pre-change tree, then
+`git stash pop` restored them:
+
+| test | pre-change result | reason |
+| --- | --- | --- |
+| `test_t_v1111_out_01_status_set_from_response` | FAIL | `AttributeError: 'TelegramError' object has no attribute 'status'` |
+| `test_t_v1111_out_02_fallback_on_400_send_and_edit` | pass (incidental) | none of its sub-cases (400/500/transport, never 401/404) are `fatal`, so the old `exc.fatal` predicate and the new `exc.status != 400` predicate coincide on every case this test exercises |
+| `test_t_v1111_out_03_no_fallback_on_429_after_budget` | FAIL | `assert 6 == 3` — the old `exc.fatal` check let a budget-exhausted 429 fall through to a second logical fallback (3 HTML + 3 plain requests) instead of skipping it |
+| `test_t_v1111_out_04_no_fallback_on_5xx_or_transport` | FAIL | `assert 2 == 1` — the old check let a bare 5xx fall through to a plain resend instead of skipping it |
+| `test_t_v1111_out_05_docstrings_current` | FAIL | `assert 'status' in '...'` — the pre-change `send_pre` docstring has neither `status` nor `400`, and still names `bot.py:154-198` |
+
+All 5 green after implementation:
+`uv run --locked pytest tests/test_v1111_out.py -v` → `5 passed`.
+
+### `T-V1110-OUT-05` regression check
+
+`tests/test_v1110_out.py:359-422`'s `test_t_v1110_out_05_plain_fallback_once_on_400`
+(the four `a`–`d` sub-cases: 400→200 succeeds, a 4097-unit body's fallback
+carries the fitted text, two 400s return `None` after exactly two
+requests, a fatal 401 skips the fallback after exactly one request) passes
+**unamended** — the new `status`-based predicate agrees with the old
+`fatal`-based one on every one of these four cases, since none of them mix
+a non-fatal non-400 status with the fallback path. Full
+`tests/test_v1110_out.py` suite: `uv run --locked pytest
+tests/test_v1110_out.py -q` → all green (no failures).
+
+### Gates 1–4 and `lint-docs` (T1)
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | `Resolved 25 packages`, `Checked 23 packages`, exit 0 |
+| 2 | `uv run --locked ruff check .` | `All checks passed!`, exit 0 |
+| 3 | `uv run --locked pytest` | `2388 passed, 1 skipped, 2 xfailed` (2391 collected — the 2384 T0 floor plus T0's own 2 `test_v1111_pin.py` functions plus this task's 5 new `test_v1111_out.py` functions), exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
+| — | `uv run --locked python devtools/checks.py lint-docs` | `[PASS] lint-docs: all prompts and the report ledger row pass` |
+
+### Delegation record (EC-03, §10.1)
+
+- T1 | delegated: yes | to: general-purpose subagent, OUT-01/OUT-02 (`TelegramError.status`, the `call` raises, the 400-only predicate, the three docstrings) and `tests/test_v1111_out.py` | brief: docs/spec/task-briefs/v1111-T1.md | map vs actual: matches §10.1's yes cell for T1 -- touched `bot.py:176-190` (`TelegramError`), `:221-274` (`call`, status-tagged raises), `_call_with_retry` at `:277-292` read only and confirmed byte-unchanged, `:1926-1942` (`IngestJob` docstring), `:2554-2598` (`send_pre`/`edit_pre`); `tables.py:134-139` (`fit_lines` docstring); `tests/test_v1110_out.py:94-95`, `:359-422` read only, unamended; `tests/test_v1111_out.py` created (5 functions) -- the reading map's file/line ranges match, shifted only by this task's own earlier insertions within `bot.py`
 
 ## T2 — not reached
 
