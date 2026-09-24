@@ -988,11 +988,15 @@ reason**:
 Five informational findings, none must-fix or should-fix, all
 pre-existing or explained by ordinary cross-task sequencing within this
 same release (a `tables.fit_lines` docstring detail predating v1.11.1;
-a 7-line citation drift in the `IngestJob` docstring's report pointer,
-caused by T4's own DOC-03 edit shifting `report-v1.11.0.md`'s line
-numbers, within EC-02's disclosed-amendment framing even though 2 lines
-over the nominal ±5 — the substance is unchanged, only the citation
-moved; a credential-shaped test placeholder in `test_v1111_tab.py`
+a 7-line citation drift in the `IngestJob` docstring's report pointer
+(**corrected at T6, this section**: not an EC-02 spec-citation-drift
+case at all — EC-02's ±5-line tolerance covers spec citations checked
+against `2431034`, and the spec's own citation there is exact; the
+docstring's text is spec-mandated verbatim, and it drifted only because
+T4's own later DOC-03 edit shifted `report-v1.11.0.md`'s line numbers
+out from under it — the substance is unchanged, only the citation
+moved, but citing EC-02's tolerance for it was a misapplication of that
+rule, not a genuine instance of it); a credential-shaped test placeholder in `test_v1111_tab.py`
 matching a 12-site pre-existing repo convention, contrasted with
 T3's own module which switched to a non-credential-shaped one; a
 redundant local fixture in `test_v1111_tab.py` now superseded by T3's
@@ -1083,7 +1087,116 @@ prior task.
 - T5 | delegated: no | to: commands only for gates 1-8, `tested_tree`, the pre-gate-8 checks | brief: — | map vs actual: matches §10.1's no/commands-only cell; nothing committed between gates 1-6 and gate 8
 - T5 | delegated: no | to: artefacts only for the report-only commit | brief: — | map vs actual: matches §10.1's no/artefacts-only cell; this commit's path set is exactly `docs/reports/report-v1.11.1.md`, `docs/prompts/263-v1111-t5-review-gates.md`, `docs/llm-usage.md`
 
-## T6 — not reached: version bump and tag not yet cut
+## T6 — version bump, evidence commit, local tag
+
+One prompt (267, shared by both commits per EC-04's exception), two
+commits: the bump (`6145831`), then this evidence-only commit.
+
+### The bump commit (`6145831`)
+
+Delegated (brief `docs/spec/task-briefs/v1111-T6.md`). `pyproject.toml:3`
+`1.11.0` → `1.11.1`; `uv lock` regenerated `uv.lock`, diff confined to
+the project's own `version` line (confirmed both by inspection and by
+`dependency_diff_is_version_only` returning `True`). All fourteen T6 pin
+sites (the eleven spec-named plus the three found by extension at T0)
+rewritten in place, none renamed or deleted — see the subagent's own
+file:line list, matching `v1111-T0-pin-inventory.md`'s T6 rows exactly.
+`AGENTS.md`'s count lines repointed (2411, `152 entries as of
+spec-v1.11.1 T6`), the brief-path token (`v1111-T<N>.md`), and the NG-11
+sentence added verbatim ("v1.11.1 changes nothing token-bearing either;
+the rule does not fire."). `config/quality_gates.yaml:797`'s
+`report_path` → `docs/reports/report-v1.11.1.md`. README's release
+table gains the `v1.11.1` row (spec `:837`'s exact text,
+`<effective judge>` = `anthropic/claude-sonnet-5 (another vendor)`);
+the `v1.11.0` row loses its `; this release` clause. The waived
+`/sessions` README wording (T5's should-fix) was correctly left
+untouched — out of this task's scope.
+
+`tests/test_v1111_ver.py`, four functions: `T-V1111-VER-01`,
+`-03` red before the bump (`AttributeError`/version-string mismatch,
+`'2411' not in AGENTS.md`), green after; `-02`, `-04` structural
+(EC-02's carve-out), green on first execution. Collection count
+**2411 exactly** (2407 + 4 = floor 2384 + 27). Gates 1–4 green
+(subagent's own run); `lint-docs` failed as anticipated by the brief
+(`report-v1.11.1.md`'s ledger-row section had no fenced code block yet
+— this section fixes that; `T-V1111-VER-04`'s own narrower
+`_lint_report_delegation` check had already passed).
+
+`gitleaks-tree` on `6145831`: exit 0, no leaks found (scanned by the
+orchestrator immediately after the commit landed).
+
+### Fresh gates 1–6 (orchestrator, on `6145831`)
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | `Resolved 25 packages`, `Checked 23 packages`, exit 0 |
+| 2 | `uv run --locked ruff check .` | `All checks passed!`, exit 0 |
+| 3 | `uv run --locked pytest` | `2408 passed, 1 skipped, 2 xfailed in 23.16s` (2411 collected), exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK`, exit 0 |
+| 5 | `uv run --locked python bot.py --selftest-live` | `OK config`/`db`/`docker (29.8.1)`/`telegram`/`embeddings`/`openrouter`; `SKIP lmstudio` (no route uses it); exit 0 |
+| 6 | `uv run --locked python devtools/mutation_check.py` (alone, background) | **152/152 killed, 0 survived, 0 errored, 0 drifted.** `W` = real 17m23.924s (1043.924s) — under 1300s, no timeout hunk; exit 0 |
+
+Gates 7 and 8 **not rerun** — reused via the identity check below
+(GATE-01).
+
+### Preliminary identity check, collection/node-id, `replay`, E1–E6
+
+- `dependency_diff_is_version_only(git diff v1.11.0 -- pyproject.toml
+  uv.lock)` = **`True`**.
+- Collection count: **2411** (`>= floor(2384) + 27`).
+- Node-id check: the literal `comm -23 v1111-T0-nodeids.txt <after>`
+  emits `comm: file 1/2 is not in sorted order` and ten spurious lines
+  — the same ambient-locale-vs-`comm`-internal-collation mismatch the
+  T0 pin-inventory subagent already documented (`v1111-T0-nodeids.txt`
+  sorts clean under `ru_RU.UTF-8` `sort`, the locale that generated it,
+  but not under `comm`'s own stricter check). **Verified instead by a
+  locale-independent set difference** (Python, `set(before) -
+  set(after)`): before 2384 lines, after 2411 lines, **0 missing** —
+  the rename mapping is empty, no baseline node id lost (NG-16).
+- `checks.py replay --range v1.11.0..HEAD`: **17/17 commits clean**
+  (every commit of this run, `8de5485` through `6145831`).
+- Appendix B E1–E6: `pytest tests/test_v1111_*.py -v` → **27 passed**
+  (all five `test_v1111_*.py` modules — OUT, TAB, TST, DOC, PIN, VER —
+  one full pass, no failures).
+- `T-V1111-TST-08` (by command): (1)
+  `pytest "tests/test_v1103_red_team.py::test_t_v1103_rt_06_leak_shape_fixture_still_fails_on_clause_c_only"
+  -o addopts=""` → `1 passed`; (2) `pytest -p xdist -n 4 -o addopts=""
+  -q` run **twice** → both `2408 passed, 1 skipped, 2 xfailed` (32.05s,
+  32.64s), identical summaries.
+
+No repair needed anywhere in this sequence (`dependency_diff_is_version_only`
+`True`, count sufficient, node-id check clean, `replay` clean, every
+E1–E6 scenario green) — **this evidence commit is T6's second and
+final commit**, no `fix:` commit precedes it.
+
+### Delegation record (EC-03, §10.1)
+
+- T6 | delegated: yes | to: general-purpose subagent, the version bump (`pyproject.toml`, `uv.lock`, fourteen pin sites, `AGENTS.md`, README's release row, `config/quality_gates.yaml:797`) and `tests/test_v1111_ver.py` | brief: docs/spec/task-briefs/v1111-T6.md | map vs actual: matches §10.1's yes cell for T6's bump commit (`6145831`); the evidence commit (this one) is the orchestrator's own artefacts-only work, matching §10.1's no/artefacts-only cell — its path set is exactly `docs/reports/report-v1.11.1.md`, `docs/reports/tg-post-v1.11.1.md`, `docs/prompts/267-v1111-t6-version-bump.md` (already on disk, bundled per EC-04's shared-prompt exception), `docs/llm-usage.md`
+
+### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
+
+| commit | exit | note |
+| --- | --- | --- |
+| `6145831` | 0 | `gitleaks-tree exit=0`, no leaks found — T6's bump commit, the last pre-evidence commit of this run |
+
+This evidence commit's own `gitleaks-tree` result, the definitive
+post-evidence identity check, `E7`, and the final `lint-docs` are
+**not recorded here** — per GATE-01's evidence boundary, they exist
+only in the annotated tag message's six fields.
+
+**Disclosed amendment — the evidence commit's actual path set is
+three, not REV-02's literal four.** `docs/prompts/267-v1111-t6-version-bump.md`
+already landed with the bump commit (`6145831`) — the brief instructed
+committing it there, since T6's single shared prompt (EC-04's
+exception) has no second, distinct prompt number the way T4's two
+prompts (260/261) did to justify deferring one into the later commit.
+This evidence commit's real diff is exactly
+`docs/reports/report-v1.11.1.md`, `docs/reports/tg-post-v1.11.1.md`,
+`docs/llm-usage.md` — the audit intent REV-02's four-path rule protects
+(one prompt file governing both commits, referenced by both, nothing
+extraneous committed) is unaffected; only the mechanics of which commit
+carries the already-unchanging prompt file differ from the literal
+text.
 
 ## Operator inputs
 
@@ -1102,13 +1215,18 @@ prior task.
 
 | task | attempt | exit | outcome |
 | --- | --- | --- | --- |
-| not reached | | | |
+| T5 | 1 | 0 | PASS — injection 5/5, hallucination 4/4, memory 3/3, judge mean 0.923 (floor 0.8), latency advisory PASS; the run's one and only invocation, against `tested_tree=7bc6d437f84d4ac4e149277408c0f750ab949947`, reused (not rerun) at T6 via the identity check |
 
 ## `docs/reports/tg-post-v1.11.1.md`
 
-Not written yet — written at T6 (or at the stop route, if triggered).
+Written below (this file); ≤ 1500 characters by `wc -m`, quoted in the
+Ledger section.
 
 ## Ledger row (paste into `economics.md`)
 
-Not reached — filled at T6. T0 completed at prompt 264 (resumed after
-the blocked pass at prompt 256, `bot_state` override count now 0).
+`ledger_header` (`config/quality_gates.yaml:798`):
+`| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | Tokens ↑/↓ | Cost | Model | Harness |`
+
+```
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.11.1 | 2026-09-24 | 110,779 bytes spec (spec-v1.11.1 authoring, prompt 255, per docs/llm-usage.md row 166) | 12 (256-267) | no -- first pass blocked at T0 (bot_state override count 2, prompt 256), resumed clean at prompt 264 after the operator cleared the rows; zero gate-failure repair cycles anywhere in T0-T6; three documentation follow-up commits (258, 265, 266) closed self-caught report-completeness gaps, none a repair cycle against a red gate | T5's clean-context review: no must-fix, two should-fix waived with reason (a README wording gap, an untested non-JSON status-tagging branch), five informational findings recorded not acted on | harness does not expose per-request tokens for the orchestrator's own main-context work; subagent aggregates per docs/llm-usage.md rows 168 (T0 pin-inventory, 171,253) + 170 (T1, 246,173) + 172 (T2, 402,257) + 173 (T3, 323,925) + 175 (T4 second commit, 237,908) + 177 (T5 review, 186,655) + this row's own T6 bump (236,233) = **1,804,404** aggregate across 7 subagent invocations | live gate spend: gate 5's probes at T0/T5/T6, gate 7's rerank + advisory smoke at T5, gate 8's 12 red-team/memory cases + 5 judge calls at T5 (reused at T6, no repeat spend) -- well under $1 aggregate at public list price for `openai/gpt-4.1` / `anthropic/claude-sonnet-5` / `openai/text-embedding-3-small` (same basis as v1.11.0's own ledger row); Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
+```
