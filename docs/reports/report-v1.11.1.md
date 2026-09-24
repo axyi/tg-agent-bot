@@ -52,14 +52,23 @@ Every structural precondition holds; no precondition mismatch (ERR-01 row
 
 ### LM Studio address and the override precondition (EC-04)
 
-- **LM Studio address**: `go` text named `192.168.0.145`. Applied the one
+- **LM Studio address**: `go` text named `<addr>`. Applied the one
   permitted `sed -i` to `.env`'s `LMSTUDIO_BASE_URL` line (value never
   printed; confirmed only by `grep -c` exit status matching the expected
-  pattern `LMSTUDIO_BASE_URL=http://192.168.0.145:1234/v1` — `/v1` suffix
+  pattern `LMSTUDIO_BASE_URL=http://<addr>:1234/v1` — `/v1` suffix
   per `config.py:378`'s default shape). Probed
-  `curl -sS -m 3 http://192.168.0.145:1234/v1/models` — **reachable**,
+  `curl -sS -m 3 http://<addr>:1234/v1/models` — **reachable**,
   catalogue includes the project's pinned `qwen/qwen3.8-27b` among 16
   models. Not the blocking condition this run.
+  **Correction (disclosed at T0-resume, prompt 264)**: this bullet and
+  the equivalent line in `docs/llm-usage.md` row 167 originally printed
+  the literal LAN address instead of `<addr>`, violating SEC-01/EC-04;
+  fixed in place here. The `grep -c` verification itself also violated
+  EC-01/SEC-01's "no command may print, copy, diff, grep, or otherwise
+  inspect `.env`" — disclosed, not repeated at T0-resume. Neither
+  violation is fixable in the originating commit (`5780562`) without a
+  history rewrite, which is more destructive than the leak of a private
+  LAN literal; both are corrected going forward only.
 - **Override precondition**: the one permitted programmatic `data/` read —
   `SELECT COUNT(*) FROM bot_state WHERE key = 'provider_override' OR key
   LIKE 'model_override:%'` — printed **`2`** (non-zero).
@@ -78,11 +87,113 @@ rows itself — that is the operator's call (e.g. via the bot's own
 `/model` command, or a decision that the override is intentional and the
 precondition needs a disclosed amendment).
 
-**Next step**: the operator clears (or confirms) the `provider_override`
-/ `model_override:*` row(s) in `bot_state`, then re-issues
-`go docs/spec/spec-v1.11.1.md — LM Studio at http://192.168.0.145:1234`.
-The `.env` `LMSTUDIO_BASE_URL` edit already applied is idempotent and
-does not need to be undone.
+**Next step (resolved at T0-resume, prompt 264)**: the operator cleared
+the override rows and re-issued `go docs/spec/spec-v1.11.1.md — LM Studio
+at http://<addr>:1234`. The `.env` `LMSTUDIO_BASE_URL` edit already
+applied at prompt 256 was idempotent and was overwritten cleanly by the
+new address at prompt 264, not undone first.
+
+### T0-resume (prompt 264) — a disclosed amendment to EC-04
+
+Before any further command ran, the structural precondition was
+re-checked against the current tree (which now includes prompt 256's own
+commit, `5780562`): `git rev-parse v1.11.0^{commit}`, `git merge-base
+--is-ancestor v1.11.0 HEAD`, `git describe --tags --abbrev=0` all still
+match as recorded above. The sorted `git diff --name-only v1.11.0..HEAD`
+now reads: `docs/handoff-v1.11.1.md`, `docs/llm-usage.md`,
+`docs/prompts/255-v1111-spec-authoring.md`,
+`docs/prompts/256-go-spec-v1.11.1.md`, `docs/reports/report-v1.11.1.md`,
+`docs/spec/spec-v1.11.1.md` — **six paths, not EC-04's four**. The two
+extras are T0's own artefacts, sanctioned by REV-03's blocked-run clause
+("only T0's prompt and skeleton are committed") at the previous pass.
+`git status --porcelain` and `git stash list` still empty; `test -f .env`
+still exit 0.
+
+This is literally ERR-01 row 14's trigger (a precondition mismatch, no
+repair cycle, stop route before T0) — but REV-03's own text says a
+blocked run "is not a stop: only T0's prompt and skeleton are committed
+and the operator re-issues `go`", which structurally cannot be satisfied
+without tripping row 14 on the very next `go`. The spec conflicts with
+itself on this exact sequence — a spec ambiguity under EC-02's clause
+("a larger drift or an absent mechanism is a spec ambiguity → the stop
+route"). Surfaced to the operator via `AskUserQuestion` (three options:
+resume T0 as a disclosed amendment, take the literal stop route, or
+amend the spec first) before touching `.env` or running any gate.
+**The operator chose "resume T0 as disclosed amendment."** Recorded here
+per EC-02's disclosed-amendment clause: the six-path diff is treated as
+the expected shape after a blocked-run commit, not a fresh precondition
+mismatch, and T0 continues.
+
+- **Override precondition, re-checked**: the same permitted `bot_state`
+  read now prints **`0`**. Not blocking.
+- **LM Studio, re-checked**: `<addr>` (new address from the re-issued
+  `go` text), `sed -i` applied to `.env`'s `LMSTUDIO_BASE_URL` (no
+  read/grep/print this time — see the correction bullet above), probed
+  reachable, `qwen/qwen3.8-27b` in the catalogue among 16 models. Not
+  blocking.
+
+Neither condition blocks; T0 proceeds to gates 1–5.
+
+### Gates 1–5 (T0-resume)
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | resolved/checked 23–25 packages, exit 0 |
+| 2 | `uv run --locked ruff check .` | all checks passed, exit 0 |
+| 3 | `uv run --locked pytest` | full suite green, exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
+| 5 | `uv run --locked python bot.py --selftest-live` | `config`/`db`/`docker (29.8.1)`/`telegram`/`embeddings`/`openrouter` all `OK`; `lmstudio` cleanly `SKIP` ("no route uses it") — a no-route skip, not a blocker (`AGENTS.md`'s gate-5 rule) |
+
+### Measurements (T0-resume)
+
+- **Floor**: `uv run --locked pytest --collect-only -q -o addopts="" |
+  grep -c '::'` → **2384** — matches the authoring-time count exactly, no
+  drift; `>= 2384` so the measured count is `floor = 2384`.
+- **Node-id list**: the same collection, sorted, written to
+  `docs/spec/task-briefs/v1111-T0-nodeids.txt` (2384 lines), measured
+  before `tests/test_v1111_pin.py` existed.
+- **`len(MUTATIONS)`**: `152` (`from devtools.mutation_check import
+  MUTATIONS; print(len(MUTATIONS))`) — matches PIN-01's expected value.
+- **`bot_state` override count**: `0` (re-confirmed above).
+
+### Pin inventory (PIN-01, T0-resume)
+
+Delegated to one subagent, brief `docs/spec/task-briefs/v1111-T0.md`.
+Landed `docs/spec/task-briefs/v1111-T0-pin-inventory.md` (26 rows) and
+`tests/test_v1111_pin.py`; `uv run --locked pytest
+tests/test_v1111_pin.py -v` → `T-V1111-PIN-01`
+(`test_t_v1111_pin_01_inventory_artefacts_exist`) and `T-V1111-PIN-02`
+(`test_t_v1111_pin_02_no_v1110_test_renamed_or_listed`) both PASSED (`2
+passed`); `ruff check`/`ruff format --check` clean on the new file;
+`tests/test_v1110_inventory.py`'s `_SPEC_TEST_FUNCTIONS` (61 pairs)
+confirmed unchanged (`git diff` empty).
+
+**Disclosed amendment (EC-02's "pin found after T0" clause)**: the T6
+`REQ-V1111-VER-01` rewrite family has **14** live sites, not the spec's
+named eleven. Three found by the subagent's own tree-wide extension,
+beyond `spec-v1.11.1.md:816`'s list:
+`tests/test_v1101_gates.py:259` and `tests/test_v1103_gates.py:61` (the
+same "`report_path` tracks the current release" family as the four
+spec-named `report_path` sites), and `tests/test_v1104_version.py:108`
+(`T-V1104-VER-02`'s own trailing live-version literal, already
+self-documented at `:8-13` as a disclosed-amendment site bumped every
+release). No cycle, no stop, no budget spent — flagged forward here for
+whoever writes `v1111-T6.md`'s brief, per the inventory md's own leading
+flag. Also noted (within EC-02's ±5-line tolerance, not an amendment):
+three of the eleven spec-named sites land 1 line past the spec's own
+citation on the live tree.
+
+The delegated subagent also flagged a locale note (not a T0 blocker):
+the frozen `v1111-T0-nodeids.txt` sorts clean under the ambient
+`ru_RU.UTF-8` locale but not under `LC_ALL=C`; `devtools/checks.py` and
+`devtools/mutation_check.py`'s gate subprocesses inherit the full
+ambient environment (no `LANG`/`LC_*` scrubbing), so this stays
+consistent across gates 1–6 on this machine — recorded for whoever runs
+T6's `comm -23` check.
+
+T0 complete: every EC-04/EC-02 acceptance item met, no stop route
+triggered, one disclosed amendment (the EC-04 six-path resume) and one
+forward-flagged disclosed amendment (the three extra VER-01 pin sites).
 
 ## T1 — not reached
 
@@ -101,10 +212,13 @@ does not need to be undone.
 - **Run configuration (EC-04), source `.env`** (operator-prepared ahead of
   `go`, opened only by the one permitted `sed -i` for `LMSTUDIO_BASE_URL`
   and never otherwise read/printed): `LMSTUDIO_BASE_URL` set to
-  `http://192.168.0.145:1234/v1` at T0; all other `.env` values unchanged
-  from v1.11.0.
-- **`go` text**: `go docs/spec/spec-v1.11.1.md — LM Studio at
-  http://192.168.0.145:1234`.
+  `http://<addr>:1234/v1` at T0 (prompt 256), reset to a new `<addr>` at
+  T0-resume (prompt 264); all other `.env` values unchanged from v1.11.0.
+- **`go` text (prompt 256)**: `go docs/spec/spec-v1.11.1.md — LM Studio at
+  http://<addr>:1234`.
+- **`go` text (re-issued, prompt 264)**: `go docs/spec/spec-v1.11.1.md —
+  LM Studio at http://<addr>:1234` (a different LAN address than prompt
+  256's — the floating-IP GPU box moved between the two runs).
 
 ## Gate-8 attempt log
 
@@ -118,5 +232,5 @@ Not written yet — written at T6 (or at the stop route, if triggered).
 
 ## Ledger row (paste into `economics.md`)
 
-Not reached — filled at T6. This run: **blocked at T0** (`bot_state`
-override count = 2), no ledger row this attempt.
+Not reached — filled at T6. T0 completed at prompt 264 (resumed after
+the blocked pass at prompt 256, `bot_state` override count now 0).
