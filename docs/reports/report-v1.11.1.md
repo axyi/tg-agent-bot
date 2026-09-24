@@ -134,13 +134,33 @@ mismatch, and T0 continues.
 
 Neither condition blocks; T0 proceeds to gates 1–5.
 
+**Prompt numbering note**: prompt 264 (this resume) was chosen as a
+disclosed amendment — 256 already carries the blocked-pass commit under
+the one-prompt-one-commit rule (not among the two ids, 262/263, exempted
+for multiple commits), and 257–263 are reserved for T1–T6. 264 is the
+first free slot in the spec's own "+1 per repair prompt" numbering
+scheme (`spec-v1.11.1.md:1011-1012`), reused here for the same kind of
+exceptional continuation. Consequence for later tasks: T6's own repair
+cycles (`spec-v1.11.1.md:177-178`, "264 upward, +1 per repair prompt")
+now start at **265**, not 264.
+
+**Node-id-file timing, disclosed (no rerun)**: §10's T0 row says gates
+1–5 run "before any T0-generated file exists"; `v1111-T0-nodeids.txt`
+(this resume's own T0-generated file) already existed, untracked, in the
+worktree when gates 4 and 5 ran (it was written immediately after the
+floor measurement, ahead of gates 4–5 in this session's actual command
+order). Neither gate reads or is affected by it — `bot.py --selftest`
+and `--selftest-live` touch no `docs/` path — so this is a disclosed
+timing deviation, not a result at risk; not repeated for T1–T6's own
+gate runs.
+
 ### Gates 1–5 (T0-resume)
 
 | gate | command | result |
 | --- | --- | --- |
 | 1 | `uv sync --locked` | resolved/checked 23–25 packages, exit 0 |
 | 2 | `uv run --locked ruff check .` | all checks passed, exit 0 |
-| 3 | `uv run --locked pytest` | full suite green, exit 0 |
+| 3 | `uv run --locked pytest` | `2381 passed, 1 skipped, 2 xfailed in 23.80s` (2384 total, matches the floor), exit 0 |
 | 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
 | 5 | `uv run --locked python bot.py --selftest-live` | `config`/`db`/`docker (29.8.1)`/`telegram`/`embeddings`/`openrouter` all `OK`; `lmstudio` cleanly `SKIP` ("no route uses it") — a no-route skip, not a blocker (`AGENTS.md`'s gate-5 rule) |
 
@@ -155,6 +175,17 @@ Neither condition blocks; T0 proceeds to gates 1–5.
 - **`len(MUTATIONS)`**: `152` (`from devtools.mutation_check import
   MUTATIONS; print(len(MUTATIONS))`) — matches PIN-01's expected value.
 - **`bot_state` override count**: `0` (re-confirmed above).
+
+`[[VERIFY: the collected-test floor]]` (`spec-v1.11.1.md:91-96`):
+measured **2384**, at or above 2384 → recorded as `floor` per the
+decision rule; no drift from authoring time.
+
+`[[VERIFY: the single-gate CLI form]]` (`spec-v1.11.1.md:791-796`):
+`grep -n "add_argument\|--only\|--gate\|--profile" devtools/checks.py`
+on the live tree still shows only `--profile` with the three
+`pre-commit`/`pre-push`/`full` choices at `checks.py:1877`, no gate
+selector — absent, confirming the decision rule's default: the standalone
+`bash` block is the only way `gitleaks-tree` runs alone this task.
 
 ### Pin inventory (PIN-01, T0-resume)
 
@@ -194,6 +225,28 @@ T6's `comm -23` check.
 T0 complete: every EC-04/EC-02 acceptance item met, no stop route
 triggered, one disclosed amendment (the EC-04 six-path resume) and one
 forward-flagged disclosed amendment (the three extra VER-01 pin sites).
+
+### Delegation record (EC-03, §10.1)
+
+- T0 | delegated: no | to: commands only for the preconditions and gate 5
+  probe, artefacts only for the prompt file and report skeleton (§5.1
+  exemptions) | brief: — | map vs actual: matches §10.1's no/no cells for
+  this partial commit (`5780562`); the yes cell (the pin inventory) was
+  not reached — blocked before it (ERR-01 row 6)
+- T0 | delegated: yes | to: general-purpose subagent, the pin inventory
+  and `tests/test_v1111_pin.py` | brief: docs/spec/task-briefs/v1111-T0.md
+  | map vs actual: matches §10.1's yes cell for the pin inventory
+  (`07522f4`); the preconditions re-check/gates 1-5/measurements
+  (commands only) and the prompt file/report update (artefacts only) are
+  bundled into this same landing commit as disclosed orchestrator work,
+  matching §10.1's no/no cells for those parts
+
+### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
+
+| commit | exit | note |
+| --- | --- | --- |
+| `5780562` | 0 | recorded late, at T0-resume (prompt 264) — the "before another commit" window had already closed when `07522f4` landed; ran the spec's standalone block with `git archive 5780562` in place of `HEAD`, disclosed as a process deviation (no leak found, no compliance impact) |
+| `07522f4` | 0 | `gitleaks-tree exit=0`, no leaks found |
 
 ## T1 — not reached
 
