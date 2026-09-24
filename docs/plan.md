@@ -1,3 +1,11 @@
+> **Superseded.** Since v1.7.0 the roadmap lives in `docs/spec/spec-vN.md`
+> (the contract) and `docs/handoff-vN.md` (the `go`-session handoff written
+> by the lab for each release — what the run session reads first). This
+> file is kept as history: its last release section is `## v1.6.0 (in
+> progress)` and its status table stops at `spec-v1.7.0.md` marked in
+> progress; every release since is specified in `docs/spec/spec-vN.md` and
+> handed off in `docs/handoff-vN.md`.
+
 # Project plan — tg-agent-bot
 
 Course assignment 3: turn a Telegram bot into an LLM agent — minimal harness

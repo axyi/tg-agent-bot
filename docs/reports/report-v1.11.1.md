@@ -748,11 +748,164 @@ flagged, applied proactively rather than reported as a finding: `ruff
 format --check` on the two touched files caught one quote-style
 mismatch, fixed as noted above.
 
+### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
+
+| commit | exit | note |
+| --- | --- | --- |
+| `5587fd1` | 0 | recorded at T4 (this commit) -- T3's own landing commit, already scanned by the orchestrator before T4 started, same lag pattern as T0/T1/T2's own tables; T0's table shape reused here since T3 previously carried only the single-line form above |
+
 ### Delegation record (EC-03, §10.1)
 
 - T3 | delegated: yes | to: general-purpose subagent, TST-01/TST-02 (six dispatch-level ERR-01 tests, the secrets-registry snapshot/restore fixture, TST-07's nested-pytest proof plus its own autouse-removal red/green check, TST-08's two by-command verifications) and tests/test_v1111_tst.py | brief: docs/spec/task-briefs/v1111-T3.md | map vs actual: matches §10.1's yes cell for T3 -- touched tests/conftest.py:1, :53-77 (new fixture, placed after no_real_bind); tests/test_v1111_tst.py created (7 functions); no bot.py/config.py edit (both REQ ids are test-only); storage.py touched only transiently for the row-12 mutation check, restored byte-identical (confirmed via git diff before commit); four stale bot.py citations, one stale README-line-pair citation and one stale tests/test_v1110_cbq.py citation found and corrected; test-first ordering disclosed as imperfect on TST-02/-07 (conftest.py written before the test file), unlike TST-01's six row tests which needed no source change at all; the prompt-renumbering disclosure (T4 to 261+262, T5 to 263, T6 to 266) recorded above and in the commit body
 
-## T4 — not reached: DOC-01…03 not yet implemented
+## T4 — DOC-01, DOC-02, DOC-03: README/`docs/plan.md`/`AGENTS.md` drift and the v1.11.0 paperwork corrected
+
+Two commits. The first (`9d8dc0e`, prompt 261, brief-confirmed
+*artefacts only*) corrected DOC-03's five v1.11.0 paperwork errors --
+`docs/reports/report-v1.11.0.md` and `docs/reports/tg-post-v1.11.0.md`
+exclusively, no test, no bookkeeping. This section's own commit (prompt
+262) implements DOC-01/DOC-02, writes `tests/test_v1111_doc.py`, and
+bundles the first commit's own bookkeeping -- its prompt file
+(`docs/prompts/261-v1111-t4-doc03.md`, already on disk untracked, staged
+here unmodified) and its `docs/llm-usage.md` row -- per EC-03's stated
+carve-out ("this prompt's own bookkeeping ... lands in T4's second
+commit").
+
+### DOC-03 -- confirmed green
+
+`T-V1111-DOC-03` was already green going into this commit (T4's own
+ordering, EC-02 `:73-74`'s carve-out: "the artefacts-only report commit
+lands before the test's commit"): `report-v1.11.0.md` reads
+`| 19 (236-254) |`, not `| 17 (236-252) |`; `## T2` names `743abc2`,
+`ef8e453`, `09f8d8a`; the T7 Phase A bullet names `33729eb` and
+`bundles`; the T7 waiver passage names `bot.py:2047` and `:2229`, no
+`2222` anywhere in the file; `checks._lint_report_delegation` on it
+returns `[]`; `tg-post-v1.11.0.md` has `236–254`, not `236–252`,
+`len()` 1453 <= 1500. Recorded as the initial result per EC-02.
+
+### DOC-01 -- three README edits
+
+(a) `## Limits`: a new `` | `/model` catalogue cap | 20 entries per
+provider (`MODEL_CATALOGUE_MAX`; the rest dropped at startup with a
+warning) | `` row after `rerank candidates`, plus one physical line
+after the table: "Sizes shown by `/documents` are decimal (1 MB =
+1,000,000 bytes); the exec and sandbox limits above are binary (MiB)."
+`MODEL_CATALOGUE_MAX` itself lives in `config.py:29` (`config.py:739-742`
+is the drop-with-warning site), not `bot.py`.
+
+(b) `## Error behaviour` gains two new rows, not three: the `/documents`
+empty row (`` | `/documents` with no documents uploaded | nothing sent
+on the table path | `No documents yet. Send me a .txt, .md, .docx or
+.pdf file.` | ``, `bot.DOCUMENTS_EMPTY_REPLY`, `bot.py:128`) placed
+immediately before the existing `/sessions` empty row, and the Telegram
+400 row (`` | Telegram 400 on a table-path send (`send_pre`/`edit_pre`)
+| one plain resend of the same fitted body, no `parse_mode`; any other
+failure (429 after the retry budget, 5xx, transport) is logged and
+never resent | the table as plain text, or nothing | ``) placed
+immediately after the existing `Telegram 429 on send` row and before
+`Telegram send fails after retries` -- the spec named no exact position
+for either, both chosen here. The spec's own third row, `/sessions`
+with no sessions, is **not** added a second time: T2's TAB-03 landed it
+already (`bot.SESSIONS_EMPTY_REPLY`, `bot.py:141`); disclosed
+amendment -- the live row's wording ("with no sessions yet" / "plain
+reply, no table") differs from spec `:488`'s own quoted wording ("with
+no sessions" / "nothing sent on the table path") for the same string
+and the same behaviour, kept as T2 shipped it rather than reworded to
+match the spec's phrasing a second time.
+
+(c) `## Versioning`: "so a `v1.6.0` tag does not exist until this
+release's own final commit lands." rewritten to "so a release's tag --
+`v1.6.0` included -- was created only after that release's own final
+commit had landed."
+
+**Line drift, cited -> actual** (all disclosed amendments, EC-02: a
+drift of <= 5 lines): `## Limits` spec `:918`, actual `:919`; `##
+Error behaviour` spec `:953`, actual `:954`; `## Versioning` spec
+`:1008`, actual `:1005` (3 lines); the `Telegram 429 on send` row spec
+`:967`, actual `:968` (1 line) -- all against `9d8dc0e` (T4's first
+commit; the DOC-03-only edits above it do not touch README).
+
+### DOC-02 -- `docs/plan.md`'s banner; `AGENTS.md`'s ruling
+
+(a) `docs/plan.md` gains exactly the seven quoted banner lines (spec
+`:508-516`) before its first line, then one blank line; the remainder
+proved byte-equal to `git show v1.11.0:docs/plan.md` (`T-V1111-DOC-02`).
+(b) `AGENTS.md`'s `## Secrets` gains one paragraph after the existing
+one, verbatim spec `:525-529` (the RFC1918/`/verify-run`-out-of-scope
+ruling).
+
+### Test-first (EC-02) -- disclosed as imperfect, not overstated
+
+Not genuine authorship-order test-first, same category as T1's own
+disclosure: the README/`docs/plan.md`/`AGENTS.md` edits landed first,
+then `tests/test_v1111_doc.py` was written against the changed tree,
+then a `git stash push --keep-index -- README.md docs/plan.md
+AGENTS.md` temporarily reverted the three doc files and the module was
+re-run to confirm red for the right reason: DOC-01 raised
+`ValueError: substring not found` on the `` `/model` catalogue cap ``
+lookup; DOC-02 failed the banner-lines comparison at index 0 (`'#
+Project plan...' != '> **Superseded....'`); DOC-03 stayed green
+throughout, consistent with its carve-out. The stash was then popped
+and all three tests re-confirmed green, `git diff --stat` on the three
+files showing only the intended hunks. Neither `T-V1111-DOC-01` nor
+`T-V1111-DOC-02` is among EC-02's four named carve-out ids
+(`T-V1111-VER-02`, `T-V1111-PIN-01`, `T-V1111-PIN-02`,
+`T-V1111-DOC-03`), so this ordering is disclosed rather than claimed as
+test-first, matching T1's own wording for the same situation.
+
+### Prompt-renumbering, stale spec citations
+
+Spec `:499` and `:530` cite "prompt 261" for T4's *second* commit (this
+one); spec `:535` cites "260" for T4's *first* commit (`9d8dc0e`).
+Both are stale -- T3's own renumbering (recorded in its report section
+and `docs/llm-usage.md` row 173) moved T4 to 261 (first commit) + 262
+(this, second commit), which is what `v1111-T4.md`'s brief and both
+prompt files actually use. Corrected here, not in the spec itself, per
+EC-02's own drift rule.
+
+### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
+
+| commit | exit | note |
+| --- | --- | --- |
+| `9d8dc0e` | 0 | `gitleaks-tree exit=0`, no leaks found (T4's first commit, already scanned by the orchestrator before this second commit started, handed to this subagent verbatim) |
+
+### Gates 1-4 and `lint-docs` (T4)
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | `Resolved 25 packages`, `Checked 23 packages`, exit 0 |
+| 2 | `uv run --locked ruff check .` | `All checks passed!`, exit 0 |
+| 3 | `uv run --locked pytest` | `2404 passed, 1 skipped, 2 xfailed in 29.29s` (2407 collected -- the 2404 T3 count plus this task's 3 new `test_v1111_doc.py` functions), exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
+| -- | `uv run --locked python devtools/checks.py lint-docs` | `[PASS] lint-docs: all prompts and the report ledger row pass` (re-run after `docs/prompts/262-v1111-t4-doc.md` was written; the config still names `report-v1.11.0.md`, `config/quality_gates.yaml:797`, so this gate does not itself check this file -- `checks._lint_report_delegation` called directly against `report-v1.11.1.md` below, T1-follow-up/T2/T3's own precedent) |
+
+`ruff format --check tests/test_v1111_doc.py` (the one new file, not the
+whole tree per the standing note against whole-file reformat risk):
+`1 file already formatted`. `checks._lint_report_delegation(Path("docs/
+reports/report-v1.11.1.md"))` called directly: `[]`.
+
+### Pre-commit self-check (`advisor`)
+
+Called before committing, per the brief. It caught two real gaps, both
+fixed before commit: (1) the test-first section originally read close
+to "written first" -- reworded to disclose the true edit-then-test
+order plainly, in T1/T3's own words, matching what the `git stash`
+red-check actually showed; (2) this task's own `gitleaks-tree` row for
+`5587fd1` was first appended to T1's existing running table by
+analogy with `ebc2822`'s placement there, but T1's table in fact holds
+only T1's own two commits (`ebc2822` is the sole misplaced row, a
+pre-existing artefact of T2 never having created its own table) --
+reverted that append and added a dedicated `gitleaks-tree` table inside
+T3's own section instead, matching the brief's "T3's own table" /
+"T4's own table" pairing at face value. Also verified directly rather
+than assumed: the README section/row line-drift figures above (grepped
+against `git show 9d8dc0e:README.md`), the `MODEL_CATALOGUE_MAX`
+location, and the stale prompt-number citations at spec `:499`/`:530`/
+`:535`.
+
+### Delegation record (EC-03, §10.1)
+
+- T4 | delegated: yes | to: general-purpose subagent, DOC-01/DOC-02 (three README edits, `docs/plan.md`'s banner, `AGENTS.md`'s Secrets paragraph) and `tests/test_v1111_doc.py` | brief: docs/spec/task-briefs/v1111-T4.md | map vs actual: matches §10.1's yes cell for T4's DOC-01/DOC-02 work -- touched README.md:952,955-956 (new Limits row + sentence), :973 (new Telegram-400 row), :979 (new /documents empty row), :1018-1019 (Versioning rewrite); docs/plan.md:1 (seven-line banner + blank line); AGENTS.md:328 (new Secrets paragraph); tests/test_v1111_doc.py created (3 functions); this commit also bundles two pieces of orchestrator bookkeeping outside the brief's DOC-01/DOC-02 scope but named in its own nine-path allowed set: T4's first commit's own prompt file (docs/prompts/261-v1111-t4-doc03.md, already on disk untracked, staged unmodified) and its docs/llm-usage.md row (174, for prompt 261/9d8dc0e), alongside this commit's own prompt file (262) and usage row (175) -- both bundlings disclosed here and in the commit body per EC-03; test-first ordering disclosed as imperfect above (edit-then-test, not among EC-02's four carve-out ids)
 
 ## T5 — not reached: review and gates 1-8 not yet run
 

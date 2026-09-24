@@ -326,3 +326,9 @@ link to this project's GitHub repository
 
 Secrets live in `.env` (git-ignored) — the Telegram bot token and the LLM API
 key never leave it. NEVER write secrets into code, docs, prompts, or reports.
+
+RFC1918 addresses of the operator's LM Studio box (`10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16`) in reports, prompts, task briefs and
+handoffs are operator input, not secrets: the lab's `/verify-run` secrets
+scan treats them as out of scope, and no historical artefact is redacted
+for them (ruled at spec-v1.11.1). New paperwork writes `<addr>` anyway.

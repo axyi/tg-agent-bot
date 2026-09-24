@@ -949,7 +949,11 @@ delivery is not provided and is not claimed.
 | chunk size / overlap | target 1000 chars, hard max 1200, overlap 200, minimum 50 (tail-merge threshold) |
 | retrieval K (passages returned) | 5 (`RAG_TOP_K`, default) |
 | rerank candidates | 10 (RRF cut before the optional listwise rerank) |
+| `/model` catalogue cap | 20 entries per provider (`MODEL_CATALOGUE_MAX`; the rest dropped at startup with a warning) |
 | `search_documents` tool output cap | 12,000 chars total (`RAG_SEARCH_ENVELOPE_MAX_CHARS`), 1,000 chars per passage (`RAG_PASSAGE_CHARS`) |
+
+Sizes shown by `/documents` are decimal (1 MB = 1,000,000 bytes); the exec and
+sandbox limits above are binary (MiB).
 
 ## Error behaviour
 
@@ -966,11 +970,13 @@ delivery is not provided and is not claimed.
 | sandbox at or over `EXEC_SANDBOX_MAX_BYTES` | exec refuses without starting a container | a tool error envelope naming the used/allowed bytes |
 | fetch to a non-allowlisted domain | refused before any request leaves | a tool error envelope |
 | Telegram 429 on send | bounded retry honouring `retry_after` | delayed delivery |
+| Telegram 400 on a table-path send (`send_pre`/`edit_pre`) | one plain resend of the same fitted body, no `parse_mode`; any other failure (429 after the retry budget, 5xx, transport) is logged and never resent | the table as plain text, or nothing |
 | Telegram send fails after retries | the reply is lost and logged | nothing |
 | DB error | the exception propagates, the process exits non-zero | a restart is the supervisor's job |
 | SIGTERM mid-run | the current round finishes, then the run is interrupted | the "shutting down" fallback, best-effort |
 | rate limit exceeded | rejected before storage | the fixed rate-limit message |
 | message too long | rejected before storage, no bucket token spent | the fixed too-long message |
+| `/documents` with no documents uploaded | nothing sent on the table path | `No documents yet. Send me a .txt, .md, .docx or .pdf file.` |
 | `/sessions` with no sessions yet | plain reply, no table | `No sessions yet. Send me a message to start one.` |
 | `/session` bare, more than one argument, or a non-integer argument | active session unchanged | `Usage: /session <id> (see /sessions)` |
 | `/session <id>` unknown or belonging to another user | active session unchanged | `No session #<id>.` |
@@ -1009,8 +1015,8 @@ delivery is not provided and is not claimed.
 annotated git tag named `v<version>` is created, by convention, on the
 release's final evidence-only commit, once that commit exists — this
 repository's own releases follow that convention but do not pre-empt it,
-so a `v1.6.0` tag does not exist until this release's own final commit
-lands.
+so a release's tag — `v1.6.0` included — was created only after that
+release's own final commit had landed.
 
 **The policy:**
 
