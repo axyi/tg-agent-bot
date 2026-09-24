@@ -93,10 +93,13 @@ def test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104():
     # Disclosed amendment (EC-02, spec-v1.11.0 T8, a site not in the T8
     # brief's starting list): repointed from v1104 to v1110, mirroring
     # AGENTS.md:95's own T8 repoint (REQ-V1110-VER-01). Function name stays
-    # as-is (PIN-01: rewritten in place, never renamed).
+    # as-is (PIN-01: rewritten in place, never renamed). Repointed again at
+    # spec-v1.11.1 T6 (a T0 pin-inventory site, not in T6's own brief's
+    # starting list either): v1110 -> v1111, the "not in" guard following one
+    # step behind, same convention.
     text = _read_agents_md()
-    assert "docs/spec/task-briefs/v1110-T<N>.md" in text
-    assert "docs/spec/task-briefs/v1104-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1111-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1110-T<N>.md" not in text
 
 
 def test_t_v190_ec_01_agents_md_brief_path_sentence_unchanged_besides_token():
@@ -148,18 +151,19 @@ def test_t_v1104_rpt_03_agents_md_count_lines_landed_at_t5():
     # pyproject.toml or landed this paperwork (Stage B'/Stage B, no T5
     # equivalent reached). spec-v1.10.4 T5 landed 2311 tests and 144
     # mutation entries, dated "as of spec-v1.10.4 T5". spec-v1.11.0 T8
-    # (this task, REQ-V1110-VER-01) lands the real, final post-run
-    # figures: 2384 tests (measured via `pytest --collect-only -q
-    # -o addopts="" | grep -c '::'` on the tree after every other T8 edit,
-    # including this task's own new tests/test_v1110_ver.py and
-    # tests/test_v1110_inventory.py) and 152 mutation entries, dated "as of
-    # spec-v1.11.0 T8".
+    # landed 2384 tests and 152 mutation entries, dated "as of spec-v1.11.0
+    # T8". spec-v1.11.1 T6 (this task, REQ-V1111-VER-01) lands this run's
+    # own post-bump figures: 2411 tests (measured via `pytest
+    # --collect-only -q -o addopts="" | grep -c '::'` on the tree after
+    # every other T6 edit, including this task's own new
+    # tests/test_v1111_ver.py) and 152 mutation entries, unchanged this
+    # generation, dated "as of spec-v1.11.1 T6".
     text = _read_agents_md()
-    assert "2384" in text
+    assert "2411" in text
     assert "152 entries" in text
-    assert "as of spec-v1.11.0 T8" in text
-    assert "2311 tests as of spec-v1.10.4 T5" not in text
-    assert "144 entries as of spec-v1.10.4 T5" not in text
+    assert "as of spec-v1.11.1 T6" in text
+    assert "2384 tests as of spec-v1.11.0 T8" not in text
+    assert "as of spec-v1.11.0 T8" not in text
 
 
 def test_t_v190_ec_01_readme_documents_rag_heading_present():
@@ -320,16 +324,17 @@ def test_t_v1100_ec_01_quality_gates_yaml_repoints_report_path():
     # v1.9.2 T3 did 1.9.1 -> 1.9.2; v1.9.3 T4 did 1.9.2 -> 1.9.3; v1.9.4 T5
     # did 1.9.3 -> 1.9.4; v1.9.5 T2 did 1.9.4 -> 1.9.5; v1.10.0 T6 did
     # 1.9.5 -> 1.10.0; v1.10.1 T2 did 1.10.0 -> 1.10.1; v1.11.0 T6's own
-    # repoint does 1.10.4 -> 1.11.0 -- not in this task's own file list
-    # either (T0's pin inventory names it as a disclosed amendment, not
-    # in the brief's starting list), bumped here only because T6's yaml
-    # edit would otherwise leave this assertion stale and pytest red; the
-    # function name is deliberately left stable across releases (its own
+    # repoint does 1.10.4 -> 1.11.0; spec-v1.11.1 T6's own repoint does
+    # 1.11.0 -> 1.11.1 -- not in this task's own file list either (T0's
+    # pin inventory names it as a disclosed amendment, not in the brief's
+    # starting list), bumped here only because T6's yaml edit would
+    # otherwise leave this assertion stale and pytest red; the function
+    # name is deliberately left stable across releases (its own
     # docstring/comment says so) for whichever task owns this repoint
     # next).
     text = (_REPO_ROOT / "config" / "quality_gates.yaml").read_text(encoding="utf-8")
-    assert "report_path: docs/reports/report-v1.11.0.md" in text
-    assert "report_path: docs/reports/report-v1.10.4.md" not in text
+    assert "report_path: docs/reports/report-v1.11.1.md" in text
+    assert "report_path: docs/reports/report-v1.11.0.md" not in text
 
 
 def _context_discipline_section(text: str) -> str:

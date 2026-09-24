@@ -92,7 +92,7 @@ Delegate to a subagent when **any one** of the following holds — inside a
 
 **Brief by file, never by retyping.** Load-bearing content the orchestrator
 already resolved goes into a task-brief file at
-`docs/spec/task-briefs/v1110-T<N>.md`, and the subagent gets its path — never
+`docs/spec/task-briefs/v1111-T<N>.md`, and the subagent gets its path — never
 a retyped copy. The brief is ~5 lines, carries no history, and names files
 and line ranges. The subagent returns a summary — findings, counts,
 `file:line` — never raw content.
@@ -158,8 +158,8 @@ uv run --locked python devtools/rag_eval.py
 uv run --locked python devtools/agent_eval.py
 ```
 
-Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 2384
-tests as of spec-v1.11.0 T8). Gate 5 needs the live environment
+Gates 1–4 are unconditional and offline (gate 3, `pytest`, is 2411
+tests as of spec-v1.11.1 T6). Gate 5 needs the live environment
 (a provisioned `.env`, a reachable Docker daemon with the sandbox image
 pulled, every provider the configuration routes to); it spends no
 inference tokens and sends no Telegram message. **Gate 5 must be fully
@@ -169,7 +169,7 @@ unreachable *configured* provider is a blocked run, not a noted one; a
 provider no route names SKIPs cleanly instead and is not a blocker.
 Gate 6 is the mutation-testing gate
 (`devtools/mutation_check.py`): offline, but slow (minutes, since it reruns
-the test suite once per mutation) — 152 entries as of spec-v1.11.0 T8
+the test suite once per mutation) — 152 entries as of spec-v1.11.1 T6
 (up from 105 at spec-v1.9.0's close; T9 added seven `v190-*` entries
 covering RAG per-user isolation (the vector KNN and BM25 queries,
 `list_documents`/`document_id_for`'s owner predicates), the delete path's
@@ -280,6 +280,7 @@ judge changed, so no run is comparable to the LM Studio baseline. v1.11.0
 changes nothing token-bearing; the rule does not fire. (`SYSTEM_PROMPT`,
 `tools.tool_specs()`, `REQUEST_DEFAULTS`, `load_context_messages`
 byte-unchanged.)
+v1.11.1 changes nothing token-bearing either; the rule does not fire.
 
 ## go protocol
 

@@ -136,10 +136,11 @@ def test_t_v1104_doc_03_agents_md_brief_token_is_v1104_waiver_paragraph_unchange
     v1104 to v1110, mirroring AGENTS.md:95's own T8 repoint (REQ-V1110-
     VER-01) -- the function name stays as-is (PIN-01: rewritten in place,
     never renamed); the waiver-paragraph prefix check below, this
-    function's actual subject, is untouched by this repoint."""
+    function's actual subject, is untouched by this repoint. Repointed
+    again at spec-v1.11.1 T6: v1110 -> v1111, same convention."""
     text = _read_agents_md()
-    assert "docs/spec/task-briefs/v1110-T<N>.md" in text
-    assert "docs/spec/task-briefs/v1104-T<N>.md" not in text
+    assert "docs/spec/task-briefs/v1111-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1110-T<N>.md" not in text
 
     waiver_start = text.index("v1.10.1 waived this rule by operator decision")
     waiver_end = text.index("## go protocol", waiver_start)

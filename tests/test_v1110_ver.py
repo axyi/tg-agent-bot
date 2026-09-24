@@ -51,10 +51,11 @@ _README_MD = _REPO_ROOT / "README.md"
 _AGENTS_MD = _REPO_ROOT / "AGENTS.md"
 _BASELINE_TAG = "v1.10.4"
 
-# T8's own measured figure (REQ-V1110-EC-03): filled in last, after every
-# other edit, from `uv run --locked pytest --collect-only -q -o addopts="" |
-# grep -c '::'` on the fully-edited tree -- never guessed in advance.
-_MEASURED_TEST_COUNT = 2384
+# T6's own measured figure (spec-v1.11.1, mirrors REQ-V1110-EC-03's own
+# convention): filled in last, after every other edit, from `uv run --locked
+# pytest --collect-only -q -o addopts="" | grep -c '::'` on the fully-edited
+# tree -- never guessed in advance.
+_MEASURED_TEST_COUNT = 2411
 
 
 def _read_readme() -> str:
@@ -73,9 +74,19 @@ def _normalize(text: str) -> str:
 
 
 def test_t_v1110_ver_01_live_version_is_1_11_0():
-    with _PYPROJECT.open("rb") as handle:
-        live_version = tomllib.load(handle)["project"]["version"]
-    assert live_version == "1.11.0"
+    # Repointed at spec-v1.11.1 T6 (REQ-V1111-VER-01), exactly as
+    # REQ-V1110-VER-01 repointed `tests/test_v1104_version.py`: the live-tree
+    # read becomes a frozen `v1.11.0` tag-blob read, since the live tree now
+    # carries T6's own bump. Function name stays (PIN-01: in place, never
+    # renamed).
+    tagged = subprocess.run(
+        ["git", "show", "v1.11.0:pyproject.toml"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert tomllib.loads(tagged)["project"]["version"] == "1.11.0"
 
 
 def test_t_v1110_ver_02_dependency_diff_version_only():
@@ -104,13 +115,16 @@ def test_t_v1110_ver_02_dependency_diff_version_only():
 
 
 def test_t_v1110_ver_03_agents_md_and_release_row():
+    # Repointed at spec-v1.11.1 T6: AGENTS.md's count/date lines are
+    # overwritten wholesale each release, so this pin tracks forward again
+    # -- the mutation-entries figure (152) is itself unchanged this
+    # generation, only the test count and the dating move.
     agents_text = _read_agents_md()
     assert f"{_MEASURED_TEST_COUNT}" in agents_text
     assert "152 entries" in agents_text
-    assert "as of spec-v1.11.0 T8" in agents_text
-    assert "2311" not in agents_text
-    assert "144 entries" not in agents_text
-    assert "as of spec-v1.10.4 T5" not in agents_text
+    assert "as of spec-v1.11.1 T6" in agents_text
+    assert "2384" not in agents_text
+    assert "as of spec-v1.11.0 T8" not in agents_text
 
     readme_text = _read_readme()
     assert "| v1.11.0 | 1.11.0 |" in readme_text

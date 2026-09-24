@@ -164,8 +164,10 @@ def test_t_v1104_rpt_03_agents_md_brief_path_token_is_v1104():
         "comparable to the LM Studio baseline"
     ) in normalized
     assert "v1.10.2 carries the waiver: its prompt change moves the hash again" in normalized
-    assert "docs/spec/task-briefs/v1110-T<N>.md" in text
-    assert "docs/spec/task-briefs/v1104-T<N>.md" not in text
+    # Repointed again at spec-v1.11.1 T6: v1110 -> v1111, same convention as
+    # AGENTS.md:95's own repoint (REQ-V1111-VER-01).
+    assert "docs/spec/task-briefs/v1111-T<N>.md" in text
+    assert "docs/spec/task-briefs/v1110-T<N>.md" not in text
 
 
 # ---------------------------------------------------------------------------

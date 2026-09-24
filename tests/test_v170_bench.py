@@ -321,12 +321,13 @@ def test_t_v1110_rpt_01_lint_docs_repointed_to_this_release():
     the v1.10.4-named predecessor asserted the v1.10.4 path, which T6's
     own required repoint made stale the same way each prior release's
     repoint made its predecessor stale; see the rename mapping in
-    `docs/spec/task-briefs/v1110-T0-pin-inventory.md`)."""
+    `docs/spec/task-briefs/v1110-T0-pin-inventory.md`). Repointed again at
+    spec-v1.11.1 T6 (REQ-V1111-VER-01): 1.11.0 -> 1.11.1."""
     from devtools.checks import DEFAULT_CONFIG_PATH, load_gate_config
 
     raw = load_gate_config(DEFAULT_CONFIG_PATH)
     lint_docs = raw["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.11.0.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.11.1.md"
     assert lint_docs["ledger_header"] == (
         "| Project | Ver | Date | Spec (tokens) | Prompts | First run | Bugs | "
         "Tokens ↑/↓ | Cost | Model | Harness |"

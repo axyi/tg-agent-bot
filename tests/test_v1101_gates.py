@@ -254,9 +254,12 @@ def test_no_other_gate_in_the_real_config_carries_env():
 def test_t_v1102_rpt_01_lint_docs_repointed_to_this_release():
     # v1.11.0 T6 (REQ-V1110-VER-03): repointed again, disclosed amendment
     # (not in T0's pin inventory) -- function name kept stable, matching
-    # every other "report_path tracks the current release" site.
+    # every other "report_path tracks the current release" site. Repointed
+    # again at spec-v1.11.1 T6 (REQ-V1111-VER-01, found by tree-wide
+    # extension, not in this task's own brief's starting list): 1.11.0 ->
+    # 1.11.1.
     config = checks.load_gate_config()
-    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.11.0.md"
+    assert config["gates"]["lint-docs"]["report_path"] == "docs/reports/report-v1.11.1.md"
 
 
 # ---------------------------------------------------------------------------

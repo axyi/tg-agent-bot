@@ -55,10 +55,13 @@ def test_t_v1103_rpt_01_v1102_report_is_red_under_the_function_directly():
 def test_t_v1103_rpt_01_quality_gates_yaml_repoints_and_enables_the_key():
     # v1.11.0 T6 (REQ-V1110-VER-03): repointed again, disclosed amendment
     # (not in T0's pin inventory) -- function name kept stable, matching
-    # every other "report_path tracks the current release" site.
+    # every other "report_path tracks the current release" site. Repointed
+    # again at spec-v1.11.1 T6 (REQ-V1111-VER-01, found by tree-wide
+    # extension, not in this task's own brief's starting list): 1.11.0 ->
+    # 1.11.1.
     config = checks.load_gate_config()
     lint_docs = config["gates"]["lint-docs"]
-    assert lint_docs["report_path"] == "docs/reports/report-v1.11.0.md"
+    assert lint_docs["report_path"] == "docs/reports/report-v1.11.1.md"
     assert lint_docs["delegation_record"] is True
 
 

@@ -100,9 +100,12 @@ def test_t_v1104_ver_02_pyproject_and_uv_lock_diff_from_f3ce1a5_is_version_only(
         live_version = tomllib.load(handle)["project"]["version"]
 
     assert baseline_version != live_version, "no project-version delta from f3ce1a5 yet"
-    # Disclosed amendment (EC-02, spec-v1.11.0 T8): this literal tracks the
-    # live version, not this function's own historical baseline -- bumped
-    # from "1.10.4" to "1.11.0" alongside T8's pyproject.toml:3 bump so the
-    # test keeps passing; the property it proves (a version delta from
-    # f3ce1a5 exists) is unaffected by which version number is live.
-    assert live_version == "1.11.0"
+    # Disclosed amendment (EC-02, spec-v1.11.0 T8, continued at spec-v1.11.1
+    # T6 -- REQ-V1111-VER-01, found by tree-wide extension, not in this
+    # task's own brief's starting list): this literal tracks the live
+    # version, not this function's own historical baseline -- bumped from
+    # "1.10.4" to "1.11.0" alongside T8's pyproject.toml:3 bump, then from
+    # "1.11.0" to "1.11.1" alongside T6's own bump, so the test keeps
+    # passing; the property it proves (a version delta from f3ce1a5 exists)
+    # is unaffected by which version number is live.
+    assert live_version == "1.11.1"
