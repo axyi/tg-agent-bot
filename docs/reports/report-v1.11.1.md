@@ -868,6 +868,8 @@ EC-02's own drift rule.
 | commit | exit | note |
 | --- | --- | --- |
 | `9d8dc0e` | 0 | `gitleaks-tree exit=0`, no leaks found (T4's first commit, already scanned by the orchestrator before this second commit started, handed to this subagent verbatim) |
+| `858cf22` | 0 | **recorded late, at T5 (prompt 263)** — the orchestrator's own oversight: unlike T1/T2/T3's pattern (scan before the next commit), the T4 follow-up (`7bc6d43`) landed before this commit was ever scanned. Scanned now via `git archive 858cf22`, no leaks found. Disclosed as a process deviation, no compliance impact. |
+| `7bc6d43` | 0 | recorded at T5 (this gap continues one commit further for the same reason) — `gitleaks-tree exit=0`, no leaks found |
 
 ### Gates 1-4 and `lint-docs` (T4)
 
@@ -942,7 +944,144 @@ disclosed here, not rewritten, same policy as `5780562`'s and
 
 - T4 | delegated: yes | to: general-purpose subagent, DOC-01/DOC-02 (three README edits, `docs/plan.md`'s banner, `AGENTS.md`'s Secrets paragraph) and `tests/test_v1111_doc.py` | brief: docs/spec/task-briefs/v1111-T4.md | map vs actual: matches §10.1's yes cell for T4's DOC-01/DOC-02 work -- touched README.md:952,955-956 (new Limits row + sentence), :973 (new Telegram-400 row), :979 (new /documents empty row), :1018-1019 (Versioning rewrite); docs/plan.md:1 (seven-line banner + blank line); AGENTS.md:330-334 (new Secrets paragraph, corrected from `:328` at T4's follow-up, prompt 266); tests/test_v1111_doc.py created (3 functions); this commit also bundles two pieces of orchestrator bookkeeping outside the brief's DOC-01/DOC-02 scope but named in its own nine-path allowed set: T4's first commit's own prompt file (docs/prompts/261-v1111-t4-doc03.md, already on disk untracked, staged unmodified) and its docs/llm-usage.md row (174, for prompt 261/9d8dc0e), alongside this commit's own prompt file (262) and usage row (175) -- both bundlings disclosed here and in the commit body per EC-03; test-first ordering disclosed as imperfect above (edit-then-test, not among EC-02's four carve-out ids)
 
-## T5 — not reached: review and gates 1-8 not yet run
+## T5 — review, gates 1-8, `tested_tree`, gate 8 (once)
+
+One prompt (263), one commit (report-only — no must-fix, no timeout
+hunk, so only the report-only commit lands per REV-02's "at most three
+commits" budget).
+
+### Review (REV-01) — clean context
+
+Delegated to the `code-reviewer` subagent, its own clean context, no
+mutation/rag_eval/agent_eval/`--profile full` run, no file writes,
+confirmed read-only (`git status --porcelain` clean at the end).
+Reviewed the full `v1.11.0..HEAD` diff against REV-01's nine checklist
+items — all nine **PASS** (two with informational caveats, see below).
+Also independently re-derived two claims from primary evidence rather
+than trusting the report: the node-id rename/delete check (`comm`
+against `v1111-T0-nodeids.txt`, 0 lines missing) and the "this run wrote
+no secrets/LAN literals" scan.
+
+**No must-fix findings — verdict: approve.** Per REV-02's commit budget
+(the fix commit is authorized *only* on a must-fix), no fix commit
+lands this task. Two should-fix findings, both **waived with a
+reason**:
+
+- `README.md:980`'s `/sessions` empty-state row in `## Error behaviour`
+  uses different wording than DOC-01(b)'s literal text (`"nothing sent
+  on the table path"` vs. the README's own "plain reply, no table"
+  phrasing) — same semantic meaning, and the actual behaviour
+  (`SESSIONS_EMPTY_REPLY` sent plain, byte-equal) is correctly tested;
+  only the row's prose diverges from the spec's suggested wording.
+  Waived: fixing it needs a source-writing commit REV-02 doesn't
+  authorize without a must-fix; flagged for a future documentation
+  pass rather than spending a repair cycle on wording.
+- `bot.py:261-263`'s non-JSON-response raise branch newly carries
+  `status=status` (correct, consistent with the other five raise
+  sites) but no test drives a 200-status/malformed-JSON response
+  through `call` to exercise it specifically — `T-V1111-OUT-01`'s own
+  assertions don't enumerate this case. Low real-world likelihood
+  (Telegram practically never returns 200 with unparseable JSON) and
+  gate 6's mutation suite still covers the surrounding function.
+  Waived: same commit-budget reasoning as above.
+
+Five informational findings, none must-fix or should-fix, all
+pre-existing or explained by ordinary cross-task sequencing within this
+same release (a `tables.fit_lines` docstring detail predating v1.11.1;
+a 7-line citation drift in the `IngestJob` docstring's report pointer,
+caused by T4's own DOC-03 edit shifting `report-v1.11.0.md`'s line
+numbers, within EC-02's disclosed-amendment framing even though 2 lines
+over the nominal ±5 — the substance is unchanged, only the citation
+moved; a credential-shaped test placeholder in `test_v1111_tab.py`
+matching a 12-site pre-existing repo convention, contrasted with
+T3's own module which switched to a non-credential-shaped one; a
+redundant local fixture in `test_v1111_tab.py` now superseded by T3's
+global autouse fixture, harmless; `download_file`'s own raise not
+status-tagged, correctly out of OUT-01's scope by design). None acted
+on — recorded for visibility, not fixed, consistent with the
+"pre-existing dead code / drift: surface, don't delete/fix outside
+scope" norm this run has followed throughout.
+
+### Gates 1-6
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | `Resolved 25 packages`, `Checked 23 packages`, exit 0 |
+| 2 | `uv run --locked ruff check .` | `All checks passed!`, exit 0 |
+| 3 | `uv run --locked pytest` | `2404 passed, 1 skipped, 2 xfailed in 31.55s` (2407 collected), exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK`, exit 0 |
+| 5 | `uv run --locked python bot.py --selftest-live` | `OK config`/`db`/`docker (29.8.1)`/`telegram`/`embeddings`/`openrouter`; `SKIP lmstudio` (no route uses it) — disclosed, non-blocking; exit 0 |
+| 6 | `uv run --locked python devtools/mutation_check.py` (direct, alone, run in background per GATE-01's "gate 6 alone on the box") | **152/152 killed, 0 survived, 0 errored, 0 drifted.** Wall `W` = **real 19m15.451s (1155.451s)** — under the 1300s threshold (MUT-01), so `config/quality_gates.yaml`'s `timeout_seconds: 1640` is **not** raised; no calibration hunk, no repair cycle; exit 0 |
+
+No must-fix from the review and `W ≤ 1300s`, so **no fix commit and no
+timeout-hunk commit land this task** — T5 is a single report-only
+commit.
+
+### `tested_tree`
+
+`git status --porcelain` empty, recorded before `tested_tree` is read.
+`tested_tree = 7bc6d437f84d4ac4e149277408c0f750ab949947` (set
+immediately after gate 6, before gate 7 — no commit or tracked change
+between gates 1-6 and gate 8, per EC-04/GATE-01).
+
+### Gate 7 (`rag_eval.py`)
+
+`vector: recall@5=1.000 mrr=0.850 page_hit_rate=1.000`; **`hybrid:
+recall@5=1.000 mrr=1.000 page_hit_rate=1.000`** (≥0.8 floor met);
+`hybrid+rerank: recall@5=1.000 mrr=0.900 page_hit_rate=1.000`; every
+answerable item's rerank flags both `True`. Two null items (advisory,
+never scored) returned passages as expected. The two advisory
+conversation-aware smoke checks failed (TOOL-06 pin, context-proof) —
+the same disclosed, non-blocking pattern v1.11.0's own gate 7 recorded
+(`report-v1.11.0.md:1683-1686`), not a regression. **`gate-7: PASS`**,
+exit 0.
+
+### Between gate 7 and gate 8 — no commit, no tracked change
+
+- `bot_state` override count, re-read: **`0`**.
+- `uv run --locked python devtools/checks.py doctor` → `[PASS] doctor:
+  all tools at pin, hooks installed`.
+- `uv run --locked python devtools/checks.py lint-docs` → `[PASS]`.
+- Collection count: `uv run --locked pytest --collect-only -q
+  -o addopts="" | grep -c '::'` → **2407** (2384 floor + 2 PIN + 5 OUT +
+  6 TAB + 7 TST + 3 DOC).
+- `git status --porcelain` still empty; `HEAD` still
+  `7bc6d437f84d4ac4e149277408c0f750ab949947`.
+
+### Gate 8 (`agent_eval.py`) — the run's one and only invocation, against `tested_tree`
+
+`injection 5/5 (floor 5) PASS`; `hallucination 4/4 (floor 3) PASS`;
+`memory 3/3 (floor 3) PASS`; judge panel (5 cases, politeness/accuracy/
+conciseness) — **judge mean `0.923` (floor 0.8) PASS**; latency
+advisory `PASS full (max 2.89s vs 4.0s)`, ttft `n/a (openrouter)`.
+**Overall: `PASS`**, exit 0. Never rerun (GATE-01) — this is the
+release's shipping compliance record.
+
+### Prompt-numbering map, final correction
+
+Superseding T3's and T0-follow-up's earlier notes (which said T6 = 266
+— stale the moment 266 was spent on T4's own follow-up): the actual
+sequence on disk is 256 (T0a), 257 (T1a), 258 (T1-followup), 259 (T2),
+260 (T3), 261 (T4a), 262 (T4b), 263 (**T5, this task**), 264 (T0-resume,
+out of order), 265 (T0-followup), 266 (T4-followup) — so **T6 takes
+267**, and any T6 repair cycle takes **268 upward**. EC-04's
+id-specific exceptions (prompt 262 — now 263 — may carry up to three
+commits; prompt 263 — now 267 — carries two) apply to **263 (this
+task's prompt) and 267 (T6)** respectively, not to the spec's original
+262/263 literals.
+
+### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
+
+This task's own commit (the report-only commit landing this section)
+is scanned by the orchestrator immediately after it lands — its row is
+added at T6's first touch of this table, same lag pattern as every
+prior task.
+
+### Delegation record (EC-03, §10.1)
+
+- T5 | delegated: no | to: the task is itself the clean-context review | brief: — | map vs actual: matches §10.1's exemption for the review step exactly; no fix commit needed (no must-fix)
+- T5 | delegated: no | to: commands only for gates 1-8, `tested_tree`, the pre-gate-8 checks | brief: — | map vs actual: matches §10.1's no/commands-only cell; nothing committed between gates 1-6 and gate 8
+- T5 | delegated: no | to: artefacts only for the report-only commit | brief: — | map vs actual: matches §10.1's no/artefacts-only cell; this commit's path set is exactly `docs/reports/report-v1.11.1.md`, `docs/prompts/263-v1111-t5-review-gates.md`, `docs/llm-usage.md`
 
 ## T6 — not reached: version bump and tag not yet cut
 
