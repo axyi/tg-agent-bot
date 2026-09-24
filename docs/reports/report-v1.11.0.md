@@ -275,6 +275,13 @@ task's changes too, via `git stash`).
 
 Delegated (brief `docs/spec/task-briefs/v1110-T2.md`, EC-04).
 
+**Disclosed EC-05 deviation (recorded by spec-v1.11.1 T4, after the
+release):** prompt 239 is cited by three commits — `743abc2` (T2's
+source commit), `ef8e453` and `09f8d8a` (record corrections after the
+fact, no source change). T1's analogous correction got its own prompt
+(238 → `2b2dd4e`); T2's did not. History is pushed and not rewritten;
+`docs/llm-usage.md` row 150 covers all three.
+
 **EC-02, stated at the granularity that actually happened, an explicit
 "no" named where it applies**: both new test files (`tests/test_v1110_sta.py`,
 `tests/test_v1110_doc.py`) were written in full and run before any `bot.py`
@@ -1531,7 +1538,7 @@ three sites (`bot.py:1959,1969,2123`) without holding `self._lock`,
 which doesn't literally match the docstring's "read and written only
 under the lock" claim. **Waived**: every write sets `cancel_reason`
 *before* `cancel.set()` (confirmed at the two write sites, `bot.py:2047`
-and `:2222`), and every unlocked read only happens after the reader has
+and `:2229`), and every unlocked read only happens after the reader has
 already observed `cancel.is_set()` — `threading.Event.set()`/`.is_set()`
 carry their own internal `Condition`/`Lock` and therefore their own
 happens-before edge, so this is standard-library-mediated safe
@@ -1697,7 +1704,7 @@ commit itself for the exact path list.
 
 - T7 (Phase E/F) | delegated: no | to: commands only — the gate run and the report-only commit | brief: — | map vs actual: all eight gates run verbatim in order, gate 6 alone (W=961.6s, under threshold, no timeout hunk needed), gate 8 exactly once against tested_tree=2c3c5aab5370d6ce951009766b879a8e7ef4b116, tree unchanged by any gate
 
-- T7 | delegated: yes | to: general-purpose subagent (claude-sonnet-5), Phase A only | brief: docs/spec/task-briefs/v1110-T7.md | map vs actual: matches the brief exactly (all 8 find/replace pairs pre-verified by the orchestrator, landed verbatim bar one ruff-driven line-split in entry 4, disclosed); the `--only`/`--select` isolation verification the brief asked for could not run (dirty-tree guard conflict, disclosed above and in the brief itself) — orchestrator's own commands-only follow-up covers it next; the `quality_gates.yaml` comment fix and this commit are the orchestrator's own commands-only work, not delegated; later T7 phases (review, gates) get their own bullets as they land
+- T7 | delegated: yes | to: general-purpose subagent (claude-sonnet-5), Phase A only | brief: docs/spec/task-briefs/v1110-T7.md | map vs actual: matches the brief exactly (all 8 find/replace pairs pre-verified by the orchestrator, landed verbatim bar one ruff-driven line-split in entry 4, disclosed); the `--only`/`--select` isolation verification the brief asked for could not run (dirty-tree guard conflict, disclosed above and in the brief itself) — orchestrator's own commands-only follow-up covers it next; commit `33729eb` bundles the delegated Phase A files with one orchestrator-authored `config/quality_gates.yaml` comment hunk (`@@ -733,7 +733,14 @@`, outside the subagent's owned paths) — its commit message discloses it; recorded here by spec-v1.11.1 T4; later T7 phases (review, gates) get their own bullets as they land
 
 ## T8 — version bump (first commit)
 
@@ -1942,5 +1949,5 @@ green execution via the identity check, `replay` clean over all 24
 commits, count 2384 ≥ floor + 62:
 
 ```
-| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.11.0 | 2026-09-23 | ~1.45M subagent aggregate (spec-v1.11.0 authoring, prompt 235, per docs/llm-usage.md row 146) | 17 (236-252) | yes -- all eight gates green on this run, gate 8 exactly once (T7, reused at T8 via the identity check), zero repair cycles spent on gate failures; one must-fix review finding found and fixed (a cancel-before-commit race in IngestWorker), not a stop | T7 clean-context review: 1 must-fix (the cancel race, fixed and empirically bite-checked both ways -- confirmed to fail without the fix, confirmed to pass with it), 2 should-fix waived with reason (unlocked `cancel_reason` reads -- safe via `threading.Event`'s own internal synchronization; the plain-text fallback's broader-than-400 scope -- already disclosed by T1 as a deliberate reading), 2 informational notes | harness does not expose per-request tokens for this session; subagent aggregates per docs/llm-usage.md rows 147-163 (T0 pin-inventory 132,226 + T1 301,171 + T2 480,577 + T3 313,416 + T4 524,206 + T5 771,524 + T6 514,046 + T7 entries 138,450 + T7 review 177,394 + T7 review-fix 223,427 + T8 310,930 = 3,887,367 aggregate as reported by the harness) | live gate spend: gate 5 probes at T0/T7/T8, gate 7's rerank + advisory smoke at T7, gate 8's 12 red-team/memory cases + 5 judge calls at T7 (reused at T8, no repeat spend) -- well under $1 aggregate at public list price for `openai/gpt-4.1` / `anthropic/claude-sonnet-5` / `openai/text-embedding-3-small`; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
+| [tg-agent-bot](https://github.com/axyi/tg-agent-bot) | 1.11.0 | 2026-09-23 | ~1.45M subagent aggregate (spec-v1.11.0 authoring, prompt 235, per docs/llm-usage.md row 146) | 19 (236-254) | yes -- all eight gates green on this run, gate 8 exactly once (T7, reused at T8 via the identity check), zero repair cycles spent on gate failures; one must-fix review finding found and fixed (a cancel-before-commit race in IngestWorker), not a stop | T7 clean-context review: 1 must-fix (the cancel race, fixed and empirically bite-checked both ways -- confirmed to fail without the fix, confirmed to pass with it), 2 should-fix waived with reason (unlocked `cancel_reason` reads -- safe via `threading.Event`'s own internal synchronization; the plain-text fallback's broader-than-400 scope -- already disclosed by T1 as a deliberate reading), 2 informational notes | harness does not expose per-request tokens for this session; subagent aggregates per docs/llm-usage.md rows 147-163 (T0 pin-inventory 132,226 + T1 301,171 + T2 480,577 + T3 313,416 + T4 524,206 + T5 771,524 + T6 514,046 + T7 entries 138,450 + T7 review 177,394 + T7 review-fix 223,427 + T8 310,930 = 3,887,367 aggregate as reported by the harness) | live gate spend: gate 5 probes at T0/T7/T8, gate 7's rerank + advisory smoke at T7, gate 8's 12 red-team/memory cases + 5 judge calls at T7 (reused at T8, no repeat spend) -- well under $1 aggregate at public list price for `openai/gpt-4.1` / `anthropic/claude-sonnet-5` / `openai/text-embedding-3-small`; Claude Code side $0 marginal, subscription-metered | claude-sonnet-5 | Claude Code |
 ```
