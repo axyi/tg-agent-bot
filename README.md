@@ -147,11 +147,13 @@ last):
 `●` marks the currently active session; the `#`/`title`/`msgs`/`last` columns
 widen to fit their content, up to `render_table`'s own per-column caps (`#`
 and `msgs` are 4 units wide, so an id or message count of 10000 or more
-truncates — the same property `/documents`' `#` column has). `title` is
+truncates -- unlike `/documents`' own `#` column, which is 5 units wide and
+truncates only past 99999). `title` is
 derived, never stored: the content of the session's first message from the
 caller, whitespace-collapsed and cut to 40 characters (`…` when longer),
 `(empty)` when the session has no message yet. A caller with no sessions yet
-sees the header and rule only. When the caller has more than 10 sessions, a
+gets a plain reply instead: `No sessions yet. Send me a message to start
+one.` When the caller has more than 10 sessions, a
 trailing line names how many older ones aren't shown, e.g. `2 older sessions
 not shown`; `/sessions` never paginates further.
 
@@ -214,17 +216,17 @@ costs on every round.
 
 Sent as one `<pre>`-wrapped table (the same outbound table path as
 `/stats`/`/sessions`) over the caller's uploaded documents, ordered
-oldest first. A 40-character filename is cut to 23 UTF-16 units + `…`;
+oldest first. A 40-character filename is cut to 21 UTF-16 units + `…`;
 `pages` is `n/a` for a document type with no page count (e.g. `.md`,
 `.txt`):
 
 ```
 Your documents (2 of 20):
 
-#  file                      type  size     chunks  pages  added     
--  ------------------------  ----  -------  ------  -----  ----------
-1  report.pdf                pdf   1.5 MB        7     42  2026-01-05
-2  fffffffffffffffffffffff…  md    12.3 KB       3    n/a  2026-01-06
+#  file                    type  size     chunks  pages  added     
+-  ----------------------  ----  -------  ------  -----  ----------
+1  report.pdf              pdf   1.5 MB        7     42  2026-01-05
+2  fffffffffffffffffffff…  md    12.3 KB       3    n/a  2026-01-06
 ```
 
 With no documents uploaded, `/documents` replies on the plain path (no
@@ -535,13 +537,12 @@ tool output.
 *this* deployment stays local instead: `EMBEDDING_MODEL=
 text-embedding-nomic-embed-text-v1.5`, `EMBEDDING_DIM=768` — served locally
 by LM Studio, so retrieval adds no new external dependency and no API cost
-for this instance. Texts are embedded in batches of two independent
-constants, both 32 today but serving different layers: the ingest
-pipeline's own `documents.EMBED_BATCH_SIZE` (what `IngestWorker` actually
-drives, one progress edit per batch) and the embeddings client's own
-internal `llm.embeddings.BATCH_SIZE` (`EmbeddingsClient.embed`'s own
-per-request chunking). The
-active `model:dim` pair is recorded once in `bot_state` under the key
+for this instance. Texts are embedded in batches of
+`llm.embeddings.BATCH_SIZE` (32) — one constant: the ingest pipeline
+imports it for its per-batch progress edit and budget/cancel checkpoint,
+and `EmbeddingsClient.embed` uses it for its per-request chunking, so the
+progress counter and the HTTP batch can never diverge. The active
+`model:dim` pair is recorded once in `bot_state` under the key
 `rag.embedding` (e.g. `text-embedding-nomic-embed-text-v1.5:768`) — see
 Storage below for what happens when it changes.
 
@@ -970,6 +971,7 @@ delivery is not provided and is not claimed.
 | SIGTERM mid-run | the current round finishes, then the run is interrupted | the "shutting down" fallback, best-effort |
 | rate limit exceeded | rejected before storage | the fixed rate-limit message |
 | message too long | rejected before storage, no bucket token spent | the fixed too-long message |
+| `/sessions` with no sessions yet | plain reply, no table | `No sessions yet. Send me a message to start one.` |
 | `/session` bare, more than one argument, or a non-integer argument | active session unchanged | `Usage: /session <id> (see /sessions)` |
 | `/session <id>` unknown or belonging to another user | active session unchanged | `No session #<id>.` |
 | `/delete` bare (no argument) | nothing deleted | `Usage: /delete <filename> \| /delete #<id>` |
@@ -990,7 +992,7 @@ delivery is not provided and is not claimed.
 | document: embedding service timeout | refused, nothing stored | `Embedding service timed out. Please try again later.` |
 | document: indexing budget exceeded (1800 s, between stages, between PDF pages, or around `getFile`/download) | refused, nothing stored | `Indexing timed out (over 1800 s). Nothing was saved.` |
 | document: Telegram error on `getFile`/download (not a timeout) | refused, nothing stored | `Telegram error while receiving the file. Please try again.` |
-| document: user already at the 20-document limit (checked before the status message, and re-checked inside the indexing transaction) | refused, nothing stored | `Limit of 20 documents reached. Use /delete <filename>.` |
+| document: user already at the 20-document limit (checked before the status message, and re-checked inside the indexing transaction) | refused, nothing stored | `Limit of 20 documents reached. Use /delete <filename> or /delete #<id>.` |
 | document: RAG not configured (no embedder) | refused, nothing stored | `Document search is not configured on this bot.` |
 | document: a second upload while the caller's job is queued or running | nothing reserved or enqueued | `⏳ Still indexing <name>; wait for it to finish.` |
 | document: the 4-job ingest queue is full | nothing reserved or enqueued, no status message | `Indexing queue is full; try again later.` |

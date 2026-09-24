@@ -132,7 +132,9 @@ def test_t_v1110_ver_04_readme_deliverables():
     assert "LMSTUDIO_MODELS" in readme_text
     assert "OPENROUTER_MODELS" in readme_text
     assert "embed (batched, OpenRouter by default)" in readme_text
-    assert "documents.EMBED_BATCH_SIZE" in readme_text
+    # REQ-V1111-TAB-05: one batch constant now, not two -- the name is
+    # rewritten in place to assert absence, not presence.
+    assert "documents.EMBED_BATCH_SIZE" not in readme_text
     assert "llm.embeddings.BATCH_SIZE" in readme_text
     assert "indexing runs in a worker thread" in readme_text
 

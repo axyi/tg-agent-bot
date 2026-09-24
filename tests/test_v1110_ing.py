@@ -537,15 +537,15 @@ def test_t_v1110_ing_05_cancel_mid_embedding(tmp_path, monkeypatch):
     tg = FakeTelegram()
     # Three paragraphs, each just under `target` (1000) so no two merge
     # into one chunk -- `chunk_text` produces exactly 3 chunks (verified
-    # directly below). `EMBED_BATCH_SIZE` is patched to 1 so each chunk is
-    # its own embed() call/batch -- "after batch 1/3" is then a real,
+    # directly below). `documents.BATCH_SIZE` is patched to 1 so each chunk
+    # is its own embed() call/batch -- "after batch 1/3" is then a real,
     # distinct checkpoint, not the only batch there is.
     base = "Sentence number with enough words to take up real space in the paragraph. "
     paragraphs = [f"Section {i}: " + (base * 12)[:900] for i in range(3)]
     text = "\n\n".join(paragraphs)
     assert len(documents.chunk_text(text)) == 3
     tg.files["documents/f1"] = text.encode("utf-8")
-    monkeypatch.setattr(documents, "EMBED_BATCH_SIZE", 1)
+    monkeypatch.setattr(documents, "BATCH_SIZE", 1)
 
     embedder = FakeEmbedder(dim=16)
     worker = bot.IngestWorker(cfg, tg, embedder, cfg.db_path)

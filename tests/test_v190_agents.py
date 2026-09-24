@@ -297,7 +297,7 @@ def test_t_v190_ec_01_readme_error_behaviour_table_gains_document_rows():
         "Embedding service timed out. Please try again later.",
         "Indexing timed out (over 1800 s). Nothing was saved.",
         "Telegram error while receiving the file. Please try again.",
-        "Limit of 20 documents reached. Use /delete <filename>.",
+        "Limit of 20 documents reached. Use /delete <filename> or /delete #<id>.",
         "Document search is not configured on this bot.",
         "Something went wrong while processing the document.",
         "❌ Interrupted by restart.",

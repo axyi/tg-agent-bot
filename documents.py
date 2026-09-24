@@ -28,6 +28,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 import storage
+from llm.embeddings import BATCH_SIZE
 
 # ---------------------------------------------------------------------------
 # REQ-V190-DOC-01: type by lowercase extension; the filename contract.
@@ -383,7 +384,6 @@ def chunk_text(
 # ---------------------------------------------------------------------------
 
 MAX_EXTRACTED_TEXT_CHARS = 2_000_000
-EMBED_BATCH_SIZE = 32
 INDEX_BUDGET_S_DEFAULT = 1800.0
 DOCUMENT_LIMIT = 20
 
@@ -549,13 +549,13 @@ def index_document(
     _check_budget(monotonic, started_at, budget_s, stage="chunking", cancel=cancel)
 
     texts = [chunk.text for _, chunk in chunk_rows]
-    total_batches = (len(texts) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+    total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
     vectors: list[bytes] = []
-    for batch_start in range(0, len(texts), EMBED_BATCH_SIZE):
-        batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
+    for batch_start in range(0, len(texts), BATCH_SIZE):
+        batch = texts[batch_start : batch_start + BATCH_SIZE]
         batch_vectors = embedder.embed(batch)
         vectors.extend(sqlite_vec.serialize_float32(vector) for vector in batch_vectors)
-        batch_no = batch_start // EMBED_BATCH_SIZE + 1
+        batch_no = batch_start // BATCH_SIZE + 1
         progress(f"📄 embedding: {batch_no}/{total_batches}")
         _check_budget(
             monotonic, started_at, budget_s, stage=f"embedding batch {batch_no}", cancel=cancel

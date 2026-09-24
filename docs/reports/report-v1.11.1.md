@@ -338,13 +338,188 @@ tests/test_v1110_out.py -q` → all green (no failures).
 | 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
 | — | `uv run --locked python devtools/checks.py lint-docs` | `[PASS] lint-docs: all prompts and the report ledger row pass` |
 
-`gitleaks-tree` on `7b910fd`: exit 0, no leaks found.
+### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
+
+| commit | exit | note |
+| --- | --- | --- |
+| `7b910fd` | 0 | `gitleaks-tree exit=0`, no leaks found |
+| `bf9f2ec` | 0 | recorded at T2 (this commit) -- the T1 follow-up's own docs-only commit, already scanned by the orchestrator before T2 started; T0's table shape reused here since T1 previously carried only the single-line form above |
 
 ### Delegation record (EC-03, §10.1)
 
 - T1 | delegated: yes | to: general-purpose subagent, OUT-01/OUT-02 (`TelegramError.status`, the `call` raises, the 400-only predicate, the three docstrings) and `tests/test_v1111_out.py` | brief: docs/spec/task-briefs/v1111-T1.md | map vs actual: matches §10.1's yes cell for T1 -- touched `bot.py:176-190` (`TelegramError`), `:221-272` (`call`, status-tagged raises), `_call_with_retry` at `:274-288` read only and confirmed byte-unchanged, `:1926-1942` (`IngestJob` docstring), `:2554-2598` (`send_pre`/`edit_pre`); `tables.py:134-139` (`fit_lines` docstring); `tests/test_v1110_out.py:94-95`, `:359-422` read only, unamended; `tests/test_v1111_out.py` created (5 functions) -- the reading map's file/line ranges match, shifted only by this task's own earlier insertions within `bot.py`; not genuinely test-first, disclosed above
 
-## T2 — not reached: TAB-01…06 not yet implemented
+## T2 — TAB-01…06: table widths, the /sessions empty state, DOC_LIMIT_REPLY, one batch constant
+
+Delegated to one subagent, brief `docs/spec/task-briefs/v1111-T2.md`.
+
+### Amendment table (spec `:315-321`, NG-07)
+
+Amendments by reference to `spec-v1.11.0.md`, both landed by this task:
+
+| spec site | was | is | id |
+|---|---|---|---|
+| `spec-v1.11.0.md:451-453` (DOC-01, `/documents`) | `#` 3, `file` 24 (72) | `#` 5, `file` 22 (72) | TAB-01 |
+| `spec-v1.11.0.md:658-659` (MOD-01, `/model`) | `[12, 44]` (58) | `[16, 40]` (58) | TAB-02 |
+
+### TAB-01/-02 -- /documents' `#` column widens, `file` narrows
+
+`bot.py:2391`'s `max_width` for `_handle_documents`' table became `[5, 22,
+4, 8, 6, 5, 10]` (sum 60 + 6 separators of 2 units each = 72 <= 72; was
+`[3, 24, 4, 8, 6, 5, 10]`). A 5-digit id (`12345`) now renders whole in the `#` column; a
+40-character filename now truncates to 21 `f`s + `…` (22 units), not 23 +
+`…` (24 units). `T-V1111-TAB-01`'s round trip also drives `/delete
+#12345` through `process` -- the reply is `Deleted #12345.` (it echoes
+the `#<id>` argument, `_handle_delete`'s existing, unchanged mechanism; it
+does not print the filename `third.txt`, which is what "the reply names
+the file" in the spec's own test-table wording turns out to mean in
+practice for the `#<id>` form, as distinct from the `<filename>` form's
+`Deleted <filename>.`). README's fenced `/documents` sample
+(`README.md:215-233` region, was `:213-232` pre-change) regenerated from
+`tables.render_table` over the same two-row fixture `T-V1110-DOC-01`
+uses, byte-equal to the live function's own output (`T-V1111-TAB-02`
+computes and compares both sides directly, not a hand-copied literal);
+the sentence at the old `:217` (now `README.md:219`) changed from "cut to
+23 UTF-16 units" to "cut to 21 UTF-16 units". Also fixed, within the T2
+reading map's `README.md:150-155` region but not separately named by any
+`REQ-V1111-TAB-*` id: the `/sessions` prose at `README.md:147-151`
+claimed `/documents`' `#` column has "the same property" (truncates past
+9999) as `/sessions`' own 4-unit `#`/`msgs` columns -- true before this
+task, false after TAB-01 widened `/documents`' `#` column to 5 units;
+reworded to state the two columns now differ, unwidened `/sessions` still
+truncating past 9999, `/documents` only past 99999 (no test pins the old
+sentence -- checked by grep before the edit).
+
+### TAB-02 (spec numbering) -- /model's status label never truncates
+
+`bot.py:1555`'s `max_width` for `_model_status_table` became `[16, 40]`
+(was `[12, 44]`); `openrouter model` (16 units, the widest label) now
+renders whole in every case, since the field column no longer clips it.
+The docstring at `bot.py:1528-1534` was rewritten to describe the new
+widths and drop the old "truncates with an ellipsis" claim about the
+label, which is no longer true. README carries no status-table sample
+(unchanged, per the spec).
+
+### TAB-03 -- /sessions with no sessions replies on the plain path
+
+A new constant, `bot.py:141`: `SESSIONS_EMPTY_REPLY = "No sessions yet.
+Send me a message to start one."`, placed next to `SESSIONS_LIST_LIMIT`.
+`_handle_sessions` (`bot.py:2463-2472`) gained `if not rows: _send(tg,
+chat_id, [SESSIONS_EMPTY_REPLY]); return` right after computing `rows`,
+before `total`/`table` -- the mirror of `_handle_documents`' own empty
+branch. With rows present, nothing else in the function changed. README's
+wording at the old `:153-154` (now `README.md:154-156`) ("A caller with
+no sessions yet sees the header and rule only.") became "... gets a plain
+reply instead: `No sessions yet. Send me a message to start one.`";
+`## Error behaviour` (heading `README.md:954`) gained a new row for this
+case at `README.md:974`.
+
+### TAB-04 -- DOC_LIMIT_REPLY names both /delete forms
+
+`bot.py:109`: `DOC_LIMIT_REPLY` became one literal, `"Limit of 20
+documents reached. Use /delete <filename> or /delete #<id>."` (was "...
+Use /delete <filename>."). Both senders are mechanically unchanged --
+`bot.py:2306`, `_handle_document`'s pre-admission count check (a plain
+`_send`), and `bot.py:2141-2144`, the worker's `except
+documents.DocumentLimitExceededError` branch (delivered through
+`_document_error_ending`, `bot.py:1878-1886`, as an edit of the existing
+status message). `T-V1111-TAB-05` drives both cases through
+`process_update`: (a) a caller already at 20 documents uploading a 21st
+is refused before any enqueue, `tg.sent == [(USER_ID,
+bot.DOC_LIMIT_REPLY)]`, no status message ever created; (b) a caller
+admitted at 19 documents, whose 20th document is inserted directly via
+`storage.add_document` (this task's own out-of-band mechanism for the
+race the spec describes -- no real thread, a plain call between admission
+and `worker.run_one`) before the job's own commit, ends with
+`tg.edited[-1][2] == bot.DOC_LIMIT_REPLY` through the
+`DocumentLimitExceededError` branch. Both cases: no document, chunk or
+vector row inserted for the refused upload, `document_count` unchanged
+by that upload. README's row (the old `:993`, now `README.md:995`)
+carries the new literal verbatim; `tests/test_v190_agents.py:300`'s
+needle rewritten to match
+(`tests/test_v1110_pin.py:114`'s prefix, `DELETE_USAGE_REPLY`'s, checked
+unaffected -- it is a different string).
+
+### TAB-05 (spec numbering; test id T-V1111-TAB-06) -- one embedding batch constant
+
+`documents.py:386`'s `EMBED_BATCH_SIZE = 32` removed; `documents.py:31`
+gains `from llm.embeddings import BATCH_SIZE` (no cycle --
+`llm/embeddings.py`'s own imports among project modules are `tracing` and
+`config` only). The loop at `documents.py:551-559` uses `BATCH_SIZE` in
+the five places `EMBED_BATCH_SIZE` stood (`:552` twice, `:554`, `:555`,
+`:558`); the outer loop, `total_batches`, `batch_no` and the per-batch
+`_check_budget` checkpoint are otherwise unchanged, so the progress and
+cancel cadence stays at 32. `T-V1111-TAB-06` proves the HTTP-call
+invariant two ways: a size-recording `FakeEmbedder` through
+`IngestWorker.run_one` over 65 chunks saw batch sizes `[32, 32, 1]` and
+the progress edits `1/3 … 3/3`; a real `EmbeddingsClient` over
+`httpx.MockTransport`, fed the same 65 chunks through
+`documents.index_document` directly, made exactly three embedding
+requests with body `input` sizes `[32, 32, 1]`, the same progress
+sequence alongside. README's paragraph (`README.md:532-548` region)
+rewritten per spec `:389-393`'s text, naming `llm.embeddings.BATCH_SIZE`
+as the one constant, not two.
+
+### Pin rewrites (the five T2 rows from the pin inventory)
+
+All five sites the inventory catalogued for T2 were rewritten in place,
+intent preserved, no new pin sites found beyond that list:
+
+- `tests/test_v1110_doc.py:200-202` -- `"f" * 23 + "…"` / `== 24` ->
+  `"f" * 21 + "…"` / `== 22`.
+- `tests/test_v1110_doc.py:378` -- `monkeypatch.setattr(documents,
+  "EMBED_BATCH_SIZE", 1)` -> `"BATCH_SIZE"` (the adjacent comment prose
+  also updated, since it named the old constant).
+- `tests/test_v1110_ing.py:548` -- same rewrite, same reason.
+- `tests/test_v190_agents.py:300` -- the `DOC_LIMIT_REPLY` needle
+  rewritten to the new `/delete #<id>` form.
+- `tests/test_v1110_ver.py:135` -- rewritten to assert
+  `"documents.EMBED_BATCH_SIZE"` **absent** from README (it used to
+  assert presence); `:136` (`"llm.embeddings.BATCH_SIZE"` present)
+  unchanged.
+
+### Test-first (EC-02)
+
+**Genuinely test-first this time.** `tests/test_v1111_tab.py` (six
+functions) was written before any of the five source edits above, then
+red-checked against the pre-change tree directly (no `git stash` needed
+-- the source edits had not been made yet):
+
+| test | pre-change result | reason |
+| --- | --- | --- |
+| `test_t_v1111_tab_01_documents_id_width_five_round_trip` | FAIL | `assert '12345' in body` -- the old `#` column (`max_width` 3) rendered the id as `12…` |
+| `test_t_v1111_tab_02_readme_documents_sample_byte_equal` | FAIL | `assert 'cut to 21 UTF-16 units' in readme_text` -- README still read "23" |
+| `test_t_v1111_tab_03_model_status_label_whole` | FAIL | `assert 'openrouter model' in inner` -- the old `field` column (`max_width` 12) truncated it to `openrouter …` |
+| `test_t_v1111_tab_04_sessions_empty_plain` | FAIL | `AttributeError: module 'bot' has no attribute 'SESSIONS_EMPTY_REPLY'` |
+| `test_t_v1111_tab_05_doc_limit_reply_names_both_forms` | FAIL | `assert bot.DOC_LIMIT_REPLY == "...or /delete #<id>."` -- the live constant still read the single-form string |
+| `test_t_v1111_tab_06_single_batch_constant` | FAIL | `assert not hasattr(documents, "EMBED_BATCH_SIZE")` -- the attribute still existed |
+
+All 6 green after implementation: `uv run --locked pytest
+tests/test_v1111_tab.py -v` -> `6 passed`. Every failure is for the
+targeted reason (no incidental pass, unlike T1's own `OUT-02`
+disclosure) -- none of these six tests is among EC-02's four named
+carve-out ids (`T-V1111-VER-02`, `-PIN-01`, `-PIN-02`, `-DOC-03`), and
+none needed to be, since every one of them failed red for the right
+reason pre-change.
+
+### Gates 1-4 and `lint-docs` (T2)
+
+| gate | command | result |
+| --- | --- | --- |
+| 1 | `uv sync --locked` | `Resolved 25 packages`, `Checked 23 packages`, exit 0 |
+| 2 | `uv run --locked ruff check .` | `All checks passed!`, exit 0 |
+| 3 | `uv run --locked pytest` | `2394 passed, 1 skipped, 2 xfailed in 28.40s` (2397 collected -- the 2391 T1 count plus this task's 6 new `test_v1111_tab.py` functions), exit 0 |
+| 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
+| -- | `uv run --locked python devtools/checks.py lint-docs` | `[PASS] lint-docs: all prompts and the report ledger row pass` |
+
+`gitleaks-tree` on this task's own commit: not run by this subagent (the
+orchestrator runs the standalone block after the commit lands, per the
+brief); recorded in a later task's follow-up once it has, matching T0/T1's
+own lag pattern.
+
+### Delegation record (EC-03, §10.1)
+
+- T2 | delegated: yes | to: general-purpose subagent, TAB-01…05 (table widths, the /sessions empty state, DOC_LIMIT_REPLY, one batch constant) and tests/test_v1111_tab.py | brief: docs/spec/task-briefs/v1111-T2.md | map vs actual: matches §10.1's yes cell for T2 -- touched bot.py:109, :141, :1528-1534, :1555, :2391, :2463-2472; documents.py:31, :386 (removed), :551-559; README.md:147-151 (the /sessions "same property" sentence, in the reading map's :150-155 region but not separately named by any REQ-V1111-TAB-* id), :154-156, :215-233, :532-548, :954-1004 region, plus the amendment table in this report; tests/test_v1110_doc.py:200-202, :378; tests/test_v1110_ing.py:548; tests/test_v190_agents.py:300; tests/test_v1110_ver.py:135; tests/test_v1111_tab.py created (6 functions) -- the reading map's file/line ranges match, no unplanned file touched
 
 ## T3 — not reached: TST-01…08 not yet implemented
 

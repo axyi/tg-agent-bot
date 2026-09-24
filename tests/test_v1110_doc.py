@@ -197,9 +197,9 @@ def test_t_v1110_doc_01_documents_table(tmp_path):
     assert "1.5 MB" in body
     assert "12.3 KB" in body
     assert "n/a" in body  # the .md row's pages cell
-    truncated = "f" * 23 + "…"
+    truncated = "f" * 21 + "…"
     assert truncated in body
-    assert tables.utf16_length(truncated) == 24
+    assert tables.utf16_length(truncated) == 22
     assert "2026-01-05" in body
     assert "2026-01-06" in body
     # No ingest job in flight this task -- the table is the last thing sent.
@@ -369,13 +369,13 @@ def test_t_v1110_doc_05_inflight_line_after_table(tmp_path, monkeypatch):
 
     # Three paragraphs, each just under `target` (1000 chars) so no two
     # merge into one chunk -- `chunk_text` produces exactly 3 chunks.
-    # `EMBED_BATCH_SIZE` patched to 1 so each chunk is its own embed()
+    # `documents.BATCH_SIZE` patched to 1 so each chunk is its own embed()
     # call/batch, matching the real "embedding: i/3" progress strings.
     base = "Sentence number with enough words to take up real space in the paragraph. "
     paragraphs = [f"Section {i}: " + (base * 12)[:900] for i in range(3)]
     text = "\n\n".join(paragraphs)
     assert len(documents.chunk_text(text)) == 3
-    monkeypatch.setattr(documents, "EMBED_BATCH_SIZE", 1)
+    monkeypatch.setattr(documents, "BATCH_SIZE", 1)
 
     tg = FakeTelegram()
     tg.files["documents/f1"] = text.encode("utf-8")

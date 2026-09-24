@@ -106,7 +106,7 @@ DOCUMENT_MAX_BYTES = 20_000_000
 DOC_RAG_NOT_CONFIGURED_REPLY = "Document search is not configured on this bot."
 DOC_TOO_LARGE_REPLY = "File too large (over 20 MB)."
 DOC_UNSUPPORTED_REPLY = "Unsupported file type. Supported: .txt .md .docx .pdf"
-DOC_LIMIT_REPLY = "Limit of 20 documents reached. Use /delete <filename>."
+DOC_LIMIT_REPLY = "Limit of 20 documents reached. Use /delete <filename> or /delete #<id>."
 DOC_CORRUPTED_PDF_REPLY = "Could not read this PDF file."
 DOC_CORRUPTED_DOCX_REPLY = "Could not read this DOCX file."
 DOC_EMPTY_REPLY = "The document contains no readable text."
@@ -138,6 +138,7 @@ DOC_CANCELLED_REPLY = "❌ Cancelled."
 DOC_INTERRUPTED_REPLY = "❌ Interrupted by restart."
 # v1.11.0 T3 (REQ-V1110-SES-02/-03): sessions -- list and switch.
 SESSIONS_LIST_LIMIT = 10
+SESSIONS_EMPTY_REPLY = "No sessions yet. Send me a message to start one."
 SESSION_USAGE_REPLY = "Usage: /session <id> (see /sessions)"
 
 # v1.11.0 T6 (REQ-V1110-EXT-01): the Bot API command menu, registered once
@@ -1525,12 +1526,12 @@ def _model_row_value(model_id: str, *, is_override: bool) -> str:
 
 def _model_status_table(conn: sqlite3.Connection, cfg: Config, llm) -> str:
     """REQ-V1110-MOD-01: bare `/model`'s (and `mod:back:-`'s) `<pre>` body --
-    a `field | value` table, `max_width` 12/44 (58 units with the
-    separator, <= 72). A row label past 12 units (`openrouter model`, 16
-    units) truncates with an ellipsis -- a known cosmetic effect of the
-    brief's own stated widths, not a rendering error (`render_table` never
-    raises on cell content, only on a line width past 72, which this
-    combination cannot reach)."""
+    a `field | value` table, `max_width` 16/40 (58 units with the
+    separator, <= 72). REQ-V1111-TAB-02: every row label fits within 16
+    units (the widest, `openrouter model`, is exactly 16) so no label ever
+    truncates; a value past 40 units still truncates with an ellipsis
+    (`render_table` never raises on cell content, only on a line width
+    past 72, which this combination cannot reach)."""
     override = load_provider_override(conn)
     rows: list[tuple[str, str]] = [
         ("provider", _active_provider(cfg, llm, override)),
@@ -1551,7 +1552,7 @@ def _model_status_table(conn: sqlite3.Connection, cfg: Config, llm) -> str:
             )
         )
     rows.append(("failures", _render_failures(llm)))
-    return tables.render_table(["field", "value"], rows, max_width=[12, 44])
+    return tables.render_table(["field", "value"], rows, max_width=[16, 40])
 
 
 def _model_step1_keyboard(cfg: Config) -> dict:
@@ -2387,7 +2388,7 @@ def _handle_documents(
             )
             for row in rows
         ],
-        max_width=[3, 24, 4, 8, 6, 5, 10],
+        max_width=[5, 22, 4, 8, 6, 5, 10],
     )
     # REQ-V1110-DOC-05 (T5): one in-flight `⏳ indexing …` line after the
     # table when the caller has a queued or running ingest job; with none,
@@ -2462,8 +2463,13 @@ def _render_last_activity(value: str | None) -> str:
 def _handle_sessions(conn, tg, chat_id: int, from_id: int) -> None:
     """REQ-V1110-SES-02: one table-path body over the `SESSIONS_LIST_LIMIT`
     most recent sessions, plus a trailing `N older sessions not shown` line
-    when `count_conversations` exceeds that limit."""
+    when `count_conversations` exceeds that limit. REQ-V1111-TAB-03: no
+    sessions at all replies on the plain path instead -- the mirror of
+    `_handle_documents`' own empty branch."""
     rows = storage.list_conversations(conn, from_id, limit=SESSIONS_LIST_LIMIT)
+    if not rows:
+        _send(tg, chat_id, [SESSIONS_EMPTY_REPLY])
+        return
     total = storage.count_conversations(conn, from_id)
     table = tables.render_table(
         ["●", "#", "title", "msgs", "last"],
