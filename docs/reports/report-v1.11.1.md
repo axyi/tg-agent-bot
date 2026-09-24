@@ -228,18 +228,8 @@ forward-flagged disclosed amendment (the three extra VER-01 pin sites).
 
 ### Delegation record (EC-03, §10.1)
 
-- T0 | delegated: no | to: commands only for the preconditions and gate 5
-  probe, artefacts only for the prompt file and report skeleton (§5.1
-  exemptions) | brief: — | map vs actual: matches §10.1's no/no cells for
-  this partial commit (`5780562`); the yes cell (the pin inventory) was
-  not reached — blocked before it (ERR-01 row 6)
-- T0 | delegated: yes | to: general-purpose subagent, the pin inventory
-  and `tests/test_v1111_pin.py` | brief: docs/spec/task-briefs/v1111-T0.md
-  | map vs actual: matches §10.1's yes cell for the pin inventory
-  (`07522f4`); the preconditions re-check/gates 1-5/measurements
-  (commands only) and the prompt file/report update (artefacts only) are
-  bundled into this same landing commit as disclosed orchestrator work,
-  matching §10.1's no/no cells for those parts
+- T0 | delegated: no | to: commands only for the preconditions and gate 5 probe, artefacts only for the prompt file and report skeleton (§5.1 exemptions) | brief: — | map vs actual: matches §10.1's no/no cells for this partial commit (`5780562`); the yes cell (the pin inventory) was not reached — blocked before it (ERR-01 row 6)
+- T0 | delegated: yes | to: general-purpose subagent, the pin inventory and `tests/test_v1111_pin.py` | brief: docs/spec/task-briefs/v1111-T0.md | map vs actual: matches §10.1's yes cell for the pin inventory (`07522f4`); the preconditions re-check/gates 1-5/measurements (commands only) and the prompt file/report update (artefacts only) are bundled into this same landing commit as disclosed orchestrator work, matching §10.1's no/no cells for those parts
 
 ### `gitleaks-tree` per-commit record (GATE-01, RPT-01)
 
@@ -257,11 +247,11 @@ Delegated to one subagent, brief `docs/spec/task-briefs/v1111-T1.md`.
 
 `TelegramError` (`bot.py:176-190`) gained a keyword field
 `status: int | None = None`, stored as `self.status`. `TelegramClient.call`
-(`bot.py:221-274`) now sets `status=status` on every raise that follows a
+(`bot.py:221-272`) now sets `status=status` on every raise that follows a
 response — the 401/404 fatal branch, the 429 branch, the other non-200
 branch, the non-JSON branch, and the `data.get("ok") is not True` branch —
 and leaves it `None` on the transport raise (the only raise before a
-response exists). `_call_with_retry` (`bot.py:277-292` on this tree)
+response exists). `_call_with_retry` (`bot.py:274-288` on this tree)
 confirmed byte-identical to `2431034`
 (`git show 2431034:bot.py | sed -n '265,280p'` diffed against the live
 range, no hunk). `send_pre` and `edit_pre` (`bot.py:2554-2598`) switched
@@ -288,12 +278,20 @@ and every read/write site (`bot.py:1959`, `:1969`, `:2123`, `:2047`,
 `:2229`, all shifted by this task's own insertions but otherwise
 untouched) are unchanged.
 
-### Test-first (EC-02)
+### Test-first (EC-02) — disclosed deviation
 
-`tests/test_v1111_out.py` (5 tests) written before any source change. A
-temporary `git stash push -- bot.py tables.py` reverted the source edits
-to confirm each test's failure reason against the pre-change tree, then
-`git stash pop` restored them:
+**Not genuinely test-first.** The subagent's own post-commit self-check
+(via `advisor`) found the actual authoring order was: read the spec →
+edit `bot.py`/`tables.py` → write `tests/test_v1111_out.py` against the
+already-changed tree → `git stash push -- bot.py tables.py` to revert the
+source edits and confirm each test's failure reason against the
+pre-change tree → `git stash pop` to restore them. The red-check below is
+still valid evidence the tests discriminate the old predicate from the
+new one; only the *authoring* order was implementation-first, not
+test-first — the same category of deviation `docs/llm-usage.md` row 155
+records for v1.11.0 T5 ("disclosed plainly, not described as partial
+compliance"), not a carve-out case (T1 is not among EC-02's four named
+carve-out ids: `T-V1111-VER-02`, `-PIN-01`, `-PIN-02`, `-DOC-03`):
 
 | test | pre-change result | reason |
 | --- | --- | --- |
@@ -305,6 +303,18 @@ to confirm each test's failure reason against the pre-change tree, then
 
 All 5 green after implementation:
 `uv run --locked pytest tests/test_v1111_out.py -v` → `5 passed`.
+
+**Disclosed gap**: `test_t_v1111_out_02_fallback_on_400_send_and_edit`
+passed on the pre-change tree too — not because it is structural (it is
+not one of EC-02's four named carve-out ids), but because none of its
+sub-cases were designed to discriminate the old `exc.fatal` predicate
+from the new `exc.status != 400` one (both agree whenever the case is
+400/500/transport and never 401/404). Accepted as-is for this release —
+the other four tests in the same module do discriminate the predicates,
+and OUT-02's own fallback-shape assertions (request counts, `parse_mode`
+omission, the fitted text) are still genuine coverage — but flagged here
+rather than silently left as an apparent (and false) carve-out
+compliance.
 
 ### `T-V1110-OUT-05` regression check
 
@@ -328,19 +338,21 @@ tests/test_v1110_out.py -q` → all green (no failures).
 | 4 | `uv run --locked python bot.py --selftest` | `selftest: OK` |
 | — | `uv run --locked python devtools/checks.py lint-docs` | `[PASS] lint-docs: all prompts and the report ledger row pass` |
 
+`gitleaks-tree` on `7b910fd`: exit 0, no leaks found.
+
 ### Delegation record (EC-03, §10.1)
 
-- T1 | delegated: yes | to: general-purpose subagent, OUT-01/OUT-02 (`TelegramError.status`, the `call` raises, the 400-only predicate, the three docstrings) and `tests/test_v1111_out.py` | brief: docs/spec/task-briefs/v1111-T1.md | map vs actual: matches §10.1's yes cell for T1 -- touched `bot.py:176-190` (`TelegramError`), `:221-274` (`call`, status-tagged raises), `_call_with_retry` at `:277-292` read only and confirmed byte-unchanged, `:1926-1942` (`IngestJob` docstring), `:2554-2598` (`send_pre`/`edit_pre`); `tables.py:134-139` (`fit_lines` docstring); `tests/test_v1110_out.py:94-95`, `:359-422` read only, unamended; `tests/test_v1111_out.py` created (5 functions) -- the reading map's file/line ranges match, shifted only by this task's own earlier insertions within `bot.py`
+- T1 | delegated: yes | to: general-purpose subagent, OUT-01/OUT-02 (`TelegramError.status`, the `call` raises, the 400-only predicate, the three docstrings) and `tests/test_v1111_out.py` | brief: docs/spec/task-briefs/v1111-T1.md | map vs actual: matches §10.1's yes cell for T1 -- touched `bot.py:176-190` (`TelegramError`), `:221-272` (`call`, status-tagged raises), `_call_with_retry` at `:274-288` read only and confirmed byte-unchanged, `:1926-1942` (`IngestJob` docstring), `:2554-2598` (`send_pre`/`edit_pre`); `tables.py:134-139` (`fit_lines` docstring); `tests/test_v1110_out.py:94-95`, `:359-422` read only, unamended; `tests/test_v1111_out.py` created (5 functions) -- the reading map's file/line ranges match, shifted only by this task's own earlier insertions within `bot.py`; not genuinely test-first, disclosed above
 
-## T2 — not reached
+## T2 — not reached: TAB-01…06 not yet implemented
 
-## T3 — not reached
+## T3 — not reached: TST-01…08 not yet implemented
 
-## T4 — not reached
+## T4 — not reached: DOC-01…03 not yet implemented
 
-## T5 — not reached
+## T5 — not reached: review and gates 1-8 not yet run
 
-## T6 — not reached
+## T6 — not reached: version bump and tag not yet cut
 
 ## Operator inputs
 
